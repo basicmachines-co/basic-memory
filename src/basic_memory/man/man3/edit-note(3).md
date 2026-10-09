@@ -23,7 +23,7 @@ MCP:
 edit_note(identifier, operation, content, project=None, workspace=None,
           project_id=None, section=None, find_text=None,
           expected_replacements=None, replace_subsections=None,
-          metadata=None, output_format="text")
+          metadata=None, expected_checksum=None, output_format="text")
 ```
 
 CLI:
@@ -66,6 +66,7 @@ permalink, or memory:// URL — there is no fuzzy fallback for edits.
 - **expected_replacements** (integer | null, optional, default: None) — For find_replace: required occurrence count of find_text (default 1). A mismatch fails without writing.
 - **replace_subsections** (boolean | null, optional, default: None) — For replace_section operation. Default (true): the section spans everything through the next heading of the same or higher level in the original note, so replacing "## Section" also replaces its "###" subsections — the replacement content may freely introduce new headings. Set to false to replace only the immediate content under the header, stopping at the next heading of any level and preserving subsections.
 - **metadata** (object | null, optional, default: None) — Optional dict of frontmatter fields to merge, independent of `operation`. Provided keys overwrite existing frontmatter values (or are added if new); unrelated frontmatter keys and the note body are left untouched. Can be combined with any operation in the same call. `title` and `permalink` are ignored since those have their own dedicated handling; `type` is applied like any other frontmatter field. Key deletion is not supported.
+- **expected_checksum** (string | null, optional, default: None) — Optional revision precondition: the full `checksum` that read_note, write_note, or edit_note returned in JSON mode (the accepted revision's checksum; text output shows only its first 8 characters). When the note has changed since, the edit is refused with a revision conflict that names the current checksum, and nothing is written. A refused precondition never auto-creates the note. To refresh a stale checksum without reading the whole note, call read_note(identifier=..., include_content=False).
 - **output_format** (string, optional, default: "text") — "text" returns a markdown summary of the edit and the note's resulting observations and relations. "json" returns machine-readable edit metadata.
 
 ## MCP USAGE

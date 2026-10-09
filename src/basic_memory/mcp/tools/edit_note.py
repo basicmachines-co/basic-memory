@@ -284,6 +284,43 @@ The {operation} on note '{identifier}' was sent, but no confirmation came back: 
 {_unknown_outcome_guidance(identifier, project_external_id)}"""
 
 
+def _revision_conflict_detail(error: Exception) -> dict[str, Any] | None:
+    """Return the structured body of a refused checksum precondition, else None.
+
+    The API answers a stale base checksum with a 409 whose detail is
+    {"message": ..., "db_checksum": ...} (#1445). Other 409s, such as an ambiguous
+    identifier, carry a plain string detail and keep their ordinary handling.
+    """
+    cause = error.__cause__
+    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 409:
+        return None
+    data = _extract_response_data(cause.response)
+    detail = data.get("detail") if isinstance(data, dict) else None
+    if isinstance(detail, dict) and "db_checksum" in detail:
+        return detail
+    return None
+
+
+def _format_revision_conflict_response(
+    identifier: str, current_checksum: str | None, project_external_id: str
+) -> str:
+    """Explain a refused checksum-guarded edit and the ways forward."""
+    if current_checksum is None:
+        return f"""# Edit Failed - Note Revision Conflict
+
+The note '{identifier}' no longer exists, so nothing was edited. Look the note up again
+before retrying, or drop expected_checksum to create it with append or prepend."""
+    return f"""# Edit Failed - Note Revision Conflict
+
+The note '{identifier}' changed since you read it, so nothing was edited.
+Current checksum: `{current_checksum}`
+
+Re-read the note to see what changed (or fetch just its checksum with
+`read_note(identifier="{identifier}", project_id="{project_external_id}", include_content=False)`),
+then retry with expected_checksum="{current_checksum}". Drop expected_checksum to edit
+the current revision unconditionally."""
+
+
 def _format_error_response(
     error_message: str,
     operation: str,
@@ -416,7 +453,8 @@ Error editing note '{identifier}': {error_message}
         "match exactly and appear once; a heading without leading `#` is treated as `##`. A "
         "missing or duplicate heading, or missing find_text, fails without writing. "
         "`identifier` must resolve exactly; there is no fuzzy matching. Pass `metadata` to "
-        "merge frontmatter fields in the same call."
+        "merge frontmatter fields in the same call. Pass `expected_checksum` to edit only "
+        "if the note is still the revision you read."
     ),
     tags={"notes"},
     annotations={
@@ -462,6 +500,7 @@ async def edit_note(
     expected_replacements: Optional[int] = None,
     replace_subsections: Optional[bool] = None,
     metadata: Annotated[Optional[dict[str, Any]], BeforeValidator(coerce_dict)] = None,
+    expected_checksum: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict[str, Any]:
@@ -514,6 +553,13 @@ async def edit_note(
             combined with any operation in the same call. `title` and `permalink` are
             ignored since those have their own dedicated handling; `type` is applied like
             any other frontmatter field. Key deletion is not supported.
+        expected_checksum: Optional revision precondition: the full `checksum` that
+            read_note, write_note, or edit_note returned in JSON mode (the accepted
+            revision's checksum; text output shows only its first 8 characters). When the
+            note has changed since, the edit is refused with a revision conflict that
+            names the current checksum, and nothing is written. A refused precondition
+            never auto-creates the note. To refresh a stale checksum without reading the
+            whole note, call read_note(identifier=..., include_content=False).
         output_format: "text" returns a markdown summary of the edit and the note's
             resulting observations and relations. "json" returns machine-readable edit
             metadata.
@@ -561,6 +607,10 @@ async def edit_note(
 
         # Update status across document (expecting exactly 2 occurrences)
         edit_note(identifier="status-report", operation="find_replace", content="In Progress", project="reports", find_text="Not Started", expected_replacements=2)
+
+        # Edit only if nobody changed the note since you read it
+        edit_note(identifier="docs/plan", operation="append", content="\\n- Next step", project="work",
+                  expected_checksum="<checksum from read_note or a previous JSON result>")
 
         # Update frontmatter fields without touching the body (any operation works;
         # append with empty content is a no-op on the body itself)
@@ -652,6 +702,7 @@ async def edit_note(
         expected_replacements=effective_replacements,
         replace_subsections=effective_replace_subsections,
         has_metadata=bool(metadata),
+        has_expected_checksum=expected_checksum is not None,
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -778,6 +829,29 @@ async def edit_note(
                         entity_id = recovered_entity_id
                     elif is_not_found and unresolved_project_route is not None:
                         raise unresolved_project_route
+                    elif is_not_found and expected_checksum is not None:
+                        # Trigger: the caller conditioned the edit on a revision it read,
+                        #   but the note no longer resolves.
+                        # Why: auto-creating would write a note the caller never saw,
+                        #   which is exactly what the precondition exists to prevent.
+                        # Outcome: the same revision conflict the API reports for a
+                        #   deleted note, with no current checksum.
+                        _raise_edit_failure(
+                            output_format,
+                            {
+                                "title": None,
+                                "permalink": None,
+                                "file_path": None,
+                                "checksum": None,
+                                "operation": operation,
+                                "fileCreated": False,
+                                "error": "NOTE_REVISION_CONFLICT",
+                                "currentChecksum": None,
+                            },
+                            _format_revision_conflict_response(
+                                identifier, None, active_project.external_id
+                            ),
+                        )
                     elif is_not_found and operation in ("append", "prepend"):
                         # Trigger: entity does not exist yet (on disk or in the index)
                         # Why: append/prepend can meaningfully create a new note from the
@@ -864,7 +938,9 @@ async def edit_note(
 
                     # Call the PATCH endpoint
                     write_sent = True
-                    result = await knowledge_client.patch_entity(entity_id, edit_data)
+                    result = await knowledge_client.patch_entity(
+                        entity_id, edit_data, base_checksum=expected_checksum
+                    )
 
                 # --- Format response ---
                 # result is always set: either by create_entity (auto-create) or patch_entity (edit)
@@ -982,6 +1058,30 @@ async def edit_note(
                         },
                         _format_unknown_outcome_response(
                             str(e), operation, identifier, active_project.external_id
+                        ),
+                    )
+                # Trigger: the API refused expected_checksum because the accepted
+                #   revision moved (or the note was deleted) since the caller read it.
+                # Why: the caller needs the current checksum to rebase, not the generic
+                #   troubleshooting text.
+                # Outcome: a revision-conflict error naming the current checksum.
+                conflict = _revision_conflict_detail(e) if expected_checksum is not None else None
+                if conflict is not None:
+                    current_checksum = conflict.get("db_checksum")
+                    _raise_edit_failure(
+                        output_format,
+                        {
+                            "title": None,
+                            "permalink": None,
+                            "file_path": None,
+                            "checksum": None,
+                            "operation": operation,
+                            "fileCreated": False,
+                            "error": "NOTE_REVISION_CONFLICT",
+                            "currentChecksum": current_checksum,
+                        },
+                        _format_revision_conflict_response(
+                            identifier, current_checksum, active_project.external_id
                         ),
                     )
                 if isinstance(e, UnresolvedProjectRouteError):

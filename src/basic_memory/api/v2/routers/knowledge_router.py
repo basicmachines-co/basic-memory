@@ -1060,12 +1060,23 @@ async def edit_entity_by_id(
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
+    base_checksum: Annotated[
+        str | None,
+        Header(
+            alias=NOTE_CONTENT_BASE_CHECKSUM_HEADER,
+            description="Optional optimistic-concurrency precondition: the "
+            "db_checksum the caller last read. A stale value rejects the edit "
+            "with a structured 409 instead of editing a newer accepted note.",
+        ),
+    ] = None,
 ) -> EntityResponseV2:
     """Edit an existing entity by external ID using operations like append, prepend, etc.
 
     Args:
         entity_id: External ID (UUID string)
         data: Edit operation details
+        base_checksum: Optional db_checksum precondition from the
+            x-bm-cloud-note-base-checksum header (issue #1552)
 
     Returns:
         Updated entity with file content
@@ -1092,6 +1103,7 @@ async def edit_entity_by_id(
                 data=data,
                 user_profile_id=None,
                 source="api",
+                base_checksum=base_checksum,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

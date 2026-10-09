@@ -159,6 +159,11 @@ def test_raw_run_note_references_the_accepted_document_checksum() -> None:
     assert run.frontmatter.output.raw.checksum == "sha256:" + "b" * 64
     assert run.frontmatter.output.raw.storage_version_id is None
     assert run.frontmatter.bm_parse_semantics is False
+    # The body is permanent wording that links the source file to its extracted
+    # text, not a status line that goes stale once materialization finishes (#1651).
+    assert "pending" not in run.body
+    assert f"[[{built.source.file_path}]]" in run.body
+    assert f"[[{built.document_file_path}]]" in run.body
 
 
 def test_extraction_options_checksum_changes_with_a_shaping_limit() -> None:

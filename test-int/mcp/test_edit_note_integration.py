@@ -1301,3 +1301,112 @@ async def test_edit_note_metadata_null_values_rejected_before_auto_create(
         error_message = str(exc_info.value)
         assert "key deletion is not supported" in error_message
         assert "status" in error_message
+
+
+@pytest.mark.asyncio
+async def test_edit_note_expected_checksum_edits_only_the_revision_read(
+    mcp_server, app, test_project
+):
+    """A checksum-guarded edit lands on the read revision and refuses a stale one (#1552)."""
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Guarded Edit",
+                "directory": "test",
+                "content": "Revision A.",
+                "output_format": "json",
+            },
+        )
+        revision_a = json.loads(created.content[0].text)["checksum"]
+
+        # A guarded edit on the current revision lands and moves the note to B.
+        updated = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/guarded-edit",
+                "operation": "append",
+                "content": "\nRevision B.",
+                "expected_checksum": revision_a,
+                "output_format": "json",
+            },
+        )
+        revision_b = json.loads(updated.content[0].text)["checksum"]
+        assert revision_b != revision_a
+
+        # An edit still conditioned on A is refused and names B as the current revision.
+        stale_json = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/guarded-edit",
+                "operation": "append",
+                "content": "\nStale edit.",
+                "expected_checksum": revision_a,
+                "output_format": "json",
+            },
+            raise_on_error=False,
+        )
+        assert stale_json.is_error is True
+        payload = json.loads(stale_json.content[0].text)
+        assert payload["error"] == "NOTE_REVISION_CONFLICT"
+        assert payload["currentChecksum"] == revision_b
+
+        stale_text = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/guarded-edit",
+                "operation": "find_replace",
+                "find_text": "Revision A.",
+                "content": "Stale replacement.",
+                "expected_checksum": revision_a,
+            },
+            raise_on_error=False,
+        )
+        assert stale_text.is_error is True
+        text = stale_text.content[0].text
+        assert "# Edit Failed - Note Revision Conflict" in text
+        assert f'expected_checksum="{revision_b}"' in text
+
+        read = await client.call_tool(
+            "read_note", {"project": test_project.name, "identifier": "test/guarded-edit"}
+        )
+        content = read.content[0].text
+        assert "Revision A." in content
+        assert "Revision B." in content
+        assert "Stale" not in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_expected_checksum_never_auto_creates(mcp_server, app, test_project):
+    """A precondition on a missing note is a conflict, not an append auto-create."""
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/never-written",
+                "operation": "append",
+                "content": "Should not exist.",
+                "expected_checksum": "a" * 64,
+                "output_format": "json",
+            },
+            raise_on_error=False,
+        )
+        assert result.is_error is True
+        payload = json.loads(result.content[0].text)
+        assert payload["error"] == "NOTE_REVISION_CONFLICT"
+        assert payload["currentChecksum"] is None
+
+        missing = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/never-written.md",
+                "output_format": "json",
+            },
+        )
+        assert json.loads(missing.content[0].text)["error"] == "NOTE_NOT_FOUND"
