@@ -193,6 +193,10 @@ style = "pep440"
 bump = true
 fallback-version = "0.0.0"
 
+[tool.ty.environment]
+# Mirrors pytest's pythonpath, which puts tests/ on the import path for shared helpers.
+extra-paths = ["tests"]
+
 [tool.ty.rules]
 all = "error"
 

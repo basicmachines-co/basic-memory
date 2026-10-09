@@ -56,7 +56,7 @@ from typing import AsyncGenerator, Generator, Literal
 import pytest
 import pytest_asyncio
 
-from tests.fake_embeddings import use_fake_embeddings
+from fake_embeddings import use_fake_embeddings
 from pathlib import Path
 from alembic import command
 from alembic.config import Config

@@ -10,7 +10,7 @@ from typing import AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from tests.fake_embeddings import use_fake_embeddings
+from fake_embeddings import use_fake_embeddings
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
