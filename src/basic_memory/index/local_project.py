@@ -34,7 +34,11 @@ from basic_memory.index.project_indexing import (
     ProjectIndexScheduler,
 )
 from basic_memory.indexing.change_detector import ChangeDetector
-from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
+from basic_memory.indexing.embedding_index_planning import (
+    DeferredEmbeddingTargetSource,
+    EmbeddingBatchVectorSync,
+    RepositoryVectorSyncEntitySource,
+)
 from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchChecker,
     IndexFileBatchContentClassifier,
@@ -506,6 +510,7 @@ class LocalProjectIndexRuntime:
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
     completion_relation_runtime: RelationResolutionRuntime | None = None
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None
+    deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None
     index_completion_recorder: ProjectIndexCompletionRecorder | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
@@ -728,6 +733,10 @@ class LocalProjectIndexRuntimeFactory:
                 entity_indexer=dependencies.search_service,
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
+            deferred_embedding_targets=RepositoryVectorSyncEntitySource(
+                session_maker=dependencies.session_maker,
+                project_id=dependencies.project_id,
+            ),
             index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
                 session_maker=dependencies.session_maker,
                 project_id=dependencies.project_id,
@@ -869,6 +878,7 @@ async def run_local_project_index(
             fanout_failure_recorder=runtime.fanout_failure_recorder,
             batch_size=runtime.batch_size,
             embedding_vector_sync=runtime.embedding_vector_sync,
+            deferred_embedding_targets=runtime.deferred_embedding_targets,
         )
     if runtime.completion_relation_runtime is not None:
         # Relation repair can mutate cached entity responses after the first

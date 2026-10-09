@@ -63,6 +63,12 @@ class VectorSyncEntitySource(Protocol):
     async def filter_markdown_entity_ids(self, entity_ids: set[EntityId]) -> set[EntityId]: ...
 
 
+class DeferredEmbeddingTargetSource(Protocol):
+    """Capability that lists entities a previous vector sync pass left unfinished."""
+
+    async def list_deferred_embedding_targets(self) -> tuple[EmbeddingIndexTarget, ...]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RepositoryVectorSyncEntitySource:
     """Load vector-sync entity candidates from the Basic Memory entity table."""
@@ -124,6 +130,36 @@ class RepositoryVectorSyncEntitySource:
                 params,
             )
             return {int(row[0]) for row in result.all()}
+
+    async def list_deferred_embedding_targets(self) -> tuple[EmbeddingIndexTarget, ...]:
+        """Return entities whose last vector sync pass did not finish, in stable order.
+
+        `vector_sync_deferred_at` marks an entity with shards still owed (or a
+        pass that failed part-way). Each sync call embeds at most one shard, so
+        the entity only completes if a later pass picks it up again; an
+        unchanged note produces no file-index target and would otherwise stay
+        partly embedded forever (#1605).
+
+        An entity without a checksum has not finished file indexing; the pass
+        that sets its checksum emits its own vector target, so it is not
+        listed here.
+        """
+        async with self.session_maker() as session:
+            result = await session.execute(
+                text("""
+                    SELECT id, checksum
+                    FROM entity
+                    WHERE project_id = :project_id
+                      AND vector_sync_deferred_at IS NOT NULL
+                      AND checksum IS NOT NULL
+                    ORDER BY id
+                """),
+                {"project_id": self.project_id},
+            )
+            return tuple(
+                EmbeddingIndexTarget(entity_id=int(entity_id), entity_checksum=str(checksum))
+                for entity_id, checksum in result.all()
+            )
 
 
 @dataclass(frozen=True, slots=True)
