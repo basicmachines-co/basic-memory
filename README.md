@@ -229,11 +229,15 @@ That registers the marketplace and installs the plugin through Claude Code. Add
 `--scope project` to declare both in the repository's settings for a team, or
 `--dry-run` to see the underlying `claude plugin` commands without running them.
 
+The plugin also bundles the shared `memory-*` skills below, as
+`/basic-memory:memory-*`, so Claude Code users don't install them separately.
+
 Source: [`plugins/claude-code`](plugins/claude-code).
 
 ### Shared skills
 
-Framework-agnostic `SKILL.md` files live in [`skills/`](skills). If your
+Framework-agnostic `SKILL.md` files live in [`skills/`](skills). The Claude Code
+plugin and the OpenClaw plugin already bundle them. For any other agent, if your
 Skills CLI supports repository subdirectory sources:
 
 ```bash

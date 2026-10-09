@@ -10,9 +10,10 @@ automatically: Claude starts each session briefed from the graph, and checkpoint
 the session back to it before the context window compacts.
 
 > This package lives in the canonical [`basic-memory`](https://github.com/basicmachines-co/basic-memory)
-> repository under `plugins/claude-code/` and only works with Claude Code. For
-> framework-agnostic skills that work in any MCP agent, see the top-level
-> [`skills/`](../../skills) directory.
+> repository under `plugins/claude-code/` and only works with Claude Code. It
+> bundles the framework-agnostic `memory-*` skills from the top-level
+> [`skills/`](../../skills) directory, which is also where to get them for other
+> MCP agents.
 
 ## What it does
 
@@ -57,7 +58,7 @@ Plugin skills are namespaced under the plugin name:
 
 | Command | What it does |
 |---------|--------------|
-| `/basic-memory:bm-setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, installs the shared `memory-*` skills, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
+| `/basic-memory:bm-setup` | One-time guided setup — maps the project to a Basic Memory project, seeds the note schemas, offers to remove standalone `memory-*` copies the plugin now replaces, optionally learns your conventions, and turns on the capture reflexes. Run this first. |
 | `/basic-memory:bm-orient` | Deliberate orientation — reads active tasks, open decisions, and recent checkpoints from the graph and summarizes where things stand, with permalinks. The mid-session counterpart to the SessionStart brief. |
 | `/basic-memory:bm-checkpoint` | Deliberate checkpoint — writes a durable handoff note (story, verification, decisions, next action). Coding setups get schema-backed `coding_session` notes with required Git identity. Also fires when you say "checkpoint this" or "wrap up". |
 | `/basic-memory:bm-decide` | Capture a durable decision — rationale, alternatives, consequences, affected work — as a `type: decision` note findable by structured recall. Also fires when you say "record this decision". |
@@ -65,6 +66,26 @@ Plugin skills are namespaced under the plugin name:
 | `/basic-memory:bm-share <note>` | Promote a personal note to a configured team project, with attribution and confirmation. The deliberate way to write to a shared workspace. |
 | `/basic-memory:bm-status` | Diagnostic — shows the active project, team read-sources and share targets, capture folders, shared local hook inbox/flush health, recent session checkpoints, and active-task count. |
 | `/basic-memory:bm-writing` | The writing standard applied whenever Claude writes or substantially revises a note. Not usually invoked directly — edit `skills/bm-writing/SKILL.md` to change how memory is written. |
+
+### Bundled `memory-*` skills
+
+The plugin also ships the shared, framework-agnostic Basic Memory skills, so
+enabling the plugin is all a machine needs. They appear as
+`/basic-memory:memory-<name>` and load on demand when a request matches:
+`memory-capture`, `memory-continue`, `memory-curate`, `memory-defrag`,
+`memory-ingest`, `memory-lifecycle`, `memory-literary-analysis`,
+`memory-metadata-search`, `memory-notes`, `memory-onboarding`, `memory-reflect`,
+`memory-research`, `memory-schema`, and `memory-tasks`. See
+[`skills/README.md`](../../skills/README.md) for what each one does.
+
+These are copies of the canonical [`skills/`](../../skills) source, written by
+`scripts/sync_plugin_skills.py`; edit `skills/`, never the copies here.
+`just package-check-claude-code` fails when the copies drift. `memory-ci-capture`
+is not bundled: it is a CI-only prompt for `bm ci publish`, not an interactive skill.
+
+If you installed these skills earlier with `npx skills add`, remove those
+standalone copies (`/basic-memory:bm-setup` offers to), or Claude sees each skill
+twice.
 
 ## Requirements
 

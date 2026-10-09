@@ -69,7 +69,8 @@ npx skills add basicmachines-co/basic-memory/skills --agent claude
 2. Add YAML frontmatter with `name` and `description`
 3. Write skill instructions in markdown
 4. Update `README.md` with the new skill's summary
-5. Commit and push
+5. Run `python3 scripts/sync_plugin_skills.py` from the monorepo root to copy it into the Claude Code plugin
+6. Commit and push
 
 ## Packaging for Distribution
 
@@ -104,6 +105,23 @@ MCP server, but that is wired at the host/plugin level (the ChatGPT plugin
 builder's **MCP** step, or a local `.mcp.json`), not per skill. To upload into a
 ChatGPT plugin's **Skills** step, drag one `dist/skills-openai/<name>.zip` per
 skill.
+
+## Claude Code Plugin Integration
+
+The [Claude Code plugin](../plugins/claude-code) bundles committed copies of these
+skills under `plugins/claude-code/skills/memory-*`, because a plugin install copies
+only the plugin directory. After **any** change under `skills/`, refresh them from
+the monorepo root:
+
+```bash
+python3 scripts/sync_plugin_skills.py          # write the copies
+python3 scripts/sync_plugin_skills.py --check  # report drift only
+```
+
+`just package-check-claude-code` (and the Consolidated Packages CI job) fails when
+the copies differ. Never edit the copies directly. `memory-ci-capture` is excluded
+on purpose (`EXCLUDED_SKILLS` in the script); a new `memory-*` skill is bundled
+automatically. The change reaches users with the next plugin version bump.
 
 ## OpenClaw Plugin Integration
 

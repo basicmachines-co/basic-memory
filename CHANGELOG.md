@@ -49,6 +49,13 @@
 
 ### Features
 
+- **#1646**: The Claude Code plugin bundles the shared `memory-*` skills (all of `skills/` except
+  the CI-only `memory-ci-capture`) as `/basic-memory:memory-*`, so enabling the plugin
+  is enough and `npx skills add` is no longer part of `/basic-memory:bm-setup`. Setup
+  instead offers to remove standalone copies from an earlier `npx` install, which would
+  otherwise appear twice. The copies are written by `scripts/sync_plugin_skills.py`,
+  and the Claude Code package check fails when they drift from `skills/`.
+
 - **#1642**: `write_note` can overwrite only the revision you read. Pass
   `expected_checksum` with `overwrite=True` (CLI: `--overwrite --expected-checksum`)
   and the note is replaced only while it is still that revision. Otherwise nothing

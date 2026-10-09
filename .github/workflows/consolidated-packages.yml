@@ -9,6 +9,7 @@ on:
       - "integrations/**"
       - "scripts/update_versions.py"
       - "scripts/validate_*.py"
+      - "scripts/sync_plugin_skills.py"
       - "justfile"
       - ".github/workflows/consolidated-packages.yml"
   push:
@@ -21,6 +22,7 @@ on:
       - "integrations/**"
       - "scripts/update_versions.py"
       - "scripts/validate_*.py"
+      - "scripts/sync_plugin_skills.py"
       - "justfile"
       - ".github/workflows/consolidated-packages.yml"
 
