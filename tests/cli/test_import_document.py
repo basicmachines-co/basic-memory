@@ -46,7 +46,11 @@ def test_import_document_help_explains_the_project_boundary() -> None:
 
     assert result.exit_code == 0, result.output
     assert "already stored inside a project" in result.output
-    assert "copy external files into the project first" in result.output
+    # Rich wraps help text into a box; strip borders and whitespace before matching.
+    help_text = " ".join(result.output.replace("│", " ").split())
+    assert "Copy external files into the project first" in help_text
+    # #1635: the help has to say which directory a relative path is resolved against.
+    assert "resolved against the project root, not the current directory" in help_text
 
 
 @patch("basic_memory.cli.commands.import_document.import_document", new_callable=AsyncMock)
@@ -182,3 +186,37 @@ async def test_import_document_rejects_a_file_outside_the_project(tmp_path: Path
         ),
     ):
         await import_document(outside, "main")
+
+
+@pytest.mark.asyncio
+async def test_import_document_resolves_a_relative_path_against_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`files/data.csv` names a file in the project, whatever the current directory (#1635)."""
+    project_home = tmp_path / "project"
+    source = project_home / "files" / "data.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("a,b\n1,2\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    project_client = MagicMock()
+    project_client.index = AsyncMock(return_value={})
+    runtime_instance = MagicMock()
+    runtime_instance.ingest = AsyncMock(return_value=RESULT)
+
+    with (
+        patch("basic_memory.mcp.async_client.get_client", fake_get_client),
+        patch(
+            "basic_memory.mcp.project_context.get_active_project",
+            AsyncMock(return_value=project_item(project_home)),
+        ),
+        patch("basic_memory.mcp.clients.ProjectClient", return_value=project_client),
+        patch(
+            "basic_memory.document_ingestion.raw_document.RawDocumentRuntime",
+            return_value=runtime_instance,
+        ),
+    ):
+        await import_document(Path("files/data.csv"), "main")
+
+    runtime_instance.ingest.assert_awaited_once_with(file_path="files/data.csv", observed_etag=None)
