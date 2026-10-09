@@ -218,6 +218,38 @@ def test_cli_export(export_config, tmp_path):
     assert json.loads(result.stdout)["diagnostics"][0]["rule"] == "export"
 
 
+def test_cli_export_refusal_prints_the_error_without_a_bundle_summary(export_config, tmp_path):
+    """A refused export has no bundle, so no "Invalid OKF bundle: 0 concepts" line (#1635)."""
+    set_container(CliContainer(export_config, RuntimeMode.TEST))
+    runner = CliRunner()
+    destination = tmp_path / "bundle"
+    first = runner.invoke(app, ["okf", "export", str(destination), "--project", "export"])
+    assert first.exit_code == 0, first.output
+
+    refused = runner.invoke(app, ["okf", "export", str(destination), "--project", "export"])
+
+    assert refused.exit_code == 1
+    assert "OKF bundle" not in refused.output
+    assert "Error: OKF export refused:" in refused.output
+
+
+def test_render_index_sorts_entries_case_insensitively():
+    """People read the index, so "coffee" sorts before "Espresso" (#1635)."""
+    snapshot = ExportSnapshot(
+        "project",
+        (
+            ExportFile("concepts/Espresso.md", b"---\ntitle: Espresso\n---\n"),
+            ExportFile("concepts/coffee.md", b"---\ntitle: coffee\n---\n"),
+            ExportFile("concepts/Zebra/a.md", b"---\ntitle: A\n---\n"),
+            ExportFile("concepts/apple/b.md", b"---\ntitle: B\n---\n"),
+        ),
+    )
+    output = {file.path: file.content.decode() for file in render_bundle(snapshot)}
+    index = output["concepts/index.md"]
+    assert index.index("[coffee]") < index.index("[Espresso]")
+    assert index.index("[apple]") < index.index("[Zebra]")
+
+
 @pytest.mark.parametrize(
     "body,expected",
     [

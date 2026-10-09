@@ -64,6 +64,13 @@ def export(
         maybe_install_uvloop(config)
         report = run_with_cleanup(export_project(config, project, destination, replace=replace))
     except (ValueError, OSError, UnicodeError) as error:
+        # Trigger: the export was refused before any bundle was staged or validated
+        # Why: a "Invalid OKF bundle: 0 concepts" header describes a bundle that
+        #      does not exist and buries the real reason (#1635)
+        # Outcome: text output prints only the error; --json keeps the CheckReport shape
+        if not json_output:
+            typer.echo(f"Error: OKF export refused: {error}", err=True)
+            raise typer.Exit(1)
         report = CheckReport(
             diagnostics=[Diagnostic(path=str(destination), rule="export", message=str(error))]
         )
