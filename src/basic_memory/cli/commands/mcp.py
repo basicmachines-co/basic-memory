@@ -3,7 +3,7 @@
 import ipaddress
 import os
 import threading
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Literal, Optional
 
 import typer
 from loguru import logger
@@ -11,9 +11,6 @@ from loguru import logger
 from basic_memory.cli.app import app
 from basic_memory.cli.auto_update import AutoUpdateStatus, run_auto_update
 from basic_memory.config import ConfigManager, init_mcp_logging
-
-if TYPE_CHECKING:  # pragma: no cover
-    from starlette.middleware import Middleware
 
 
 class _DeferredMcpServer:
@@ -27,21 +24,39 @@ class _DeferredMcpServer:
 mcp_server = _DeferredMcpServer()
 
 
-def http_guard_middleware() -> list["Middleware"]:
-    """Build the Host/Origin guard installed on both HTTP transports.
+type HttpTransport = Literal["streamable-http", "sse"]
 
-    FastMCP's ``host_origin_protection`` option only reaches the streamable-http app;
-    ``create_sse_app`` ignores it. Passing the guard as plain middleware covers both
-    transports with one mechanism. In "auto" mode the guard checks Host and Origin
-    only for connections arriving on a loopback address, which closes DNS rebinding
-    from a browser tab while leaving 0.0.0.0 container binds (Docker bridge) usable.
+
+def http_guard_options(transport: HttpTransport) -> dict[str, Any]:
+    """Return the `run` kwargs that install FastMCP's Host/Origin guard for a transport.
+
+    In "auto" mode the guard checks Host and Origin only for connections arriving on
+    a loopback address. That closes DNS rebinding from a browser tab and leaves
+    0.0.0.0 container binds (Docker bridge) usable.
     """
+    # Trigger: streamable-http transport.
+    # Why: FastMCP builds its own guard there from host_origin_protection and the
+    #      configured FASTMCP_HTTP_ALLOWED_HOSTS / FASTMCP_HTTP_ALLOWED_ORIGINS.
+    # Outcome: delegate to FastMCP; adding our middleware too would guard twice.
+    if transport == "streamable-http":
+        return {"host_origin_protection": "auto"}
+
+    # SSE: FastMCP 4.0.3's create_sse_app ignores host_origin_protection, so install
+    # the same guard ourselves with the allowlists create_streamable_http_app would
+    # read from fastmcp.settings.
     # Deferred: fastmcp/starlette are heavy and the CLI import path must stay light
     # (tests/cli/test_cli_exit.py guards this).
+    import fastmcp
     from fastmcp.server.http import HostOriginGuardMiddleware
     from starlette.middleware import Middleware
 
-    return [Middleware(HostOriginGuardMiddleware, mode="auto")]
+    guard = Middleware(
+        HostOriginGuardMiddleware,
+        allowed_hosts=fastmcp.settings.http_allowed_hosts,
+        allowed_origins=fastmcp.settings.http_allowed_origins,
+        mode="auto",
+    )
+    return {"middleware": [guard]}
 
 
 def is_loopback_host(host: str) -> bool:
@@ -171,14 +186,11 @@ def mcp(
             typer.echo(f"Warning: {warning}", err=True)
             logger.warning(warning)
 
-        # The guard goes in as middleware rather than host_origin_protection, which
-        # FastMCP only applies to streamable-http. host_origin_protection stays at
-        # its default (off) so streamable-http does not get the guard twice.
         mcp_server.run(
             transport=transport,
             host=host,
             port=port,
             path=path,
             log_level="INFO",
-            middleware=http_guard_middleware(),
+            **http_guard_options(transport),
         )
