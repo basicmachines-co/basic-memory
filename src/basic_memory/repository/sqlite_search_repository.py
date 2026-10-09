@@ -1,6 +1,7 @@
 """SQLite FTS5-based search repository implementation."""
 
 import asyncio
+import sqlite3
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import override, List
@@ -273,7 +274,19 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     "support (uv-managed CPython, Homebrew Python, or the official "
                     "Docker image). Search falls back to keyword-only until then."
                 ) from exc
-            await driver_connection.load_extension(sqlite_vec.loadable_path())
+            try:
+                await driver_connection.load_extension(sqlite_vec.loadable_path())
+            except sqlite3.OperationalError as exc:
+                # Trigger: extension loading exists but this binary will not load
+                # (an incompatible wheel, or loading denied by the SQLite build).
+                # Why: semantic search has no off switch, so a failed load must take
+                # the same keyword-only fallback as a missing capability (#711).
+                # Outcome: the typed error init_search_index() already handles.
+                raise SemanticDependenciesMissingError(
+                    f"sqlite-vec could not be loaded ({exc}). "
+                    "Reinstall basic-memory to get a sqlite-vec build for this platform. "
+                    "Search falls back to keyword-only until then."
+                ) from exc
             await driver_connection.enable_load_extension(False)
             await session.execute(text("SELECT vec_version()"))
 

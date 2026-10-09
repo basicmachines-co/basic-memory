@@ -596,3 +596,11 @@ async def test_embedding_status_reports_keyword_only_host(
     assert status.vector_runtime_available is False
     assert status.reindex_recommended is False
     assert status.reindex_reason is None
+
+
+def test_embedding_status_still_emits_the_deprecated_semantic_field():
+    """CLIs released before the flag was removed require semantic_search_enabled
+    when they read project info from an upgraded server."""
+    assert EmbeddingStatus().model_dump()["semantic_search_enabled"] is True
+    keyword_only = EmbeddingStatus(vector_runtime_available=False).model_dump(mode="json")
+    assert keyword_only["semantic_search_enabled"] is False

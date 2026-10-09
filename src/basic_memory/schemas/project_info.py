@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import Field, BaseModel
+from pydantic import BaseModel, Field, computed_field
 
 from basic_memory.utils import generate_permalink
 
@@ -103,6 +103,16 @@ class EmbeddingStatus(BaseModel):
     # Derived
     reindex_recommended: bool = False
     reindex_reason: Optional[str] = None
+
+    @computed_field
+    @property
+    def semantic_search_enabled(self) -> bool:
+        """Deprecated mirror of vector_runtime_available.
+
+        CLIs released before the flag was removed require this field when they read
+        project info from an upgraded server; keep emitting it until they age out.
+        """
+        return self.vector_runtime_available
 
 
 class ProjectInfoResponse(BaseModel):
