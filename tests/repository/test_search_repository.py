@@ -670,6 +670,18 @@ class TestSearchTermPreparation:
             assert fts_query(search_repository).prepare_search_term("hello*") == "hello*"
             assert fts_query(search_repository).prepare_search_term("test*world") == "test*world"
 
+    def test_multi_word_query_with_a_wildcard(self, search_repository):
+        """A wildcard on one word of several must stay valid query syntax on both backends."""
+        prepare = fts_query(search_repository).prepare_search_term
+        if is_postgres_backend(search_repository):
+            # Every word joins with "&"; a bare "foo cache:*" is rejected by to_tsquery.
+            assert prepare("foo cache*") == "foo:* & cache:*"
+            assert prepare("IT-644 cache*") == "IT-644:* & cache:*"
+            assert prepare("IT-644 *cache") == "IT-644:* & cache:*"
+        else:
+            assert prepare("foo cache*") == "foo* AND cache*"
+            assert prepare("IT-644 cache*") == '"IT-644"* AND cache*'
+
     def test_boolean_operators_preserved(self, search_repository):
         """Boolean operators should be preserved without modification."""
         if is_postgres_backend(search_repository):
