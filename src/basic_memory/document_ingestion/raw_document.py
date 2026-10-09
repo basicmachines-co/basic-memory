@@ -427,11 +427,31 @@ def build_raw_ingestion_run_markdown(
         # that would go stale (#1651). The wikilinks give readers one-click navigation
         # between the original file and its extracted text.
         body=(
-            f"This note records the text extraction of [[{artifacts.source.file_path}]]. "
-            f"The extracted text is in [[{artifacts.document_file_path}]].\n"
+            "This note records the text extraction of "
+            f"{_run_note_link(artifacts.source.file_path, 'the source file')}. "
+            "The extracted text is in "
+            f"{_run_note_link(artifacts.document_file_path, 'the document note')}.\n"
         ),
     )
     return assemble_document_ingestion_run_markdown(run)
+
+
+# A path containing these would close or split a [[...]] link and inject Markdown
+# into the permanent run note. Project paths allow them, so they are not rejected.
+_WIKILINK_BREAKING = ("[[", "]]", "|", "\n", "\r")
+
+
+def _run_note_link(file_path: str, description: str) -> str:
+    """Return a wikilink to file_path, or a plain description when it cannot be linked.
+
+    Trigger: the path contains link delimiters or a line break.
+    Why: there is no escape inside a wikilink, and the run note is never rewritten.
+    Outcome: the body names the file by description; the exact path stays in the
+    frontmatter (`source.file_path`, `output.document_file_path`).
+    """
+    if any(token in file_path for token in _WIKILINK_BREAKING):
+        return f"{description} (path in frontmatter)"
+    return f"[[{file_path}]]"
 
 
 def extraction_options_checksum(limits: BaseModel) -> str:
