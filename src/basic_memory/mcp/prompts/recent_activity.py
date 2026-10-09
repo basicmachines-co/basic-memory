@@ -57,14 +57,15 @@ async def recent_activity_prompt(
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly
     # and add prompt-specific guidance
-    # A bare call resolves to the default project; it reaches every project only
-    # when no default is configured, so the header must not promise all projects.
-    target = f"project '{project}'" if project else "the default project"
+    # A bare call resolves to the default project, or to every project when no
+    # default is configured. Only the tool knows which, and its summary states
+    # the scope, so the header names a project only when the caller gave one.
+    scope = f" from project '{project}'" if project else ""
 
     prompt_guidance = dedent(f"""
         # Recent Activity Context
 
-        This is a memory retrieval session showing recent activity from {target}.
+        This is a memory retrieval session showing recent activity{scope}.
 
         {activity_summary}
 

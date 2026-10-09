@@ -43,9 +43,11 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
     assert "Capture Opportunity" in out
     # Discovery mode has no project; the guidance must not invent a "default" project name.
     assert 'project="default"' not in out
-    # A bare call resolves the default project first, so it must not promise all projects.
+    # A bare call may reach the default project or every project; the header must
+    # not assert either scope, since the tool output states which one applied.
     assert "all projects" not in out
-    assert "showing recent activity from the default project" in out
+    assert "default project" not in out
+    assert "showing recent activity." in out
 
 
 @pytest.mark.asyncio
