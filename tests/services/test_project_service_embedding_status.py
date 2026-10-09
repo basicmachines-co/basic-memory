@@ -32,19 +32,23 @@ async def _execute(project_service: ProjectService, query, params=None):
 async def _drop_real_vector_storage(project_service: ProjectService) -> None:
     """Remove the vector table semantic search created, so the stub can replace it.
 
-    Semantic search is always on, so search setup has already created the real
-    sqlite-vec (or pgvector) table. Dropping a vec0 table needs the extension loaded.
+    Semantic search is always on, so search setup has usually already created the
+    real sqlite-vec (or pgvector) table. Dropping a vec0 table needs the extension
+    loaded.
     """
     async with db.scoped_session(project_service.session_maker) as session:
         if not _is_postgres():
-            import sqlite_vec
-
             connection = await session.connection()
             raw_connection = await connection.get_raw_connection()
             driver_connection = raw_connection.driver_connection
             assert driver_connection is not None
-            await driver_connection.enable_load_extension(True)
-            await driver_connection.load_extension(sqlite_vec.loadable_path())
+            # Python builds without extension loading never create the vec0 table
+            # (search falls back to keywords, #711), so there is nothing to unload.
+            if hasattr(driver_connection, "enable_load_extension"):
+                import sqlite_vec
+
+                await driver_connection.enable_load_extension(True)
+                await driver_connection.load_extension(sqlite_vec.loadable_path())
         await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
         await session.commit()
 
