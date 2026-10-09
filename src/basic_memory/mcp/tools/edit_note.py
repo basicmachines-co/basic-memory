@@ -260,17 +260,28 @@ def _write_was_refused(error: Exception) -> bool:
     return isinstance(cause, HTTPStatusError) and 400 <= cause.response.status_code < 500
 
 
+def _unknown_outcome_guidance(identifier: str, project_external_id: str) -> str:
+    """Tell the caller to check the note before retrying a write that may have landed.
+
+    The suggested read names the project by external_id: a project name can match a
+    same-named project in another workspace, where the append would look absent.
+    """
+    return (
+        "The edit may have been applied. Read the note before retrying; repeating an "
+        "append or prepend that already landed adds the content twice: "
+        f'read_note(identifier="{identifier}", project_id="{project_external_id}")'
+    )
+
+
 def _format_unknown_outcome_response(
-    error_message: str, operation: str, identifier: str, project: str
+    error_message: str, operation: str, identifier: str, project_external_id: str
 ) -> str:
     """Format a failure that happened after the write was sent, with no refusal from the API."""
     return f"""# Edit Outcome Unknown
 
 The {operation} on note '{identifier}' was sent, but no confirmation came back: {error_message}
 
-The edit may have been applied. Read the note before retrying; repeating an append or
-prepend that already landed adds the content twice:
-`read_note(identifier="{identifier}", project="{project}")`"""
+{_unknown_outcome_guidance(identifier, project_external_id)}"""
 
 
 def _format_error_response(
@@ -965,9 +976,12 @@ async def edit_note(
                             "fileCreated": False,
                             "error": "EDIT_OUTCOME_UNKNOWN",
                             "detail": str(e),
+                            "message": _unknown_outcome_guidance(
+                                identifier, active_project.external_id
+                            ),
                         },
                         _format_unknown_outcome_response(
-                            str(e), operation, identifier, active_project.name
+                            str(e), operation, identifier, active_project.external_id
                         ),
                     )
                 if isinstance(e, UnresolvedProjectRouteError):

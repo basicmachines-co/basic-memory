@@ -611,15 +611,45 @@ def test_edit_note_error_response(mock_mcp_edit):
 def test_edit_note_reports_a_tool_error_payload_and_exits_nonzero(
     mock_mcp_edit: AsyncMock,
 ) -> None:
-    """A failed edit raised as a tool error prints its error field, not raw JSON."""
+    """A failed edit: error on stderr, the structured result on stdout, as write-note does."""
     result = runner.invoke(
         cli_app,
         ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
     )
 
     assert result.exit_code == 1
-    assert "Error: The note was modified concurrently." in result.output
-    assert '"fileCreated"' not in result.output
+    assert "Error: The note was modified concurrently." in result.stderr
+    assert json.loads(result.stdout)["fileCreated"] is False
+
+
+@patch(
+    "basic_memory.mcp.tools.edit_note",
+    new_callable=AsyncMock,
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "operation": "append",
+                "fileCreated": False,
+                "error": "EDIT_OUTCOME_UNKNOWN",
+                "detail": "Network error: the connection dropped",
+                "message": "The edit may have been applied. Read the note before retrying.",
+            }
+        )
+    ),
+)
+def test_edit_note_unknown_outcome_keeps_the_read_before_retry_warning(
+    mock_mcp_edit: AsyncMock,
+) -> None:
+    """A lost response must not reach the user as a bare error code (or a script retries)."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: EDIT_OUTCOME_UNKNOWN" in result.stderr
+    assert "Read the note before retrying" in result.stderr
+    assert json.loads(result.stdout)["detail"] == "Network error: the connection dropped"
 
 
 # --- build-context ---
