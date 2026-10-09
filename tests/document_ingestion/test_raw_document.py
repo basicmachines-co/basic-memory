@@ -25,6 +25,7 @@ from basic_memory.document_ingestion.raw_document import (
     RawDocumentWriteResult,
     RawPdfDocumentRuntime,
     build_raw_document_artifacts,
+    _run_note_link,
     build_raw_ingestion_run_markdown,
     canonical_db_checksum,
     extraction_options_checksum,
@@ -379,3 +380,16 @@ async def test_raw_runtime_rejects_a_source_replaced_during_extraction() -> None
         )
 
     assert events == ["resolve", "read", "extract", "resolve"]
+
+
+@pytest.mark.parametrize("file_path", ["docs/a]]b.pdf", "docs/a|b.pdf", "docs/a\nb.pdf"])
+def test_run_note_never_wraps_a_link_breaking_path_in_a_wikilink(file_path: str) -> None:
+    """A path that would close or split [[...]] is named by description instead."""
+    link = _run_note_link(file_path, "the source file")
+
+    assert link == "the source file (path in frontmatter)"
+    assert file_path not in link
+
+
+def test_run_note_links_an_ordinary_path() -> None:
+    assert _run_note_link("docs/report.pdf", "the source file") == "[[docs/report.pdf]]"
