@@ -170,7 +170,8 @@ def test_warn_unreadable_new_directories_ignores_readable_directories_and_files(
     try:
         warn_unreadable_new_directories(
             project,
-            {
+            local_index_available=True,
+            changes={
                 (Change.added, str(readable)),
                 (Change.added, str(note)),
                 (Change.added, str(gone)),
@@ -195,10 +196,39 @@ def test_unreadable_directory_warning_quotes_a_project_name_with_spaces(tmp_path
 
     messages, sink_id = _capture_warnings()
     try:
-        warn_unreadable_new_directories(project, {(Change.added, str(closed))})
+        warn_unreadable_new_directories(
+            project, {(Change.added, str(closed))}, local_index_available=True
+        )
     finally:
         logger.remove(sink_id)
         closed.chmod(0o755)
 
     assert len(messages) == 1
     assert "`bm project index 'My Notes'`" in messages[0]
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root can read a directory with mode 000",
+)
+@pytest.mark.parametrize("local_index_available", [True, False])
+def test_unreadable_directory_warning_survives_braces_and_fits_the_mode(
+    tmp_path: Path, local_index_available: bool
+) -> None:
+    """Braces in a path are not format fields, and a cloud project gets no local reindex hint."""
+    closed = tmp_path / "{foo}"
+    closed.mkdir(mode=0o000)
+    project = cast(Project, SimpleNamespace(name="research"))
+
+    messages, sink_id = _capture_warnings()
+    try:
+        warn_unreadable_new_directories(
+            project, {(Change.added, str(closed))}, local_index_available=local_index_available
+        )
+    finally:
+        logger.remove(sink_id)
+        closed.chmod(0o755)
+
+    assert len(messages) == 1
+    assert str(closed) in messages[0]
+    assert ("bm project index research" in messages[0]) is local_index_available

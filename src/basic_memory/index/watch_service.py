@@ -18,7 +18,7 @@ from watchfiles import awatch
 from watchfiles.main import Change, FileChange
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ConfigManager, WATCH_STATUS_JSON
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.index.local_watch import (
@@ -317,7 +317,12 @@ class WatchService:
 
         start_time = time.time()
         project_root = local_project_root(project)
-        warn_unreadable_new_directories(project, changes)
+        warn_unreadable_new_directories(
+            project,
+            changes,
+            local_index_available=self.app_config.get_project_mode(project.name)
+            == ProjectMode.LOCAL,
+        )
         request = LocalWatchEventIndexRequest.from_project_changes(
             project=project,
             changes=changes,
@@ -355,7 +360,9 @@ class WatchService:
         await self.write_status()
 
 
-def warn_unreadable_new_directories(project: Project, changes: set[FileChange]) -> None:
+def warn_unreadable_new_directories(
+    project: Project, changes: set[FileChange], *, local_index_available: bool
+) -> None:
     """Log a warning for each newly created directory in a batch that cannot be read.
 
     Trigger: a directory reported as added cannot be listed (for example, created
@@ -363,9 +370,16 @@ def warn_unreadable_new_directories(project: Project, changes: set[FileChange]) 
     Why: on Linux the watcher adds a watch on a new directory when it appears, and
     when that fails the notify library discards the error. Files written into the
     directory then produce no events and are never indexed, with nothing logged.
-    Outcome: a warning naming the directory and the command that indexes it once
-    its permissions are fixed.
+    Outcome: a warning naming the directory. For a local project it also names the
+    command that indexes it once its permissions are fixed; a cloud project's local
+    copy is watched too, but the local reindex refuses cloud projects.
     """
+    remedy = (
+        f"Once its permissions are fixed, run "
+        f"`{shell_command('bm', 'project', 'index', project.name)}`."
+        if local_index_available
+        else "Fix its permissions so the watcher can read it."
+    )
     for change, path in changes:
         if change != Change.added:
             continue
@@ -376,12 +390,15 @@ def warn_unreadable_new_directories(project: Project, changes: set[FileChange]) 
             with os.scandir(directory):
                 pass
         except OSError as exc:
+            # Loguru formats the message with str.format when arguments are passed, so the
+            # path and project name go in as arguments: a directory named "{foo}" embedded
+            # in the message itself would raise KeyError and drop the whole batch.
             logger.warning(
-                f"New directory cannot be read, so the file watcher cannot watch it and "
-                f"files written into it will not be indexed: {directory} ({exc.strerror}). "
-                f"Once its permissions are fixed, run "
-                f"`{shell_command('bm', 'project', 'index', project.name)}` "
-                f"(or `bm reindex`).",
+                "New directory cannot be read, so the file watcher cannot watch it and "
+                "files written into it will not be indexed: {} ({}). {}",
+                directory,
+                exc.strerror,
+                remedy,
                 project=project.name,
                 path=str(directory),
             )
