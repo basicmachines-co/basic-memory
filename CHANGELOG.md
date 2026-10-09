@@ -336,6 +336,13 @@
   `replace_section`, `insert_before_section` and `insert_after_section`. Thanks to
   @xhkzdepartedream (#1708).
 
+- **#1604**: `bm cloud push` and `bm cloud pull` on Team workspaces are much faster.
+  The project is listed with one `Depth: infinity` PROPFIND instead of one request per
+  directory, and eight files transfer at once. File bodies stream to and from disk, so
+  memory does not grow with file size. This needs a cloud service that answers
+  recursive listings; against an older one, or a project too large for one listing,
+  the command stops with a message naming the cause.
+
 - **#1654**: A Markdown file kept in step by a one-way sync tool (rclone sync, a backup
   script) is no longer re-indexed and rewritten forever. Indexing writes a `permalink`
   (and `title` and `type` with `ensure_frontmatter_on_sync`) into a file that arrived
