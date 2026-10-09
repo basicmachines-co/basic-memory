@@ -384,12 +384,15 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         index_path = str(directory / "index.md")
         lines = ['---\nokf_version: "0.2"\n---\n'] if directory == PurePosixPath(".") else []
         lines.append("# " + (snapshot.project if str(directory) == "." else directory.name) + "\n")
-        for file in sorted(snapshot.files, key=lambda file: file.path):
+        # Index entries are for people, so order them case-insensitively
+        # ("coffee" before "Espresso"); the raw path breaks casefold ties so the
+        # output stays deterministic (#1635).
+        for file in sorted(snapshot.files, key=lambda file: (file.path.casefold(), file.path)):
             path = PurePosixPath(file.path)
             if path.parent == directory:
                 label = titles.get(file.path, path.stem)
                 lines.append("- " + markdown_link(label, path.name))
-        for child in sorted(directories):
+        for child in sorted(directories, key=lambda child: (str(child).casefold(), str(child))):
             if child != directory and child.parent == directory:
                 lines.append("- " + markdown_link(child.name, child.name + "/index.md"))
         output.append(ExportFile(index_path, ("\n".join(lines) + "\n").encode("utf-8")))
