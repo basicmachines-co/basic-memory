@@ -1698,6 +1698,18 @@ class SearchRepositoryBase(ABC):
             entity_ids,
         )
 
+    async def _fetch_prepare_window_projector_owned_entity_ids(
+        self,
+        session: AsyncSession,
+        entity_ids: list[int],
+    ) -> set[int]:
+        """Fetch the window entities whose current revision the Wiki projector wrote."""
+        return await semantic_vector_sync.fetch_prepare_window_projector_owned_entity_ids(
+            self,
+            session,
+            entity_ids,
+        )
+
     async def _prepare_entity_vector_jobs_window(
         self,
         entity_ids: list[int],

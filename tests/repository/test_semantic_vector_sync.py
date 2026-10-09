@@ -380,9 +380,17 @@ async def test_prepare_window_read_helpers_handle_empty_inputs() -> None:
         session,
         [],
     )
+    projector_owned_entity_ids = (
+        await semantic_vector_sync.fetch_prepare_window_projector_owned_entity_ids(
+            repository,
+            session,
+            [],
+        )
+    )
 
     assert source_rows == {}
     assert existing_rows == {}
+    assert projector_owned_entity_ids == set()
     manifest_sql = semantic_vector_sync.prepare_window_existing_rows_sql(":entity_id_0")
     assert "embedding_status" in manifest_sql
     assert "search_vector_embeddings" not in manifest_sql
@@ -432,7 +440,7 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
     async def write_scope():
         yield
 
-    def _stub_plan(repository, *, entity_id, source_rows, existing_rows):
+    def _stub_plan(repository, *, entity_id, source_rows, existing_rows, projector_owned):
         if entity_id == 1:
             return skip_result
         if entity_id == 4:
@@ -457,6 +465,11 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
     fetch_existing_rows = AsyncMock(return_value={})
     monkeypatch.setattr(repository, "_fetch_prepare_window_source_rows", fetch_source_rows)
     monkeypatch.setattr(repository, "_fetch_prepare_window_existing_rows", fetch_existing_rows)
+    monkeypatch.setattr(
+        repository,
+        "_fetch_prepare_window_projector_owned_entity_ids",
+        AsyncMock(return_value=set()),
+    )
     monkeypatch.setattr(repository, "_uses_external_vector_index", Mock(return_value=True))
     monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
     monkeypatch.setattr(semantic_vector_sync, "plan_entity_vector_jobs_prefetched", _stub_plan)

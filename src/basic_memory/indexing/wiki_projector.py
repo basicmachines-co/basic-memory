@@ -11,6 +11,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 import re
 import unicodedata
 
+from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
 from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
@@ -18,7 +19,7 @@ OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
 WIKI_PROJECTOR_VERSION = "wiki/1.0.0"
 WIKI_PROJECTOR_NAME = "Basic Memory Wiki Projector"
-WIKI_PROJECTOR_SOURCE = "wiki_projector"
+WIKI_PROJECTOR_SOURCE = NOTE_SOURCE_WIKI_PROJECTOR
 WIKI_LOG_ENTRY_LIMIT = 25
 RESERVED_WIKI_FILENAMES = frozenset({"index.md", "log.md"})
 WINDOWS_RESERVED_NAMES = frozenset(

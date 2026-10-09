@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import logfire
@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
+from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
 from basic_memory.runtime.vector_sync import (
     VECTOR_SYNC_SAMPLE_ERROR_LIMIT,
     VectorSyncBatchResult,
@@ -153,6 +154,9 @@ class DeleteEntityVectorPreparePlan:
     prepare_start: float
     source_rows_count: int
     expected_deletions: list[StagedVectorDeletion]
+    # True when the entity is deliberately kept out of semantic search, so the
+    # cleanup reports a skip instead of ordinary sync work.
+    entity_skipped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -716,6 +720,33 @@ async def fetch_prepare_window_source_rows(
     return grouped_rows
 
 
+async def fetch_prepare_window_projector_owned_entity_ids(
+    repository: SearchRepositoryBase,
+    session: AsyncSession,
+    entity_ids: list[int],
+) -> set[int]:
+    """Return window entities whose current accepted revision the Wiki projector wrote.
+
+    Ownership follows note_content.last_source rather than the file name, so a
+    hand-written index.md stays embedded and a generated page that a person or
+    agent edits is embedded again on its next sync.
+    """
+    if not entity_ids:
+        return set()
+
+    placeholders, params = repository._prepare_window_entity_params(entity_ids)
+    params["projector_source"] = NOTE_SOURCE_WIKI_PROJECTOR
+    result = await session.execute(
+        text(
+            "SELECT entity_id FROM note_content "
+            f"WHERE project_id = :project_id AND entity_id IN ({placeholders}) "
+            "AND last_source = :projector_source"
+        ),
+        params,
+    )
+    return {int(row.entity_id) for row in result.fetchall()}
+
+
 def prepare_window_existing_rows_sql(placeholders: str) -> str:
     """Build SQL for existing chunk and embedding rows in one prepare window."""
     return (
@@ -780,6 +811,11 @@ async def prepare_entity_vector_jobs_window(
             existing_rows_by_entity = await repository._fetch_prepare_window_existing_rows(
                 session, entity_ids
             )
+            projector_owned_entity_ids = (
+                await repository._fetch_prepare_window_projector_owned_entity_ids(
+                    session, entity_ids
+                )
+            )
     except Exception as exc:
         # Trigger: the shared read pass failed before we had entity-level diffs.
         # Why: once the window-level read session breaks, we cannot safely
@@ -796,6 +832,7 @@ async def prepare_entity_vector_jobs_window(
                 entity_id=entity_id,
                 source_rows=source_rows_by_entity.get(entity_id, []),
                 existing_rows=existing_rows_by_entity.get(entity_id, []),
+                projector_owned=entity_id in projector_owned_entity_ids,
             )
         except Exception as exc:
             prepared_by_index[index] = exc
@@ -848,6 +885,9 @@ async def prepare_entity_vector_jobs_window(
                                 existing_rows=locked_existing_rows.get(
                                     original_plan.entity_id,
                                     [],
+                                ),
+                                projector_owned=(
+                                    original_plan.entity_id in projector_owned_entity_ids
                                 ),
                             )
                             if isinstance(replanned, PreparedEntityVectorSync):
@@ -947,6 +987,7 @@ def plan_entity_vector_jobs_prefetched(
     entity_id: int,
     source_rows: list[Any],
     existing_rows: list[VectorChunkState],
+    projector_owned: bool = False,
 ) -> PreparedEntityVectorSync | EntityVectorPreparePlan:
     """Plan one entity from prefetched rows without opening a write transaction."""
     sync_start = time.perf_counter()
@@ -970,6 +1011,18 @@ def plan_entity_vector_jobs_prefetched(
                 for row in existing_rows
             ],
         )
+
+    # Trigger: the Wiki projector wrote this entity's current accepted revision
+    #   (a generated index.md or log.md).
+    # Why: those pages are link lists and change logs that every projection
+    #   rewrites; embedding them costs worker time and adds noise to semantic
+    #   results. Their search rows and relations stay, because the graph uses
+    #   their links. Only the vectors go.
+    # Outcome: plan the same cleanup as an entity with no semantic source rows,
+    #   so existing vectors are deleted and nothing is embedded, and report the
+    #   entity as skipped.
+    if projector_owned:
+        return replace(delete_entity_chunks(), entity_skipped=True)
 
     if not source_rows:
         return delete_entity_chunks()
@@ -1116,6 +1169,7 @@ async def apply_entity_vector_prepare_plan(
             sync_start=plan.sync_start,
             source_rows_count=plan.source_rows_count,
             embedding_jobs=[],
+            entity_skipped=plan.entity_skipped,
             prepare_seconds=time.perf_counter() - plan.prepare_start,
             delete_entity_vectors=True,
             staged_deletions=staged_deletions,

@@ -73,6 +73,9 @@ VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
         "wiki_projector",
     }
 )
+# Named because semantic vector sync skips notes whose current accepted revision
+# the Wiki projector wrote: those generated pages are never embedded.
+NOTE_SOURCE_WIKI_PROJECTOR: RuntimeNoteChangeSource = "wiki_projector"
 # Named because the accepted-note write path special-cases relay writes: the
 # relay superseding its own prior write is never a real conflict (#1589).
 NOTE_SOURCE_COLLABORATION_RELAY: RuntimeNoteChangeSource = "collaboration_relay"

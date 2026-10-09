@@ -1692,6 +1692,9 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
     monkeypatch.setattr(repo, "_prepare_entity_write_scope", _track_write_scope)
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
@@ -1769,6 +1772,9 @@ async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_w
     )
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
     monkeypatch.setattr(repo, "_prepare_vector_session", _stub_prepare_vector_session)
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
