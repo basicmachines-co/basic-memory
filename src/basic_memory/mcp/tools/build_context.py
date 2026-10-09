@@ -39,6 +39,8 @@ def _compact_observation(observation: ObservationSummary) -> ObservationSummary:
 def _compact_context_labels(graph: GraphContext) -> GraphContext:
     # Observation titles and permalinks embed source prose. Use the category and
     # owning file for discovery; keep numeric and external IDs unchanged.
+    # Compact requests skip entity observation lists, so only observations that
+    # surface as primary or related results need relabeling.
     return graph.model_copy(
         update={
             "results": [
@@ -47,7 +49,6 @@ def _compact_context_labels(graph: GraphContext) -> GraphContext:
                         "primary_result": _compact_observation(result.primary_result)
                         if isinstance(result.primary_result, ObservationSummary)
                         else result.primary_result,
-                        "observations": [_compact_observation(obs) for obs in result.observations],
                         "related_results": [
                             _compact_observation(item)
                             if isinstance(item, ObservationSummary)
@@ -222,9 +223,9 @@ async def build_context(
     context: Context | None = None,
     compact: Annotated[
         bool,
-        "Omit note and observation bodies for graph discovery. Preserve identifiers, "
-        "relation targets and pagination; use read_note for selected content. "
-        "This reduces response size, not traversal work or a guaranteed token budget.",
+        "Omit note bodies and entity observation lists for graph discovery; the server "
+        "skips loading observations. Preserve identifiers, relation targets and "
+        "pagination; use read_note for selected content. Not a guaranteed token budget.",
     ] = False,
 ) -> dict[str, Any] | str:
     """Get context needed to continue a discussion within a specific project.
@@ -254,7 +255,8 @@ async def build_context(
         output_format: Response format - "json" for structured JSON dict,
             "text" for compact markdown text
         context: Optional FastMCP context for performance caching.
-        compact: Omit note and observation bodies while retaining navigation summaries.
+        compact: Omit note bodies and entity observation lists while retaining navigation
+            summaries. The server skips loading observations for compact requests.
 
     Returns:
         dict (output_format="json"): Structured JSON with internal fields excluded
@@ -370,6 +372,12 @@ async def build_context(
                 page=page,
                 page_size=page_size,
                 max_related=max_related,
+                # Trigger: compact discovery asks for graph shape, not bodies.
+                # Why: loading every entity's observations is the costly part of
+                #      shaping the graph, and compact output never shows them (#1571).
+                # Outcome: the server skips the observation query; the primary and
+                #      related result selection is unchanged.
+                include_observations=not compact,
             )
 
             logger.debug(
@@ -387,14 +395,16 @@ async def build_context(
                 return _format_context_markdown(graph, active_project.name, compact=compact)
 
             # Discovery keeps the same graph and pagination, but leaves source prose
-            # for an explicit read. Exclude at serialization to preserve API models.
+            # for an explicit read. The server returned no entity observations, so
+            # the list is dropped rather than shown empty. Exclude at serialization
+            # to preserve API models.
             if compact:
                 return graph.model_dump(
                     exclude={
                         "results": {
                             "__all__": {
                                 "primary_result": {"content"},
-                                "observations": {"__all__": {"content"}},
+                                "observations": True,
                                 "related_results": {"__all__": {"content"}},
                             }
                         }
