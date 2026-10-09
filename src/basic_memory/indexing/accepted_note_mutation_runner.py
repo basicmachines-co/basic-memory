@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import NoReturn, Protocol
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +186,8 @@ class AcceptedNoteEditMutation:
     data: EditEntityRequest
     actor: AcceptedNoteMutationActor
     source: RuntimeNoteChangeSource
+    # db_checksum the caller last read; None means no precondition (issue #1552).
+    base_checksum: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,13 +486,41 @@ def concurrent_write_rejection() -> AcceptedNoteMutationRejection:
 
 
 def reject_stale_base_checksum(current_db_checksum: str | None) -> NoReturn:
-    """Reject a PUT whose base-checksum precondition no longer matches DB state."""
+    """Reject a write whose base-checksum precondition no longer matches DB state."""
     raise AcceptedNoteMutationRejected(
         AcceptedNoteMutationRejection(
             kind=AcceptedNoteMutationRejectKind.conflict,
             detail=AcceptedNoteBaseChecksumConflict(db_checksum=current_db_checksum),
         )
     )
+
+
+async def reject_lost_compare_and_set(
+    session: AsyncSession,
+    error: NoteContentVersionConflict,
+    *,
+    entity_external_id: NoteExternalId,
+    base_checksum: str | None,
+) -> NoReturn:
+    """Reject a write whose db_version compare-and-set lost to a concurrent writer.
+
+    This is the one place a lost compare-and-set becomes a route-facing refusal,
+    so every mutation kind answers a lost race the same way.
+    """
+    # Trigger: the caller pinned the revision it read (base_checksum).
+    # Why: a lost compare-and-set proves another write landed after that read, so
+    #   the caller's checksum is stale. The guarded wire shape lets it rebase,
+    #   where the plain concurrent-write 409 would leave it nothing to act on.
+    # Outcome: the stale-checksum conflict carrying the winner's checksum. This is
+    #   a plain column read in the still-open transaction: the ORM row in the
+    #   identity map holds this write's planned values, not the winner's. A row
+    #   deleted by the winner reads as None, which callers treat as a gone note.
+    if base_checksum is not None:
+        current_db_checksum = await session.scalar(
+            select(NoteContent.db_checksum).where(NoteContent.external_id == entity_external_id)
+        )
+        reject_stale_base_checksum(current_db_checksum=current_db_checksum)
+    raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
 
 
 async def resolve_accepted_note_source_checksum(
@@ -587,7 +618,12 @@ async def run_accepted_note_update(
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
-        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
+        await reject_lost_compare_and_set(
+            session,
+            error,
+            entity_external_id=request.entity_external_id,
+            base_checksum=request.base_checksum,
+        )
 
 
 async def run_accepted_note_edit(
@@ -602,7 +638,12 @@ async def run_accepted_note_edit(
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
-        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
+        await reject_lost_compare_and_set(
+            session,
+            error,
+            entity_external_id=request.entity_external_id,
+            base_checksum=request.base_checksum,
+        )
 
 
 async def run_accepted_note_move(
@@ -617,7 +658,12 @@ async def run_accepted_note_move(
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
-        raise AcceptedNoteMutationRejected(concurrent_write_rejection()) from error
+        await reject_lost_compare_and_set(
+            session,
+            error,
+            entity_external_id=request.entity_external_id,
+            base_checksum=None,
+        )
 
 
 async def run_accepted_note_delete(
@@ -1090,12 +1136,34 @@ async def _run_accepted_note_edit(
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )
-    project, entity, current_note_content = await load_existing_markdown_note_content(
-        session,
-        project_external_id=request.project_external_id,
-        entity_external_id=request.entity_external_id,
-        dependencies=dependencies,
-    )
+    try:
+        project, entity, current_note_content = await load_existing_markdown_note_content(
+            session,
+            project_external_id=request.project_external_id,
+            entity_external_id=request.entity_external_id,
+            dependencies=dependencies,
+        )
+    except AcceptedNoteMutationRejected as error:
+        # Trigger: the caller pinned a revision, and the note is gone (a delete
+        #   landed after the caller resolved it).
+        # Why: a guarded edit must answer a deleted note the same way whether the
+        #   delete landed before resolution or after it; a bare 404 would make the
+        #   result race-dependent.
+        # Outcome: the stale-checksum conflict with no current checksum.
+        if (
+            request.base_checksum is not None
+            and error.rejection.kind is AcceptedNoteMutationRejectKind.not_found
+        ):
+            reject_stale_base_checksum(current_db_checksum=None)
+        raise
+    # Optimistic-concurrency precondition, checked against the row this
+    # transaction just locked; accept_write's compare-and-set still guards the
+    # window after it (issue #1552).
+    if (
+        request.base_checksum is not None
+        and current_note_content.db_checksum != request.base_checksum
+    ):
+        reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
     reject_locked_note(current_note_content)
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     try:

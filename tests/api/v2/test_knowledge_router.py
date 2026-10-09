@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 
 from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
@@ -16,7 +17,7 @@ from basic_memory.index.local_project import (
     LocalProjectIndexRuntimeFactory,
     run_local_project_index_for_project,
 )
-from basic_memory.models import Entity as EntityModel, Project
+from basic_memory.models import Entity as EntityModel, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -978,6 +979,102 @@ async def test_edit_entity_with_base_checksum_after_delete_returns_409_gone(
         json=edit_data,
     )
     assert response.status_code == 404
+
+
+def _lose_the_compare_and_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the next accepted write lose its db_version compare-and-set for real.
+
+    A concurrent winner is simulated by advancing the row inside the loser's
+    transaction just before its conditional UPDATE runs, so the repository's
+    real rowcount check refuses the write.
+    """
+    accept_write = NoteContentRepository.accept_write
+
+    async def advance_then_accept(self, session, write):
+        await session.execute(
+            update(NoteContent)
+            .where(NoteContent.entity_id == write.entity_id)
+            .values(db_version=NoteContent.db_version + 1, db_checksum="winner-checksum")
+            .execution_options(synchronize_session=False)
+        )
+        monkeypatch.setattr(NoteContentRepository, "accept_write", accept_write)
+        return await accept_write(self, session, write)
+
+    monkeypatch.setattr(NoteContentRepository, "accept_write", advance_then_accept)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["patch", "put"])
+async def test_guarded_write_that_loses_the_compare_and_set_reports_the_winner(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+):
+    """A guarded write that passes the precheck but loses the CAS is a stale revision.
+
+    The lost compare-and-set proves another write landed after the caller's read,
+    so the caller gets the structured conflict with the winner's checksum to
+    rebase on, not the plain concurrent-write 409 (#1552).
+    """
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Write", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+
+    _lose_the_compare_and_set(monkeypatch)
+    url = f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    headers = {NOTE_CONTENT_BASE_CHECKSUM_HEADER: note_content.db_checksum}
+    if method == "patch":
+        response = await client.patch(
+            url, json={"operation": "append", "content": "Loser"}, headers=headers
+        )
+    else:
+        response = await client.put(
+            url,
+            json={"title": "Raced Write", "directory": "test", "content": "Loser"},
+            headers=headers,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": "winner-checksum",
+    }
+
+
+@pytest.mark.asyncio
+async def test_unguarded_edit_that_loses_the_compare_and_set_keeps_the_plain_409(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without a base checksum there is no revision to report; the 409 stays plain."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Edit", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    _lose_the_compare_and_set(monkeypatch)
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={"operation": "append", "content": "Loser"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "The note was modified concurrently. Reload the latest content and retry."
+    )
 
 
 @pytest.mark.asyncio
