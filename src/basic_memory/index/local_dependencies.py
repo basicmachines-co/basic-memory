@@ -199,6 +199,8 @@ class LocalIndexSearchService(
         entity_ids: list[int],
     ) -> VectorSyncBatchResult: ...
 
+    async def semantic_effectively_enabled(self) -> bool: ...
+
 
 class LocalIndexEntityService(Protocol):
     """Entity service capabilities needed by local index maintenance adapters."""
