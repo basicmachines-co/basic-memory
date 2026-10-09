@@ -27,8 +27,10 @@
   removed. FastEmbed and sqlite-vec are core dependencies, so the setting only mattered
   for installs that turned it off by hand; those installs now download the embedding model
   and build vectors. Old `config.json` files and `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED`
-  are ignored rather than rejected. `bm reindex --embeddings` no longer refuses, and
-  `EmbeddingStatus` drops its `semantic_search_enabled` field. Where sqlite-vec cannot
+  are ignored rather than rejected. `bm reindex --embeddings` no longer refuses.
+  `EmbeddingStatus` gains `vector_runtime_available`; `semantic_search_enabled` is still
+  emitted as a deprecated alias of it, so older CLIs keep reading upgraded servers, and a
+  status from an older server is still accepted. Where sqlite-vec cannot
   load (python.org Python on macOS), search still falls back to keyword-only, and a
   vector or hybrid query says semantic search is unavailable and points at the log.
 
