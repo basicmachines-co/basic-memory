@@ -858,6 +858,8 @@ class TestSearchTermPreparation:
         # A caller's trailing wildcard is kept once, never doubled into "cache**".
         assert prepare("IT-644 cache*") == '"IT-644"* AND cache*'
         assert prepare("IT-6* cacheability") == '"IT-6"* AND cacheability*'
+        # A leading wildcard is not FTS5 syntax, so the word is quoted as text.
+        assert prepare("IT-644 *cache") == '"IT-644"* AND "*cache"*'
 
     @pytest.mark.asyncio
     async def test_punctuated_word_matches_when_the_words_are_not_adjacent(
@@ -884,7 +886,7 @@ class TestSearchTermPreparation:
             )
         )
 
-        for query in ("IT-644 cacheability", "IT-644 cache*"):
+        for query in ("IT-644 cacheability", "IT-644 cache*", "IT-644 *cacheability"):
             results = await search_repository.search(search_text=query)
             assert search_entity.id in [result.id for result in results], query
 
