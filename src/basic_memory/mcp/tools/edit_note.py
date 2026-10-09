@@ -819,8 +819,13 @@ async def edit_note(
                     # Why: files written directly to disk are invisible to identifier
                     #      resolution until indexed; editing them should just work (#581)
                     # Outcome: the single file is indexed and resolution retried once
+                    # A guarded edit skips recovery: the caller read a revision that
+                    #   no longer resolves, so the note was deleted. Its file can
+                    #   outlive the delete until cleanup runs, and indexing it here
+                    #   would resurrect the note with the caller's own checksum,
+                    #   which the precondition would then accept.
                     recovered_entity_id: str | None = None
-                    if is_not_found:
+                    if is_not_found and expected_checksum is None:
                         recovered_entity_id = await _resolve_after_disk_recovery(
                             knowledge_client, entity_identifier
                         )
