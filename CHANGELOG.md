@@ -23,6 +23,21 @@
   #1662, which was reverted when its concurrency test found appends reported as refused
   that had landed; #1688 fixed that cause first. Thanks to @sammywachtel.
 
+- **#1697**: `basic-memory mcp --transport streamable-http|sse` binds to `127.0.0.1` by
+  default instead of `0.0.0.0`, so the unauthenticated HTTP server is no longer reachable
+  from the network unless you ask for it. A non-loopback `--host` prints a warning. Both
+  HTTP transports also reject requests whose `Host` or `Origin` header is foreign (DNS
+  rebinding), honoring FastMCP's `FASTMCP_HTTP_ALLOWED_HOSTS` / `_ORIGINS`. The Docker
+  image already passes `--host 0.0.0.0` and is unaffected (#1578).
+
+- **#1704**: `bm import document` resolves a relative path against the project root, not
+  the current directory, matching `bm ls` and `bm cat`. A command that relied on the old
+  behavior now fails with "File not found" and the resolved path.
+
+- **#1702**: `build_context(compact=True)` no longer loads observations, and compact JSON
+  no longer has an `observations` key (text-mode compact already hid them). Primary
+  results, relations and related results are unchanged (#1571).
+
 - **#1600**: `bm project remove` on a cloud-routed project always deletes the project's
   cloud files; there is no longer a way to keep them. It warns that the files can be
   recovered only from a cloud snapshot (`bm cloud snapshot list`) and asks for
@@ -371,6 +386,42 @@
   made SQLite quote the whole query as a single exact phrase, which only matches when the
   words are adjacent. Now only the punctuated word is quoted, and every word must match in
   any order: `"IT-644"* AND cacheability*`. Thanks to @dougvann.
+
+- **#1701**: Environment overrides are no longer written into `config.json`. Any config
+  save (a project add, a migration, first run) wrote the merged settings, so a one-off
+  `BASIC_MEMORY_*` variable became permanent. A save now keeps the file's own value for
+  every env-overridden setting. Commands that name a setting still save it: `bm config
+  set/unset`, `bm cloud api-key save`, `bm cloud workspace set-default`, `bm cloud
+  logout`, `bm cloud promo` and `bm project default` (#1631, #1598).
+
+- **#1699**: A case-only rename (`config.md` to `Config.md`) on a case-insensitive
+  filesystem no longer leaves a permanent ghost note. The index pass's delete check now
+  matches the exact spelling against the directory listing, so the next pass removes the
+  stale entry (#1627).
+
+- **#1700**: A note too large to embed in one pass finishes embedding on later index
+  passes without a manual `bm reindex`; #1691 already stopped unchanged observations from
+  being re-embedded (#1605).
+
+- **#1698**: Appending `---` or `===` after a paragraph with `edit_note` no longer turns the
+  paragraph into a heading. When an append or prepend would form a setext heading over
+  existing text, a blank line separates them; every other join, including list items and
+  observations, is unchanged (#1585).
+
+- **#1705**: Note-tool fixes from the live run (#1634):
+  - A line read that starts past the end of a note is an error ("start_line 500 is past
+    the end of the document (17 lines)") instead of "Lines 500-17".
+  - A link that climbs out of the project is no longer stored as an unresolved relation.
+  - A `write_note` conflict after a move names the note that actually owns the path; the
+    `already_exists` outcome gains `external_id` and `permalink`.
+  - `recent_activity` describes its scope accurately, and an empty result from any tool
+    returns an explicit `[]` text block.
+
+- **#1704**: CLI polish from the live run (#1635). `bm project add` and `bm project index`
+  show embedding progress. `bm config set default_project` rejects an unknown project
+  and accepts display names. `bm project index --help` shows user-facing text, the
+  `.bmignore` path in help points at the real config directory, and a refused OKF export
+  no longer prints a misleading summary.
 
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.
