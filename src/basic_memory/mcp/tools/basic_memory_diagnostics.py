@@ -6,7 +6,12 @@ import platform
 import sys
 
 import basic_memory
-from basic_memory.config import CONFIG_FILE_NAME, BasicMemoryConfig, resolve_data_dir
+from basic_memory.config import (
+    CONFIG_FILE_NAME,
+    BasicMemoryConfig,
+    env_overridden_fields,
+    resolve_data_dir,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.redaction import redact_config as _redact_config
 from basic_memory.redaction import redact_url as _redact_url  # noqa: F401 (re-exported for tests)
@@ -52,6 +57,9 @@ def basic_memory_diagnostics() -> str:
     # chmod the directory, violating this tool's read-only contract.
     config_file = resolve_data_dir() / CONFIG_FILE_NAME
     config_exists = config_file.exists()
+    # Env precedence depends on which keys the file spells (legacy sync keys),
+    # so the override section needs the parsed file, or {} when it is unreadable.
+    file_data: dict[str, object] = {}
 
     if config_exists:
         try:
@@ -60,6 +68,7 @@ def basic_memory_diagnostics() -> str:
             config_dump = f"<error reading config: {exc}>"
         else:
             if isinstance(raw_config, dict):
+                file_data = raw_config
                 safe_config = _redact_config(raw_config)
                 config_dump = json.dumps(safe_config, indent=2, default=str)
             else:
@@ -71,7 +80,7 @@ def basic_memory_diagnostics() -> str:
     # The running server's settings are BasicMemoryConfig (pydantic-settings), so a
     # BASIC_MEMORY_<FIELD> env var wins over config.json. Without this section the
     # dump above can disagree with what the server actually uses (#1595).
-    env_overrides, other_env_names = _environment_overrides()
+    env_overrides, other_env_names = _environment_overrides(file_data)
     if env_overrides:
         env_dump = json.dumps(env_overrides, indent=2, default=str)
     else:
@@ -105,14 +114,19 @@ def basic_memory_diagnostics() -> str:
         "```",
     ]
     if other_env_names:
-        # Not config fields (API keys, test switches, routing flags): their names
-        # help support, their values could be secrets, so only names are listed.
+        # Names help support; values could be secrets, so only names are listed.
         lines += ["", f"- Other BASIC_MEMORY_* variables set: {', '.join(other_env_names)}"]
     return "\n".join(lines)
 
 
-def _environment_overrides() -> tuple[dict[str, object], list[str]]:
-    """Split BASIC_MEMORY_* env vars into config-field overrides and other names.
+def _environment_overrides(
+    file_data: dict[str, object],
+) -> tuple[dict[str, object], list[str]]:
+    """Split BASIC_MEMORY_* env vars into effective config overrides and other names.
+
+    `env_overridden_fields` is the rule ConfigManager uses to let env win over
+    the file, so this reports exactly the overrides the server applies,
+    including legacy sync env names mapped to their current field.
 
     Overrides are keyed by config field name so they go through the same
     redaction as the file dump; redact_config matches field names, not env var
@@ -120,18 +134,25 @@ def _environment_overrides() -> tuple[dict[str, object], list[str]]:
     """
     prefix = str(BasicMemoryConfig.model_config["env_prefix"])
     overrides: dict[str, object] = {}
-    other_names: list[str] = []
-    for env_name, value in os.environ.items():
-        # pydantic-settings matches env names case-insensitively by default.
-        if not env_name.upper().startswith(prefix):
-            continue
-        field_name = env_name[len(prefix) :].lower()
-        if field_name in BasicMemoryConfig.model_fields:
-            overrides[field_name] = value
-        else:
-            other_names.append(env_name)
+    used_env_names: set[str] = set()
+    for field_name in env_overridden_fields(file_data):
+        env_name = f"{prefix}{field_name.upper()}"
+        if env_name not in os.environ:
+            # Only a legacy sync env var put this field in the override set.
+            legacy_key = BasicMemoryConfig._LEGACY_SYNC_FIELDS[field_name]
+            env_name = f"{prefix}{legacy_key.upper()}"
+        overrides[field_name] = os.environ[env_name]
+        used_env_names.add(env_name)
+
+    # Everything else (API keys, test switches, routing flags, env names the
+    # loader does not apply) is listed by name only: values could be secrets.
+    other_names = sorted(
+        env_name
+        for env_name in os.environ
+        if env_name.upper().startswith(prefix) and env_name not in used_env_names
+    )
 
     redacted = _redact_config(overrides)
     for field_name in overrides.keys() - redacted.keys():
         redacted[field_name] = "<redacted>"
-    return dict(sorted(redacted.items())), sorted(other_names)
+    return dict(sorted(redacted.items())), other_names
