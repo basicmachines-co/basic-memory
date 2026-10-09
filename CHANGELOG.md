@@ -336,6 +336,14 @@
   `semantic=True` (`bm grep --semantic`) to rank by meaning. This replaces the `literal`
   parameter and the `-F` flag, and `context_lines` (`-C`) no longer needs either.
 
+- **#1681**: On Postgres, saving a note twice in quick succession no longer answers 500.
+  Two refreshes of the same note's search rows could deadlock or collide on
+  `search_index_pkey`, and the loser failed the save even though search rows are derived
+  state. A refresh that loses that race now logs a warning and leaves the winner's rows
+  for the next refresh. The save's search row is written after its accept commits rather
+  than inside it, so a failed refresh can no longer roll back the note. Thanks to
+  @sammywachtel.
+
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.
   Loguru's `diagnose` mode called `repr()` on every frame's locals, and each ASGI frame
