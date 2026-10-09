@@ -99,9 +99,11 @@ bm cloud login
 **Result:** Cloud credentials are available for cloud-routed commands.
 Apply OSS discount code `{{OSS_DISCOUNT_CODE}}` during checkout to receive 20% off for 3 months.
 
-### 2. Set Up Sync
+### 2. Set Up Sync (Personal workspaces)
 
-Install rclone and configure credentials:
+Personal workspaces transfer over rclone, so install it and configure credentials once.
+Team workspaces transfer over WebDAV and need neither rclone nor storage credentials:
+Team members skip this step.
 
 ```bash
 bm cloud setup
@@ -845,7 +847,7 @@ bm cloud api-key create <name>   # Create API key via cloud API (requires OAuth 
 ### Setup
 
 ```bash
-bm cloud setup              # Install rclone via package manager and configure credentials
+bm cloud setup              # Personal only: install rclone and configure credentials
 ```
 
 ### Project Management
@@ -902,13 +904,13 @@ bm cloud check --name <project>             # Legacy mirror integrity check
 **Basic Memory Cloud uses project-scoped sync:**
 
 1. **Authenticate cloud access** - `bm cloud login`
-2. **Install rclone** - `bm cloud setup`
+2. **Install rclone (Personal workspaces only)** - `bm cloud setup`
 3. **Add projects with sync** - `bm project add research --cloud --local-path ~/Documents/research`
 4. **Fetch cloud changes** - `bm cloud pull --name research`
 5. **Upload your changes** - `bm cloud push --name research`
 6. **Resolve conflicts explicitly** - re-run with `--on-conflict keep-cloud|keep-local|keep-both`
 
-The same workflow applies to Personal and Team workspaces.
+The same workflow applies to Personal and Team workspaces; Team workspaces skip step 2.
 
 **Key benefits:**
 - ✅ Each project independently syncs (or doesn't)
