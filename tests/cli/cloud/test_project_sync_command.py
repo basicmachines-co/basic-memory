@@ -1260,3 +1260,18 @@ def test_mirror_commands_are_marked_deprecated_in_help(command):
         line for line in result.output.splitlines() if line.strip("│ ").startswith(f"{command} ")
     )
     assert "deprecated" in line.lower()
+
+
+@pytest.mark.parametrize("command", ["sync", "bisync"])
+def test_mirror_commands_show_migration_notice_without_credentials(monkeypatch, command):
+    """A logged-out run still names pull/push before the credential error (#1596)."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
+
+    result = runner.invoke(app, ["cloud", command, "--name", "research"])
+
+    output = _plain(result.output)
+    assert result.exit_code == 1, result.output
+    assert f"`bm cloud {command}` is deprecated" in output
+    assert "bm cloud pull" in output
+    assert "cloud credentials are required" in output

@@ -304,8 +304,9 @@ def sync_project_command(
       bm cloud sync --name research --dry-run
     """
     config = ConfigManager().config
-    _require_cloud_credentials(config)
+    # The migration notice comes first so a missing login still shows pull/push.
     _warn_mirror_deprecated("sync", name)
+    _require_cloud_credentials(config)
     target_workspace = _require_personal_workspace(
         name,
         config,
@@ -816,8 +817,9 @@ def bisync_project_command(
       bm cloud bisync --name research --dry-run # Preview changes
     """
     config = ConfigManager().config
-    _require_cloud_credentials(config)
+    # The migration notice comes first so a missing login still shows pull/push.
     _warn_mirror_deprecated("bisync", name)
+    _require_cloud_credentials(config)
     _require_personal_workspace(name, config)
 
     try:
