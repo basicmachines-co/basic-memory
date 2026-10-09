@@ -44,6 +44,7 @@ from basic_memory.config import (
     ProjectConfig,
 )
 from basic_memory.utils import generate_permalink
+from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.services.file_service import FileService
@@ -1204,6 +1205,19 @@ class ProjectService:
         dimensions = config.semantic_embedding_dimensions
         document_prefix_set = bool(config.semantic_embedding_document_prefix)
         query_prefix_set = bool(config.semantic_embedding_query_prefix)
+
+        # A host that cannot load sqlite-vec runs keyword-only (#711). Nothing is
+        # embedded there and a reindex would skip every note, so report the state
+        # instead of a missing-storage error that recommends one.
+        if not semantic_runtime_available(config):
+            return EmbeddingStatus(
+                vector_runtime_available=False,
+                embedding_provider=provider,
+                embedding_model=model,
+                embedding_dimensions=dimensions,
+                embedding_document_prefix_set=document_prefix_set,
+                embedding_query_prefix_set=query_prefix_set,
+            )
 
         is_postgres = config.database_backend == DatabaseBackend.POSTGRES
         vector_index = resolve_semantic_vector_index_name(config, config.database_backend)

@@ -1831,7 +1831,13 @@ def display_project_info(
             right.add_row("[bold]Embeddings[/bold]", "")
             if info.embedding_status:
                 es = info.embedding_status
-                right.add_row("[green]●[/green] Semantic Search", "Enabled")
+                if es.vector_runtime_available:
+                    right.add_row("[green]●[/green] Semantic Search", "Enabled")
+                else:
+                    right.add_row(
+                        "[yellow]●[/yellow] Semantic Search",
+                        "Unavailable: sqlite-vec cannot load here, keyword-only",
+                    )
                 if es.embedding_provider:
                     right.add_row("  Provider", es.embedding_provider)
                 if es.embedding_model:

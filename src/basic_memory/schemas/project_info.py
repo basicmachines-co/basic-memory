@@ -83,6 +83,9 @@ class EmbeddingStatus(BaseModel):
     """Embedding/vector index status for a project."""
 
     # Config
+    # False on a SQLite host that cannot load sqlite-vec, where search runs
+    # keyword-only (#711) and the counts below stay empty by design.
+    vector_runtime_available: bool = True
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimensions: Optional[int] = None

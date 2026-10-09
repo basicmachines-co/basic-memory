@@ -578,3 +578,21 @@ async def _insert_manifest_chunk(
         },
     )
     return int(result.scalar_one())
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_reports_keyword_only_host(
+    project_service: ProjectService, test_project, monkeypatch
+):
+    """On a host that cannot load sqlite-vec (#711), status says so instead of
+    recommending a reindex that would skip every note."""
+    from basic_memory.services import project_service as project_service_module
+
+    # Injected: this host can load sqlite-vec, so the fallback is simulated.
+    monkeypatch.setattr(project_service_module, "semantic_runtime_available", lambda _c: False)
+
+    status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_runtime_available is False
+    assert status.reindex_recommended is False
+    assert status.reindex_reason is None
