@@ -20,6 +20,7 @@ express per-project access.
 """
 
 import asyncio
+import os
 import re
 import xml.etree.ElementTree as ElementTree
 from collections.abc import AsyncIterator, Callable
@@ -211,8 +212,9 @@ async def _rate_limited_request(
     that makes a retry something other than the same request again.
 
     A successful response body is left unread, so a download can go to disk as it
-    arrives. An error response is read in full: it is small, and the caller's
-    error message quotes it. The response is closed when the block exits.
+    arrives. Any other response (a redirect from a proxy as well as an error) is
+    read in full: it is small, and the caller's error message quotes it. The
+    response is closed when the block exits.
 
     A 429 on the final attempt is yielded rather than raised, so the caller's
     own error handling reports it with the rate-limit detail attached.
@@ -232,20 +234,24 @@ async def _rate_limited_request(
         attempt += 1
 
     try:
-        if response.is_error:
+        if not response.is_success:
             await response.aread()
         yield response
     finally:
         await response.aclose()
 
 
-def _file_chunks(source: Path) -> Callable[[], AsyncIterator[bytes]]:
-    """A body factory that reads ``source`` from the start on every call."""
+def _file_chunks(stream: BinaryIO) -> Callable[[], AsyncIterator[bytes]]:
+    """A body factory that rewinds one open file and reads it on every call.
+
+    The file is opened once by the caller, so a retry replays the file that was
+    validated and measured, even if the path is replaced during a Retry-After wait.
+    """
 
     async def chunks() -> AsyncIterator[bytes]:
-        with source.open("rb") as stream:
-            while chunk := stream.read(_STREAM_CHUNK_BYTES):
-                yield chunk
+        stream.seek(0)
+        while chunk := stream.read(_STREAM_CHUNK_BYTES):
+            yield chunk
 
     return chunks
 
@@ -361,25 +367,28 @@ async def upload_file(
         WebdavError: If the service refuses the upload for any other reason.
     """
     request_path = webdav_path(project, rel_path)
-    stat = source.stat()
-    headers = {
-        "X-OC-Mtime": str(int(stat.st_mtime)),
-        "Content-Length": str(stat.st_size),
-    }
-    if create_only:
-        headers["If-None-Match"] = "*"
+    with source.open("rb") as stream:
+        # Measured from the open handle, so the declared size and mtime describe
+        # exactly the file every attempt sends.
+        stat = os.fstat(stream.fileno())
+        headers = {
+            "X-OC-Mtime": str(int(stat.st_mtime)),
+            "Content-Length": str(stat.st_size),
+        }
+        if create_only:
+            headers["If-None-Match"] = "*"
 
-    try:
-        async with _rate_limited_request(
-            client, "PUT", request_path, content=_file_chunks(source), headers=headers
-        ) as response:
-            # Checked before raise_for_status: a refused precondition is the answer
-            # this call asked for, not a failure.
-            if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
-                return False
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
+        try:
+            async with _rate_limited_request(
+                client, "PUT", request_path, content=_file_chunks(stream), headers=headers
+            ) as response:
+                # Checked before raise_for_status: a refused precondition is the
+                # answer this call asked for, not a failure.
+                if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
+                    return False
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
 
     return True
 
