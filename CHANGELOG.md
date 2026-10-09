@@ -400,9 +400,10 @@
   matches the exact spelling against the directory listing, so the next pass removes the
   stale entry (#1627).
 
-- **#1700**: A note too large to embed in one pass finishes embedding on later index
-  passes without a manual `bm reindex`; #1691 already stopped unchanged observations from
-  being re-embedded (#1605).
+- **#1700**: In a local project, a note too large to embed in one pass finishes embedding
+  on later index passes without a manual `bm reindex`; #1691 already stopped unchanged
+  observations from being re-embedded (#1605). The hosted runtime does not resume these
+  notes yet.
 
 - **#1698**: Appending `---` or `===` after a paragraph with `edit_note` no longer turns the
   paragraph into a heading. When an append or prepend would form a setext heading over
