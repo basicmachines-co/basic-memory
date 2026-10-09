@@ -1275,3 +1275,14 @@ def test_mirror_commands_show_migration_notice_without_credentials(monkeypatch, 
     assert f"`bm cloud {command}` is deprecated" in output
     assert "bm cloud pull" in output
     assert "cloud credentials are required" in output
+
+
+@pytest.mark.parametrize("command", ["sync", "bisync"])
+def test_migration_notice_keeps_markup_in_project_names(monkeypatch, command):
+    """Rich must not eat a bracketed project name from the suggested command."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
+
+    result = runner.invoke(app, ["cloud", command, "--name", "[bold]oops[/bold]"])
+
+    assert "bm cloud pull --name '[bold]oops[/bold]'" in _plain(result.output)
