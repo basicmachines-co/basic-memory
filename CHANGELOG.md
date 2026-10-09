@@ -342,6 +342,11 @@
   state. A refresh that loses that race now logs a warning and leaves the winner's rows
   for the next refresh. The save's search row is written after its accept commits rather
   than inside it, so a failed refresh can no longer roll back the note. Thanks to
+
+- **#1686**: The file watcher logs a warning when a new directory cannot be read. On
+  Linux, notify drops the error when it cannot watch a new directory, so files written
+  into it were never indexed and nothing said why. The warning names the directory and
+  says to run `bm project index <name>` once its permissions are fixed. Thanks to
   @sammywachtel.
 
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
