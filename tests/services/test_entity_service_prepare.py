@@ -1009,3 +1009,20 @@ def test_append_cr_terminated_underline_after_paragraph_keeps_paragraph(underlin
 
     assert result == "paragraph\n\n" + underline
     assert _setext_heading_texts(result) == []
+
+
+@pytest.mark.parametrize("literal_line", ["```", "<div>"])
+def test_append_ignores_block_syntax_inside_frontmatter(literal_line: str) -> None:
+    # A literal block scalar is YAML text, so the body still ends in a paragraph.
+    current_content = f"---\nmeta: |\n  {literal_line}\n---\nparagraph"
+
+    result = apply_edit_operation(current_content, "append", "---")
+
+    assert result == current_content + "\n\n---"
+    assert _setext_heading_texts(remove_frontmatter(result, strip=False)) == []
+
+
+def test_append_thematic_break_to_frontmatter_only_note_keeps_single_newline() -> None:
+    result = apply_edit_operation("---\ntitle: Note\n---", "append", "---")
+
+    assert result == "---\ntitle: Note\n---\n---"
