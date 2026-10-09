@@ -132,17 +132,6 @@ async def report_project_readiness(project: str) -> None:
     console.print(f"[dim]{escape(project_item.name)}: {summary}[/dim]")
 
 
-async def index_project_and_report_readiness(project: str) -> None:
-    """Index a project, then say what state that left it in.
-
-    One coroutine so the caller opens the database once for both steps:
-    `run_with_cleanup` shuts the engine down on exit, so a second call would pay
-    the reconnect and the migration check over again.
-    """
-    await run_project_index(project, force_full=True, run_in_background=False)
-    await report_project_readiness(project)
-
-
 async def get_project_info(project: str):
     """Get project information via API endpoint."""
     # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).

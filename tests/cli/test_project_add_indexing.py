@@ -109,6 +109,9 @@ def test_project_add_indexes_files_already_on_disk(tmp_path):
 
     add = _bm(["project", "add", "adopted", str(notes)], env)
     assert add.returncode == 0, add.stderr
+    # The add runs the same visible pass as `bm project index` rather than one
+    # silent API request (#1635).
+    assert "Rebuilding full-text search index" in add.stdout
 
     # No reindex is run here. That is the entire point of the test.
     search = _bm(["tool", "search-notes", "Alpha Note", "--project", "adopted", "--json"], env)

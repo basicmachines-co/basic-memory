@@ -28,10 +28,9 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 )
 from basic_memory.cli.commands.command_utils import (
     get_project_info,
-    index_project_and_report_readiness,
     run_with_cleanup,
 )
-from basic_memory.cli.commands.db import run_reindex_command
+from basic_memory.cli.commands.db import index_project_and_report_readiness, run_reindex_command
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client, resolve_configured_workspace
@@ -820,7 +819,7 @@ def _abort_after_project_created(
     deleting it to tidy up an error message would discard what they asked for.
     """
     # A typer.Exit carries no message of its own -- the failing step already
-    # printed one (run_project_index does) -- so only the state and remedy are
+    # printed one (the reindex pass does) -- so only the state and remedy are
     # missing. Anything else still needs its message shown.
     detail = "" if isinstance(error, typer.Exit) else f": {error}"
     console.print(f"[yellow]Project '{name}' was created, but {step} failed{detail}[/yellow]")

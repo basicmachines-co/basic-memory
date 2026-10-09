@@ -73,7 +73,7 @@ def _configure_embedding_runtime(
 ) -> tuple[SimpleNamespace, AsyncMock, list[str]]:
     """Install the runtime boundaries needed to exercise the real reindex command."""
     app_config = _stub_app_config()
-    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     printed_lines: list[str] = []
     project_index = AsyncMock(
         return_value=SimpleNamespace(
@@ -282,7 +282,7 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     session_maker,
 ):
     app_config = _stub_app_config()
-    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     project_index = AsyncMock(
         return_value=SimpleNamespace(
             total_files=3,
@@ -343,7 +343,7 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
     session_maker,
 ):
     app_config = _stub_app_config()
-    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     printed_lines: list[str] = []
     vector_reindex_calls: list[dict[str, object]] = []
 
@@ -443,7 +443,7 @@ async def test_reindex_embeddings_only_warns_when_project_has_no_indexed_entitie
 ):
     """Embeddings-only mode explains that it cannot discover project files."""
     app_config = _stub_app_config()
-    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     printed_lines: list[str] = []
 
     class StubProjectRepository:
@@ -530,8 +530,8 @@ async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, 
     as a missing file. Recovery must re-drive stuck rows before each project scan."""
     app_config = _stub_app_config()
     projects = [
-        SimpleNamespace(id=1, name="foo", path="/tmp/foo"),
-        SimpleNamespace(id=2, name="bar", path="/tmp/bar"),
+        SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo"),
+        SimpleNamespace(id=2, name="bar", permalink="bar", path="/tmp/bar"),
     ]
     call_order: list[str] = []
 
@@ -721,7 +721,7 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     """A full reindex (search + embeddings) must embed once: the FTS rebuild runs
     with embeddings=False so only the explicit vector phase calls the provider."""
     app_config = _stub_app_config()
-    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     vector_reindex_calls: list[dict[str, object]] = []
     project_index = AsyncMock(
         return_value=SimpleNamespace(
@@ -878,3 +878,77 @@ def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
     ) in output
     assert "Representative error:" not in output
     assert "Reindex complete!" in output
+
+
+# --- `bm project add` indexing (#1635) ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("semantic_search_enabled", [True, False])
+async def test_project_add_indexing_runs_the_reindex_pass_then_reports_readiness(
+    monkeypatch, semantic_search_enabled: bool
+):
+    """`project add` reuses the reindex pass, so its embedding phase shows the progress bar.
+
+    The old path made one foreground API request that embedded inline and printed
+    nothing until it returned. Embeddings follow the config here, without the
+    "Semantic search is not enabled" warning an explicit reindex prints.
+    """
+    app_config = _stub_app_config(semantic_search_enabled=semantic_search_enabled)
+    monkeypatch.setattr(db_cmd, "ConfigManager", lambda: SimpleNamespace(config=app_config))
+    steps: list[tuple[str, object]] = []
+
+    async def fake_reindex(config, **kwargs):
+        assert config is app_config
+        steps.append(("reindex", kwargs))
+
+    async def fake_report(project: str) -> None:
+        steps.append(("readiness", project))
+
+    monkeypatch.setattr(db_cmd, "_reindex", fake_reindex)
+    monkeypatch.setattr(db_cmd, "report_project_readiness", fake_report)
+
+    await db_cmd.index_project_and_report_readiness("research")
+
+    assert steps == [
+        (
+            "reindex",
+            {
+                "search": True,
+                "embeddings": semantic_search_enabled,
+                "full": False,
+                "project": "research",
+            },
+        ),
+        ("readiness", "research"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reindex_matches_the_project_by_permalink(monkeypatch, session_maker):
+    """`new_default` names the project reconciliation stored as `new-default`.
+
+    Exact name equality missed it, so `bm project add new_default` reported its
+    own index pass as "Project 'new_default' not found".
+    """
+    stats = _vector_stats(total_entities=1, embedded=1, skipped=0, errors=0)
+    _, project_index, _ = _configure_embedding_runtime(monkeypatch, session_maker, stats)
+    stored = SimpleNamespace(id=1, name="new-default", permalink="new-default", path="/tmp/n")
+
+    class NormalizedProjectRepository:
+        async def get_active_projects(self, session):
+            return [stored]
+
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", NormalizedProjectRepository)
+
+    await db_cmd._reindex(
+        _stub_app_config(),
+        search=True,
+        embeddings=False,
+        full=False,
+        project="new_default",
+    )
+
+    project_index.assert_awaited_once()
+    [indexed_call] = project_index.await_args_list
+    assert indexed_call.args[0] is stored
