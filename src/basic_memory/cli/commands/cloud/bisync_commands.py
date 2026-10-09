@@ -113,8 +113,9 @@ def convert_bmignore_to_rclone_filters(
 ) -> Path:
     """Convert .bmignore patterns to rclone filter format.
 
-    Reads ~/.basic-memory/.bmignore (gitignore-style) and converts to
-    ~/.basic-memory/.bmignore.rclone (rclone filter format).
+    Reads <config dir>/.bmignore (gitignore-style; the config dir honors
+    BASIC_MEMORY_CONFIG_DIR) and converts it to <config dir>/.bmignore.rclone
+    (rclone filter format).
 
     Only regenerates if .bmignore has been modified since last conversion,
     unless force=True is used for a destructive filter consumer. Destructive
@@ -128,7 +129,7 @@ def convert_bmignore_to_rclone_filters(
     create_default_bmignore()
 
     bmignore_path = get_bmignore_path()
-    # Create rclone filter path: ~/.basic-memory/.bmignore -> ~/.basic-memory/.bmignore.rclone
+    # Create rclone filter path: <config dir>/.bmignore -> <config dir>/.bmignore.rclone
     rclone_filter_path = bmignore_path.parent / f"{bmignore_path.name}.rclone"
 
     # Skip regeneration if rclone file is newer than bmignore
@@ -209,7 +210,7 @@ def convert_bmignore_to_rclone_prune_filters() -> Path:
 def get_bisync_filter_path() -> Path:
     """Get path to bisync filter file.
 
-    Uses ~/.basic-memory/.bmignore (converted to rclone format).
+    Uses <config dir>/.bmignore (converted to rclone format).
     The file is automatically created with default patterns on first use.
 
     Returns:

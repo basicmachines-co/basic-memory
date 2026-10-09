@@ -74,3 +74,12 @@ def test_prune_requires_a_project_when_no_default_is_set():
         assert exit_info.exit_code == 1
     else:  # pragma: no cover - the assertion above is the point of the test
         raise AssertionError("prune must exit when no project can be resolved")
+
+
+def test_prune_help_points_at_the_config_dir():
+    """The ignore file lives in BASIC_MEMORY_CONFIG_DIR, not always ~/.basic-memory (#1635)."""
+    result = runner.invoke(app, ["prune", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "BASIC_MEMORY_CONFIG_DIR" in result.output
+    assert "~/.basic-memory/.bmignore" not in result.output

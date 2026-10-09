@@ -24,7 +24,8 @@ def prune(
 ) -> None:
     """Remove index entries for files your ignore patterns now exclude.
 
-    Indexing skips files matched by ~/.basic-memory/.bmignore and the project's
+    Indexing skips files matched by .bmignore in the Basic Memory config directory
+    ($BASIC_MEMORY_CONFIG_DIR, default ~/.basic-memory) and the project's
     .gitignore, but entries indexed before a pattern was added stay in the index:
     the files are still on disk, so the scan's delete guard keeps them. Like
     `git rm --cached`, prune removes the index entries (entity, relations, search
