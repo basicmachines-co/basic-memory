@@ -1335,6 +1335,9 @@ async def test_prepare_window_uses_entity_local_timing_after_shared_reads(monkey
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
     monkeypatch.setattr(repo, "_prepare_entity_write_scope", _yielding_write_scope)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
     monkeypatch.setattr(repo, "_delete_entity_chunks", AsyncMock(return_value=[]))
     monkeypatch.setattr(
