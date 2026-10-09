@@ -181,3 +181,24 @@ def test_warn_unreadable_new_directories_ignores_readable_directories_and_files(
         logger.remove(sink_id)
 
     assert messages == []
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root can read a directory with mode 000",
+)
+def test_unreadable_directory_warning_quotes_a_project_name_with_spaces(tmp_path: Path) -> None:
+    """The recovery command must survive copy-paste for a project named with a space."""
+    closed = tmp_path / "people"
+    closed.mkdir(mode=0o000)
+    project = cast(Project, SimpleNamespace(name="My Notes"))
+
+    messages, sink_id = _capture_warnings()
+    try:
+        warn_unreadable_new_directories(project, {(Change.added, str(closed))})
+    finally:
+        logger.remove(sink_id)
+        closed.chmod(0o755)
+
+    assert len(messages) == 1
+    assert "`bm project index 'My Notes'`" in messages[0]

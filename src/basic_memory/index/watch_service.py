@@ -34,7 +34,7 @@ from basic_memory.index.local_watch import (
 from basic_memory.index.storage_events import StorageEventIndexRuntime
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, shell_command
 
 
 class WatchEvent(BaseModel):
@@ -379,7 +379,8 @@ def warn_unreadable_new_directories(project: Project, changes: set[FileChange]) 
             logger.warning(
                 f"New directory cannot be read, so the file watcher cannot watch it and "
                 f"files written into it will not be indexed: {directory} ({exc.strerror}). "
-                f"Once its permissions are fixed, run `bm project index {project.name}` "
+                f"Once its permissions are fixed, run "
+                f"`{shell_command('bm', 'project', 'index', project.name)}` "
                 f"(or `bm reindex`).",
                 project=project.name,
                 path=str(directory),
