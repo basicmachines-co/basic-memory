@@ -235,7 +235,6 @@ class InspectDroppedChunk(BaseModel):
         "model_mismatch",
         "index_mismatch",
         "readiness_changed",
-        "malformed_key",
     ]
     stored_model: str | None
     stored_index: str | None
@@ -277,7 +276,6 @@ type InspectDisposition = Literal[
     "model_mismatch",
     "index_mismatch",
     "readiness_changed",
-    "malformed_key",
     "filtered_out",
     "missing_search_row",
     "beyond_page_window",
@@ -334,11 +332,11 @@ class _ForeignOwnerDropKey:
 
 
 @dataclass(frozen=True, slots=True)
-class _MalformedDropKey:
-    """Identity for a dropped chunk whose key failed to parse, scoped to its owner.
+class _UnattributedDropKey:
+    """Identity for a dropped chunk with no manifest row to name its search row.
 
-    Two entities can serve identically malformed keys; the raw key alone would merge
-    them and misattribute one entity's drop evidence to the other.
+    Scoped to its owner: two entities can return the same stale chunk key, and the raw
+    key alone would merge them and misattribute one entity's drop evidence.
     """
 
     entity_id: int | None
@@ -362,13 +360,6 @@ class _CandidateTrace:
 def _best_similarity(current: float | None, observed: float) -> float:
     """Track the best similarity without clamping negative cosine scores at zero."""
     return observed if current is None else max(current, observed)
-
-
-def _parse_trace_chunk_key(chunk_key: str) -> TraceKey:
-    parts = chunk_key.split(":")
-    if len(parts) < 3:
-        raise ValueError(f"Invalid traced chunk key: {chunk_key!r}")
-    return parts[0], int(parts[1])
 
 
 def _rejection_disposition(rejection: Rejection) -> InspectDisposition:
@@ -452,7 +443,7 @@ def query_trace_response(
         VectorQueryTrace,
     )
 
-    candidates: dict[TraceKey | _MalformedDropKey | _ForeignOwnerDropKey, _CandidateTrace] = {}
+    candidates: dict[TraceKey | _UnattributedDropKey | _ForeignOwnerDropKey, _CandidateTrace] = {}
     external_ids = entity_external_id_lookup or {}
 
     def candidate(key: TraceKey) -> _CandidateTrace:
@@ -504,11 +495,10 @@ def query_trace_response(
             )
         surviving_vector_keys = set(best_vector_scores)
         for rejection in vector.drops:
-            try:
-                key = _parse_trace_chunk_key(rejection.chunk_key)
-            except (TypeError, ValueError):
+            key = rejection.key
+            if key is None:
                 entry = candidates.setdefault(
-                    _MalformedDropKey(rejection.entity_id, rejection.chunk_key),
+                    _UnattributedDropKey(rejection.entity_id, rejection.chunk_key),
                     _CandidateTrace(key=None, raw_chunk_key=rejection.chunk_key),
                 )
                 entry.entity_id = rejection.entity_id

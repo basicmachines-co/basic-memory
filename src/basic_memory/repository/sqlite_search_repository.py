@@ -13,10 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.models.search import (
+    CHUNK_LOCATION_COLUMNS,
     CREATE_SEARCH_INDEX,
+    SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
+    SQLITE_CHUNK_LOCATION_UPGRADE,
 )
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
@@ -32,6 +35,22 @@ from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
+
+
+async def _upgrade_legacy_chunk_manifest(session: AsyncSession) -> None:
+    """Add the chunk location columns and re-key a pre-location chunk table in place.
+
+    Chunk keys used to embed the search row id, which changes on every note rewrite.
+    Re-keying by content keeps each chunk row id, which is how sqlite-vec finds its
+    vector, so no embedding is lost. A missing table or any other shape is left alone:
+    vector setup creates the table, or rebuilds it on an unrecognized schema.
+    """
+    result = await session.execute(text("PRAGMA table_info(search_vector_chunks)"))
+    columns = {row[1] for row in result.fetchall()}
+    if columns != SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS - CHUNK_LOCATION_COLUMNS:
+        return
+    for statement in SQLITE_CHUNK_LOCATION_UPGRADE:
+        await session.execute(text(statement))
 
 
 class SQLiteSearchRepository(SearchRepositoryBase):
@@ -101,6 +120,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             async with db.scoped_session(self.session_maker) as session:
                 # Create FTS5 virtual table if it doesn't exist
                 await session.execute(CREATE_SEARCH_INDEX)
+                # Readers such as `bm inspect` query the chunk manifest even when
+                # semantic search is off or sqlite-vec failed to load, so its schema
+                # upgrade cannot wait for the vector runtime below.
+                await _upgrade_legacy_chunk_manifest(session)
                 await session.commit()
         except Exception as e:  # pragma: no cover
             logger.error(f"Error initializing search index: {e}")
@@ -275,25 +298,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         async with db.scoped_session(self.session_maker) as session:
             await self._ensure_sqlite_vec_loaded(session)
 
+            await _upgrade_legacy_chunk_manifest(session)
             chunks_columns_result = await session.execute(
                 text("PRAGMA table_info(search_vector_chunks)")
             )
             chunks_columns = [row[1] for row in chunks_columns_result.fetchall()]
 
-            expected_columns = {
-                "id",
-                "entity_id",
-                "project_id",
-                "chunk_key",
-                "chunk_text",
-                "source_hash",
-                "entity_fingerprint",
-                "embedding_model",
-                "vector_index",
-                "embedding_status",
-                "updated_at",
-            }
-            schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
+            schema_mismatch = (
+                bool(chunks_columns) and set(chunks_columns) != SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS
+            )
             if schema_mismatch:
                 # Trigger: older SQLite installs are missing newly required chunk metadata columns.
                 # Why: vector tables store derived data only, so rebuilding them is safer than

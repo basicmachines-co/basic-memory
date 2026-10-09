@@ -257,21 +257,55 @@ class TestBuildVectorChunkRecords:
 
         assert result.records
         for record in result.records:
-            assert set(record) == {"chunk_key", "chunk_text", "source_hash"}
+            assert set(record) == {
+                "chunk_key",
+                "chunk_text",
+                "source_hash",
+                "source_type",
+                "source_row_id",
+                "chunk_index",
+            }
             assert record["chunk_key"].startswith("entity:")
 
-    def test_chunk_key_includes_row_id(self):
+    def test_chunk_key_is_content_identity_not_row_id(self):
+        """A recreated observation keeps its key; the row id lives in the location."""
+
+        def observation(row_id: int) -> list[SimpleNamespace]:
+            return [
+                _make_row(
+                    row_type=SearchItemType.OBSERVATION.value,
+                    content_snippet="obs content",
+                    row_id=row_id,
+                )
+            ]
+
+        before = build_vector_chunk_records(observation(99)).records
+        after = build_vector_chunk_records(observation(4512)).records
+
+        assert [record["chunk_key"] for record in before] == [
+            record["chunk_key"] for record in after
+        ]
+        assert all("99" not in record["chunk_key"].split(":")[0] for record in before)
+        assert before[0]["source_row_id"] == 99
+        assert after[0]["source_row_id"] == 4512
+        assert before[0]["source_type"] == SearchItemType.OBSERVATION.value
+
+    def test_identical_text_gets_one_key_per_occurrence(self):
         rows = [
             _make_row(
                 row_type=SearchItemType.OBSERVATION.value,
-                content_snippet="obs content",
-                row_id=99,
+                content_snippet="repeated fact",
+                row_id=row_id,
             )
+            for row_id in (5, 6)
         ]
 
-        result = build_vector_chunk_records(rows)
+        records = build_vector_chunk_records(rows).records
 
-        assert any("99" in record["chunk_key"] for record in result.records)
+        assert len(records) == 2
+        assert records[0]["chunk_key"] != records[1]["chunk_key"]
+        assert records[0]["chunk_key"].endswith(":0")
+        assert records[1]["chunk_key"].endswith(":1")
 
     def test_duplicate_rows_collapse_to_unique_chunk_keys(self):
         rows = [
@@ -295,20 +329,28 @@ class TestBuildVectorChunkRecords:
 
         assert result.duplicate_chunk_keys == 1
         assert len(result.records) == 1
-        assert result.records[0]["chunk_key"] == "entity:77:0"
+        assert result.records[0]["source_row_id"] == 77
+        assert result.records[0]["chunk_index"] == 0
+        assert result.records[0]["chunk_key"] == (f"entity:{result.records[0]['source_hash']}:0")
 
 
 class TestBuildEntityFingerprint:
     def test_fingerprint_is_stable_across_record_order(self):
         first_record: VectorChunkRecord = {
-            "chunk_key": "entity:1:0",
+            "chunk_key": "entity:first-hash:0",
             "chunk_text": "First chunk",
             "source_hash": "first-hash",
+            "source_type": "entity",
+            "source_row_id": 1,
+            "chunk_index": 0,
         }
         second_record: VectorChunkRecord = {
-            "chunk_key": "entity:1:1",
+            "chunk_key": "entity:second-hash:0",
             "chunk_text": "Second chunk",
             "source_hash": "second-hash",
+            "source_type": "entity",
+            "source_row_id": 1,
+            "chunk_index": 1,
         }
 
         forward = build_entity_fingerprint([first_record, second_record])
@@ -318,9 +360,12 @@ class TestBuildEntityFingerprint:
 
     def test_fingerprint_changes_with_source_hash(self):
         original: VectorChunkRecord = {
-            "chunk_key": "entity:1:0",
+            "chunk_key": "entity:first-hash:0",
             "chunk_text": "Same chunk",
             "source_hash": "first-hash",
+            "source_type": "entity",
+            "source_row_id": 1,
+            "chunk_index": 0,
         }
         changed: VectorChunkRecord = {**original, "source_hash": "second-hash"}
 

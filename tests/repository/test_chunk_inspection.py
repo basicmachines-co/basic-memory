@@ -93,27 +93,38 @@ async def _insert_manifest(
     rows: list[SearchIndexRow],
     embedding_model: str,
     vector_index: str,
-    pending_key: str | None = None,
-    omit_chunk_key: str | None = None,
+    pending_source: tuple[str, int] | None = None,
+    omit_source: tuple[str, int] | None = None,
 ) -> None:
     records = build_vector_chunk_records(rows).records
     # Fingerprint always covers the full current record set — omitting a record after
     # this point reproduces a scheduling pass that stored only part of the chunks.
     entity_fingerprint = build_entity_fingerprint(records)
-    if omit_chunk_key is not None:
-        records = [record for record in records if record["chunk_key"] != omit_chunk_key]
+    if omit_source is not None:
+        records = [
+            record
+            for record in records
+            if (record["source_type"], record["source_row_id"]) != omit_source
+        ]
     updated_at = datetime(2026, 8, 12, 12, 30, tzinfo=timezone.utc)
     values = [
         {
             "project_id": project_id,
             "entity_id": entity_id,
             "chunk_key": record["chunk_key"],
+            "source_type": record["source_type"],
+            "source_row_id": record["source_row_id"],
+            "chunk_index": record["chunk_index"],
             "chunk_text": record["chunk_text"],
             "source_hash": record["source_hash"],
             "entity_fingerprint": entity_fingerprint,
             "embedding_model": embedding_model,
             "vector_index": vector_index,
-            "embedding_status": "pending" if record["chunk_key"] == pending_key else "ready",
+            "embedding_status": (
+                "pending"
+                if (record["source_type"], record["source_row_id"]) == pending_source
+                else "ready"
+            ),
             "updated_at": updated_at,
         }
         for record in records
@@ -122,10 +133,10 @@ async def _insert_manifest(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status, updated_at"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, :source_hash, "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, :source_hash, "
                 ":entity_fingerprint, :embedding_model, :vector_index, "
                 ":embedding_status, :updated_at)"
             ),
@@ -185,7 +196,7 @@ async def test_inspection_groups_rows_and_normalizes_manifest_timestamps(
         rows=rows,
         embedding_model=search_repository.configured_embedding_model,
         vector_index=search_repository.configured_vector_index,
-        pending_key=f"observation:{sample_entity.id}:0",
+        pending_source=("observation", sample_entity.id),
     )
     await _write_current_entity_file(file_service, sample_entity)
 
@@ -226,10 +237,13 @@ async def test_inspection_groups_rows_and_normalizes_manifest_timestamps(
         "observation",
         "relation",
     ]
-    assert [row.chunks[0].stored_row.chunk_key for row in inspection.rows] == [
-        f"entity:{sample_entity.id}:0",
-        f"observation:{sample_entity.id}:0",
-        f"relation:{sample_entity.id}:0",
+    assert [
+        (row.chunks[0].stored_row.source_type, row.chunks[0].stored_row.source_row_id)
+        for row in inspection.rows
+    ] == [
+        ("entity", sample_entity.id),
+        ("observation", sample_entity.id),
+        ("relation", sample_entity.id),
     ]
     assert inspection.readiness.total == 3
     assert inspection.readiness.ready == 2
@@ -353,7 +367,7 @@ async def _insert_physical_vectors(
     session_maker,
     repository,
     *,
-    omit_chunk_key: str | None = None,
+    omit_source: tuple[str, int] | None = None,
 ) -> None:
     """Materialize a physical vector row for every stored manifest chunk.
 
@@ -363,13 +377,15 @@ async def _insert_physical_vectors(
     async with db.scoped_session(session_maker) as session:
         manifest_result = await session.execute(
             text(
-                "SELECT id, chunk_key, source_hash FROM search_vector_chunks "
+                "SELECT id, source_type, source_row_id, source_hash FROM search_vector_chunks "
                 "WHERE project_id = :project_id"
             ),
             {"project_id": repository.project_id},
         )
         manifest_rows = [
-            row for row in manifest_result.mappings().all() if row["chunk_key"] != omit_chunk_key
+            row
+            for row in manifest_result.mappings().all()
+            if (row["source_type"], row["source_row_id"]) != omit_source
         ]
         if isinstance(repository, PostgresSearchRepository):
             for row in manifest_rows:
@@ -429,7 +445,7 @@ async def test_current_chunks_missing_from_manifest_mark_index_behind(
         rows=rows,
         embedding_model=search_repository.configured_embedding_model,
         vector_index=search_repository.configured_vector_index,
-        omit_chunk_key=f"relation:{sample_entity.id}:0",
+        omit_source=("relation", sample_entity.id),
     )
     await _insert_physical_vectors(session_maker, search_repository)
     await _write_current_entity_file(file_service, sample_entity)
@@ -493,18 +509,20 @@ async def test_ready_chunk_without_physical_vector_reports_orphaned(
     await _insert_physical_vectors(
         session_maker,
         search_repository,
-        omit_chunk_key=f"entity:{sample_entity.id}:0",
+        omit_source=("entity", sample_entity.id),
     )
     await _write_current_entity_file(file_service, sample_entity)
 
     inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
 
     statuses = {
-        chunk.stored_row.chunk_key: chunk.status for row in inspection.rows for chunk in row.chunks
+        chunk.stored_row.source_type: chunk.status
+        for row in inspection.rows
+        for chunk in row.chunks
     }
-    assert statuses[f"entity:{sample_entity.id}:0"] == "orphaned"
-    assert statuses[f"observation:{sample_entity.id}:0"] == "ready"
-    assert statuses[f"relation:{sample_entity.id}:0"] == "ready"
+    assert statuses["entity"] == "orphaned"
+    assert statuses["observation"] == "ready"
+    assert statuses["relation"] == "ready"
     assert inspection.readiness.orphaned == 1
     assert inspection.readiness.ready == 2
     assert inspection.readiness.missing == 0
@@ -719,12 +737,12 @@ async def test_source_hash_mismatch_marks_note_index_behind(
         await session.execute(
             text(
                 "UPDATE search_vector_chunks SET source_hash = :source_hash "
-                "WHERE project_id = :project_id AND chunk_key = :chunk_key"
+                "WHERE project_id = :project_id AND source_type = :source_type"
             ),
             {
                 "source_hash": "stale-source-hash",
                 "project_id": sample_entity.project_id,
-                "chunk_key": f"observation:{sample_entity.id}:0",
+                "source_type": "observation",
             },
         )
         await session.commit()
@@ -759,12 +777,12 @@ async def test_inspection_uses_all_stored_fingerprints_for_note_staleness(
         await session.execute(
             text(
                 "UPDATE search_vector_chunks SET entity_fingerprint = :fingerprint "
-                "WHERE project_id = :project_id AND chunk_key = :chunk_key"
+                "WHERE project_id = :project_id AND source_type = :source_type"
             ),
             {
                 "fingerprint": "older-shard-fingerprint",
                 "project_id": sample_entity.project_id,
-                "chunk_key": f"relation:{sample_entity.id}:0",
+                "source_type": "relation",
             },
         )
         await session.commit()
@@ -805,11 +823,11 @@ async def test_inspection_marks_wrong_configured_identity_orphaned(
         await session.execute(
             text(
                 "UPDATE search_vector_chunks SET embedding_model = 'LegacyEmbedding:model' "
-                "WHERE project_id = :project_id AND chunk_key = :chunk_key"
+                "WHERE project_id = :project_id AND source_type = :source_type"
             ),
             {
                 "project_id": sample_entity.project_id,
-                "chunk_key": f"entity:{sample_entity.id}:0",
+                "source_type": "entity",
             },
         )
         await session.commit()
@@ -1128,6 +1146,9 @@ def test_classify_chunk_status_covers_closed_status_space():
         chunk_key="entity:1:0",
         chunk_text="content",
         source_hash="current-source",
+        source_type="entity",
+        source_row_id=1,
+        chunk_index=0,
         entity_fingerprint="current-entity",
         embedding_model=identity.embedding_model,
         vector_index=identity.vector_index,
@@ -1172,9 +1193,12 @@ def test_chunk_manifest_row_hydrates_string_timestamp_and_rejects_unknown_status
     """Portable hydration normalizes SQLite timestamps and validates persisted status."""
     row = {
         "entity_id": 1,
-        "chunk_key": "entity:1:0",
+        "chunk_key": "entity:source:0",
         "chunk_text": "content",
         "source_hash": "source",
+        "source_type": "entity",
+        "source_row_id": 1,
+        "chunk_index": 0,
         "entity_fingerprint": "entity",
         "embedding_model": "model",
         "vector_index": "sqlite-vec",

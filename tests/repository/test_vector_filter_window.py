@@ -70,6 +70,7 @@ def _ranking(count: int, *, top: float = 0.99, step: float = 0.01) -> list[Hydra
         HydratedChunk(
             entity_id=row_id,
             chunk_key=f"entity:{row_id}:0",
+            source_key=("entity", row_id),
             chunk_text=f"chunk {row_id}",
             similarity=top - (row_id - 1) * step,
         )

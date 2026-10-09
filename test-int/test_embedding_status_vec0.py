@@ -118,9 +118,10 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         chunk_result = await session.execute(
             text(
                 "INSERT INTO search_vector_chunks "
-                "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "(entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, "
+                "chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status) "
-                "VALUES (:eid, :pid, 'chunk-1', 'vec content', 'hash', "
+                "VALUES (:eid, :pid, 'chunk-1', 'entity', :eid, 0, 'vec content', 'hash', "
                 "'fp-hash', :embedding_model, :vector_index, 'pending') "
                 "RETURNING id"
             ),

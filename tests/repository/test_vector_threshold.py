@@ -36,6 +36,7 @@ def _make_vector_rows(scores: list[float]) -> list[HydratedChunk]:
         HydratedChunk(
             entity_id=index,
             chunk_key=f"entity:{index}:0",
+            source_key=("entity", index),
             chunk_text=f"chunk text for entity:{index}:0",
             similarity=score,
         )
@@ -177,6 +178,7 @@ def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[Hydra
         HydratedChunk(
             entity_id=si_id,
             chunk_key=f"entity:{si_id}:{chunk_index}",
+            source_key=("entity", si_id),
             chunk_text=f"chunk-{chunk_index} (sim={score})",
             similarity=score,
         )
@@ -246,18 +248,3 @@ async def test_large_note_returns_chunks_not_full_content():
     # Should use chunk text, not the full content
     assert results[0].matched_chunk_text == "chunk text for entity:0:0"
     assert results[0].matched_chunk_text != large_content
-
-
-@pytest.mark.asyncio
-async def test_unparseable_chunk_key_names_no_search_row():
-    """A chunk whose key does not spell a search row is skipped rather than ranked."""
-    semantic = vector_semantic()
-    rows = [
-        HydratedChunk(entity_id=0, chunk_key="entity:0:0", chunk_text="good", similarity=0.9),
-        HydratedChunk(entity_id=0, chunk_key="garbage", chunk_text="bad", similarity=0.95),
-    ]
-
-    results = await run_vector_only(semantic, rows, _index_rows(1))
-
-    assert [row.id for row in results] == [0]
-    assert results[0].matched_chunk_text == "good"

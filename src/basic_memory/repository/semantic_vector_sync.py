@@ -136,6 +136,15 @@ class EntityVectorShardPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class ChunkMetadataUpdate:
+    """A reused chunk whose embedding stays but whose location or fingerprint moved."""
+
+    row_id: int
+    source_row_id: int
+    chunk_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteEntityVectorPreparePlan:
     """Delete stale vector state for an entity with no indexable source rows."""
 
@@ -157,7 +166,7 @@ class UpsertEntityVectorPreparePlan:
     existing_by_key: dict[str, VectorChunkState]
     stale_ids: list[int]
     stale_deletions: list[StagedVectorDeletion]
-    metadata_update_ids: list[int]
+    metadata_updates: list[ChunkMetadataUpdate]
     scheduled_records: list[VectorChunkRecord]
     entity_fingerprint: str
     embedding_model: str
@@ -222,6 +231,8 @@ class VectorChunkState:
     entity_fingerprint: str
     embedding_model: str
     has_embedding: bool
+    source_row_id: int
+    chunk_index: int
     vector_index: str = ""
     embedding_status: str = ""
 
@@ -709,7 +720,8 @@ def prepare_window_existing_rows_sql(placeholders: str) -> str:
     """Build SQL for existing chunk and embedding rows in one prepare window."""
     return (
         "SELECT c.entity_id, c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
-        "c.embedding_model, c.vector_index, c.embedding_status "
+        "c.embedding_model, c.vector_index, c.embedding_status, "
+        "c.source_row_id, c.chunk_index "
         "FROM search_vector_chunks c "
         f"WHERE c.project_id = :project_id AND c.entity_id IN ({placeholders}) "
         "ORDER BY c.entity_id ASC, c.chunk_key ASC"
@@ -740,6 +752,8 @@ async def fetch_prepare_window_existing_rows(
                 embedding_model=str(row["embedding_model"]),
                 vector_index=str(row["vector_index"]),
                 embedding_status=str(row["embedding_status"]),
+                source_row_id=int(row["source_row_id"]),
+                chunk_index=int(row["chunk_index"]),
                 has_embedding=(
                     str(row["embedding_status"]) == "ready"
                     and str(row["vector_index"]) == repository._semantic_vector_index_name
@@ -1015,7 +1029,7 @@ def plan_entity_vector_jobs_prefetched(
             prepare_seconds=prepare_seconds,
         )
 
-    metadata_update_ids: list[int] = []
+    metadata_updates: list[ChunkMetadataUpdate] = []
     pending_records: list[VectorChunkRecord] = []
     skipped_chunks_count = 0
     for record in chunk_records:
@@ -1026,6 +1040,10 @@ def plan_entity_vector_jobs_prefetched(
 
         same_source_hash = current.source_hash == record["source_hash"]
         same_entity_fingerprint = current.entity_fingerprint == current_entity_fingerprint
+        same_location = (
+            current.source_row_id == record["source_row_id"]
+            and current.chunk_index == record["chunk_index"]
+        )
         same_embedding_model = current.embedding_model == current_embedding_model
         same_vector_index = current.vector_index in {"", current_vector_index}
 
@@ -1035,8 +1053,16 @@ def plan_entity_vector_jobs_prefetched(
             and same_embedding_model
             and same_vector_index
         ):
-            if not same_entity_fingerprint:
-                metadata_update_ids.append(current.id)
+            # The text is unchanged, so the embedding is reused. Only the manifest's
+            # pointer to the (possibly recreated) search row and the fingerprint move.
+            if not same_entity_fingerprint or not same_location:
+                metadata_updates.append(
+                    ChunkMetadataUpdate(
+                        row_id=current.id,
+                        source_row_id=record["source_row_id"],
+                        chunk_index=record["chunk_index"],
+                    )
+                )
             skipped_chunks_count += 1
             continue
 
@@ -1063,7 +1089,7 @@ def plan_entity_vector_jobs_prefetched(
         existing_by_key=existing_by_key,
         stale_ids=stale_ids,
         stale_deletions=stale_deletions,
-        metadata_update_ids=metadata_update_ids,
+        metadata_updates=metadata_updates,
         scheduled_records=scheduled_records,
         entity_fingerprint=current_entity_fingerprint,
         embedding_model=current_embedding_model,
@@ -1104,19 +1130,23 @@ async def apply_entity_vector_prepare_plan(
             plan.entity_id,
             expected_deletions=plan.stale_deletions,
         )
-    for row_id in plan.metadata_update_ids:
+    for update in plan.metadata_updates:
         await session.execute(
             text(
                 "UPDATE search_vector_chunks "
                 "SET entity_fingerprint = :entity_fingerprint, "
                 "embedding_model = :embedding_model, "
+                "source_row_id = :source_row_id, "
+                "chunk_index = :chunk_index, "
                 f"updated_at = {timestamp_expr} "
                 "WHERE id = :id"
             ),
             {
-                "id": row_id,
+                "id": update.row_id,
                 "entity_fingerprint": plan.entity_fingerprint,
                 "embedding_model": plan.embedding_model,
+                "source_row_id": update.source_row_id,
+                "chunk_index": update.chunk_index,
             },
         )
 
@@ -1184,6 +1214,8 @@ async def upsert_scheduled_chunk_records(
                     text(
                         "UPDATE search_vector_chunks "
                         "SET chunk_text = :chunk_text, source_hash = :source_hash, "
+                        "source_type = :source_type, source_row_id = :source_row_id, "
+                        "chunk_index = :chunk_index, "
                         "entity_fingerprint = :entity_fingerprint, "
                         "embedding_model = :embedding_model, "
                         "vector_index = :vector_index, "
@@ -1195,6 +1227,9 @@ async def upsert_scheduled_chunk_records(
                         "id": current.id,
                         "chunk_text": record["chunk_text"],
                         "source_hash": record["source_hash"],
+                        "source_type": record["source_type"],
+                        "source_row_id": record["source_row_id"],
+                        "chunk_index": record["chunk_index"],
                         "entity_fingerprint": entity_fingerprint,
                         "embedding_model": embedding_model,
                         "vector_index": repository._semantic_vector_index_name,
@@ -1215,10 +1250,12 @@ async def upsert_scheduled_chunk_records(
             text(
                 "INSERT INTO search_vector_chunks ("
                 "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "source_type, source_row_id, chunk_index, "
                 "entity_fingerprint, embedding_model, updated_at"
                 ", vector_index, embedding_status"
                 ") VALUES ("
                 ":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, "
+                ":source_type, :source_row_id, :chunk_index, "
                 ":entity_fingerprint, :embedding_model, "
                 f"{timestamp_expr}, :vector_index, 'pending'"
                 ") RETURNING id"
@@ -1229,6 +1266,9 @@ async def upsert_scheduled_chunk_records(
                 "chunk_key": record["chunk_key"],
                 "chunk_text": record["chunk_text"],
                 "source_hash": record["source_hash"],
+                "source_type": record["source_type"],
+                "source_row_id": record["source_row_id"],
+                "chunk_index": record["chunk_index"],
                 "entity_fingerprint": entity_fingerprint,
                 "embedding_model": embedding_model,
                 "vector_index": repository._semantic_vector_index_name,

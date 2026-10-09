@@ -78,10 +78,10 @@ async def _seed_current_manifest(search_repository, session_maker, entity_id: in
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, :source_hash, "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, :source_hash, "
                 ":entity_fingerprint, :embedding_model, :vector_index, 'ready')"
             ),
             [
@@ -89,6 +89,9 @@ async def _seed_current_manifest(search_repository, session_maker, entity_id: in
                     "project_id": search_repository.project_id,
                     "entity_id": entity_id,
                     "chunk_key": record["chunk_key"],
+                    "source_type": record["source_type"],
+                    "source_row_id": record["source_row_id"],
+                    "chunk_index": record["chunk_index"],
                     "chunk_text": record["chunk_text"],
                     "source_hash": record["source_hash"],
                     "entity_fingerprint": fingerprint,
@@ -358,6 +361,7 @@ async def test_inspect_query_batch_enriches_all_known_external_ids(monkeypatch):
                     reason="not_in_manifest",
                     stored_model=None,
                     stored_index=None,
+                    key=None,
                 ),
             ),
         ),

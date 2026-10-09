@@ -9,11 +9,9 @@ import pytest
 
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_reader import (
-    HydratedChunk,
     Reranking,
     SearchReader,
     SemanticSearch,
-    parse_chunk_key,
     vector_eligible,
 )
 from basic_memory.repository.search_scope import ProjectScope
@@ -27,7 +25,6 @@ from tests.repository.test_hybrid_fusion import (
     fake_vector_retrieval,
     vector_leg,
 )
-from tests.repository.test_vector_threshold import run_vector_only, vector_semantic
 
 SCOPE = ProjectScope.single(1)
 SEMANTIC_MODES = [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID]
@@ -55,14 +52,6 @@ def _semantic(fts: FakeFts | None = None) -> SemanticSearch:
 )
 def test_vector_eligible_requires_text_and_no_identity_filter(query, eligible):
     assert vector_eligible(query) is eligible
-
-
-def test_parse_chunk_key_reads_type_and_row_id():
-    assert parse_chunk_key("observation:5:0") == ("observation", 5)
-    with pytest.raises(ValueError):
-        parse_chunk_key("entity:not-a-number:0")
-    with pytest.raises(IndexError):
-        parse_chunk_key("garbage")
 
 
 # --- SearchReader dispatch ---
@@ -165,16 +154,6 @@ async def test_no_row_ids_means_no_row_fetch():
     semantic = SemanticSearch(session_maker, SCOPE, FakeFts(), fake_vector_retrieval())
 
     assert await semantic._fetch_search_index_rows_by_ids([]) == {}
-
-
-@pytest.mark.asyncio
-async def test_vector_only_with_no_parseable_chunk_keys_returns_nothing():
-    semantic = vector_semantic()
-    fetch_rows = AsyncMock()
-    rows = [HydratedChunk(entity_id=0, chunk_key="garbage", chunk_text="bad", similarity=0.95)]
-
-    assert await run_vector_only(semantic, rows, fetch_rows) == []
-    fetch_rows.assert_not_called()
 
 
 @pytest.mark.asyncio

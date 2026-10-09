@@ -122,10 +122,13 @@ def test_next_revision_id_refuses_a_forked_graph(tmp_path):
         next_revision_id(ScriptDirectory.from_config(config))
 
 
-# None is what the CLI passes when --head is omitted; "head" is the Python API default.
-@pytest.mark.parametrize("built_on", [None, "head", "z9a0b1c2d3e4"])
+# None is what the CLI passes when --head is omitted; "head" is the Python API default;
+# "current" names the head revision explicitly, whichever revision that is today.
+@pytest.mark.parametrize("built_on", [None, "head", "current"])
 def test_revision_hook_assigns_the_next_version(built_on):
     script = _script_directory()
+    if built_on == "current":
+        (built_on,) = script.get_heads()
     context = MigrationContext.configure(dialect_name="sqlite", opts={"script": script})
     directive = MigrationScript(
         rev_id="abc123", upgrade_ops=UpgradeOps(), downgrade_ops=DowngradeOps(), head=built_on

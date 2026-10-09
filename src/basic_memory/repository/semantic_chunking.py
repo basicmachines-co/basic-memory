@@ -41,11 +41,23 @@ class SemanticSourceRow(Protocol):
 
 
 class VectorChunkRecord(TypedDict):
-    """One deterministic chunk input for vector synchronization."""
+    """One deterministic chunk input for vector synchronization.
+
+    ``chunk_key`` is the chunk's identity: its source row type, the hash of its text,
+    and an occurrence number for identical text within one entity. Unchanged text keeps
+    its key, and therefore its embedding, across note rewrites.
+
+    ``source_row_id`` and ``chunk_index`` locate the chunk: the search_index row it was
+    cut from and its position in that row. A rewrite recreates observation and relation
+    rows with new ids, so the location changes while the identity does not.
+    """
 
     chunk_key: str
     chunk_text: str
     source_hash: str
+    source_type: str
+    source_row_id: int
+    chunk_index: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,30 +96,57 @@ def compose_row_source_text(row: SemanticSourceRow) -> str:
     return "\n\n".join(part for part in row_parts if part)
 
 
+def vector_chunk_key(source_type: str, source_hash: str, occurrence: int) -> str:
+    """Identity of a chunk within its entity, independent of where the text sits.
+
+    The key never contains a search_index row id. Updating a note deletes and recreates
+    its observations and relations, so their row ids change on every write; a key built
+    from them made every unchanged observation look new and re-embedded the whole note.
+    """
+    return f"{source_type}:{source_hash}:{occurrence}"
+
+
 def build_vector_chunk_records(rows: Iterable[SemanticSourceRow]) -> VectorChunkBuildResult:
     """Build one deterministic chunk record per logical search-row chunk."""
-    records_by_key: dict[str, VectorChunkRecord] = {}
+    chunks_by_location: dict[tuple[str, int, int], tuple[str, str]] = {}
     duplicate_chunk_keys = 0
 
     for row in rows:
         source_text = compose_row_source_text(row)
         chunks = split_text_into_chunks(source_text)
         for chunk_index, chunk_text in enumerate(chunks):
-            chunk_key = f"{row.type}:{row.id}:{chunk_index}"
-            source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+            location = (row.type, row.id, chunk_index)
             # SQLite FTS5 can return duplicate logical rows because it does not
-            # enforce relational uniqueness. Collapse them before the vector
-            # writer encounters duplicate chunk keys.
-            if chunk_key in records_by_key:
+            # enforce relational uniqueness. Collapse them before assigning keys,
+            # or one logical chunk would be counted as two occurrences.
+            if location in chunks_by_location:
                 duplicate_chunk_keys += 1
-            records_by_key[chunk_key] = {
-                "chunk_key": chunk_key,
+            source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+            chunks_by_location[location] = (chunk_text, source_hash)
+
+    # Identical text within one entity (a repeated observation) gets one key per
+    # occurrence, numbered in row order, so each copy keeps its own manifest row.
+    occurrences: dict[tuple[str, str], int] = {}
+    records: list[VectorChunkRecord] = []
+    for (source_type, source_row_id, chunk_index), (
+        chunk_text,
+        source_hash,
+    ) in chunks_by_location.items():
+        occurrence = occurrences.get((source_type, source_hash), 0)
+        occurrences[(source_type, source_hash)] = occurrence + 1
+        records.append(
+            {
+                "chunk_key": vector_chunk_key(source_type, source_hash, occurrence),
                 "chunk_text": chunk_text,
                 "source_hash": source_hash,
+                "source_type": source_type,
+                "source_row_id": source_row_id,
+                "chunk_index": chunk_index,
             }
+        )
 
     return VectorChunkBuildResult(
-        records=list(records_by_key.values()),
+        records=records,
         duplicate_chunk_keys=duplicate_chunk_keys,
     )
 
@@ -118,11 +157,17 @@ def build_entity_fingerprint(chunk_records: Iterable[VectorChunkRecord]) -> str:
     Vector eligibility follows the derived search rows rather than raw file
     bytes. Title, permalink, or observation changes therefore invalidate the
     entity fingerprint even when unrelated file bytes do not.
+
+    The location of each chunk is part of the fingerprint. A rewrite that keeps every
+    chunk's text but recreates its rows must not fast-skip the entity, or the manifest
+    would keep pointing search hits at deleted search_index rows.
     """
     canonical_records = [
         {
             "chunk_key": record["chunk_key"],
             "source_hash": record["source_hash"],
+            "source_row_id": record["source_row_id"],
+            "chunk_index": record["chunk_index"],
         }
         for record in sorted(chunk_records, key=lambda record: record["chunk_key"])
     ]

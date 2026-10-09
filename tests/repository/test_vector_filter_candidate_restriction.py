@@ -167,6 +167,7 @@ def _vector_chunks(row_ids: list[int]) -> list[HydratedChunk]:
         HydratedChunk(
             entity_id=row_id,
             chunk_key=f"{SearchItemType.ENTITY.value}:{row_id}:0",
+            source_key=(SearchItemType.ENTITY.value, row_id),
             chunk_text=TARGET_CONTENT,
             similarity=0.99 - index * 0.001,
         )

@@ -347,19 +347,24 @@ async def test_postgres_upsert_preserves_external_vector_ownership() -> None:
             entity_id=42,
             scheduled_records=[
                 {
-                    "chunk_key": "entity:42:0",
+                    "chunk_key": "entity:new-hash:0",
                     "chunk_text": "changed",
                     "source_hash": "new-hash",
+                    "source_type": "entity",
+                    "source_row_id": 42,
+                    "chunk_index": 0,
                 }
             ],
             existing_by_key={
-                "entity:42:0": VectorChunkState(
+                "entity:new-hash:0": VectorChunkState(
                     id=7,
-                    chunk_key="entity:42:0",
+                    chunk_key="entity:new-hash:0",
                     source_hash="old-hash",
                     entity_fingerprint="old-fingerprint",
                     embedding_model="stub:4:document",
                     has_embedding=True,
+                    source_row_id=1,
+                    chunk_index=0,
                     vector_index="recording-a",
                     embedding_status="ready",
                 )
@@ -403,6 +408,9 @@ class TestBatchPrepareWindow:
                     "chunk_key": f"entity:{entity_id}:0",
                     "chunk_text": f"chunk {entity_id}",
                     "source_hash": f"hash-{entity_id}",
+                    "source_type": "entity",
+                    "source_row_id": entity_id,
+                    "chunk_index": 0,
                 }
             ]
 
