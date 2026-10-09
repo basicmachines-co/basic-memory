@@ -1256,9 +1256,9 @@ def test_mirror_commands_are_marked_deprecated_in_help(command):
     result = runner.invoke(app, ["cloud", "--help"], env={"COLUMNS": "200"})
 
     assert result.exit_code == 0, result.output
-    line = next(
-        line for line in result.output.splitlines() if line.strip("│ ").startswith(f"{command} ")
-    )
+    # CI sets FORCE_COLOR, so strip escape codes before reading table rows.
+    rows = re.sub(r"\x1b\[[0-9;]*m", "", result.output).splitlines()
+    line = next(line for line in rows if line.strip("│ ").startswith(f"{command} "))
     assert "deprecated" in line.lower()
 
 
