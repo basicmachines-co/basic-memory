@@ -17,8 +17,10 @@ positive tests are not passing by luck.
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import string
+import uuid
 
 import pytest
 
@@ -85,11 +87,22 @@ def _skip_unless_postgres(db_backend) -> None:
         pytest.skip("the collision is Postgres row locking; SQLite allows one writer")
 
 
+def _write_atomically(path, text: str) -> None:
+    """Replace the file in one step, as the materializer's atomic write does.
+
+    A plain write_text truncates first, so a concurrent refresh could read an empty or
+    half-written file and index a body that starts with no version marker.
+    """
+    staged = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    staged.write_text(text)
+    os.replace(staged, path)
+
+
 async def _save_then_index(search_service, file_service, entity: Entity, version: int) -> None:
     """What a save does: write the file, then refresh the index from storage."""
     path = file_service.get_entity_path(entity)
     await asyncio.to_thread(
-        path.write_text, f"---\ntitle: {entity.title}\n---\n{_long_body(version)}\n"
+        _write_atomically, path, f"---\ntitle: {entity.title}\n---\n{_long_body(version)}\n"
     )
     await search_service.index_entity_data(entity)
 
@@ -137,7 +150,7 @@ async def test_concurrent_saves_of_a_long_note_all_succeed_and_converge(
         assert any(
             indexed.startswith(f"versionmarker{v}\n")
             for v in range(round_start, round_start + CONCURRENT_SAVES)
-        )
+        ), f"round {round_start}: indexed body starts {indexed[:60]!r}"
 
         # The next refresh converges the rows to the file on disk.
         await search_service.index_entity_data(entity)
