@@ -814,6 +814,20 @@ class SearchService:
             entities = await self.entity_repository.find_all(session)
         entity_ids = [entity.id for entity in entities]
 
+        # A host that cannot load sqlite-vec runs keyword-only (#711); its vector
+        # tables cannot even be opened, so the whole rebuild is a no-op there.
+        if not await self.repository.semantic_effectively_enabled():
+            logger.warning("Skipping vector reindex: semantic search is unavailable on this host")
+            return {
+                "total_entities": len(entity_ids),
+                "embedded": 0,
+                "skipped": len(entity_ids),
+                "errors": 0,
+                "sample_errors": (),
+                "vector_index": None,
+                "embedding_model": None,
+            }
+
         # Clean up stale rows in search_index and search_vector_chunks
         # that reference entity_ids no longer in the entity table
         await self._purge_stale_search_rows()

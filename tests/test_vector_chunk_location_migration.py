@@ -79,7 +79,9 @@ def _upgrade_postgres(connection) -> None:
 async def test_upgrade_rekeys_by_content_and_keeps_row_ids(engine_factory, db_backend):
     engine, _ = engine_factory
     async with engine.begin() as connection:
-        await connection.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+        # Postgres keeps pgvector embeddings in a table that references the chunks.
+        cascade = " CASCADE" if db_backend == "postgres" else ""
+        await connection.execute(text(f"DROP TABLE IF EXISTS search_vector_chunks{cascade}"))
         await connection.execute(
             text(LEGACY_POSTGRES_CHUNKS if db_backend == "postgres" else LEGACY_SQLITE_CHUNKS)
         )

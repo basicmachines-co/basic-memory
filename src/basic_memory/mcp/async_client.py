@@ -3,13 +3,19 @@ from asyncio import Lock
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from threading import RLock
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any, AsyncIterator, Callable, Optional
 
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 import logfire
-from basic_memory.config import ConfigManager, ProjectMode, has_cloud_credentials
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ConfigManager,
+    ProjectMode,
+    has_cloud_credentials,
+)
 
 if TYPE_CHECKING:
     # FastAPI is only needed when a request routes through the local ASGI
@@ -359,6 +365,22 @@ async def get_cloud_proxy_client(
     timeout = _build_timeout()
     async with _cloud_client(config, timeout, workspace=workspace) as client:
         yield client
+
+
+def routes_off_host(config: BasicMemoryConfig, project_names: Sequence[str]) -> bool:
+    """Whether requests for these projects run somewhere other than this process.
+
+    Follows get_client's precedence: an injected factory, then the explicit
+    --local/--cloud flags, then each project's routing mode. Callers use it to decide
+    what the remote side can do instead of probing the local runtime.
+    """
+    if _client_factory is not None:
+        return True
+    if _explicit_routing():
+        return _force_cloud_mode()
+    return bool(project_names) and all(
+        config.get_project_mode(name) == ProjectMode.CLOUD for name in project_names
+    )
 
 
 @asynccontextmanager

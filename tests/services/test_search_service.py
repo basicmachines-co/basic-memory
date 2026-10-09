@@ -1935,3 +1935,19 @@ async def test_vector_sync_skips_entities_when_the_vector_runtime_is_unavailable
 
     assert (batch.entities_total, batch.entities_skipped, batch.entities_failed) == (1, 1, 0)
     assert (single.entities_total, single.entities_skipped, single.entities_failed) == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_reindex_vectors_is_a_noop_when_the_vector_runtime_is_unavailable(
+    search_service, full_entity
+):
+    """`bm reindex --embeddings` on a keyword-only host (#711) reports every entity as
+    skipped instead of failing while opening vector tables it cannot load."""
+    # Injected: the state init_search_index() leaves when sqlite-vec cannot load.
+    search_service.repository._semantic_enabled = False
+
+    stats = await search_service.reindex_vectors()
+
+    assert stats["embedded"] == 0
+    assert stats["errors"] == 0
+    assert stats["skipped"] == stats["total_entities"] >= 1

@@ -13,7 +13,7 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.config import ConfigManager
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
@@ -22,7 +22,7 @@ from basic_memory.utils import (
     parse_tags,
     strict_search_tags,
 )
-from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.async_client import get_client, routes_off_host
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.index_readiness import project_index_required
 from basic_memory.mcp.project_context import (
@@ -222,12 +222,11 @@ def _default_search_type(project_names: Sequence[str]) -> str:
 
     # A host that cannot load sqlite-vec runs keyword-only (#711); defaulting to
     # hybrid there would turn every plain search into a semantic-unavailable error.
-    # Projects routed to Cloud search on Cloud's Postgres, which always has vectors,
-    # so the local runtime does not limit them.
-    routed_to_cloud = bool(project_names) and all(
-        config.get_project_mode(name) == ProjectMode.CLOUD for name in project_names
-    )
-    return "hybrid" if routed_to_cloud or semantic_runtime_available(config) else "text"
+    # Searches that leave this process (Cloud, or an injected client factory) run on
+    # Cloud's Postgres, which always has vectors, so the local runtime does not
+    # limit them.
+    remote = routes_off_host(config, project_names)
+    return "hybrid" if remote or semantic_runtime_available(config) else "text"
 
 
 def _is_service_unavailable_error(error: BaseException) -> bool:

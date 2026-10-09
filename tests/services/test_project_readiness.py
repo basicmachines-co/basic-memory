@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+
+from basic_memory.config import DatabaseBackend
 from sqlalchemy import text
 
 from basic_memory import db
@@ -543,8 +545,10 @@ async def test_a_missing_vector_manifest_reports_nothing_embedded(
     when a caller needs it.
     """
     _, session_maker = engine_factory
+    # Postgres keeps pgvector embeddings in a table that references the chunks.
+    cascade = " CASCADE" if app_config.database_backend == DatabaseBackend.POSTGRES else ""
     async with db.scoped_session(session_maker) as session:
-        await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+        await session.execute(text(f"DROP TABLE IF EXISTS search_vector_chunks{cascade}"))
 
     readiness = await readiness_service.readiness_for(test_project, ())
     embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
