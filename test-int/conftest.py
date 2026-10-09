@@ -83,10 +83,8 @@ from basic_memory.config import (
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.models.base import Base
-from basic_memory.repository.embedding_provider_factory import create_embedding_provider
-from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.project_repository import ProjectRepository
-from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from fastapi import FastAPI
 
 from basic_memory.deps import get_engine_factory, get_app_config
@@ -326,13 +324,13 @@ async def engine_factory(
             autoflush=False,
         )
 
-        # Semantic search is always on, and production creates pgvector storage at
-        # database initialization. The reset above drops it, so recreate it here for
-        # the configured provider's dimensions, as initialization would.
-        await PgVectorIndex(
-            session_maker,
-            build_vector_index_scope(app_config, create_embedding_provider(app_config)),
-        ).create_storage()
+        # Semantic search is always on, and production creates vector storage (the
+        # chunk manifest and pgvector tables) at database initialization. The reset
+        # above drops it, so run that same initialization here. Vector storage is
+        # shared by every project, so any valid project id builds it.
+        await PostgresSearchRepository(
+            session_maker, project_id=1, app_config=app_config
+        ).init_search_index()
 
         # Set module-level state to prevent MCP lifespan from re-initializing
         # This ensures get_or_create_db() sees an existing engine and skips initialization

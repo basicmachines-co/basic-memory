@@ -40,12 +40,10 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base
 from basic_memory.models.knowledge import Entity
 from basic_memory.models.project import Project
-from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.pgvector_index import PgVectorIndex
-from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -405,13 +403,13 @@ async def engine_factory(
             autoflush=False,
         )
 
-        # Semantic search is always on, and production creates pgvector storage at
-        # database initialization. The reset above drops it, so recreate it here for
-        # the configured provider's dimensions, as initialization would.
-        await PgVectorIndex(
-            session_maker,
-            build_vector_index_scope(app_config, create_embedding_provider(app_config)),
-        ).create_storage()
+        # Semantic search is always on, and production creates vector storage (the
+        # chunk manifest and pgvector tables) at database initialization. The reset
+        # above drops it, so run that same initialization here. Vector storage is
+        # shared by every project, so any valid project id builds it.
+        await PostgresSearchRepository(
+            session_maker, project_id=1, app_config=app_config
+        ).init_search_index()
 
         # Important: wire the engine/session into the global db module state.
         # Some codepaths (e.g. app initialization / MCP lifespan) call db.get_or_create_db(),
