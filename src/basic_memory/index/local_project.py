@@ -444,17 +444,21 @@ def path_spelled_exactly_on_disk(
     NFC because APFS is also normalization-insensitive, and only case is in question.
 
     ``entry_names_by_directory`` caches listings so a batch lists each directory once.
+    A cached listing can only prove presence: a miss is re-listed before it counts,
+    because a file created after the directory was listed is live, and confirming it
+    deleted would drop its entity and its stable external_id.
     Listing errors propagate to the caller, which owns the absent-or-unknown decision.
     """
     directory = base_path
     for name in Path(relative_path).parts:
+        wanted = unicodedata.normalize("NFC", name)
         entry_names = entry_names_by_directory.get(directory)
-        if entry_names is None:
+        if entry_names is None or wanted not in entry_names:
             entry_names = frozenset(
                 unicodedata.normalize("NFC", entry) for entry in os.listdir(directory)
             )
             entry_names_by_directory[directory] = entry_names
-        if unicodedata.normalize("NFC", name) not in entry_names:
+        if wanted not in entry_names:
             return False
         directory = directory / name
     return True
