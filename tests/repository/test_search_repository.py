@@ -768,9 +768,14 @@ class TestSearchTermPreparation:
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        assert fts_query(search_repository).prepare_search_term('say "hello"') == '"say ""hello"""*'
+        # A caller-quoted word stays a phrase; the other words are AND-joined.
         assert (
-            fts_query(search_repository).prepare_search_term("it's working") == '"it\'s working"*'
+            fts_query(search_repository).prepare_search_term('say "hello"') == 'say* AND "hello"*'
+        )
+        # An apostrophe needs quoting, but only for its own word.
+        assert (
+            fts_query(search_repository).prepare_search_term("it's working")
+            == '"it\'s"* AND working*'
         )
 
     def test_file_paths_no_prefix_wildcard(self, search_repository):
@@ -808,27 +813,77 @@ class TestSearchTermPreparation:
         # This reproduces the bug where "Basic Memory v0.13.0b2" becomes "Basic* AND Memory* AND v0.13.0b2*"
         # which causes FTS5 syntax errors because v0.13.0b2* is not valid FTS5 syntax
         result = fts_query(search_repository).prepare_search_term("Basic Memory v0.13.0b2")
-        # Should be quoted because of dots in v0.13.0b2
-        assert result == '"Basic Memory v0.13.0b2"*'
+        # Only the dotted token is quoted; quoting the whole query as one phrase would
+        # require the words to be adjacent in the text.
+        assert result == 'Basic* AND Memory* AND "v0.13.0b2"*'
 
     def test_mixed_special_characters_in_multi_word_queries(self, search_repository):
-        """Multi-word queries with special characters in any word should be fully quoted."""
+        """Each word with special characters is quoted on its own; the rest stay bare."""
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        # Any word containing special characters should cause the entire phrase to be quoted
         assert (
             fts_query(search_repository).prepare_search_term("config.json file")
-            == '"config.json file"*'
+            == '"config.json"* AND file*'
         )
         assert (
             fts_query(search_repository).prepare_search_term("user@email.com account")
-            == '"user@email.com account"*'
+            == '"user@email.com"* AND account*'
         )
         assert (
             fts_query(search_repository).prepare_search_term("node.js and react")
-            == '"node.js and react"*'
+            == '"node.js"* AND and* AND react*'
         )
+
+    def test_punctuated_identifiers_with_other_terms(self, search_repository):
+        """Ticket ids, flags and colon tokens next to plain words must not collapse the
+        query into one exact phrase, which returns nothing (#1657)."""
+        if is_postgres_backend(search_repository):
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
+
+        prepare = fts_query(search_repository).prepare_search_term
+        assert prepare("IT-644 cacheability") == '"IT-644"* AND cacheability*'
+        assert prepare("#344 #336 Dev bundle") == '"#344"* AND "#336"* AND Dev* AND bundle*'
+        assert prepare("cim --diff acli") == 'cim* AND "--diff"* AND acli*'
+        assert prepare("queue:run") == '"queue:run"*'
+        # A caller-quoted multi-word phrase survives as one phrase.
+        assert prepare('"Monday never bumps" updated_at') == '"Monday never bumps"* AND updated_at*'
+        # A single caller-quoted term is not quoted a second time.
+        assert prepare('"mirror-image"') == '"mirror-image"*'
+        # A file path inside a multi-word query keeps its exact match.
+        assert prepare("notes/plan.md draft") == '"notes/plan.md" AND draft*'
+        # A word with no letters or digits has no tokens; as an empty phrase it would
+        # make the whole AND match nothing.
+        assert prepare("Note & Symbols") == "Note* AND Symbols*"
+
+    @pytest.mark.asyncio
+    async def test_punctuated_word_matches_when_the_words_are_not_adjacent(
+        self, search_repository, search_entity
+    ):
+        """End to end: both words occur in the note, in different sentences (#1657)."""
+        await search_repository.index_item(
+            SearchIndexRow(
+                id=search_entity.id,
+                type=SearchItemType.ENTITY.value,
+                title="CDN rollout",
+                content_stems="cdn rollout",
+                content_snippet=(
+                    "Ticket IT-644 tracks the CDN rollout.\n\n"
+                    "Later we measured cacheability of static assets."
+                ),
+                permalink=search_entity.permalink,
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                metadata={"note_type": search_entity.note_type},
+                created_at=search_entity.created_at,
+                updated_at=search_entity.updated_at,
+                project_id=search_repository.project_id,
+            )
+        )
+
+        results = await search_repository.search(search_text="IT-644 cacheability")
+
+        assert search_entity.id in [result.id for result in results]
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters_returns_results(self, search_repository):
