@@ -1334,7 +1334,7 @@ async def delete_directory(
     active runtime.
 
     Args:
-        project_id: Project external ID from URL path
+        project_external_id: Project external ID from URL path (path alias "project_id")
         data: Delete request with directory path
 
     Returns:
