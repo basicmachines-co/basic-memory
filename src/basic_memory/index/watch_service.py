@@ -320,7 +320,10 @@ class WatchService:
         warn_unreadable_new_directories(
             project,
             changes,
-            local_index_available=self.app_config.get_project_mode(project.name)
+            # Current config, not the startup snapshot: `bm project set-cloud` can change
+            # the mode while this watch cycle still runs (same reason as
+            # _project_is_configured above).
+            local_index_available=ConfigManager().config.get_project_mode(project.name)
             == ProjectMode.LOCAL,
         )
         request = LocalWatchEventIndexRequest.from_project_changes(
