@@ -646,10 +646,14 @@ def list_projects(
             cloud_ws_name = cloud_workspace.name if cloud_workspace else None
             cloud_ws_type = cloud_workspace.workspace_type if cloud_workspace else None
 
-            sync_supported = cloud_ws_type is None or cloud_ws_type == "personal"
-            sync_reason = None if sync_supported else f"{cloud_ws_type} workspace"
-            local_usage = "sync-supported" if sync_supported else "cloud-only"
-            has_sync = bool(is_attached_row and entry and entry.local_sync_path and sync_supported)
+            # Push/pull works on every workspace type (rclone on Personal, WebDAV
+            # on Team), so a local sync path is usable everywhere. The JSON keys
+            # stay for scripts that read them; the mirror commands that were
+            # Personal-only (sync/bisync) are deprecated (#1596).
+            sync_supported = True
+            sync_reason = None
+            local_usage = "sync-supported"
+            has_sync = bool(is_attached_row and entry and entry.local_sync_path)
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:
                 mcp_transport = "https"
@@ -693,13 +697,7 @@ def list_projects(
 
         # --- Rich table output ---
         for row_data in project_rows:
-            sync_display = (
-                "[X]"
-                if row_data["sync"]
-                else "cloud-only"
-                if not row_data["sync_supported"]
-                else ""
-            )
+            sync_display = "[X]" if row_data["sync"] else ""
             table.add_row(
                 row_data.get("display_name") or row_data["name"],
                 row_data["local_path"],
@@ -873,7 +871,7 @@ def add_project(
         bm project add research                           # No local sync\n
         bm project add research --local-path ~/docs       # With local sync\n
         bm project add research --cloud --visibility shared\n
-        bm project add research --cloud --workspace Personal --visibility shared\n
+        bm project add research --cloud --workspace my-team --visibility shared\n
 
     Local mode example:\n
         bm project add research ~/Documents/research
@@ -1090,9 +1088,9 @@ def add_project(
         # Save local sync path to config if in cloud mode
         if local_sync_path:
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
-            # Lead with the Team-safe additive commands (they work on any
-            # workspace); the bisync mirror is Personal-only, so it is an aside
-            # rather than the instruction. Mirrors `bm cloud sync-setup`.
+            # Push/pull is the supported sync workflow on every workspace; the
+            # bisync mirror is deprecated (#1596), so it is not suggested here.
+            # Mirrors `bm cloud sync-setup`.
             console.print("\nNext steps:")
             console.print(
                 f"  1. Preview a pull: "
@@ -1103,10 +1101,6 @@ def add_project(
             )
             console.print(
                 f"  3. Upload local changes: {command_hint('bm', 'cloud', 'push', '--name', name)}"
-            )
-            console.print(
-                f"  Personal workspaces can also mirror with: "
-                f"{command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
             )
 
 
@@ -1535,7 +1529,7 @@ def set_cloud(
     <path>`.
 
     Examples:
-      bm project set-cloud research --workspace Personal
+      bm project set-cloud research --workspace my-team
       bm project set-cloud research --workspace 11111111-...
       bm project set-cloud research   # uses default workspace
     """

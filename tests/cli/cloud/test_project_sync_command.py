@@ -145,7 +145,7 @@ def test_cloud_bisync_fails_fast_when_sync_entry_disappears(monkeypatch, config_
     ],
 )
 def test_cloud_bisync_commands_block_organization_workspace(monkeypatch, argv, config_manager):
-    """Bisync commands should fail before setup/execution for Team workspaces."""
+    """Deprecated bisync commands refuse Team workspaces before setup/execution."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
     config = config_manager.load_config()
@@ -178,13 +178,13 @@ def test_cloud_bisync_commands_block_organization_workspace(monkeypatch, argv, c
 
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
-    assert "The bisync operation is only supported on Personal workspaces" in output
+    assert "is deprecated and will be removed in a future release" in output
     assert "bm cloud pull --name research" in output
     assert "bm cloud push --name research" in output
 
 
 def test_cloud_sync_blocks_organization_workspace(monkeypatch, config_manager):
-    """The destructive mirror `sync` is now Personal-only and blocks Team workspaces."""
+    """The deprecated mirror `sync` blocks Team workspaces with the push/pull commands."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
     config = config_manager.load_config()
@@ -212,7 +212,7 @@ def test_cloud_sync_blocks_organization_workspace(monkeypatch, config_manager):
 
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
-    assert "only supported on Personal workspaces" in output
+    assert "`bm cloud sync` is deprecated and does not run on Team workspaces" in output
     assert "bm cloud push --name research" in output
     assert "bm cloud pull --name research" in output
 
@@ -275,6 +275,10 @@ def test_cloud_sync_allows_personal_workspace(monkeypatch, config_manager):
 
     assert result.exit_code == 0, result.output
     assert "research synced successfully" in result.output
+    # Still runs on Personal, but warns on every run (#1596).
+    output = " ".join(result.output.split())
+    assert "`bm cloud sync` is deprecated" in output
+    assert "bm cloud push --name research" in output
     assert routing == {
         "mount_workspace_id": "personal-tenant",
         "project_workspace_id": "personal-tenant",
@@ -443,6 +447,7 @@ def test_bisync_reset_skips_workspace_check_without_credentials(monkeypatch, tmp
 
     assert result.exit_code == 0, result.output
     assert "No bisync state found for project 'research'" in result.output
+    assert "`bm cloud bisync-reset` is deprecated" in " ".join(result.output.split())
 
 
 def _stub_transfer_env(
@@ -1130,6 +1135,8 @@ def test_cloud_prune_blocks_organization_workspace(monkeypatch, config_manager):
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
     assert "The prune operation" in output
+    # prune is not a deprecated mirror command; only sync/bisync warn (#1596).
+    assert "is deprecated" not in output
     assert "only supported on Personal workspaces" in output
     assert "bm cloud push --name research" in output
     assert "bm cloud pull --name research" in output
@@ -1241,3 +1248,15 @@ def _workspace(
         is_default=is_default,
         has_active_subscription=True,
     )
+
+
+@pytest.mark.parametrize("command", ["sync", "bisync", "bisync-reset"])
+def test_mirror_commands_are_marked_deprecated_in_help(command):
+    """Help output labels the rclone mirror commands deprecated (#1596)."""
+    result = runner.invoke(app, ["cloud", "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.output
+    line = next(
+        line for line in result.output.splitlines() if line.strip("│ ").startswith(f"{command} ")
+    )
+    assert "deprecated" in line.lower()

@@ -161,7 +161,7 @@ In local mode the plugin auto-creates the BM project on first init via `bm proje
 
 ### Cloud mode
 
-When `mode: cloud`, tool calls route directly through the BM cloud API — no local file mirror, no bisync. You set this up once with the BM CLI:
+When `mode: cloud`, tool calls route directly through the BM cloud API — no local file mirror, no file sync. You set this up once with the BM CLI:
 
 ```bash
 # Authenticate (OAuth) or save an API key
@@ -192,7 +192,7 @@ hermes gateway restart
 
 Tool calls now route from `bm mcp` → `<cloud_host>/proxy` over HTTPS using your OAuth token (or API key). Notes never touch local disk.
 
-**Don't confuse cloud mode with `bm cloud bisync`.** Bisync is rclone-style two-way file sync between a *local* project and cloud storage, intended for keeping local working copies. For agent-driven capture you want true cloud routing (`set-cloud`), not bisync.
+**Don't confuse cloud mode with file sync.** `bm cloud pull` / `bm cloud push` copy files between a *local* project and cloud storage, for keeping local working copies (`bm cloud bisync` is deprecated). For agent-driven capture you want true cloud routing (`set-cloud`), not file sync.
 
 ## Updating / removing
 

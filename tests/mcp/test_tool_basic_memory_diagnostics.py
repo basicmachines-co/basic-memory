@@ -544,3 +544,51 @@ def test_diagnostics_redacts_database_url_query_password(tmp_path):
     assert "query-supersecret" not in result
     assert "sslmode=require" in result
     assert "sslpassword=%2A%2A%2A" in result
+
+
+# ---------------------------------------------------------------------------
+# Environment overrides (#1595)
+# ---------------------------------------------------------------------------
+
+
+def _environment_section(report: str) -> tuple[dict[str, str], str]:
+    """Return the parsed override JSON and the raw text of the env section."""
+    section = report.split("## Environment Overrides", 1)[1]
+    env_json = section.split("```json\n", 1)[1].split("\n```", 1)[0]
+    return json.loads(env_json), section
+
+
+def test_diagnostics_reports_env_overrides_by_field_name(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"default_search_type": "hybrid"}))
+    monkeypatch.setenv("BASIC_MEMORY_DEFAULT_SEARCH_TYPE", "vector")
+    monkeypatch.setenv("basic_memory_semantic_min_similarity", "0.49")
+
+    overrides, _ = _environment_section(basic_memory_diagnostics())
+
+    assert overrides["default_search_type"] == "vector"
+    assert overrides["semantic_min_similarity"] == "0.49"
+
+
+def test_diagnostics_redacts_secret_env_overrides(monkeypatch):
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_API_KEY", "bmc_env_secret")
+    monkeypatch.setenv("BASIC_MEMORY_REDIS_URL", "redis://user:hunter2@cache.example.com:6379/0")
+
+    report = basic_memory_diagnostics()
+    overrides, _ = _environment_section(report)
+
+    assert overrides["cloud_api_key"] == "<redacted>"
+    assert overrides["redis_url"] == "redis://***@cache.example.com:6379/0"
+    assert "bmc_env_secret" not in report
+    assert "hunter2" not in report
+
+
+def test_diagnostics_lists_non_field_env_vars_by_name_only(monkeypatch):
+    monkeypatch.setenv("BASIC_MEMORY_NOT_A_CONFIG_FIELD", "do-not-print")
+
+    report = basic_memory_diagnostics()
+    overrides, section = _environment_section(report)
+
+    assert "not_a_config_field" not in overrides
+    assert "BASIC_MEMORY_NOT_A_CONFIG_FIELD" in section
+    assert "do-not-print" not in report
