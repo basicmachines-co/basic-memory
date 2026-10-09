@@ -2621,6 +2621,9 @@ class RuntimeFactorySearchIndex:
             entities_failed=0,
         )
 
+    async def semantic_effectively_enabled(self) -> bool:
+        return True
+
 
 class RuntimeFactoryRelationRepository:
     async def find_unresolved_relations(

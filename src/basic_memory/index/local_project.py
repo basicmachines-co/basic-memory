@@ -37,6 +37,7 @@ from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.embedding_index_planning import (
     DeferredEmbeddingTargetSource,
     EmbeddingBatchVectorSync,
+    EmbeddingIndexTarget,
     RepositoryVectorSyncEntitySource,
 )
 from basic_memory.indexing.file_batch_runner import (
@@ -536,6 +537,30 @@ def local_project_embedding_vector_sync(
     return dependencies.search_service
 
 
+class SemanticRuntimeProbe(Protocol):
+    """Capability that reports whether semantic embedding can run right now."""
+
+    async def semantic_effectively_enabled(self) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDeferredEmbeddingTargetSource:
+    """List deferred embedding work only when this runtime can embed it."""
+
+    targets: DeferredEmbeddingTargetSource
+    semantic_runtime: SemanticRuntimeProbe
+
+    async def list_deferred_embedding_targets(self) -> tuple[EmbeddingIndexTarget, ...]:
+        # Trigger: the database carries deferral markers from an install that could
+        #   embed, but this Python/SQLite build fell back to keyword-only (#711).
+        # Why: resuming those entities would call into vector sync and raise, so a
+        #   no-change index pass would fail instead of degrading quietly.
+        # Outcome: no deferred targets; the markers wait for a runtime that can embed.
+        if not await self.semantic_runtime.semantic_effectively_enabled():
+            return ()
+        return await self.targets.list_deferred_embedding_targets()
+
+
 @dataclass(frozen=True, slots=True)
 class LocalIndexFileBatchReader(IndexFileBatchReader[IndexInputFile]):
     """Load current local files for the shared index-file batch runner."""
@@ -733,9 +758,12 @@ class LocalProjectIndexRuntimeFactory:
                 entity_indexer=dependencies.search_service,
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
-            deferred_embedding_targets=RepositoryVectorSyncEntitySource(
-                session_maker=dependencies.session_maker,
-                project_id=dependencies.project_id,
+            deferred_embedding_targets=LocalDeferredEmbeddingTargetSource(
+                targets=RepositoryVectorSyncEntitySource(
+                    session_maker=dependencies.session_maker,
+                    project_id=dependencies.project_id,
+                ),
+                semantic_runtime=dependencies.search_service,
             ),
             index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
                 session_maker=dependencies.session_maker,

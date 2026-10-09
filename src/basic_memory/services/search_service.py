@@ -692,6 +692,10 @@ class SearchService:
             )
             raise  # pragma: no cover
 
+    async def semantic_effectively_enabled(self) -> bool:
+        """Return whether this runtime can embed, honoring the keyword-only fallback."""
+        return await self.repository.semantic_effectively_enabled()
+
     async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         """Refresh vector chunks for one entity in repositories that support semantic indexing."""
         async with db.scoped_session(self.session_maker) as session:
