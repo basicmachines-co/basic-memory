@@ -22,10 +22,13 @@ express per-project access.
 import asyncio
 import re
 import xml.etree.ElementTree as ElementTree
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -84,12 +87,14 @@ class RemoteFile:
     modified: datetime | None
 
 
-@dataclass(frozen=True)
-class DownloadedFile:
-    """A file fetched over ``GET``, with whatever validators came back with it."""
+# File bodies move in chunks of this size, in both directions. A transfer runs
+# several files at once (#1604), so holding each whole file in memory would
+# multiply peak memory by the number of files in flight.
+_STREAM_CHUNK_BYTES = 1024 * 1024
 
-    content: bytes
-    modified: datetime | None
+# A request body is either fixed bytes or a factory that opens a fresh stream.
+# A stream can be read once, so a retried upload needs a new one per attempt.
+type RequestBody = bytes | str | Callable[[], AsyncIterator[bytes]] | None
 
 
 @dataclass(frozen=True)
@@ -188,15 +193,16 @@ def _retry_after_seconds(response: httpx.Response) -> float:
     return min(max(seconds, _RATE_LIMIT_MIN_WAIT_SECONDS), _RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
-async def _request_with_rate_limit_retry(
+@asynccontextmanager
+async def _rate_limited_request(
     client: httpx.AsyncClient,
     method: str,
     request_path: str,
     *,
-    content: bytes | str | None = None,
+    content: RequestBody = None,
     headers: dict[str, str] | None = None,
-) -> httpx.Response:
-    """Send one request, waiting out any rate-limit rejections.
+) -> AsyncIterator[httpx.Response]:
+    """Send one request, waiting out any rate-limit rejections, and stream the answer.
 
     Every request this module sends is safe to repeat: the reads have no body,
     and the one write carries the same bytes and headers each time, so a replay
@@ -204,16 +210,44 @@ async def _request_with_rate_limit_retry(
     explicitly rather than forwarded, so a caller cannot quietly add a parameter
     that makes a retry something other than the same request again.
 
-    A 429 on the final attempt is returned rather than raised, so the caller's
+    A successful response body is left unread, so a download can go to disk as it
+    arrives. An error response is read in full: it is small, and the caller's
+    error message quotes it. The response is closed when the block exits.
+
+    A 429 on the final attempt is yielded rather than raised, so the caller's
     own error handling reports it with the rate-limit detail attached.
     """
-    for remaining in range(_RATE_LIMIT_MAX_ATTEMPTS - 1, -1, -1):
-        response = await client.request(method, request_path, content=content, headers=headers)
-        if response.status_code != httpx.codes.TOO_MANY_REQUESTS or remaining == 0:
-            return response
+    attempt = 1
+    while True:
+        body = content if content is None or isinstance(content, bytes | str) else content()
+        request = client.build_request(method, request_path, content=body, headers=headers)
+        response = await client.send(request, stream=True)
+        if (
+            response.status_code != httpx.codes.TOO_MANY_REQUESTS
+            or attempt == _RATE_LIMIT_MAX_ATTEMPTS
+        ):
+            break
+        await response.aclose()
         await _sleep(_retry_after_seconds(response))
+        attempt += 1
 
-    raise AssertionError("unreachable: the loop returns on its final attempt")
+    try:
+        if response.is_error:
+            await response.aread()
+        yield response
+    finally:
+        await response.aclose()
+
+
+def _file_chunks(source: Path) -> Callable[[], AsyncIterator[bytes]]:
+    """A body factory that reads ``source`` from the start on every call."""
+
+    async def chunks() -> AsyncIterator[bytes]:
+        with source.open("rb") as stream:
+            while chunk := stream.read(_STREAM_CHUNK_BYTES):
+                yield chunk
+
+    return chunks
 
 
 async def list_project_files(client: httpx.AsyncClient, project: str) -> list[RemoteFile]:
@@ -230,31 +264,33 @@ async def list_project_files(client: httpx.AsyncClient, project: str) -> list[Re
     """
     request_path = webdav_path(project)
     try:
-        response = await _request_with_rate_limit_retry(
+        async with _rate_limited_request(
             client,
             "PROPFIND",
             request_path,
             content=_PROPFIND_BODY,
             headers={"Depth": "infinity", "Content-Type": "application/xml"},
-        )
-        # Trigger: the service refused the recursive listing (RFC 4918 9.1).
-        # Why: it does this for a project larger than one response may describe.
-        # A per-directory walk would work around it, but silently falling back
-        # would hide that the service has drawn a line here.
-        # Outcome: stop with a message that names the cause.
-        if response.status_code == httpx.codes.FORBIDDEN and _is_finite_depth_refusal(
-            response.text
-        ):
-            raise WebdavError(
-                f"The cloud refused to list project '{project}' in one request: it has "
-                "more files than one listing may describe. Push and pull cannot run "
-                "on this project yet."
-            )
-        response.raise_for_status()
+        ) as response:
+            # Trigger: the service refused the recursive listing (RFC 4918 9.1).
+            # Why: it does this for a project larger than one response may describe.
+            # A per-directory walk would work around it, but silently falling back
+            # would hide that the service has drawn a line here.
+            # Outcome: stop with a message that names the cause.
+            if response.status_code == httpx.codes.FORBIDDEN and _is_finite_depth_refusal(
+                response.text
+            ):
+                raise WebdavError(
+                    f"The cloud refused to list project '{project}' in one request: it has "
+                    "more files than one listing may describe. Push and pull cannot run "
+                    "on this project yet."
+                )
+            response.raise_for_status()
+            await response.aread()
+            listing_xml = response.text
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to list cloud project '{project}': {_describe(exc)}") from exc
 
-    entries = _parse_propfind(response.text, request_path=request_path)
+    entries = _parse_propfind(listing_xml, request_path=request_path)
     _require_recursive_listing(entries, project)
     return [
         RemoteFile(
@@ -268,23 +304,29 @@ async def list_project_files(client: httpx.AsyncClient, project: str) -> list[Re
     ]
 
 
-async def download_file(client: httpx.AsyncClient, project: str, rel_path: str) -> DownloadedFile:
-    """Fetch one file, along with the last-modified time the service reports.
+async def download_file(
+    client: httpx.AsyncClient, project: str, rel_path: str, sink: BinaryIO
+) -> datetime | None:
+    """Write one file's bytes into ``sink`` as they arrive.
+
+    Returns:
+        The last-modified time the service reports, or None when it sends none.
 
     Raises:
-        WebdavError: If the service refuses the download.
+        WebdavError: If the service refuses the download or the connection fails
+            partway. ``sink`` may then hold a partial body; the caller discards it.
     """
     request_path = webdav_path(project, rel_path)
     try:
-        response = await _request_with_rate_limit_retry(client, "GET", request_path)
-        response.raise_for_status()
+        async with _rate_limited_request(client, "GET", request_path) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes(_STREAM_CHUNK_BYTES):
+                sink.write(chunk)
+            modified = _parse_http_date(response.headers.get("Last-Modified"))
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to download {rel_path}: {_describe(exc)}") from exc
 
-    return DownloadedFile(
-        content=response.content,
-        modified=_parse_http_date(response.headers.get("Last-Modified")),
-    )
+    return modified
 
 
 async def upload_file(
@@ -292,11 +334,15 @@ async def upload_file(
     project: str,
     rel_path: str,
     *,
-    content: bytes,
-    mtime: int,
+    source: Path,
     create_only: bool = False,
 ) -> bool:
-    """Write one file, advertising the local modification time.
+    """Write one local file, advertising its modification time.
+
+    The body is read from ``source`` in chunks as it is sent, with the size
+    declared up front as Content-Length, so the service can refuse an oversized
+    file before reading it. A file that changes size mid-upload fails the
+    request rather than sending bytes that disagree with the declared length.
 
     ``X-OC-Mtime`` (the ownCloud/Nextcloud convention) is what `bm cloud upload`
     already sends, so the two write paths look identical to the service.
@@ -315,19 +361,23 @@ async def upload_file(
         WebdavError: If the service refuses the upload for any other reason.
     """
     request_path = webdav_path(project, rel_path)
-    headers = {"X-OC-Mtime": str(mtime)}
+    stat = source.stat()
+    headers = {
+        "X-OC-Mtime": str(int(stat.st_mtime)),
+        "Content-Length": str(stat.st_size),
+    }
     if create_only:
         headers["If-None-Match"] = "*"
 
     try:
-        response = await _request_with_rate_limit_retry(
-            client, "PUT", request_path, content=content, headers=headers
-        )
-        # Checked before raise_for_status: a refused precondition is the answer
-        # this call asked for, not a failure.
-        if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
-            return False
-        response.raise_for_status()
+        async with _rate_limited_request(
+            client, "PUT", request_path, content=_file_chunks(source), headers=headers
+        ) as response:
+            # Checked before raise_for_status: a refused precondition is the answer
+            # this call asked for, not a failure.
+            if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
+                return False
+            response.raise_for_status()
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
 
