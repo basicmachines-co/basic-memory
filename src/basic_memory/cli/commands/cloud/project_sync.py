@@ -112,7 +112,9 @@ class ConflictStrategy(str, Enum):
 def _warn_mirror_deprecated(command: str, name: str) -> None:
     """Print the deprecation notice every deprecated mirror command shows on each run."""
     notice = MIRROR_DEPRECATION_NOTICE.format(command=command, name=shlex.quote(name))
-    console.print(f"[yellow]{notice}[/yellow]")
+    # markup=False: the project name is user text, and a name like `[bold]x[/bold]`
+    # would otherwise render as `x`, so the copied pull/push command would be wrong.
+    console.print(notice, style="yellow", markup=False)
 
 
 def _has_cloud_credentials(config: BasicMemoryConfig) -> bool:
@@ -215,7 +217,7 @@ def _require_personal_workspace(
     if workspace.workspace_type != "personal":
         # The templates below embed `--name {name}`; quote it before rendering so a
         # name with a space stays one argument in the command they print.
-        console.print(f"[red]{unsupported_message.format(name=shlex.quote(name))}[/red]")
+        console.print(unsupported_message.format(name=shlex.quote(name)), style="red", markup=False)
         raise typer.Exit(1)
 
     return workspace
