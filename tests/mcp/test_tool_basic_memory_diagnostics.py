@@ -7,6 +7,7 @@ from pathlib import Path
 
 import basic_memory
 import pytest
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.mcp.tools.basic_memory_diagnostics import (
     _redact_config,
     _redact_url,
@@ -588,6 +589,16 @@ def test_diagnostics_matches_config_manager_env_precedence(monkeypatch, tmp_path
     names_only = section.split("```", 2)[2]
     assert "semantic_min_similarity" not in names_only
     assert "BASIC_MEMORY_SYNC_DELAY" not in names_only
+
+
+def test_diagnostics_reports_pydantic_winner_for_duplicate_spellings(monkeypatch):
+    """With two spellings set, the report shows the value the config actually uses."""
+    monkeypatch.setenv("BASIC_MEMORY_DEFAULT_SEARCH_TYPE", "text")
+    monkeypatch.setenv("basic_memory_default_search_type", "vector")
+
+    overrides, _ = _environment_section(basic_memory_diagnostics())
+
+    assert overrides["default_search_type"] == BasicMemoryConfig().default_search_type
 
 
 def test_diagnostics_redacts_secret_env_overrides(monkeypatch):

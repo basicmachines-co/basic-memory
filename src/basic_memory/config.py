@@ -280,7 +280,9 @@ def env_override_sources(file_data: Mapping[str, Any]) -> dict[str, str]:
     A field is env-sourced when `BASIC_MEMORY_<FIELD>` is set in any letter
     case: pydantic-settings matches env names case-insensitively, so a
     lowercase name must win over the file just as it wins over the default.
-    When several spellings are set, the exact upper-case name is reported.
+    When several spellings are set, the last one in `os.environ` order is
+    reported, because pydantic-settings folds the environment into a
+    lower-cased dict and the last spelling overwrites the earlier ones.
 
     A field renamed from a legacy sync key is also env-sourced when its legacy
     env var is set and the file does not spell the new name, because that is
@@ -288,16 +290,12 @@ def env_override_sources(file_data: Mapping[str, Any]) -> dict[str, str]:
     migration reads the exact upper-case legacy name, so this does too.
     """
     env_prefix = str(BasicMemoryConfig.model_config["env_prefix"])
-    env_names_by_upper: dict[str, str] = {}
-    for env_name in os.environ:
-        env_names_by_upper.setdefault(env_name.upper(), env_name)
+    env_names_by_upper = {env_name.upper(): env_name for env_name in os.environ}
 
     sources: dict[str, str] = {}
     for field_name in BasicMemoryConfig.model_fields:
         expected = f"{env_prefix}{field_name.upper()}"
-        if expected in os.environ:
-            sources[field_name] = expected
-        elif expected in env_names_by_upper:
+        if expected in env_names_by_upper:
             sources[field_name] = env_names_by_upper[expected]
     for new_field, legacy_key in BasicMemoryConfig._LEGACY_SYNC_FIELDS.items():
         legacy_env_name = f"{env_prefix}{legacy_key.upper()}"
