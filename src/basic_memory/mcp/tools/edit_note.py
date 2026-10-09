@@ -234,13 +234,43 @@ The identifier `{identifier}` resolved to a note outside the selected project `{
 Retry with `project_id="{target_project_id}"`, or use `list_memory_projects()` to confirm the intended project before editing."""
 
 
+class EditRefused(ToolError):
+    """A failed edit, already formatted for the caller.
+
+    The outer handler in edit_note re-raises it unchanged instead of wrapping it again.
+    """
+
+
 def _raise_edit_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
     """Report a failed edit as a tool error, keeping the guidance for the caller.
 
     A returned "Edit Failed" string reads as success to MCP clients; raising makes
     the result an error (isError) while the message still carries the same help.
     """
-    raise ToolError(json.dumps(payload) if output_format == "json" else text)
+    raise EditRefused(json.dumps(payload) if output_format == "json" else text)
+
+
+def _write_was_refused(error: Exception) -> bool:
+    """Whether the API answered the write with a 4xx, so nothing was written.
+
+    The HTTP helpers raise ToolError from the HTTPStatusError when a response arrived,
+    and from the TransportError when none did.
+    """
+    cause = error.__cause__
+    return isinstance(cause, HTTPStatusError) and 400 <= cause.response.status_code < 500
+
+
+def _format_unknown_outcome_response(
+    error_message: str, operation: str, identifier: str, project: str
+) -> str:
+    """Format a failure that happened after the write was sent, with no refusal from the API."""
+    return f"""# Edit Outcome Unknown
+
+The {operation} on note '{identifier}' was sent, but no confirmation came back: {error_message}
+
+The edit may have been applied. Read the note before retrying; repeating an append or
+prepend that already landed adds the content twice:
+`read_note(identifier="{identifier}", project="{project}")`"""
 
 
 def _format_error_response(
@@ -580,8 +610,9 @@ async def edit_note(
                 context=context,
             )
             if detected:
-                if output_format == "json":
-                    return {
+                _raise_edit_failure(
+                    output_format,
+                    {
                         "title": None,
                         "permalink": None,
                         "file_path": None,
@@ -590,10 +621,11 @@ async def edit_note(
                         "fileCreated": False,
                         "error": "AMBIGUOUS_IDENTIFIER",
                         "project": detected,
-                    }
-                return _format_ambiguous_workspace_identifier_response(
-                    identifier=identifier,
-                    detected_project=detected,
+                    },
+                    _format_ambiguous_workspace_identifier_response(
+                        identifier=identifier,
+                        detected_project=detected,
+                    ),
                 )
 
     with logfire.span(
@@ -643,6 +675,9 @@ async def edit_note(
                         + ", ".join(null_keys)
                     )
 
+            # Set once the create or PATCH request leaves this process; the handler below
+            # needs it to tell a refusal from a write whose outcome is unknown.
+            write_sent = False
             # Use the PATCH endpoint to edit the entity
             try:
                 # Import here to avoid circular import
@@ -690,8 +725,9 @@ async def edit_note(
                         # Why: patching through the active project's endpoint would leak
                         #   an internal entity ID in a misleading 404 and cannot succeed.
                         # Outcome: stop before mutation and provide the owning project ID.
-                        if output_format == "json":
-                            return {
+                        _raise_edit_failure(
+                            output_format,
+                            {
                                 "title": None,
                                 "permalink": None,
                                 "file_path": None,
@@ -701,13 +737,18 @@ async def edit_note(
                                 "error": "CROSS_PROJECT_ENTITY",
                                 "project": active_project.name,
                                 "targetProjectId": resolved_entity.project_external_id,
-                            }
-                        return _format_cross_project_entity_response(
-                            identifier=identifier,
-                            active_project=active_project.name,
-                            target_project_id=resolved_entity.project_external_id,
+                            },
+                            _format_cross_project_entity_response(
+                                identifier=identifier,
+                                active_project=active_project.name,
+                                target_project_id=resolved_entity.project_external_id,
+                            ),
                         )
                     entity_id = resolved_entity.external_id
+                except EditRefused:
+                    # The cross-project refusal above must not be read as a missing note:
+                    # its text says "Not Found", which would route it to auto-create.
+                    raise
                 except Exception as resolve_error:
                     error_msg = str(resolve_error).lower()
                     is_not_found = "entity not found" in error_msg or "not found" in error_msg
@@ -742,8 +783,9 @@ async def edit_note(
                                 directory=directory,
                                 project=active_project.name,
                             )
-                            if output_format == "json":
-                                return {
+                            _raise_edit_failure(
+                                output_format,
+                                {
                                     "title": title,
                                     "permalink": None,
                                     "file_path": None,
@@ -751,8 +793,10 @@ async def edit_note(
                                     "operation": operation,
                                     "fileCreated": False,
                                     "error": "SECURITY_VALIDATION_ERROR",
-                                }
-                            return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
+                                },
+                                f"# Error\n\nDirectory path '{directory}' is not allowed - "
+                                "paths must stay within project boundaries",
+                            )
 
                         entity = Entity(
                             title=title,
@@ -780,6 +824,7 @@ async def edit_note(
                             directory=directory,
                             operation=operation,
                         )
+                        write_sent = True
                         result = await knowledge_client.create_entity(entity.model_dump())
                         file_created = True
                     else:
@@ -807,6 +852,7 @@ async def edit_note(
                         edit_data["metadata"] = metadata
 
                     # Call the PATCH endpoint
+                    write_sent = True
                     result = await knowledge_client.patch_entity(entity_id, edit_data)
 
                 # --- Format response ---
@@ -898,8 +944,32 @@ async def edit_note(
                 summary_result = "\n".join(summary)
                 return add_project_metadata(summary_result, active_project.name)
 
+            except EditRefused:
+                raise
             except Exception as e:
                 logger.error(f"Error editing note: {e}")
+                # Trigger: the write was sent and the API did not answer it with a refusal
+                #   (no response arrived, or a 5xx).
+                # Why: the server may have committed it, so "refused, retry" would invite
+                #   a retry that applies an append or prepend twice.
+                # Outcome: still an error, but one that says to read the note first.
+                if write_sent and not _write_was_refused(e):
+                    _raise_edit_failure(
+                        output_format,
+                        {
+                            "title": None,
+                            "permalink": None,
+                            "file_path": None,
+                            "checksum": None,
+                            "operation": operation,
+                            "fileCreated": False,
+                            "error": "EDIT_OUTCOME_UNKNOWN",
+                            "detail": str(e),
+                        },
+                        _format_unknown_outcome_response(
+                            str(e), operation, identifier, active_project.name
+                        ),
+                    )
                 if isinstance(e, UnresolvedProjectRouteError):
                     _raise_edit_failure(
                         output_format,

@@ -455,23 +455,24 @@ async def test_edit_note_cross_project_resolution_stops_before_patch(
     monkeypatch.setattr(KnowledgeClient, "resolve_entity_response", resolve_in_sibling)
     monkeypatch.setattr(KnowledgeClient, "patch_entity", fail_patch)
 
-    result = await edit_note(
-        project=test_project.name,
-        identifier="sibling-project::Cross Project Note",
-        operation="append",
-        content="\nMust not be appended.",
-        output_format=output_format,
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier="sibling-project::Cross Project Note",
+            operation="append",
+            content="\nMust not be appended.",
+            output_format=output_format,
+        )
 
     if output_format == "json":
-        assert isinstance(result, dict)
+        result = json.loads(str(refusal.value))
         assert result["error"] == "CROSS_PROJECT_ENTITY"
         assert result["fileCreated"] is False
         assert result["project"] == test_project.name
         assert result["targetProjectId"] == target_project_id
         assert target_entity_id not in result.values()
     else:
-        assert isinstance(result, str)
+        result = str(refusal.value)
         assert "# Edit Failed - Note Not Found In This Project" in result
         assert f"selected project `{test_project.name}`" in result
         assert f'project_id="{target_project_id}"' in result
@@ -1123,15 +1124,16 @@ async def test_edit_note_workspace_qualified_plain_permalink_requires_explicit_r
     )
     monkeypatch.setattr(edit_note_module, "get_project_client", fail_if_called)
 
-    result = await edit_note(
-        identifier=qualified_identifier,
-        operation="append",
-        content="\nAppended via plain workspace-qualified permalink.",
-        project=None,
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            identifier=qualified_identifier,
+            operation="append",
+            content="\nAppended via plain workspace-qualified permalink.",
+            project=None,
+        )
 
     assert detected_identifiers == [qualified_identifier]
-    assert isinstance(result, str)
+    result = str(refusal.value)
     assert "# Edit Failed - Ambiguous Identifier" in result
     assert f"`{qualified_identifier}` could refer to a local note path" in result
     assert f'project="{workspace_slug}/{test_project.name}"' in result
@@ -1166,15 +1168,16 @@ async def test_edit_note_workspace_qualified_plain_permalink_json_error(
         raising=False,
     )
 
-    result = await edit_note(
-        identifier=qualified_identifier,
-        operation="append",
-        content="\nAppended via plain workspace-qualified permalink.",
-        output_format="json",
-        project=None,
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            identifier=qualified_identifier,
+            operation="append",
+            content="\nAppended via plain workspace-qualified permalink.",
+            output_format="json",
+            project=None,
+        )
 
-    assert isinstance(result, dict)
+    result = json.loads(str(refusal.value))
     assert result["error"] == "AMBIGUOUS_IDENTIFIER"
     assert result["project"] == f"{workspace_slug}/{test_project.name}"
     assert result["fileCreated"] is False
@@ -1209,14 +1212,15 @@ async def test_edit_note_ambiguous_namespace_identifier_returns_guidance(
         raising=False,
     )
 
-    result = await edit_note(
-        identifier=identifier,
-        operation="append",
-        content="\nAppended via namespace-style plain identifier.",
-        project=None,
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            identifier=identifier,
+            operation="append",
+            content="\nAppended via namespace-style plain identifier.",
+            project=None,
+        )
 
-    assert isinstance(result, str)
+    result = str(refusal.value)
     assert "# Edit Failed - Ambiguous Identifier" in result
     assert f"`{identifier}` could refer to a local note path" in result
     assert f"memory://{normalized_identifier}" in result
@@ -1317,14 +1321,15 @@ async def test_edit_note_plain_workspace_route_returns_guidance_with_local_confi
     monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
     monkeypatch.setattr(edit_note_module, "get_project_client", fail_if_called)
 
-    result = await edit_note(
-        identifier="personal/main/team/plain-edit-note",
-        operation="append",
-        content="\nAppended via plain workspace-qualified permalink.",
-        project=None,
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            identifier="personal/main/team/plain-edit-note",
+            operation="append",
+            content="\nAppended via plain workspace-qualified permalink.",
+            project=None,
+        )
 
-    assert isinstance(result, str)
+    result = str(refusal.value)
     assert "# Edit Failed - Ambiguous Identifier" in result
     assert 'project="personal/main"' in result
 
@@ -1697,14 +1702,15 @@ async def test_resolve_after_disk_recovery_propagates_unexpected_errors():
 @pytest.mark.asyncio
 async def test_edit_note_append_traversal_identifier_is_blocked(client, test_project):
     """A traversal identifier must be rejected by both disk recovery and auto-create."""
-    result = await edit_note(
-        project=test_project.name,
-        identifier="../escape-note",
-        operation="append",
-        content="should never be written",
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier="../escape-note",
+            operation="append",
+            content="should never be written",
+        )
 
-    assert isinstance(result, str)
+    result = str(refusal.value)
     assert "# Error" in result
     assert "paths must stay within project boundaries" in result
     assert not (Path(test_project.path).parent / "escape-note.md").exists()
@@ -1713,15 +1719,16 @@ async def test_edit_note_append_traversal_identifier_is_blocked(client, test_pro
 @pytest.mark.asyncio
 async def test_edit_note_append_traversal_identifier_json_error(client, test_project):
     """JSON mode reports a structured security error for traversal identifiers."""
-    result = await edit_note(
-        project=test_project.name,
-        identifier="../escape-json-note",
-        operation="append",
-        content="should never be written",
-        output_format="json",
-    )
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier="../escape-json-note",
+            operation="append",
+            content="should never be written",
+            output_format="json",
+        )
 
-    assert isinstance(result, dict)
+    result = json.loads(str(refusal.value))
     assert result["error"] == "SECURITY_VALIDATION_ERROR"
     assert result["fileCreated"] is False
 
@@ -1763,3 +1770,80 @@ async def test_edit_note_reports_the_accepted_db_checksum(
 
     assert "checksum: unknown" not in result
     assert f"checksum: {db_checksum[:8]}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_reports_unknown_outcome_when_no_response_arrives(
+    client, test_project, monkeypatch
+):
+    """A PATCH that got no response may have committed; the error must say to read first."""
+    await write_note(
+        project=test_project.name,
+        title="Unknown Outcome",
+        directory="notes",
+        content="# Unknown Outcome\n\nBody.",
+    )
+
+    async def dropped_connection(self, entity_id, patch_data):
+        try:
+            raise httpx.ReadError("connection dropped")
+        except httpx.ReadError as error:
+            raise ToolError("Network error: the connection dropped") from error
+
+    monkeypatch.setattr(KnowledgeClient, "patch_entity", dropped_connection)
+
+    with pytest.raises(ToolError) as text_failure:
+        await edit_note(
+            project=test_project.name,
+            identifier="notes/unknown-outcome",
+            operation="append",
+            content="\nAppended.",
+        )
+    assert "# Edit Outcome Unknown" in str(text_failure.value)
+    assert "may have been applied" in str(text_failure.value)
+
+    with pytest.raises(ToolError) as json_failure:
+        await edit_note(
+            project=test_project.name,
+            identifier="notes/unknown-outcome",
+            operation="append",
+            content="\nAppended.",
+            output_format="json",
+        )
+    payload = json.loads(str(json_failure.value))
+    assert payload["error"] == "EDIT_OUTCOME_UNKNOWN"
+    assert "connection dropped" in payload["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_note_reports_a_4xx_as_a_refusal_not_an_unknown_outcome(
+    client, test_project, monkeypatch
+):
+    """The API answered no, so nothing was written and the plain failure stands."""
+    await write_note(
+        project=test_project.name,
+        title="Refused Edit",
+        directory="notes",
+        content="# Refused Edit\n\nBody.",
+    )
+
+    async def conflict(self, entity_id, patch_data):
+        request = httpx.Request("PATCH", "http://test/entities")
+        response = httpx.Response(409, request=request)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise ToolError("Note was modified concurrently") from error
+
+    monkeypatch.setattr(KnowledgeClient, "patch_entity", conflict)
+
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier="notes/refused-edit",
+            operation="append",
+            content="\nAppended.",
+            output_format="json",
+        )
+    payload = json.loads(str(refusal.value))
+    assert payload["error"] == "Note was modified concurrently"
