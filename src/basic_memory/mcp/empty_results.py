@@ -27,16 +27,13 @@ class EmptyListResultMiddleware(Middleware):
         result = await call_next(context)
         # Trigger: the tool returned an empty list, so FastMCP emitted no content.
         # Why: text-only clients would otherwise receive an empty response.
-        # Outcome: the first block is "[]", the same JSON a non-empty list renders
-        #          as, so parsers keep working; the second says it in words. The
+        # Outcome: one "[]" block, the same JSON shape a non-empty list renders as,
+        #          so clients that parse the joined text still get valid JSON. The
         #          structured result is unchanged.
         if result.content or result.structured_content != {"result": []}:
             return result
         return ToolResult(
-            content=[
-                TextContent(type="text", text="[]"),
-                TextContent(type="text", text=f"No results: {context.message.name} found nothing."),
-            ],
+            content=[TextContent(type="text", text="[]")],
             structured_content=result.structured_content,
             meta=result.meta,
         )

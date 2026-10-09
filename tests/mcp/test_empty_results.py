@@ -22,14 +22,14 @@ def _server() -> FastMCP:
 
 
 @pytest.mark.asyncio
-async def test_empty_list_result_gets_json_and_prose_text_blocks():
+async def test_empty_list_result_gets_one_json_text_block():
     async with Client(_server()) as client:
         result = await client.call_tool("rows", {"count": 0})
 
     assert result.structured_content == {"result": []}
-    texts = [block.text for block in result.content if block.type == "text"]
-    assert json.loads(texts[0]) == []
-    assert texts[1] == "No results: rows found nothing."
+    assert len(result.content) == 1
+    assert result.content[0].type == "text"
+    assert json.loads(result.content[0].text) == []
 
 
 @pytest.mark.asyncio
