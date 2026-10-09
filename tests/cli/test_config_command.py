@@ -181,6 +181,35 @@ def test_config_set_coerces_bool_from_string(runner, write_config):
     assert "format_on_save = True" in result.output
 
 
+def test_config_set_default_project_rejects_unknown_project(runner, write_config):
+    """An unknown default_project fails instead of being swapped for the first project (#1635)."""
+    config_file = write_config(_base_config())
+
+    result = runner.invoke(app, ["config", "set", "default_project", "nosuch"])
+
+    assert result.exit_code == 1
+    assert "'nosuch' is not a configured project" in result.output
+    assert "main" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "main"
+
+
+def test_config_set_default_project_accepts_known_project(runner, write_config):
+    config_file = write_config(
+        _base_config(
+            projects={
+                "main": {"path": "/tmp/main", "mode": "local"},
+                "research": {"path": "/tmp/research", "mode": "local"},
+            }
+        )
+    )
+
+    result = runner.invoke(app, ["config", "set", "default_project", "research"])
+
+    assert result.exit_code == 0, result.output
+    assert "default_project = research" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "research"
+
+
 def test_config_set_rejects_structured_field(runner, write_config):
     write_config(_base_config())
 
