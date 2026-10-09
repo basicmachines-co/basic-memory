@@ -377,9 +377,11 @@ def warn_unreadable_new_directories(
     command that indexes it once its permissions are fixed; a cloud project's local
     copy is watched too, but the local reindex refuses cloud projects.
     """
+    # A name starting with "-" would be read as an option; "--" ends option parsing.
+    name_args = ("--", project.name) if project.name.startswith("-") else (project.name,)
     remedy = (
         f"Once its permissions are fixed, run "
-        f"`{shell_command('bm', 'project', 'index', project.name)}`."
+        f"`{shell_command('bm', 'project', 'index', *name_args)}`."
         if local_index_available
         else "Fix its permissions so the watcher can read it."
     )

@@ -232,3 +232,25 @@ def test_unreadable_directory_warning_survives_braces_and_fits_the_mode(
     assert len(messages) == 1
     assert str(closed) in messages[0]
     assert ("bm project index research" in messages[0]) is local_index_available
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root can read a directory with mode 000",
+)
+def test_unreadable_directory_warning_ends_options_before_a_dash_name(tmp_path: Path) -> None:
+    """A project named like an option must not be parsed as one when the hint is pasted."""
+    closed = tmp_path / "people"
+    closed.mkdir(mode=0o000)
+    project = cast(Project, SimpleNamespace(name="-foo"))
+
+    messages, sink_id = _capture_warnings()
+    try:
+        warn_unreadable_new_directories(
+            project, {(Change.added, str(closed))}, local_index_available=True
+        )
+    finally:
+        logger.remove(sink_id)
+        closed.chmod(0o755)
+
+    assert "`bm project index -- -foo`" in messages[0]
