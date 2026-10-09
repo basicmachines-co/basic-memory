@@ -647,7 +647,7 @@ def insert_relative_to_section(
 _SETEXT_UNDERLINE_LINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*(?:\r\n|\r|\n|$)")
 
 
-def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
+def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
     """Return whether joining the texts on one newline would create a setext heading.
 
     A setext underline turns the paragraph text directly above it into an H1 or H2, and a
@@ -656,34 +656,35 @@ def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
     the section parser then sees a heading nobody wrote (#1585). Every other join stays a
     single newline: a blank line between list items would turn a tight list into a loose
     one, and ATX headings, list items and quotes can already interrupt a paragraph.
+
+    ``body_before`` is the Markdown body text that ends at the join, with no frontmatter;
+    callers decide that, because only they know whether their text is a whole note or a
+    fragment inside a body.
     """
     if not _SETEXT_UNDERLINE_LINE.match(text_after):
         return False
     # Whether the line above is paragraph text depends on block context no single line
     # shows: `2. item` after a paragraph is lazy continuation, not a list, and a line
     # inside an open fence or HTML block is not a paragraph at all (a blank line there
-    # would rewrite code or close the block). Parsing the joined text lets markdown-it
+    # would rewrite code or close the block). Parsing the joined body lets markdown-it
     # decide. The prefilter above keeps this parse off the common append path.
-    # Valid frontmatter is YAML, not Markdown, and EntityParser drops it before parsing
-    # the body; a literal block scalar in it (`meta: |` then a fence line) must not read
-    # as an open code block.
-    body_before = (
-        remove_frontmatter(text_before, strip=False)
-        if has_frontmatter(text_before)
-        else text_before
-    )
     before = body_before.removesuffix("\n")
     underline_line = len(document_lines(before + "\n"))
     return setext_heading_underlined_at(before + "\n" + text_after, underline_line)
 
 
-def _edit_join_separator(text_before: str, text_after: str) -> str:
+def _markdown_body(document: str) -> str:
+    """Return a whole note's Markdown body: the text EntityParser parses after frontmatter."""
+    return remove_frontmatter(document, strip=False) if has_frontmatter(document) else document
+
+
+def _edit_join_separator(text_before: str, text_after: str, *, body_before: str) -> str:
     """Newlines that join an edit's text to its neighbor without changing either one."""
     line_break = "\n" if text_before and not text_before.endswith("\n") else ""
     # Trigger: a paragraph line would sit directly above a setext underline.
     # Why: a single newline would promote that paragraph to a heading.
     # Outcome: a blank line keeps the paragraph a paragraph and the underline a break.
-    if _joins_into_setext_heading(text_before, text_after):
+    if _joins_into_setext_heading(body_before, text_after):
         return line_break + "\n"
     return line_break
 
@@ -692,10 +693,16 @@ def _prepend_after_frontmatter(current_content: str, content: str) -> str:
     if has_frontmatter(current_content):
         frontmatter_data = parse_frontmatter(current_content)
         body_content = remove_frontmatter(current_content)
-        new_body = content + _edit_join_separator(content, body_content) + body_content
+        # The prepended content opens the existing body, so it is a body fragment: any
+        # `---` block inside it is Markdown, not frontmatter.
+        separator = _edit_join_separator(content, body_content, body_before=content)
+        new_body = content + separator + body_content
         yaml_frontmatter = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
         return f"---\n{yaml_frontmatter}---\n\n{new_body.strip()}"
-    return content + _edit_join_separator(content, current_content) + current_content
+    # Without existing frontmatter the prepended content opens the note itself, so a
+    # frontmatter block at its start becomes the note's frontmatter.
+    separator = _edit_join_separator(content, current_content, body_before=_markdown_body(content))
+    return content + separator + current_content
 
 
 def apply_edit_operation(
@@ -708,7 +715,10 @@ def apply_edit_operation(
     replace_subsections: bool = True,
 ) -> str:
     if operation == "append":
-        return current_content + _edit_join_separator(current_content, content) + content
+        separator = _edit_join_separator(
+            current_content, content, body_before=_markdown_body(current_content)
+        )
+        return current_content + separator + content
     if operation == "prepend":
         return _prepend_after_frontmatter(current_content, content)
     if operation == "find_replace":

@@ -1026,3 +1026,14 @@ def test_append_thematic_break_to_frontmatter_only_note_keeps_single_newline() -
     result = apply_edit_operation("---\ntitle: Note\n---", "append", "---")
 
     assert result == "---\ntitle: Note\n---\n---"
+
+
+def test_prepend_fragment_with_frontmatter_like_block_keeps_html_block_open() -> None:
+    # Prepended into an existing body, the `---` block is Markdown, and its `<div>` line
+    # opens an HTML block that a blank line would close.
+    fragment = "---\nmeta: |\n  <div>\n---\nraw html"
+    current_content = "---\ntitle: Note\n---\n\n---\n\nOriginal body"
+
+    result = apply_edit_operation(current_content, "prepend", fragment)
+
+    assert remove_frontmatter(result) == fragment + "\n---\n\nOriginal body"
