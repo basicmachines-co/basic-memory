@@ -344,6 +344,40 @@ async def test_pull_keep_both_writes_the_incoming_copy_beside_the_local_one(conf
 
 
 @pytest.mark.asyncio
+async def test_pull_keep_both_conflict_copy_wins_a_shared_destination(
+    config_home, tmp_path, capsys
+):
+    """A conflict copy whose name is also a new file keeps the plan's order.
+
+    Transfers run concurrently, so the conflict copy is made the slower download
+    here. It must still claim the shared name, because it is first in the plan.
+    """
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local version")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/webdav/research/dup.md":
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, content=b"cloud dup")
+        return httpx.Response(200, content=b"cloud file with the copy's name")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(conflicts=["dup.md"], new=["dup.conflict-S.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-both",
+        conflict_suffix="S",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert (root / "dup.md").read_text() == "local version"
+    assert (root / "dup.conflict-S.md").read_text() == "cloud dup"
+    assert "dup.conflict-S.md" in _plain(capsys.readouterr().out)
+
+
+@pytest.mark.asyncio
 async def test_push_uploads_new_files_with_their_local_mtime(config_home, tmp_path):
     root = tmp_path / "research"
     _write(root, "notes/new.md", "local content", mtime=1780000000)

@@ -258,26 +258,38 @@ async def _run_transfers(
         OSError: If a local file could not be read or written.
     """
     outcome = _TransferOutcome()
-    # Workers share one iterator. Advancing it never awaits, so each transfer is
+    # Trigger: two transfers name the same destination, as when a keep-both
+    # conflict copy's name is also a new file in the plan.
+    # Why: both are create-only, so whichever lands first wins the name. The
+    # plan's order (conflict copies first) decides that, not network timing.
+    # Outcome: transfers sharing a destination run in plan order on one worker.
+    by_destination: dict[str, list[_Transfer]] = {}
+    for transfer in transfers:
+        by_destination.setdefault(transfer.dest_rel, []).append(transfer)
+    # Workers share one iterator. Advancing it never awaits, so each group is
     # handed to exactly one worker.
-    queue = iter(transfers)
+    groups = iter(by_destination.values())
 
     async def worker() -> None:
-        for transfer in queue:
-            if verbose:
-                console.print(f"  {transfer.describe()}")
-            if direction == "pull":
-                written = await _pull_file(client, project, local_root, transfer)
-            else:
-                written = await _push_file(client, project, local_root, transfer)
-            if written:
-                outcome.transferred += 1
-            else:
-                outcome.refused.append(transfer.dest_rel)
+        for same_destination in groups:
+            for transfer in same_destination:
+                await move(transfer)
+
+    async def move(transfer: _Transfer) -> None:
+        if verbose:
+            console.print(f"  {transfer.describe()}")
+        if direction == "pull":
+            written = await _pull_file(client, project, local_root, transfer)
+        else:
+            written = await _push_file(client, project, local_root, transfer)
+        if written:
+            outcome.transferred += 1
+        else:
+            outcome.refused.append(transfer.dest_rel)
 
     try:
         async with asyncio.TaskGroup() as group:
-            for _ in range(min(TRANSFER_CONCURRENCY, len(transfers))):
+            for _ in range(min(TRANSFER_CONCURRENCY, len(by_destination))):
                 group.create_task(worker())
     except ExceptionGroup as group_error:
         # Trigger: one or more workers failed, and the task group cancelled the rest.
