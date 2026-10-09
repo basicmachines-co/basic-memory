@@ -23,15 +23,12 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationActor,
     AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
-    AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationResult,
     AcceptedNoteUpdateMutation,
-    load_existing_markdown_note_content,
     load_accepted_note_mutation_project,
     resolve_accepted_note_schema_directory,
-    reject_stale_base_checksum,
     run_accepted_note_create,
     run_accepted_note_delete,
     run_accepted_note_edit,
@@ -680,8 +677,9 @@ class NoteContentMutationService:
         PATCH caller -- an assistant appending to a note through MCP -- has no
         synced revision to condition on.
 
-        The read shares this transaction with the edit, so the runner plans
-        against the same db_version the precondition just checked.
+        The runner checks it against the row it locks for the edit and maps a
+        lost compare-and-set to the same structured 409, so every guarded
+        refusal comes from one place.
         """
         actor_context = self._resolve_actor(
             "edit",
@@ -701,29 +699,6 @@ class NoteContentMutationService:
                 invalidate_on_rejection=freshening_may_have_published,
             ):
                 async with accepted_note_transaction(self.session_maker) as session:
-                    if base_checksum is not None:
-                        try:
-                            _, _, current_note_content = await load_existing_markdown_note_content(
-                                session,
-                                project_external_id=project_external_id,
-                                entity_external_id=entity_external_id,
-                                dependencies=self.mutation_dependencies,
-                            )
-                        except AcceptedNoteMutationRejected as error:
-                            # Trigger: the guarded note was deleted after the caller
-                            #   resolved it (the entity row is gone).
-                            # Why: a guarded edit must answer a deleted note the same
-                            #   way whether the delete landed before resolution or
-                            #   after it; a bare 404 here would be race-dependent.
-                            # Outcome: the base-checksum conflict with no current
-                            #   checksum, which callers read as "the note is gone".
-                            if error.rejection.kind is AcceptedNoteMutationRejectKind.not_found:
-                                reject_stale_base_checksum(current_db_checksum=None)
-                            raise
-                        if current_note_content.db_checksum != base_checksum:
-                            reject_stale_base_checksum(
-                                current_db_checksum=current_note_content.db_checksum
-                            )
                     result = await run_accepted_note_edit(
                         session,
                         request=AcceptedNoteEditMutation(
@@ -737,6 +712,7 @@ class NoteContentMutationService:
                                 author=actor_context.author,
                             ),
                             source=actor_context.source,
+                            base_checksum=base_checksum,
                         ),
                         dependencies=self.mutation_dependencies,
                     )

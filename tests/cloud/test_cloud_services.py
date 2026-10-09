@@ -1244,57 +1244,23 @@ async def test_the_default_on_accepted_mutation_changes_nothing(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_edit_note_rejects_a_stale_base_checksum(monkeypatch) -> None:
-    """PATCH gains the precondition PUT already had.
+@pytest.mark.parametrize("base_checksum", ["checksum-the-caller-read", None])
+async def test_edit_note_forwards_the_base_checksum_to_the_runner(
+    monkeypatch, base_checksum
+) -> None:
+    """PATCH gains the precondition PUT already had, enforced inside the runner.
 
-    Without it a caller that read revision N patches revision N+5 blind, and the
-    only way to condition an edit was to re-implement this method outside core.
+    The runner checks it against the row it locks and maps a lost compare-and-set
+    to the same conflict, so the service only has to pass it through. The ordinary
+    PATCH caller has no synced revision, so it passes None.
     """
-    ran: list[str] = []
+    requests: list[Any] = []
 
     async def fake_runner(_session, *, request, dependencies):
-        ran.append("runner")
+        requests.append(request)
         return AcceptedNoteMutationResult(change=cast(Any, SimpleNamespace(status_code=200)))
 
-    async def fake_load(_session, *, project_external_id, entity_external_id, dependencies):
-        return (None, None, SimpleNamespace(db_checksum="checksum-now"))
-
     monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", fake_runner)
-    monkeypatch.setattr(note_content_writes, "load_existing_markdown_note_content", fake_load)
-
-    service = NoteContentMutationService(
-        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
-        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
-    )
-
-    with pytest.raises(NoteContentMutationServiceError) as rejected:
-        await service.edit_note(
-            project_external_id="project-123",
-            entity_external_id="note-1",
-            data=EditEntityRequest(operation="append", content="more"),
-            user_profile_id=uuid4(),
-            source="api",
-            base_checksum="checksum-the-caller-read",
-        )
-
-    assert rejected.value.status_code == 409
-    assert ran == [], "a stale precondition must reject before the edit runs"
-
-
-@pytest.mark.asyncio
-async def test_edit_note_without_a_base_checksum_reads_no_precondition(monkeypatch) -> None:
-    """The ordinary PATCH caller has no synced revision, so none is imposed."""
-    reads: list[str] = []
-
-    async def fake_runner(_session, *, request, dependencies):
-        return AcceptedNoteMutationResult(change=cast(Any, SimpleNamespace(status_code=200)))
-
-    async def fake_load(_session, **_kwargs):
-        reads.append("read")
-        return (None, None, SimpleNamespace(db_checksum="checksum-now"))
-
-    monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", fake_runner)
-    monkeypatch.setattr(note_content_writes, "load_existing_markdown_note_content", fake_load)
 
     service = NoteContentMutationService(
         session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
@@ -1307,6 +1273,7 @@ async def test_edit_note_without_a_base_checksum_reads_no_precondition(monkeypat
         data=EditEntityRequest(operation="append", content="more"),
         user_profile_id=uuid4(),
         source="api",
+        base_checksum=base_checksum,
     )
 
-    assert reads == []
+    assert [request.base_checksum for request in requests] == [base_checksum]
