@@ -127,6 +127,11 @@ class AcceptedNoteMutationRejection:
 
     kind: AcceptedNoteMutationRejectKind
     detail: AcceptedNoteMutationRejectionDetail
+    # True when the note's entity or NoteContent row was absent at a loader
+    # stage. Unguarded writes surface ``kind`` as-is; a guarded write maps any
+    # missing-state rejection to the stale-checksum conflict, because its
+    # checksum cannot be validated against state that does not exist.
+    missing_state: bool = False
 
 
 class AcceptedNoteMutationRejected(Exception):
@@ -495,6 +500,26 @@ def reject_stale_base_checksum(current_db_checksum: str | None) -> NoReturn:
     )
 
 
+def reject_guarded_missing_state(
+    error: AcceptedNoteMutationRejected,
+    *,
+    guarded: bool,
+) -> NoReturn:
+    """Re-raise a runner rejection, mapping missing state for guarded writes.
+
+    This is the one place loader rejections leave a guarded runner, so a missing
+    entity or NoteContent row maps the same way at every loader stage.
+    """
+    # Trigger: the caller pinned a revision, and the note's state vanished (a
+    #   delete committed before or between this transaction's loads).
+    # Why: the caller's checksum cannot be validated against state that does not
+    #   exist, and the answer must not depend on which load observed the delete.
+    # Outcome: the stale-checksum conflict with no current checksum ("gone").
+    if guarded and error.rejection.missing_state:
+        reject_stale_base_checksum(current_db_checksum=None)
+    raise error
+
+
 async def reject_lost_compare_and_set(
     session: AsyncSession,
     error: NoteContentVersionConflict,
@@ -615,6 +640,11 @@ async def run_accepted_note_update(
     """Accept a PUT create-or-replace into DB state without materializing its file."""
     try:
         return await _run_accepted_note_update(session, request=request, dependencies=dependencies)
+    except AcceptedNoteMutationRejected as error:
+        reject_guarded_missing_state(
+            error,
+            guarded=request.base_checksum is not None or request.base_file_path is not None,
+        )
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
@@ -635,6 +665,8 @@ async def run_accepted_note_edit(
     """Accept a partial note edit into DB state without materializing its file."""
     try:
         return await _run_accepted_note_edit(session, request=request, dependencies=dependencies)
+    except AcceptedNoteMutationRejected as error:
+        reject_guarded_missing_state(error, guarded=request.base_checksum is not None)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
@@ -889,23 +921,13 @@ async def _run_accepted_note_update(
                 AcceptedNoteMutationRejectKind.unsupported_media_type,
                 "Only markdown note mutations are supported by the note-content path.",
             )
-        try:
-            current_note_content = await load_required_accepted_note_content(
-                session,
-                project_id=project.id,
-                entity_id=entity.id,
-                dependencies=dependencies,
-                missing_kind=AcceptedNoteMutationRejectKind.conflict,
-            )
-        except AcceptedNoteMutationRejected:
-            # Trigger: the caller pinned a revision, and the note's content row is
-            #   gone once its lock is held (a delete committed after the entity load).
-            # Why: that is the note the caller read no longer existing, the same
-            #   outcome as the entity itself being gone, not a backfill gap.
-            # Outcome: the structured stale-revision 409 with db_checksum None.
-            if request.base_checksum is not None or request.base_file_path is not None:
-                reject_stale_base_checksum(current_db_checksum=None)
-            raise
+        current_note_content = await load_required_accepted_note_content(
+            session,
+            project_id=project.id,
+            entity_id=entity.id,
+            dependencies=dependencies,
+            missing_kind=AcceptedNoteMutationRejectKind.conflict,
+        )
         reject_locked_note(current_note_content)
         await session.refresh(entity)
         if not runtime_content_type_is_markdown(entity):
@@ -1136,26 +1158,12 @@ async def _run_accepted_note_edit(
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
     )
-    try:
-        project, entity, current_note_content = await load_existing_markdown_note_content(
-            session,
-            project_external_id=request.project_external_id,
-            entity_external_id=request.entity_external_id,
-            dependencies=dependencies,
-        )
-    except AcceptedNoteMutationRejected as error:
-        # Trigger: the caller pinned a revision, and the note is gone (a delete
-        #   landed after the caller resolved it).
-        # Why: a guarded edit must answer a deleted note the same way whether the
-        #   delete landed before resolution or after it; a bare 404 would make the
-        #   result race-dependent.
-        # Outcome: the stale-checksum conflict with no current checksum.
-        if (
-            request.base_checksum is not None
-            and error.rejection.kind is AcceptedNoteMutationRejectKind.not_found
-        ):
-            reject_stale_base_checksum(current_db_checksum=None)
-        raise
+    project, entity, current_note_content = await load_existing_markdown_note_content(
+        session,
+        project_external_id=request.project_external_id,
+        entity_external_id=request.entity_external_id,
+        dependencies=dependencies,
+    )
     # Optimistic-concurrency precondition, checked against the row this
     # transaction just locked; accept_write's compare-and-set still guards the
     # window after it (issue #1552).
@@ -1419,6 +1427,7 @@ async def load_existing_markdown_note_content(
         reject_accepted_note_mutation(
             AcceptedNoteMutationRejectKind.not_found,
             f"Entity with external_id '{entity_external_id}' not found",
+            missing_state=True,
         )
     if not runtime_content_type_is_markdown(entity):
         reject_accepted_note_mutation(
@@ -1462,6 +1471,7 @@ async def load_required_accepted_note_content(
         reject_accepted_note_mutation(
             missing_kind,
             "Note content is not available for this note yet. Retry after backfill.",
+            missing_state=True,
         )
     return note_content
 
@@ -1585,11 +1595,14 @@ def reject_locked_note(note_content: NoteContent) -> None:
 def reject_accepted_note_mutation(
     kind: AcceptedNoteMutationRejectKind,
     detail: str,
+    *,
+    missing_state: bool = False,
 ) -> NoReturn:
     """Raise one typed accepted-note mutation rejection."""
     raise AcceptedNoteMutationRejected(
         AcceptedNoteMutationRejection(
             kind=kind,
             detail=detail,
+            missing_state=missing_state,
         )
     )
