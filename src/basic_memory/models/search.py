@@ -230,6 +230,24 @@ ON search_vector_chunks (project_id, entity_id, chunk_key)
 
 CHUNK_LOCATION_COLUMNS = frozenset({"source_type", "source_row_id", "chunk_index"})
 
+# Every column of the current SQLite chunk table, used to recognize its schema.
+SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS = frozenset(
+    {
+        "id",
+        "entity_id",
+        "project_id",
+        "chunk_key",
+        "chunk_text",
+        "source_hash",
+        "entity_fingerprint",
+        "embedding_model",
+        "vector_index",
+        "embedding_status",
+        "updated_at",
+    }
+    | CHUNK_LOCATION_COLUMNS
+)
+
 # Upgrade a SQLite chunk table whose keys still embed the search row id
 # ("observation:5:0"): split the location into columns, then re-key each chunk by its
 # content ("observation:<sha256>:<occurrence>"). Mirrors Alembic revision 0040.

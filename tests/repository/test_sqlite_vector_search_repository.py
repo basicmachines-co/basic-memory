@@ -417,6 +417,50 @@ async def test_sqlite_legacy_chunk_keys_are_rekeyed_in_place_keeping_vectors(sea
 
 
 @pytest.mark.asyncio
+async def test_legacy_chunk_manifest_is_upgraded_with_semantic_search_disabled(search_repository):
+    """`bm inspect` reads the manifest even when semantic search is off.
+
+    The upgrade therefore runs in init_search_index(), not only in vector setup, which
+    never runs when semantic search is disabled or sqlite-vec fails to load.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite chunk manifest upgrade is local SQLite-only.")
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+        await session.execute(
+            text(
+                "CREATE TABLE search_vector_chunks ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, "
+                "project_id INTEGER NOT NULL, chunk_key TEXT NOT NULL, "
+                "chunk_text TEXT NOT NULL, source_hash TEXT NOT NULL, "
+                "entity_fingerprint TEXT NOT NULL, embedding_model TEXT NOT NULL, "
+                "vector_index TEXT NOT NULL, embedding_status TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks (id, entity_id, project_id, chunk_key, "
+                "chunk_text, source_hash, entity_fingerprint, embedding_model, vector_index, "
+                "embedding_status) VALUES (930, 31, :project_id, 'entity:31:0', 'text', "
+                "'hash', 'fingerprint', 'model', 'sqlite-vec', 'ready')"
+            ),
+            {"project_id": search_repository.project_id},
+        )
+        await session.commit()
+
+    search_repository._semantic_enabled = False
+    await search_repository.init_search_index()
+
+    manifest = await search_repository.get_entity_chunk_manifest(31)
+    assert [(row.source_type, row.source_row_id, row.chunk_index) for row in manifest] == [
+        ("entity", 31, 0)
+    ]
+    assert manifest[0].chunk_key == "entity:hash:0"
+
+
+@pytest.mark.asyncio
 async def test_disabled_semantic_cleanup_deletes_sqlite_vec_rows(search_repository):
     """Project cleanup must not strand sqlite-vec rows when semantic search is disabled."""
     if not isinstance(search_repository, SQLiteSearchRepository):
