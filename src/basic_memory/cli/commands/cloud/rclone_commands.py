@@ -146,7 +146,7 @@ def get_bmignore_filter_path(
 ) -> Path:
     """Get path to rclone filter file.
 
-    Uses ~/.basic-memory/.bmignore converted to rclone format.
+    Uses <config dir>/.bmignore converted to rclone format.
     File is automatically created with default patterns on first use.
 
     Returns:
@@ -167,7 +167,7 @@ def get_bmignore_prune_filter_path() -> Path:
     """Get path to the inverted rclone filter used by prune.
 
     Selects exactly the paths .bmignore ignores (#1032); regenerated from
-    ~/.basic-memory/.bmignore on every call.
+    <config dir>/.bmignore on every call.
 
     Returns:
         Path to inverted rclone filter file

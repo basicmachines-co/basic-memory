@@ -29,6 +29,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_sync,
     project_transfer,
 )
+from basic_memory.ignore_utils import get_bmignore_path
 from basic_memory.utils import shell_command
 from basic_memory.cli.commands.cloud.rclone_config import (
     DEFAULT_RCLONE_REMOTE,
@@ -351,8 +352,9 @@ def prune_project_command(
     """Delete cloud files that match your local .bmignore patterns.
 
     Targeted cleanup for files that synced before their pattern was added to
-    ~/.basic-memory/.bmignore (the sync filter hides ignored paths from normal
-    deletion, stranding them on the cloud — see #1032). Prune lists the
+    .bmignore in the Basic Memory config directory ($BASIC_MEMORY_CONFIG_DIR,
+    default ~/.basic-memory). The sync filter hides ignored paths from normal
+    deletion, stranding them on the cloud (#1032). Prune lists the
     matching remote files and deletes them only after confirmation.
 
     Personal workspaces only: prune deletes from the bucket based on this
@@ -400,7 +402,9 @@ def prune_project_command(
             remote_name=remote_name,
         )
 
-        console.print(f"[blue]Scanning {name} for cloud files matching .bmignore...[/blue]")
+        console.print(
+            f"[blue]Scanning {name} for cloud files matching {get_bmignore_path()}...[/blue]"
+        )
         # Trigger: preview and deletion are separated by an interactive prompt.
         # Why: the remote and .bmignore can both change while the prompt is open.
         # Outcome: pass the exact previewed paths to deletion so nothing outside

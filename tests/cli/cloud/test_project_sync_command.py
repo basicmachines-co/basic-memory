@@ -2,6 +2,7 @@
 
 import importlib
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -908,6 +909,26 @@ def test_cloud_prune_dry_run_previews_without_deleting(monkeypatch, config_manag
     assert "secrets/leak.md" in output
     assert "nothing deleted" in output.lower()
     assert "args" not in recorder  # delete never ran
+
+
+def test_cloud_prune_names_the_bmignore_in_the_config_dir(monkeypatch, config_manager):
+    """The scan message names the real ignore file, not a hardcoded ~/.basic-memory (#1635)."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    _stub_prune_env(monkeypatch, module, matches=[])
+    monkeypatch.setattr(module, "get_bmignore_path", lambda: Path("/cfg/.bmignore"))
+
+    result = runner.invoke(app, ["cloud", "prune", "--name", "research", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "matching /cfg/.bmignore" in " ".join(result.output.split())
+
+
+def test_cloud_prune_help_points_at_the_config_dir():
+    result = runner.invoke(app, ["cloud", "prune", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "BASIC_MEMORY_CONFIG_DIR" in result.output
+    assert "~/.basic-memory/.bmignore" not in result.output
 
 
 def test_cloud_prune_confirmation_declined_deletes_nothing(monkeypatch, config_manager):
