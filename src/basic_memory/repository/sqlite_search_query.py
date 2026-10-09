@@ -90,7 +90,8 @@ def _prepare_query_word(word: str, is_prefix: bool) -> str:
     star = "*" if (is_prefix or caller_wildcard) and not is_file_path else ""
     if _is_caller_quoted(word):
         return f"{word}{star}"
-    if any(c in _WORD_QUOTING_CHARS for c in word):
+    # A "*" left anywhere but the end ("*cache") is not FTS5 syntax; quote it as text.
+    if "*" in word or any(c in _WORD_QUOTING_CHARS for c in word):
         escaped_word = word.replace('"', '""')
         return f'"{escaped_word}"{star}'
     return f"{word}{star}"
