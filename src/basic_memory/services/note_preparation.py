@@ -29,7 +29,11 @@ from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_metadata,
 )
-from basic_memory.markdown.path_links import is_path_target, resolve_project_path
+from basic_memory.markdown.path_links import (
+    climbs_out_of_project,
+    is_path_target,
+    resolve_project_path,
+)
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -104,6 +108,8 @@ class PreparedEntityWrite:
 
     @property
     def relations(self) -> list[AcceptedRelationWrite]:
+        # A path link that climbs past the project root names no project file and
+        # never will, so it is dropped rather than kept as an unresolved relation.
         return [
             AcceptedRelationWrite(
                 relation_type=relation.type,
@@ -111,6 +117,7 @@ class PreparedEntityWrite:
                 context=relation.context,
             )
             for relation in self.entity_markdown.relations
+            if not climbs_out_of_project(relation.target, self.entity_fields.file_path)
         ]
 
     @property
@@ -930,6 +937,7 @@ async def prepare_move_entity_content(
                 context=relation.context,
             )
             for relation in entity_markdown.relations
+            if not climbs_out_of_project(relation.target, file_path.as_posix())
         ),
     )
 

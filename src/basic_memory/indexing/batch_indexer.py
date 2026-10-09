@@ -21,6 +21,7 @@ from basic_memory.file_utils import (
     compute_checksum,
     remove_frontmatter,
 )
+from basic_memory.markdown.path_links import climbs_out_of_project
 from basic_memory.markdown.schemas import FrontmatterState, EntityMarkdown
 from basic_memory.indexing.models import (
     IndexEntitySearchWriter,
@@ -1141,6 +1142,8 @@ class BatchIndexer:
         )
         indexed_relations: list[IndexedRelation] = []
         for relation in prepared.markdown.relations:
+            if climbs_out_of_project(relation.target, entity.file_path):
+                continue
             resolved = await self.entity_service.resolve_deferred_self_relation(
                 relation.target,
                 entity,

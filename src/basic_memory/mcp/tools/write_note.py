@@ -501,18 +501,37 @@ async def write_note(
                     action = "Created"
                 case NoteUpdated(entity=result):
                     action = "Updated"
-                case NoteAlreadyExists():
+                case NoteAlreadyExists() as existing:
+                    # Trigger: a note already owns the requested path.
+                    # Why: the permalink computed from this request can name another
+                    #      note. After a move, the moved note keeps the path's original
+                    #      permalink and the note now at the path has a suffixed one, so
+                    #      the computed value would steer edit_note to the wrong note.
+                    # Outcome: the refusal names the note the API found at the path, by
+                    #          its stored permalink, or by file path when the API could
+                    #          not name it (an older server, or a lost create race).
+                    existing_permalink = existing.permalink
+                    conflict_workspace = current_workspace_permalink_context()
+                    if existing_permalink and conflict_workspace is not None:
+                        existing_permalink = build_qualified_permalink_reference(
+                            active_project.permalink,
+                            existing_permalink,
+                            workspace_permalink=conflict_workspace.workspace_slug,
+                        )
                     _raise_write_refusal(
                         output_format,
                         {
                             "title": title,
-                            "permalink": entity.permalink,
-                            "file_path": None,
+                            "permalink": existing_permalink,
+                            "file_path": existing.file_path,
+                            "external_id": existing.external_id,
                             "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_ALREADY_EXISTS",
                         },
-                        _format_overwrite_error(title, entity.permalink, active_project.name),
+                        _format_overwrite_error(
+                            title, existing_permalink or existing.file_path, active_project.name
+                        ),
                     )
                 case NoteTargetMoved() as moved:
                     _raise_write_refusal(
@@ -714,21 +733,24 @@ def _format_revision_conflict(
         Project: {project_name}""")
 
 
-def _format_overwrite_error(title: str, permalink: str | None, project_name: str) -> str:
-    """Format a helpful error when write_note is blocked by the overwrite guard."""
+def _format_overwrite_error(title: str, identifier: str, project_name: str) -> str:
+    """Format a helpful error when write_note is blocked by the overwrite guard.
+
+    ``identifier`` names the note that owns the path: its permalink, or its file path.
+    """
     return textwrap.dedent(f"""\
         # Error: Note already exists
 
-        **"{title}"** already exists (permalink: `{permalink}`).
+        **"{title}"** already exists (`{identifier}`).
 
         `write_note` does not overwrite by default. Choose an option:
 
         | Goal | Action |
         |------|--------|
-        | Append content | `edit_note("{permalink}", operation="append", content="...")` |
-        | Prepend content | `edit_note("{permalink}", operation="prepend", content="...")` |
-        | Replace a section | `edit_note("{permalink}", operation="replace_section", section="...", content="...")` |
+        | Append content | `edit_note("{identifier}", operation="append", content="...")` |
+        | Prepend content | `edit_note("{identifier}", operation="prepend", content="...")` |
+        | Replace a section | `edit_note("{identifier}", operation="replace_section", section="...", content="...")` |
         | Full replace | `write_note(title="{title}", content="...", directory="...", overwrite=True)` |
-        | Inspect first | `read_note("{permalink}")` |
+        | Inspect first | `read_note("{identifier}")` |
 
         Project: {project_name}""")

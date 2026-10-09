@@ -608,6 +608,41 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_drops_path_links_that_climb_out_of_the_project(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """A Markdown link past the project root is prose, not an unresolved relation (#1634)."""
+    source_path = "links/sub/source.md"
+    await _create_file(
+        project_config.home / source_path,
+        "# Source\n\n[outside](../../../../outside.md) and [inside](../../Inside.md)\n",
+    )
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {source_path: await _load_input(file_service, source_path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    indexed_source = next(indexed for indexed in result.indexed if indexed.path == source_path)
+    assert [relation.target_name for relation in indexed_source.relations] == ["../../Inside.md"]
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_keeps_file_indexed_when_semantic_dependencies_are_missing(
     app_config,
     entity_service,

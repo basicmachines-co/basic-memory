@@ -69,3 +69,13 @@ def resolve_project_path(target: str, source_path: str | None) -> str | None:
         else:
             parts.append(part)
     return "/" + "/".join(parts) if parts else None
+
+
+def climbs_out_of_project(target: str, source_path: str) -> bool:
+    """Whether a path target climbs past the project root from the note at ``source_path``.
+
+    Such a target names no project file now or after any later index pass, so it is
+    prose and not a relation: an unresolved row for it could never resolve. Identity
+    targets (titles, permalinks) are never out of the project by spelling alone.
+    """
+    return is_path_target(target) and resolve_project_path(target, source_path) is None

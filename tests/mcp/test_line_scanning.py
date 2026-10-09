@@ -93,11 +93,9 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
         assert last["content"] == lines[-1]
         assert last["has_more"] is False
         assert last["next_start_line"] is None and last["next_end_line"] is None
-    empty = await read_note(
-        "Bounds", start_line=1000, output_format="json", project=test_project.name
-    )
-    assert isinstance(empty, dict)
-    assert empty["content"] == "" and empty["has_more"] is False
+    # A range past the last line is an error, not an empty "Lines 1000-N" read (#1634).
+    with pytest.raises(ToolError, match="start_line 1000 is past the end of the document"):
+        await read_note("Bounds", start_line=1000, output_format="json", project=test_project.name)
 
 
 @pytest.mark.asyncio

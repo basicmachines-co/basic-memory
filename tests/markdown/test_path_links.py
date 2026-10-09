@@ -4,6 +4,7 @@ import pytest
 
 from basic_memory.markdown.entity_parser import EntityParser, parse
 from basic_memory.markdown.path_links import (
+    climbs_out_of_project,
     is_path_target,
     markdown_link_path,
     resolve_project_path,
@@ -62,6 +63,22 @@ def test_path_targets_resolve_against_the_note_that_carries_them(target, source_
 )
 def test_path_targets_are_rooted_or_explicitly_relative(target, expected):
     assert is_path_target(target) is expected
+
+
+@pytest.mark.parametrize(
+    ("target", "source_path", "expected"),
+    [
+        ("../../../../outside.md", "links/sub/source.md", True),
+        ("../../inside.md", "links/sub/source.md", False),
+        ("../up.md", "source.md", True),
+        ("./same.md", "source.md", False),
+        ("/root.md", "links/sub/source.md", False),
+        ("Guide", "source.md", False),
+    ],
+)
+def test_path_targets_that_climb_past_the_root_leave_the_project(target, source_path, expected):
+    """These name no project file, so they are not relations (#1634)."""
+    assert climbs_out_of_project(target, source_path) is expected
 
 
 @pytest.mark.parametrize(

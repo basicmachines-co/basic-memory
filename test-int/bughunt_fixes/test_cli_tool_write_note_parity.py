@@ -117,7 +117,8 @@ def test_mcp_write_note_conflict_emits_error(app, app_config, test_project, conf
     assert isinstance(second, dict)
     assert second.get("error") == "NOTE_ALREADY_EXISTS"
     assert second.get("action") == "conflict"
-    assert second.get("file_path") is None
+    # The refusal names the note that owns the path (#1634).
+    assert second.get("file_path") == "conflict/Conflict Note.md"
 
 
 def test_cli_write_note_conflict_should_exit_nonzero(app, app_config, test_project, config_manager):

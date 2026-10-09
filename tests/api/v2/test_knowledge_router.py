@@ -2485,6 +2485,13 @@ async def test_get_entity_lines_slice_forms(
     assert clamped.content == "z"
     assert (clamped.content_start_line, clamped.content_end_line) == (13, 13)
 
+    # A range that starts past the last line is an error, not an inverted range (#1634).
+    past_end = await client.get(url, params={"lines": "500-510"})
+    assert past_end.status_code == 404
+    assert past_end.json()["detail"] == (
+        "start_line 500 is past the end of the document (13 lines)"
+    )
+
 
 @pytest.mark.asyncio
 async def test_get_entity_slice_param_validation_422(

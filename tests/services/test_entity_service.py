@@ -2309,3 +2309,21 @@ async def test_delete_directory_entity_deleted_between_query_and_delete(
     # Call delete_entity with the stale entity ID - should return True, not raise
     result = await entity_service.delete_entity(entities[0].id)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_path_link_that_climbs_out_of_the_project_is_not_a_relation(
+    entity_service: EntityService,
+):
+    """A Markdown link past the project root is prose, not an unresolved relation (#1634)."""
+    entity, created = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Climber",
+            directory="links/sub",
+            note_type="note",
+            content="[outside](../../../../outside.md) and [inside](../../Inside.md)",
+        )
+    )
+
+    assert created is True
+    assert [relation.to_name for relation in entity.relations] == ["../../Inside.md"]

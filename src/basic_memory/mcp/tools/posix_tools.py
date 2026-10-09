@@ -44,7 +44,7 @@ from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.markdown.line_scanning import scan_literal_lines
-from basic_memory.markdown.sections import document_lines
+from basic_memory.markdown.sections import document_lines, line_range_past_end
 from basic_memory.mcp.async_client import is_factory_mode
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
@@ -314,6 +314,9 @@ async def cat(
     lines = document_lines(payload["content"])
     total_lines = len(lines)
     first = start_line or 1
+    past_end = line_range_past_end(first, total_lines)
+    if past_end is not None:
+        raise ValueError(f"cat: {past_end}")
     last = min(end_line, total_lines) if end_line is not None else total_lines
     payload["content"] = "\n".join(lines[first - 1 : last])
     payload["start_line"] = first

@@ -85,7 +85,7 @@ async def test_recent_activity_prompt_discovery_mode(client, test_project, test_
     result = await recent_activity_prompt(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
-    assert "all projects" in result  # pyright: ignore [reportOperatorIssue]
+    assert "the default project" in result  # pyright: ignore [reportOperatorIssue]
     assert "Next Steps" in result  # pyright: ignore [reportOperatorIssue]
     assert "write_note" in result  # pyright: ignore [reportOperatorIssue]
 

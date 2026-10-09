@@ -24,6 +24,7 @@ from basic_memory.markdown.entity_parser import (
     EntityParser,
     normalize_frontmatter_metadata,
 )
+from basic_memory.markdown.path_links import climbs_out_of_project
 from basic_memory.markdown.utils import entity_model_from_markdown
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import ObservationRepository, RelationRepository
@@ -233,6 +234,8 @@ class EntityService(BaseService[EntityModel]):
         )
         indexed_relations: list[IndexedRelation] = []
         for relation in markdown.relations:
+            if climbs_out_of_project(relation.target, entity.file_path):
+                continue
             resolved = await self.resolve_deferred_self_relation(relation.target, entity)
             indexed_relations.append(
                 IndexedRelation(
