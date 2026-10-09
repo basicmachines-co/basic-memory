@@ -758,6 +758,19 @@ def test_path_spelled_exactly_on_disk_matches_case_of_every_component(tmp_path: 
     assert set(entry_names_by_directory) == {tmp_path, tmp_path / "Case"}
 
 
+def test_path_spelled_exactly_on_disk_relists_a_cached_miss(tmp_path: Path) -> None:
+    """A file created after its directory was listed is present, not confirmed deleted."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "first.md").write_bytes(b"# First\n")
+    entry_names_by_directory: dict[Path, frozenset[str]] = {}
+    assert path_spelled_exactly_on_disk(tmp_path, "notes/first.md", entry_names_by_directory)
+
+    # Created after the batch cached the listing of notes/.
+    (tmp_path / "notes" / "second.md").write_bytes(b"# Second\n")
+
+    assert path_spelled_exactly_on_disk(tmp_path, "notes/second.md", entry_names_by_directory)
+
+
 def test_path_spelled_exactly_on_disk_ignores_unicode_normalization(tmp_path: Path) -> None:
     """NFC and NFD spellings of one name are the same file; only case matters here."""
     nfd_name = "Cafe\u0301.md"
