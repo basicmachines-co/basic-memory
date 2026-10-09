@@ -25,10 +25,11 @@
 
 - **#1697**: `basic-memory mcp --transport streamable-http|sse` binds to `127.0.0.1` by
   default instead of `0.0.0.0`, so the unauthenticated HTTP server is no longer reachable
-  from the network unless you ask for it. A non-loopback `--host` prints a warning. Both
-  HTTP transports also reject requests whose `Host` or `Origin` header is foreign (DNS
-  rebinding), honoring FastMCP's `FASTMCP_HTTP_ALLOWED_HOSTS` / `_ORIGINS`. The Docker
-  image already passes `--host 0.0.0.0` and is unaffected (#1578).
+  from the network unless you ask for it. A non-loopback `--host` prints a warning. On a
+  loopback bind, both HTTP transports also reject requests whose `Host` or `Origin`
+  header is foreign (DNS rebinding), honoring FastMCP's `FASTMCP_HTTP_ALLOWED_HOSTS` /
+  `_ORIGINS`. A non-loopback bind gets that check only when those allowlists are set. The
+  Docker image already passes `--host 0.0.0.0` and keeps working as before (#1578).
 
 - **#1704**: `bm import document` resolves a relative path against the project root, not
   the current directory, matching `bm ls` and `bm cat`. A command that relied on the old
