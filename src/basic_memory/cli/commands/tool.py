@@ -46,8 +46,6 @@ from basic_memory.cli.commands.routing import force_routing, validate_routing_fl
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
-VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
-
 # Shared Rich console (stderr=False so output goes to stdout, matching _print_json).
 console = Console()
 
@@ -916,7 +914,13 @@ def edit_note(
     ] = None,
     section: Annotated[
         Optional[str],
-        typer.Option("--section", help="Section heading for replace_section operation"),
+        typer.Option(
+            "--section",
+            help=(
+                "Section heading for section-based operations: replace_section, "
+                "insert_before_section, insert_after_section"
+            ),
+        ),
     ] = None,
     expected_replacements: int = typer.Option(
         1,
@@ -949,12 +953,16 @@ def edit_note(
     ),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Edit an existing markdown note using append/prepend/find_replace/replace_section.
+    """Edit an existing markdown note.
+
+    Operations: append, prepend, find_replace, replace_section,
+    insert_before_section, insert_after_section.
 
     Examples:
 
     bm tool edit-note my-note --operation append --content "new content"
     bm tool edit-note my-note --operation find_replace --find-text "old" --content "new"
+    bm tool edit-note my-note --operation insert_after_section --section "## Notes" --content "new line"
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated"
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
     """
