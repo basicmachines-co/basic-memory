@@ -38,6 +38,7 @@ from basic_memory.repository.semantic_vector_sync import (
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository import sqlite_vec_index as sqlite_vec_index_module
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLITE_VEC_MAX_K, SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -226,6 +227,12 @@ def _enable_semantic(
     provider = embedding_provider or StubEmbeddingProvider()
     search_repository._embedding_provider = provider
     search_repository._vector_dimensions = provider.dimensions
+    # The repository built its vector index for the default provider; rebuild it for
+    # this provider's dimensions.
+    search_repository._semantic_vector_index = SQLiteVecIndex(
+        search_repository.session_maker,
+        build_vector_index_scope(search_repository._app_config, provider),
+    )
     search_repository._vector_tables_initialized = False
 
 
@@ -237,7 +244,6 @@ def _make_sqlite_repo_for_unit_tests() -> SQLiteSearchRepository:
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         semantic_embedding_sync_batch_size=8,
     )
     repo = SQLiteSearchRepository(
@@ -2005,3 +2011,24 @@ async def test_embedding_index_reports_only_chunks_actually_embedded(search_repo
 
     assert first.chunks_embedded > 0
     assert second.chunks_embedded == 0
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_load_failure_falls_back_to_keyword_search(search_repository, monkeypatch):
+    """A sqlite-vec binary that fails to load must not abort startup (#711).
+
+    Extension loading exists here, but an incompatible wheel or a SQLite build that
+    denies loading makes load_extension raise OperationalError. With no config flag
+    left to turn semantic search off, startup has to fall back to keyword-only.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec loading is local SQLite-only.")
+    import sqlite_vec
+
+    # Injected: a loadable path that does not exist, as a broken wheel would leave.
+    monkeypatch.setattr(sqlite_vec, "loadable_path", lambda: "/nonexistent/vec0")
+
+    await search_repository.init_search_index()
+
+    assert search_repository._semantic_enabled is False
+    assert await search_repository.semantic_effectively_enabled() is False

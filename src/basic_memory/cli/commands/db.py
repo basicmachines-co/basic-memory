@@ -291,15 +291,6 @@ def run_reindex_command(
     config_manager = ConfigManager()
     app_config = config_manager.config
 
-    if embeddings and not app_config.semantic_search_enabled:
-        console.print(
-            "[yellow]Semantic search is not enabled.[/yellow] "
-            "Set [cyan]semantic_search_enabled: true[/cyan] in config to use embeddings."
-        )
-        embeddings = False
-        if not search:
-            raise typer.Exit(0)
-
     run_with_cleanup(
         _reindex(app_config, search=search, embeddings=embeddings, full=full, project=project)
     )

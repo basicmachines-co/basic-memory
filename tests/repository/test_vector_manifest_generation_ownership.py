@@ -122,7 +122,6 @@ def _app_config() -> BasicMemoryConfig:
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
 
 

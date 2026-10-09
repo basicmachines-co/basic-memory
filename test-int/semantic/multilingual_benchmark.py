@@ -144,7 +144,6 @@ def embedding_benchmark_config(
     return BasicMemoryConfig(
         env="test",
         database_backend=storage_case.database_backend,
-        semantic_search_enabled=True,
         semantic_vector_index=configured_vector_index,
         semantic_embedding_provider="fastembed",
         semantic_embedding_model=model_case.model_name,

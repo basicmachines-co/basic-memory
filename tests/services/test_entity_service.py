@@ -15,6 +15,9 @@ from basic_memory.config import ProjectConfig, BasicMemoryConfig, DatabaseBacken
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
+from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
+from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService, _fenced_code_line_flags
@@ -59,6 +62,9 @@ class _DeleteTestEmbeddingProvider:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vectorize(text) for text in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
     @staticmethod
     def _vectorize(text: str) -> list[float]:
@@ -366,6 +372,14 @@ async def test_delete_entity_removes_search_and_vector_state(
     repository._semantic_enabled = True
     repository._embedding_provider = _DeleteTestEmbeddingProvider()
     repository._vector_dimensions = repository._embedding_provider.dimensions
+    # The repository built its vector index for the default provider; rebuild it for
+    # this provider's dimensions.
+    scope = build_vector_index_scope(repository._app_config, repository._embedding_provider)
+    repository._semantic_vector_index = (
+        SQLiteVecIndex(repository.session_maker, scope)
+        if app_config.database_backend == DatabaseBackend.SQLITE
+        else PgVectorIndex(repository.session_maker, scope)
+    )
     repository._vector_tables_initialized = False
     await search_service.init_search_index()
 

@@ -1505,14 +1505,14 @@ class SearchRepositoryBase(ABC):
     def _assert_semantic_available(self) -> None:
         if not self._semantic_enabled:
             raise SemanticSearchDisabledError(
-                "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true."
+                "Semantic search is unavailable: the vector runtime failed to load at "
+                "startup, so search is keyword-only. See the startup log for the cause."
             )
         if self._embedding_provider is None:
             raise SemanticDependenciesMissingError(
                 "No embedding provider configured. "
                 "Install/update basic-memory to include semantic dependencies "
-                "(pip install -U basic-memory) "
-                "and set semantic_search_enabled=true."
+                "(pip install -U basic-memory)."
             )
 
     def _build_chunk_records(self, rows: Iterable[SemanticSourceRow]) -> list[VectorChunkRecord]:

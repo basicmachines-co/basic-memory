@@ -573,10 +573,7 @@ class LocalProjectIndexRuntimeProvider(Protocol):
 def local_project_embedding_vector_sync(
     dependencies: LocalIndexProjectDependencies,
 ) -> EmbeddingBatchVectorSync | None:
-    """Return the semantic vector sync backend when local config enables it."""
-    app_config = dependencies.entity_service.app_config
-    if app_config is None or not app_config.semantic_search_enabled:
-        return None
+    """Return the semantic vector sync backend for local indexing."""
     return dependencies.search_service
 
 

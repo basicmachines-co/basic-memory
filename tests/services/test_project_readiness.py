@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+
+from basic_memory.config import DatabaseBackend
 from sqlalchemy import text
 
 from basic_memory import db
@@ -32,6 +34,7 @@ from basic_memory.schemas.project_readiness import (
     ProjectIndexStageName,
     combine_index_phases,
 )
+from basic_memory.services import project_readiness as project_readiness_module
 from basic_memory.services.project_readiness import (
     ProjectReadinessService,
     file_stage_counts,
@@ -290,6 +293,9 @@ async def test_a_project_with_indexed_notes_but_no_recorded_pass_is_indexed(
                 "file_path": "notes/written.md",
                 "content_type": "text/markdown",
                 "checksum": "indexed-sum",
+                # This test is about the index phase; opt the note out of embeddings
+                # so the embeddings stage owes nothing.
+                "entity_metadata": {"embed": "false"},
                 "created_at": now,
                 "updated_at": now,
             },
@@ -334,24 +340,6 @@ async def test_readiness_for_missing_project_id_fails_loudly(readiness_service):
 
 
 @pytest.mark.asyncio
-async def test_embedding_stage_settles_immediately_when_semantic_search_is_off(
-    readiness_service, test_project, app_config
-):
-    """With embeddings disabled there is nothing to wait for, so nothing is owed.
-
-    Reporting outstanding embedding work here would park every project in
-    PENDING forever -- the vacuous-ready bug inverted.
-    """
-    assert app_config.semantic_search_enabled is False
-
-    readiness = await readiness_service.readiness_for(test_project, ())
-    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
-
-    assert embeddings.total == 0
-    assert embeddings.pending == 0
-
-
-@pytest.mark.asyncio
 async def test_readiness_for_project_id_loads_the_project_itself(readiness_service, test_project):
     """The status route names a project by id and never holds the row."""
     readiness = await readiness_service.readiness_for_project_id(test_project.id, ())
@@ -364,13 +352,31 @@ async def test_an_unembedded_markdown_note_is_pending_embedding_work(
     readiness_service, test_project, sample_entity, app_config
 ):
     """A note with no ready chunk is embedding work a caller can wait on."""
-    app_config.semantic_search_enabled = True
 
     readiness = await readiness_service.readiness_for(test_project, ())
     embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
 
     assert embeddings.total == 1
     assert embeddings.pending == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_stage_settles_when_the_vector_runtime_cannot_load(
+    readiness_service, test_project, sample_entity, monkeypatch
+):
+    """A keyword-only host (#711) never embeds, so nothing is owed.
+
+    Counting the note as pending would park the project in PENDING forever and make
+    `bm status --wait` run to its timeout.
+    """
+    # Injected: this host can load sqlite-vec, so the fallback is simulated.
+    monkeypatch.setattr(project_readiness_module, "semantic_runtime_available", lambda _c: False)
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    assert embeddings.total == 0
+    assert embeddings.pending == 0
 
 
 async def _insert_chunk(
@@ -416,7 +422,6 @@ async def test_a_ready_chunk_under_the_configured_identity_settles_the_stage(
     readiness_service, test_project, sample_entity, app_config, engine_factory
 ):
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -443,7 +448,6 @@ async def test_a_chunk_from_a_previous_embedding_model_is_not_settled(
     unambiguous and wrong, which is the failure this PR exists to remove.
     """
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -465,7 +469,6 @@ async def test_a_chunk_from_a_previous_vector_index_is_not_settled(
 ):
     """The same rule for the other half of the retrieval identity."""
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -485,7 +488,6 @@ async def test_a_pending_chunk_is_not_settled(
 ):
     """Retrieval admits only `ready`; so does readiness."""
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -509,7 +511,6 @@ async def test_an_embed_false_note_owes_no_embedding_work(
     would leave the stage PENDING forever and hang `bm status --wait` on work no
     pass will ever do.
     """
-    app_config.semantic_search_enabled = True
     async with db.scoped_session(session_maker) as session:
         await entity_repository.create(
             session,
@@ -544,9 +545,10 @@ async def test_a_missing_vector_manifest_reports_nothing_embedded(
     when a caller needs it.
     """
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
+    # Postgres keeps pgvector embeddings in a table that references the chunks.
+    cascade = " CASCADE" if app_config.database_backend == DatabaseBackend.POSTGRES else ""
     async with db.scoped_session(session_maker) as session:
-        await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+        await session.execute(text(f"DROP TABLE IF EXISTS search_vector_chunks{cascade}"))
 
     readiness = await readiness_service.readiness_for(test_project, ())
     embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
@@ -567,7 +569,6 @@ async def test_a_deferred_entity_is_not_settled(
     letting `status --wait` return with the note's later chunks unsearchable.
     """
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -595,7 +596,6 @@ async def test_clearing_the_deferral_settles_the_entity(
 ):
     """The marker is cleared when a later pass finishes the entity."""
     _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     await _insert_chunk(
         session_maker,
         entity_id=sample_entity.id,
@@ -946,7 +946,6 @@ async def test_embeddings_counted_pending_are_exactly_the_drainable_ones(
     either would park the stage in PENDING with nothing able to clear it.
     """
     _, maker = engine_factory
-    app_config.semantic_search_enabled = True
 
     if shape in {"stale_model", "pending_status", "deferred", "current"}:
         await _insert_chunk(

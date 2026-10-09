@@ -46,7 +46,6 @@ from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_in
 from basic_memory.markdown.line_scanning import scan_literal_lines
 from basic_memory.markdown.sections import document_lines, line_range_past_end
 from basic_memory.mcp.async_client import is_factory_mode
-from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
@@ -332,14 +331,7 @@ def _grep_retrieval_mode(semantic: bool) -> SearchRetrievalMode:
     something, so a grep for a term that appears nowhere would list unrelated notes
     instead of nothing (#1685).
     """
-    if not semantic:
-        return SearchRetrievalMode.FTS
-    try:
-        config = get_container().config
-    except RuntimeError:
-        # CLI paths call tools before the MCP container exists (search.py precedent).
-        config = ConfigManager().config
-    return SearchRetrievalMode.HYBRID if config.semantic_search_enabled else SearchRetrievalMode.FTS
+    return SearchRetrievalMode.HYBRID if semantic else SearchRetrievalMode.FTS
 
 
 @mcp.tool(

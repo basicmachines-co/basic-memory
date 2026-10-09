@@ -84,7 +84,6 @@ def _postgres_config(**overrides: object) -> BasicMemoryConfig:
         "env": "test",
         "database_backend": DatabaseBackend.POSTGRES,
         "database_url": "postgresql+asyncpg://user:secret@db.example.test:5432/memory",
-        "semantic_search_enabled": True,
         "semantic_vector_index": "pgvector",
     }
     values.update(overrides)
@@ -236,25 +235,3 @@ def test_search_repository_composition_root_injects_selected_adapter(monkeypatch
     assert isinstance(repository, PostgresSearchRepository)
     assert repository._semantic_vector_index_name == "milvus"
     assert repository._semantic_vector_index is index
-
-
-def test_disabled_search_repository_retains_configured_adapter_name(monkeypatch) -> None:
-    """Cleanup must identify external ownership without loading an embedding model."""
-    monkeypatch.setattr(
-        "basic_memory.repository.search_repository.create_embedding_provider",
-        lambda _config: pytest.fail("disabled search must not create an embedding provider"),
-    )
-
-    repository = create_search_repository(
-        MagicMock(),
-        project_id=7,
-        app_config=_postgres_config(
-            semantic_search_enabled=False,
-            semantic_vector_index="milvus",
-        ),
-        database_backend=DatabaseBackend.POSTGRES,
-    )
-
-    assert isinstance(repository, PostgresSearchRepository)
-    assert repository._semantic_vector_index_name == "milvus"
-    assert not hasattr(repository, "_semantic_vector_index")

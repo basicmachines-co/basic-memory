@@ -9,6 +9,8 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+
+from fake_embeddings import use_fake_embeddings
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
@@ -41,6 +43,7 @@ from basic_memory.models.project import Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -61,6 +64,12 @@ from basic_memory.services.search_service import SearchService
 # By default, tests run against SQLite.
 # Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
 # This allows running sqlite/postgres tests in parallel in CI.
+
+
+@pytest.fixture(autouse=True)
+def _fake_embeddings(request, monkeypatch):
+    """Use the deterministic test embedder; see tests/fake_embeddings.py."""
+    use_fake_embeddings(request, monkeypatch)
 
 
 @pytest.fixture(scope="session")
@@ -303,13 +312,6 @@ def app_config(config_home, db_backend, postgres_container, monkeypatch) -> Basi
         update_permalinks_on_move=True,
         database_backend=backend,
         database_url=database_url,
-        # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec
-        #          are importable, which they are in dev and CI environments.
-        # Why: with it on, every test that syncs pays the ONNX embedding stack (~5-7s per
-        #      sync) — embeddings are covered by the dedicated semantic suites, which
-        #      configure semantic_search_enabled explicitly themselves.
-        # Outcome: non-semantic tests skip embedding work entirely.
-        semantic_search_enabled=False,
     )
 
     return app_config
@@ -400,6 +402,14 @@ async def engine_factory(
             expire_on_commit=False,
             autoflush=False,
         )
+
+        # Semantic search is always on, and production creates vector storage (the
+        # chunk manifest and pgvector tables) at database initialization. The reset
+        # above drops it, so run that same initialization here. Vector storage is
+        # shared by every project, so any valid project id builds it.
+        await PostgresSearchRepository(
+            session_maker, project_id=1, app_config=app_config
+        ).init_search_index()
 
         # Important: wire the engine/session into the global db module state.
         # Some codepaths (e.g. app initialization / MCP lifespan) call db.get_or_create_db(),

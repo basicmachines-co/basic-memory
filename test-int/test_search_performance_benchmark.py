@@ -79,7 +79,6 @@ def _enable_semantic_for_benchmark(search_service, app_config) -> None:
     if not isinstance(repository, SQLiteSearchRepository):
         return
 
-    app_config.semantic_search_enabled = True
     repository._semantic_enabled = True
     if repository._embedding_provider is None:
         repository._embedding_provider = FastEmbedEmbeddingProvider(

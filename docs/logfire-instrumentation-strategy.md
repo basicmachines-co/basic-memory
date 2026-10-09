@@ -416,7 +416,6 @@ What this does:
 - creates an isolated temp home, config dir, and project path
 - enables Logfire for the run
 - automatically exports to Logfire when `LOGFIRE_TOKEN` is present
-- defaults `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` so the smoke run stays fast and trace-friendly
 - disables promo telemetry so the trace is about Basic Memory work, not analytics noise
 - runs a small CLI workflow:
   - `project add`
@@ -431,12 +430,6 @@ If you want to exercise the instrumentation without exporting anything upstream:
 
 ```bash
 BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE=false just telemetry-smoke
-```
-
-If you want the smoke run to include vector or hybrid retrieval spans too:
-
-```bash
-LOGFIRE_TOKEN=lf_... BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true just telemetry-smoke
 ```
 
 The recipe sets `BASIC_MEMORY_LOGFIRE_ENVIRONMENT=telemetry-smoke` by default so these traces are easy to isolate in Logfire. Override it if you want the smoke traces grouped under a different environment name.

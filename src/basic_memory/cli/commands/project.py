@@ -1830,37 +1830,40 @@ def display_project_info(
             right.add_row("[bold]Embeddings[/bold]", "")
             if info.embedding_status:
                 es = info.embedding_status
-                if not es.semantic_search_enabled:
-                    right.add_row("[green]●[/green] Semantic Search", "Disabled")
-                else:
+                if es.vector_runtime_available:
                     right.add_row("[green]●[/green] Semantic Search", "Enabled")
-                    if es.embedding_provider:
-                        right.add_row("  Provider", es.embedding_provider)
-                    if es.embedding_model:
-                        right.add_row("  Model", es.embedding_model)
-                    # Embedding coverage bar
-                    if es.total_indexed_entities > 0:
-                        coverage_bar = make_bar(
-                            es.total_entities_with_chunks,
-                            es.total_indexed_entities,
-                            width=20,
-                        )
-                        count_text = Text(
-                            f" {es.total_entities_with_chunks}/{es.total_indexed_entities}",
-                            style="green",
-                        )
-                        bar_with_count = Text.assemble("  Indexed  ", coverage_bar, count_text)
-                        right.add_row(bar_with_count, "")
-                    right.add_row("  Chunks", str(es.total_chunks))
-                    if es.reindex_recommended:
-                        right.add_row(
-                            "[yellow]●[/yellow] Status",
-                            "[yellow]Reindex recommended[/yellow]",
-                        )
-                        if es.reindex_reason:
-                            right.add_row("  Reason", f"[yellow]{es.reindex_reason}[/yellow]")
-                    else:
-                        right.add_row("[green]●[/green] Status", "[green]Up to date[/green]")
+                else:
+                    right.add_row(
+                        "[yellow]●[/yellow] Semantic Search",
+                        "Unavailable: sqlite-vec cannot load here, keyword-only",
+                    )
+                if es.embedding_provider:
+                    right.add_row("  Provider", es.embedding_provider)
+                if es.embedding_model:
+                    right.add_row("  Model", es.embedding_model)
+                # Embedding coverage bar
+                if es.total_indexed_entities > 0:
+                    coverage_bar = make_bar(
+                        es.total_entities_with_chunks,
+                        es.total_indexed_entities,
+                        width=20,
+                    )
+                    count_text = Text(
+                        f" {es.total_entities_with_chunks}/{es.total_indexed_entities}",
+                        style="green",
+                    )
+                    bar_with_count = Text.assemble("  Indexed  ", coverage_bar, count_text)
+                    right.add_row(bar_with_count, "")
+                right.add_row("  Chunks", str(es.total_chunks))
+                if es.reindex_recommended:
+                    right.add_row(
+                        "[yellow]●[/yellow] Status",
+                        "[yellow]Reindex recommended[/yellow]",
+                    )
+                    if es.reindex_reason:
+                        right.add_row("  Reason", f"[yellow]{es.reindex_reason}[/yellow]")
+                else:
+                    right.add_row("[green]●[/green] Status", "[green]Up to date[/green]")
 
             # --- Compose two-column layout (content-sized, NOT Layout) ---
             columns = Table.grid(padding=(0, 4), expand=False)

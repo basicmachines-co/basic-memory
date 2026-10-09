@@ -1155,7 +1155,7 @@ class SearchReader:
     def _semantic(self) -> SemanticSearch:
         if self.semantic is None:
             raise SemanticSearchDisabledError(
-                "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true."
+                "Semantic search is not available in this search reader."
             )
         return self.semantic
 

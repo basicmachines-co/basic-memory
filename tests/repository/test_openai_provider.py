@@ -158,7 +158,6 @@ def test_embedding_provider_factory_selects_fastembed_by_default():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
     )
     provider = create_embedding_provider(config)
@@ -171,7 +170,6 @@ def test_embedding_provider_factory_selects_openai_and_applies_default_model():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
         semantic_embedding_model="bge-small-en-v1.5",
     )
@@ -185,7 +183,6 @@ def test_embedding_provider_factory_forwards_openai_api_configuration():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
         semantic_embedding_api_base="https://embedding.example/v1",
         semantic_embedding_api_key="test-key",
@@ -203,7 +200,6 @@ def test_embedding_provider_factory_separates_openai_api_cache_keys():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
         semantic_embedding_api_base="https://one.example/v1",
         semantic_embedding_api_key="test-key",
@@ -227,7 +223,6 @@ def test_embedding_provider_factory_rejects_unknown_provider():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="unknown-provider",
     )
     with pytest.raises(ValueError):
@@ -240,7 +235,6 @@ def test_embedding_provider_factory_passes_custom_dimensions_to_fastembed():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_dimensions=768,
     )
@@ -255,7 +249,6 @@ def test_embedding_provider_factory_passes_custom_dimensions_to_openai():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
         semantic_embedding_dimensions=3072,
     )
@@ -270,7 +263,6 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
     )
     fastembed_provider = create_embedding_provider(fastembed_config)
@@ -281,7 +273,6 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
     )
     openai_provider = create_embedding_provider(openai_config)
@@ -296,7 +287,6 @@ def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_cache_dir="/tmp/fastembed-cache",
         semantic_embedding_threads=3,
@@ -324,7 +314,6 @@ def test_embedding_provider_factory_uses_default_cache_dir_when_unset(config_hom
         env="test",
         projects={"test-project": str(config_home / "project")},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_cache_dir=None,
     )
@@ -352,7 +341,6 @@ def test_embedding_provider_factory_cache_key_reflects_resolved_cache_dir(
         env="test",
         projects={"test-project": str(config_home / "project")},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_cache_dir=None,
     )
@@ -401,7 +389,6 @@ def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -422,7 +409,6 @@ def test_embedding_provider_factory_auto_tuning_caps_large_cpu_budgets(pin_cpu_b
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -445,7 +431,6 @@ def test_embedding_provider_factory_auto_tuning_stays_conservative_on_small_cpu_
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -473,7 +458,6 @@ def test_embedding_provider_factory_auto_tunes_without_process_cpu_count(monkeyp
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -495,7 +479,6 @@ def test_embedding_provider_factory_leaves_knobs_unset_when_cpu_budget_is_unknow
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -514,7 +497,6 @@ def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=2,
     )
@@ -522,7 +504,6 @@ def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=2,
     )
@@ -541,7 +522,6 @@ def test_embedding_provider_factory_reuses_auto_tuned_provider_for_same_cpu_budg
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -550,7 +530,6 @@ def test_embedding_provider_factory_reuses_auto_tuned_provider_for_same_cpu_budg
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -619,7 +598,6 @@ def test_embedding_provider_factory_creates_new_provider_for_different_cache_key
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_model="bge-small-en-v1.5",
     )
@@ -627,7 +605,6 @@ def test_embedding_provider_factory_creates_new_provider_for_different_cache_key
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_model="some-other-model",
     )
@@ -644,7 +621,6 @@ def test_embedding_provider_factory_wraps_provider_when_prefixes_are_configured(
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_document_prefix="title: none | text: ",
         semantic_embedding_query_prefix="task: search result | query: ",
@@ -664,7 +640,6 @@ def test_embedding_provider_factory_reuses_provider_for_same_prefixes():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_document_prefix="doc: ",
         semantic_embedding_query_prefix="query: ",
@@ -682,7 +657,6 @@ def test_embedding_provider_factory_separates_cache_for_different_prefixes():
         "env": "test",
         "projects": {"test-project": "/tmp/basic-memory-test"},
         "default_project": "test-project",
-        "semantic_search_enabled": True,
         "semantic_embedding_provider": "fastembed",
         "semantic_embedding_query_prefix": "query: ",
     }
@@ -712,7 +686,6 @@ def test_embedding_provider_factory_reuses_provider_when_only_thread_knobs_diffe
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=2,
         semantic_embedding_parallel=1,
@@ -721,7 +694,6 @@ def test_embedding_provider_factory_reuses_provider_when_only_thread_knobs_diffe
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=4,
         semantic_embedding_parallel=2,
@@ -744,7 +716,6 @@ def test_embedding_provider_factory_reuses_provider_when_cpu_budget_drifts(pin_c
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=None,
         semantic_embedding_parallel=None,
@@ -766,7 +737,6 @@ def test_embedding_provider_factory_forwards_openai_request_concurrency():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="openai",
         semantic_embedding_request_concurrency=6,
     )
@@ -782,7 +752,6 @@ def test_embedding_provider_factory_reset_clears_cache():
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
     )
 

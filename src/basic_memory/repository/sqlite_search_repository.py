@@ -1,6 +1,7 @@
 """SQLite FTS5-based search repository implementation."""
 
 import asyncio
+import sqlite3
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from typing import override, List
@@ -76,7 +77,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         super().__init__(session_maker, project_id)
         self._fts = SQLiteFts(session_maker)
         self._app_config = app_config or ConfigManager().config
-        self._semantic_enabled = self._app_config.semantic_search_enabled
+        # Semantic search is always on. init_search_index() turns it off for this
+        # instance only when sqlite-vec cannot load (#711), falling back to keywords.
+        self._semantic_enabled = True
         self._semantic_vector_k = self._app_config.semantic_vector_k
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._semantic_embedding_sync_batch_size = (
@@ -92,13 +95,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._vector_tables_initialized = False
         self._vector_dimensions = 384
 
-        if self._semantic_enabled and self._embedding_provider is None:
+        if self._embedding_provider is None:
             # Constraint: SQLite maps L2 distance to cosine similarity via 1 - L2²/2.
             # This conversion is correct only for unit-normalized embeddings.
             # Provider implementations must return normalized vectors.
             self._embedding_provider = create_embedding_provider(self._app_config)
         # create_rerank_provider returns None unless reranking is enabled.
-        if self._semantic_enabled and self._rerank_provider is None:
+        if self._rerank_provider is None:
             self._rerank_provider = create_rerank_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
@@ -251,8 +254,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     "Common cause: python.org Python on macOS. "
                     "Reinstall basic-memory under a Python that ships extension "
                     "support (uv-managed CPython, Homebrew Python, or the official "
-                    "Docker image), or set semantic_search_enabled=false in config "
-                    "to silence this and use keyword-only search."
+                    "Docker image). Search falls back to keyword-only until then."
                 )
 
             try:
@@ -270,10 +272,21 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     "Common cause: python.org Python on macOS. "
                     "Reinstall basic-memory under a Python that ships extension "
                     "support (uv-managed CPython, Homebrew Python, or the official "
-                    "Docker image), or set semantic_search_enabled=false in config "
-                    "to silence this and use keyword-only search."
+                    "Docker image). Search falls back to keyword-only until then."
                 ) from exc
-            await driver_connection.load_extension(sqlite_vec.loadable_path())
+            try:
+                await driver_connection.load_extension(sqlite_vec.loadable_path())
+            except sqlite3.OperationalError as exc:
+                # Trigger: extension loading exists but this binary will not load
+                # (an incompatible wheel, or loading denied by the SQLite build).
+                # Why: semantic search has no off switch, so a failed load must take
+                # the same keyword-only fallback as a missing capability (#711).
+                # Outcome: the typed error init_search_index() already handles.
+                raise SemanticDependenciesMissingError(
+                    f"sqlite-vec could not be loaded ({exc}). "
+                    "Reinstall basic-memory to get a sqlite-vec build for this platform. "
+                    "Search falls back to keyword-only until then."
+                ) from exc
             await driver_connection.enable_load_extension(False)
             await session.execute(text("SELECT vec_version()"))
 

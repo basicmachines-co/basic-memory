@@ -99,7 +99,6 @@ async def corpus(
     legacy way, so note-type expansion has something to find.
     """
     engine, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
     app_config.reranker_enabled = False
     app_config.semantic_min_similarity = 0.0
     provider = MarkerEmbeddingProvider()
@@ -517,26 +516,6 @@ async def test_api_pagination_and_empty_later_page(
         assert response.status_code == 200, response.text
         assert len(response.json()["results"]) == count
         assert response.json()["has_more"] == has_more
-
-
-@pytest.mark.asyncio
-async def test_semantic_modes_need_the_semantic_stack(corpus: Corpus, client: AsyncClient) -> None:
-    corpus.config.semantic_search_enabled = False
-    scope = {"project_ids": [corpus.projects[0].id]}
-
-    for mode in SEMANTIC_MODES:
-        response = await client.request(
-            "QUERY", "/v2/search/", json={**scope, "text": "nebula", "retrieval_mode": mode.value}
-        )
-        assert response.status_code == 400, response.text
-        assert "disabled" in response.json()["detail"]
-    assert corpus.provider.query_calls == 0
-
-    no_criteria = await client.request("QUERY", "/v2/search/", json=scope)
-    assert no_criteria.status_code == 200 and not no_criteria.json()["results"]
-    lexical = await client.request("QUERY", "/v2/search/", json={**scope, "text": "nebula"})
-    assert lexical.status_code == 200, lexical.text
-    assert lexical.json()["total"] == 3
 
 
 @pytest.mark.asyncio

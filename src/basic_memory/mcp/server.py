@@ -137,18 +137,16 @@ async def lifespan(app: FastMCP):
                 logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
                 logger.info(
                     f"Config: database_backend={config.database_backend.value}, "
-                    f"semantic_search_enabled={config.semantic_search_enabled}, "
                     f"default_project={config.default_project}"
                 )
-                if config.semantic_search_enabled:
-                    logger.info(
-                        f"Semantic search: provider={config.semantic_embedding_provider}, "
-                        f"model={config.semantic_embedding_model}, "
-                        f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
-                        f"batch_size={config.semantic_embedding_batch_size}, "
-                        f"document_prefix_set={bool(config.semantic_embedding_document_prefix)}, "
-                        f"query_prefix_set={bool(config.semantic_embedding_query_prefix)}"
-                    )
+                logger.info(
+                    f"Semantic search: provider={config.semantic_embedding_provider}, "
+                    f"model={config.semantic_embedding_model}, "
+                    f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
+                    f"batch_size={config.semantic_embedding_batch_size}, "
+                    f"document_prefix_set={bool(config.semantic_embedding_document_prefix)}, "
+                    f"query_prefix_set={bool(config.semantic_embedding_query_prefix)}"
+                )
 
                 # Log configured projects with their routing mode
                 for name, entry in config.projects.items():
@@ -193,7 +191,7 @@ async def lifespan(app: FastMCP):
                     api_container.read_cache = read_cache
 
                 # Log embedding status so it's easy to spot in the logs
-                if config.semantic_search_enabled and db._session_maker is not None:
+                if db._session_maker is not None:
                     await _log_embedding_status(db._session_maker)
 
                 # Create and start local watch coordinator (lifecycle centralized in coordinator)

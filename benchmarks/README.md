@@ -224,7 +224,7 @@ file/entity/row counts, duplicate permalinks, duplicate observation or relation
 tuples, and unique `bmk-*` markers that detect lost or doubled writes.
 
 The run uses a fresh isolated home under `benchmarks/.bm-homes/`; environment
-variables such as `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` pass through, so axes
+variables such as `BASIC_MEMORY_REDIS_URL` pass through, so axes
 like Redis on/off are controlled the same way as the retrieval scripts.
 Postgres row-integrity checks are a follow-up; the write workload itself is
 database-agnostic.

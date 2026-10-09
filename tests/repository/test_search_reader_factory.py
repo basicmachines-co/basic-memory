@@ -7,12 +7,10 @@ import pytest
 
 import basic_memory.repository.search_repository as search_repository_module
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
-from basic_memory.repository.postgres_search_query import PostgresFts
 from basic_memory.repository.search_reader import Reranking
 from basic_memory.repository.search_repository import create_search_reader
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index_factory import semantic_embedding_identity
-from basic_memory.repository.sqlite_search_query import SQLiteFts
 
 SCOPE = ProjectScope.of([3, 1])
 
@@ -51,27 +49,6 @@ def _config(backend: DatabaseBackend, **overrides: object) -> BasicMemoryConfig:
     )
 
 
-@pytest.mark.parametrize(
-    ("backend", "fts_type"),
-    [(DatabaseBackend.SQLITE, SQLiteFts), (DatabaseBackend.POSTGRES, PostgresFts)],
-)
-def test_reader_without_semantic_search_is_full_text_only(monkeypatch, backend, fts_type):
-    """Disabled semantic search never resolves a provider, and the engine picks the backend."""
-    monkeypatch.setattr(
-        search_repository_module,
-        "create_embedding_provider",
-        lambda _config: pytest.fail("a full-text reader must not load an embedding provider"),
-    )
-
-    reader = create_search_reader(
-        MagicMock(), SCOPE, _config(backend, semantic_search_enabled=False)
-    )
-
-    assert reader.scope == SCOPE
-    assert reader.semantic is None
-    assert isinstance(reader.fts, fts_type)
-
-
 @pytest.mark.parametrize("reranker", [None, _StubReranker()])
 def test_reader_with_semantic_search_composes_the_shared_stack(monkeypatch, reranker):
     """The reader gets the same provider, adapter, and reranker a project repository would."""
@@ -88,7 +65,6 @@ def test_reader_with_semantic_search_composes_the_shared_stack(monkeypatch, rera
     monkeypatch.setattr(search_repository_module, "create_rerank_provider", lambda _c: reranker)
     config = _config(
         DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         semantic_vector_k=7,
         semantic_min_similarity=0.25,
         reranker_candidates=9,

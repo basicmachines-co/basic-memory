@@ -546,7 +546,7 @@ async def test_note_update_does_not_reembed_unchanged_observations_or_relations(
     from basic_memory.services.search_service import SearchService
 
     provider = _RecordingEmbeddingProvider()
-    semantic_config = app_config.model_copy(update={"semantic_search_enabled": True})
+    semantic_config = app_config
     if app_config.database_backend == DatabaseBackend.POSTGRES:
         async with db.scoped_session(session_maker) as session:
             try:

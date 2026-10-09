@@ -322,9 +322,8 @@ class LocalWatchEventIndexRuntimeFactory:
     dependency_provider: LocalIndexProjectDependencyProvider = (
         DefaultLocalIndexProjectDependencyProvider()
     )
-    # Embedding requires semantic search to be configured, so default it off and
-    # let runtime construction opt in via semantic_search_enabled (#1016).
-    index_embeddings: bool = False
+    # Semantic search is always on, so watched edits refresh their embeddings too.
+    index_embeddings: bool = True
     move_batch_size: int = 100
     read_cache: ReadCache | None = None
 
