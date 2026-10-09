@@ -7,6 +7,7 @@ codes against, and a live cloud is not the thing under test here.
 
 import io
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -533,6 +534,42 @@ async def test_delimiter_filenames_round_trip_through_list_and_download():
     assert [f.path for f in files] == ["a#draft.md"]
     # httpx reports the decoded path; the delimiter survived the round trip.
     assert fetched == ["/webdav/research/a#draft.md"]
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_is_reported_with_its_status():
+    """A proxy's 3xx is not a success; the message must name it, not a stream error."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, text="moved", headers={"Location": "/login"})
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match="HTTP 302 - moved"):
+            await download_file(client, "research", "a.md", io.BytesIO())
+
+
+# Windows refuses to replace a file another handle holds open, so the race this
+# guards against cannot happen there.
+@pytest.mark.skipif(sys.platform == "win32", reason="cannot replace an open file on Windows")
+@pytest.mark.asyncio
+async def test_upload_retry_sends_the_file_it_opened(recorded_waits, tmp_path):
+    """Replacing the path during a Retry-After wait does not change what is replayed."""
+    source = _local_file(tmp_path, b"original")
+    bodies: list[bytes] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        if len(bodies) == 1:
+            replacement = tmp_path / "replacement.md"
+            replacement.write_bytes(b"swapped!")
+            os.replace(replacement, source)
+            return _rate_limited()
+        return httpx.Response(201)
+
+    async with _client(handler) as client:
+        await upload_file(client, "research", "a.md", source=source)
+
+    assert bodies == [b"original", b"original"]
 
 
 @pytest.mark.asyncio
