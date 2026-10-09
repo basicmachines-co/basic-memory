@@ -6,13 +6,17 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 
 import pytest
+from markdown_it import MarkdownIt
 
 from basic_memory.file_utils import ParseError, parse_frontmatter, remove_frontmatter
 from basic_memory.repository import AcceptedObservationWrite, AcceptedRelationWrite
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.entity_service import PreparedEntityFields
-from basic_memory.services.note_preparation import _merge_metadata_into_markdown
+from basic_memory.services.note_preparation import (
+    _merge_metadata_into_markdown,
+    apply_edit_operation,
+)
 
 
 @pytest.mark.asyncio
@@ -893,3 +897,86 @@ def test_merge_metadata_into_markdown_preserves_separatorless_body():
     assert merged.endswith("---\nBody line\n")
     assert "\n\nBody line" not in merged
     assert parse_frontmatter(merged)["status"] == "resolved"
+
+
+# --- Edit joins and setext headings (#1585) ---
+
+
+def _setext_heading_texts(markdown: str) -> list[str]:
+    """Return the text of every setext (underlined) heading CommonMark finds."""
+    tokens = MarkdownIt("commonmark").parse(markdown)
+    return [
+        tokens[index + 1].content
+        for index, token in enumerate(tokens)
+        if token.type == "heading_open" and token.markup in ("=", "-")
+    ]
+
+
+@pytest.mark.parametrize("current_content", ["Some paragraph text", "Some paragraph text\n"])
+def test_append_thematic_break_after_paragraph_keeps_paragraph(current_content: str) -> None:
+    result = apply_edit_operation(current_content, "append", "---\n\n## Section Two\nsecond body")
+
+    assert result == "Some paragraph text\n\n---\n\n## Section Two\nsecond body"
+    assert _setext_heading_texts(result) == []
+    assert "<hr />" in MarkdownIt("commonmark").render(result)
+
+
+def test_append_equals_run_after_paragraph_keeps_paragraph() -> None:
+    result = apply_edit_operation("Some paragraph text", "append", "===")
+
+    assert result == "Some paragraph text\n\n==="
+    assert _setext_heading_texts(result) == []
+
+
+def test_append_list_item_after_list_item_stays_tight() -> None:
+    current_content = "## Observations\n- [fact] first"
+
+    result = apply_edit_operation(current_content, "append", "- [fact] second")
+
+    assert result == "## Observations\n- [fact] first\n- [fact] second"
+    # markdown-it hides the item paragraphs of a tight list; a loose list shows them.
+    tokens = MarkdownIt("commonmark").parse(result)
+    item_paragraphs = [token for token in tokens if token.type == "paragraph_open"]
+    assert len(item_paragraphs) == 2
+    assert all(token.hidden for token in item_paragraphs)
+
+
+def test_append_thematic_break_after_list_item_needs_no_blank_line() -> None:
+    result = apply_edit_operation("- item", "append", "---")
+
+    assert result == "- item\n---"
+    assert _setext_heading_texts(result) == []
+
+
+def test_append_after_blank_line_is_unchanged() -> None:
+    result = apply_edit_operation("Some paragraph text\n\n", "append", "---")
+
+    assert result == "Some paragraph text\n\n---"
+
+
+def test_append_paragraph_text_after_paragraph_keeps_single_newline() -> None:
+    result = apply_edit_operation("Some paragraph text", "append", "More text")
+
+    assert result == "Some paragraph text\nMore text"
+
+
+def test_prepend_paragraph_before_thematic_break_keeps_paragraph() -> None:
+    result = apply_edit_operation("---\n\nOriginal body", "prepend", "Prepended line")
+
+    assert result == "Prepended line\n\n---\n\nOriginal body"
+    assert _setext_heading_texts(result) == []
+
+
+def test_prepend_after_frontmatter_before_thematic_break_keeps_paragraph() -> None:
+    current_content = "---\ntitle: Note\n---\n\n---\n\nOriginal body"
+
+    result = apply_edit_operation(current_content, "prepend", "Prepended line")
+
+    assert remove_frontmatter(result) == "Prepended line\n\n---\n\nOriginal body"
+    assert _setext_heading_texts(remove_frontmatter(result)) == []
+
+
+def test_prepend_heading_before_thematic_break_keeps_single_newline() -> None:
+    result = apply_edit_operation("---\nOriginal body", "prepend", "# Title")
+
+    assert result == "# Title\n---\nOriginal body"
