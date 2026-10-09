@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -46,8 +47,10 @@ def test_import_document_help_explains_the_project_boundary() -> None:
 
     assert result.exit_code == 0, result.output
     assert "already stored inside a project" in result.output
-    # Rich wraps help text into a box; strip borders and whitespace before matching.
-    help_text = " ".join(result.output.replace("│", " ").split())
+    # Rich wraps help text into a box, and CI forces color, so ANSI codes land between
+    # wrapped lines. Strip the codes, the borders and the whitespace before matching.
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    help_text = " ".join(plain.replace("│", " ").split())
     assert "Copy external files into the project first" in help_text
     # #1635: the help has to say which directory a relative path is resolved against.
     assert "resolved against the project root, not the current directory" in help_text
