@@ -980,3 +980,23 @@ def test_prepend_heading_before_thematic_break_keeps_single_newline() -> None:
     result = apply_edit_operation("---\nOriginal body", "prepend", "# Title")
 
     assert result == "# Title\n---\nOriginal body"
+
+
+def test_append_thematic_break_after_lazy_ordered_item_keeps_paragraph() -> None:
+    # `2.` cannot interrupt a paragraph, so this line is paragraph text, not a list item.
+    result = apply_edit_operation("paragraph\n2. item", "append", "---")
+
+    assert result == "paragraph\n2. item\n\n---"
+    assert _setext_heading_texts(result) == []
+
+
+@pytest.mark.parametrize(
+    "current_content",
+    ["```python\nprint('x')", "<div>\nraw html"],
+    ids=["open-fence", "open-html-block"],
+)
+def test_append_inside_open_block_keeps_single_newline(current_content: str) -> None:
+    # A blank line here would rewrite code bytes or close the HTML block.
+    result = apply_edit_operation(current_content, "append", "---")
+
+    assert result == current_content + "\n---"
