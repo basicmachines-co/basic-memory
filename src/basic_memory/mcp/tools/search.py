@@ -41,6 +41,7 @@ from basic_memory.schemas.search import (
     SearchRetrievalMode,
 )
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
+from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
 _SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
 _NO_SEARCH_CRITERIA_MESSAGE = (
@@ -217,7 +218,9 @@ def _default_search_type() -> str:
     if config.default_search_type:
         return config.default_search_type
 
-    return "hybrid"
+    # A host that cannot load sqlite-vec runs keyword-only (#711); defaulting to
+    # hybrid there would turn every plain search into a semantic-unavailable error.
+    return "hybrid" if semantic_runtime_available(config) else "text"
 
 
 def _is_service_unavailable_error(error: BaseException) -> bool:

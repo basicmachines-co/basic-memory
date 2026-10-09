@@ -32,6 +32,7 @@ from basic_memory.schemas.project_readiness import (
     ProjectIndexStageName,
     combine_index_phases,
 )
+from basic_memory.services import project_readiness as project_readiness_module
 from basic_memory.services.project_readiness import (
     ProjectReadinessService,
     file_stage_counts,
@@ -355,6 +356,25 @@ async def test_an_unembedded_markdown_note_is_pending_embedding_work(
 
     assert embeddings.total == 1
     assert embeddings.pending == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_stage_settles_when_the_vector_runtime_cannot_load(
+    readiness_service, test_project, sample_entity, monkeypatch
+):
+    """A keyword-only host (#711) never embeds, so nothing is owed.
+
+    Counting the note as pending would park the project in PENDING forever and make
+    `bm status --wait` run to its timeout.
+    """
+    # Injected: this host can load sqlite-vec, so the fallback is simulated.
+    monkeypatch.setattr(project_readiness_module, "semantic_runtime_available", lambda _c: False)
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    assert embeddings.total == 0
+    assert embeddings.pending == 0
 
 
 async def _insert_chunk(

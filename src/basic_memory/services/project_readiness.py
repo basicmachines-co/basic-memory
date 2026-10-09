@@ -38,6 +38,7 @@ from basic_memory.schemas.project_readiness import (
     ProjectIndexStageName,
     combine_index_phases,
 )
+from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
 
 def _phase_for(*, indexed: bool, pending: int) -> ProjectIndexPhase:
@@ -270,7 +271,12 @@ class ProjectReadinessService:
         polled status route must not pay. ``bm project info`` verifies it, via
         ``ProjectService.get_embedding_status``, and recommends a rebuild.
 
+        A host that cannot load sqlite-vec runs keyword-only (#711) and never
+        embeds, so the stage reports zero of zero there instead of parking the
+        project in PENDING forever.
         """
+        if not semantic_runtime_available(self.app_config):
+            return 0, 0
 
         # The opt-out policy reads a JSON metadata field, so the rows are loaded
         # and filtered in Python. Restating it as SQL would be a second copy of a

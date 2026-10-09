@@ -1915,3 +1915,23 @@ async def test_note_whose_relation_spells_an_observation_address_indexes_both(
         SearchItemType.OBSERVATION.value,
         SearchItemType.RELATION.value,
     ]
+
+
+@pytest.mark.asyncio
+async def test_vector_sync_skips_entities_when_the_vector_runtime_is_unavailable(
+    search_service, full_entity
+):
+    """A keyword-only host (#711) indexes and writes without vectors instead of failing.
+
+    init_search_index() turns semantic retrieval off on a repository whose host cannot
+    load sqlite-vec; project indexing and write follow-ups still call vector sync, which
+    must report the entities as skipped rather than raise.
+    """
+    # Injected: the state init_search_index() leaves when sqlite-vec cannot load.
+    search_service.repository._semantic_enabled = False
+
+    batch = await search_service.sync_entity_vectors_batch([full_entity.id])
+    single = await search_service.sync_entity_vectors(full_entity.id)
+
+    assert (batch.entities_total, batch.entities_skipped, batch.entities_failed) == (1, 1, 0)
+    assert (single.entities_total, single.entities_skipped, single.entities_failed) == (1, 1, 0)

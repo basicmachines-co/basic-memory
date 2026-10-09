@@ -685,6 +685,13 @@ class SearchService:
                 entities_total=1, entities_synced=0, entities_failed=0, entities_skipped=1
             )
 
+        # A host that cannot load sqlite-vec runs keyword-only (#711): there is
+        # nothing to embed into, so indexing and writes must finish without vectors.
+        if not await self.repository.semantic_effectively_enabled():
+            return VectorSyncBatchResult(
+                entities_total=1, entities_synced=0, entities_failed=0, entities_skipped=1
+            )
+
         return await self.repository.sync_entity_vectors(entity_id)
 
     async def sync_entity_vectors_batch(
@@ -695,6 +702,16 @@ class SearchService:
         """Refresh vector chunks for a batch of entities."""
         if not entity_ids:
             return await self.repository.sync_entity_vectors_batch([])
+
+        # A host that cannot load sqlite-vec runs keyword-only (#711): there is
+        # nothing to embed into, so indexing and writes must finish without vectors.
+        if not await self.repository.semantic_effectively_enabled():
+            return VectorSyncBatchResult(
+                entities_total=len(entity_ids),
+                entities_synced=0,
+                entities_failed=0,
+                entities_skipped=len(entity_ids),
+            )
 
         async with db.scoped_session(self.session_maker) as session:
             entities_by_id = {

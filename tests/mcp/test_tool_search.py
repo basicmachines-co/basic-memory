@@ -3,6 +3,8 @@
 import inspect
 
 import pytest
+
+from basic_memory.config import DatabaseBackend
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -1040,6 +1042,7 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
     @dataclass
     class StubConfig:
         default_search_type: str | None = None
+        database_backend: DatabaseBackend = DatabaseBackend.SQLITE
 
     @dataclass
     class StubContainer:
@@ -1100,6 +1103,7 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
     @dataclass
     class StubConfig:
         default_search_type: str | None = None
+        database_backend: DatabaseBackend = DatabaseBackend.SQLITE
 
     @dataclass
     class StubContainer:
@@ -1167,7 +1171,13 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
         lambda: type(
             "StubConfigManager",
             (),
-            {"config": type("Cfg", (), {"default_search_type": None})()},
+            {
+                "config": type(
+                    "Cfg",
+                    (),
+                    {"default_search_type": None, "database_backend": DatabaseBackend.SQLITE},
+                )()
+            },
         )(),
     )
 
@@ -1970,8 +1980,32 @@ def test_default_search_type_falls_back_to_hybrid():
     mock_container = MagicMock()
     mock_container.config = mock_config
 
-    with patch.object(search_module, "get_container", return_value=mock_container):
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        patch.object(search_module, "semantic_runtime_available", return_value=True),
+    ):
         assert search_module._default_search_type() == "hybrid"
+
+
+def test_default_search_type_is_text_when_the_vector_runtime_cannot_load():
+    """A host that cannot load sqlite-vec runs keyword-only (#711), so plain searches
+    default to text instead of failing as semantic-unavailable."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        # Injected: this host can load sqlite-vec, so the fallback is simulated.
+        patch.object(search_module, "semantic_runtime_available", return_value=False),
+    ):
+        assert search_module._default_search_type() == "text"
 
 
 def test_boolean_queries_default_to_text_search():
