@@ -24,6 +24,43 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+# Top-level commands that skip ensure_initialization() in app_callback.
+# Skip for 'mcp' command - it has its own lifespan that handles initialization
+# Skip for API-using commands (status, tool, etc.) - they handle initialization via deps.py
+# Skip for 'reset' command - it manages its own database lifecycle
+# Skip for 'man' - it only copies packaged files; a broken local database
+# must not block installing the offline docs
+# ('hook' returns before this check.)
+# Every entry must be a registered top-level command (tests/cli/test_cli_app.py).
+SKIP_INIT_COMMANDS = frozenset(
+    {
+        "doctor",
+        "inspect",
+        "man",
+        "mcp",
+        "status",
+        "project",
+        "config",
+        "tool",
+        "reset",
+        "reindex",
+        "prune",
+        "update",
+        "wiki",
+        "workspace",
+        # POSIX read verbs (#1404): API-hitting commands that initialize via
+        # deps.py, same as status/tool.
+        "cat",
+        "grep",
+        "ls",
+        "find",
+        "tail",
+        "head",
+        "tree",
+    }
+)
+
+
 app = typer.Typer(name="basic-memory")
 
 
@@ -127,44 +164,10 @@ def app_callback(
 
     ctx.call_on_close(_post_command_messages)
 
-    # Run initialization for commands that don't use the API
-    # Skip for 'mcp' command - it has its own lifespan that handles initialization
-    # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
-    # Skip for 'reset' command - it manages its own database lifecycle
-    # Skip for 'man' - it only copies packaged files; a broken local database
-    # must not block installing the offline docs
-    # ('hook' returns above, before this point.)
-    skip_init_commands = {
-        "doctor",
-        "inspect",
-        "man",
-        "mcp",
-        "status",
-        "sync",
-        "project",
-        "config",
-        "tool",
-        "reset",
-        "reindex",
-        "prune",
-        "update",
-        "watch",
-        "wiki",
-        "workspace",
-        # POSIX read verbs (#1404): API-hitting commands that initialize via
-        # deps.py, same as status/tool.
-        "cat",
-        "grep",
-        "ls",
-        "find",
-        "tail",
-        "head",
-        "tree",
-    }
     if (
         not version
         and ctx.invoked_subcommand is not None
-        and ctx.invoked_subcommand not in skip_init_commands
+        and ctx.invoked_subcommand not in SKIP_INIT_COMMANDS
     ):
         from basic_memory.services.initialization import ensure_initialization
 

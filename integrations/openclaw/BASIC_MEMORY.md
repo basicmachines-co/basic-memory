@@ -61,11 +61,11 @@ bm project info
 # Set the default project
 bm project default "name"
 
-# One-way sync (local -> cloud)
-bm project sync
+# Fetch cloud changes into a local project (cloud -> local)
+bm cloud pull --name "name"
 
-# Bidirectional sync
-bm project bisync
+# Upload local changes to cloud (local -> cloud)
+bm cloud push --name "name"
 ```
 
 ## Cross-Project Operations

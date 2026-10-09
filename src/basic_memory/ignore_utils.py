@@ -108,7 +108,8 @@ def create_default_bmignore() -> None:
 
     bmignore_path.parent.mkdir(parents=True, exist_ok=True)
     bmignore_path.write_text("""# Basic Memory Ignore Patterns
-# This file is used by 'bm cloud upload', 'bm cloud bisync', and file indexing
+# This file is used by 'bm cloud upload', 'bm cloud push'/'pull', the deprecated
+# 'bm cloud bisync', and file indexing
 # Patterns use standard gitignore-style syntax
 
 # Hidden files (files starting with dot)

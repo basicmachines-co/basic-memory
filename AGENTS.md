@@ -438,7 +438,7 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Setup cloud sync: `basic-memory cloud setup`
 - Save API key: `basic-memory cloud api-key save bmc_...`
 - Create API key: `basic-memory cloud api-key create "name"`
-- Integrity check (local vs cloud): `basic-memory cloud check --name "name"`
+- Integrity check (local vs cloud, legacy Personal-only): `basic-memory cloud check --name "name"`
 - Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
 - Restore from snapshot: `basic-memory cloud restore <path> --snapshot <id>`
 
@@ -446,8 +446,7 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Fetch cloud changes (cloud -> local): `basic-memory cloud pull --name "name"` (Team-safe; additive, never deletes local)
 - Upload local changes (local -> cloud): `basic-memory cloud push --name "name"` (Team-safe; additive, never deletes cloud)
 - Resolve conflicts on push/pull: `--on-conflict [fail|keep-local|keep-cloud|keep-both]` (default `fail` lists conflicts and aborts, git-style)
-- One-way mirror (local -> cloud): `basic-memory cloud sync --name "name"` (Personal workspaces only; deletes cloud files missing locally)
-- Two-way mirror (local <-> cloud): `basic-memory cloud bisync --name "name"` (Personal workspaces only)
+- Deprecated (#1596), Personal workspaces only, to be removed: `basic-memory cloud sync` (one-way mirror; deletes cloud files missing locally), `basic-memory cloud bisync` and `bisync-reset` (two-way mirror). They warn on every run; use pull/push.
 
 ### MCP Capabilities
 
@@ -465,10 +464,10 @@ Basic Memory now supports cloud synchronization and storage (requires active sub
 - Secure session management with token refresh
 - Support for multiple cloud projects
 
-**Bidirectional Sync:**
-- rclone bisync integration for two-way synchronization
-- Conflict resolution and integrity verification
-- Real-time sync with change detection
+**File Sync:**
+- `bm cloud pull` / `bm cloud push`: additive, git-style transfers on Personal and Team workspaces
+- Conflict resolution with `--on-conflict`
+- rclone bisync is deprecated (#1596)
 
 **Cloud Project Management:**
 - Create and manage projects in the cloud

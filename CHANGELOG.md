@@ -84,6 +84,15 @@
   only `workspace` and `shared` visibility, so `private` had created a team-visible
   project while reporting success.
 
+- **#1596**: `bm cloud sync`, `bm cloud bisync` and `bm cloud bisync-reset` are
+  deprecated and will be removed in a future release. `bm cloud pull` / `bm cloud push`
+  are the supported sync workflow on Personal and Team workspaces. The mirror commands
+  are marked deprecated in `--help`, print a notice with the pull/push command on every
+  run, still work on Personal workspaces, and on Team workspaces exit with that notice
+  instead of a "Personal only" error. `bm project list` no longer shows Team projects
+  with a local sync path as `cloud-only`: `sync_supported` is now true for every
+  workspace. Help examples no longer pass `--workspace Personal`.
+
 ### Features
 
 - **#1642**: `write_note` can overwrite only the revision you read. Pass
@@ -331,6 +340,15 @@
   accepts `metadata`, matching the core MCP tools. Thanks to @lastguru-net (#1474).
 
 ### Bug Fixes
+
+- **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
+  variables that override `config.json`, redacted the same way as the file dump. It
+  used to print only the file, which can disagree with what the server is using. Other
+  `BASIC_MEMORY_*` variables are listed by name only.
+
+- **#1593**: The CLI's list of commands that skip startup initialization no longer
+  names `sync` and `watch`, which are not commands. A test now keeps the list to
+  registered commands. Thanks to @FBISiri.
 
 - `bm tool edit-note --help` lists all six edit operations and documents `--section` for
   `replace_section`, `insert_before_section` and `insert_after_section`. Thanks to

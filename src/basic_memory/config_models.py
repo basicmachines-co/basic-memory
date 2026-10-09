@@ -133,7 +133,8 @@ class CloudProjectConfig(BaseModel):
         default=None, description="Timestamp of last successful sync operation"
     )
     bisync_initialized: bool = Field(
-        default=False, description="Whether rclone bisync baseline has been established"
+        default=False,
+        description="Whether rclone bisync baseline has been established (bisync is deprecated)",
     )
 
 
@@ -162,7 +163,7 @@ class ProjectEntry(BaseModel):
     )
     bisync_initialized: bool = Field(
         default=False,
-        description="Whether rclone bisync baseline has been established",
+        description="Whether rclone bisync baseline has been established (bisync is deprecated)",
     )
     last_sync: Optional[datetime] = Field(
         default=None,

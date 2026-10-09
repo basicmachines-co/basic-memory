@@ -341,16 +341,17 @@ def test_project_list_cloud_fetches_all_workspaces_and_labels_duplicate_permalin
     assert personal_project["sync_supported"] is True
     assert personal_project["sync_reason"] is None
     assert personal_project["local_usage"] == "sync-supported"
-    assert team_project["sync_supported"] is False
-    assert team_project["sync_reason"] == "organization workspace"
-    assert team_project["local_usage"] == "cloud-only"
+    # Push/pull works on Team workspaces too, so Team rows are not "cloud-only" (#1596).
+    assert team_project["sync_supported"] is True
+    assert team_project["sync_reason"] is None
+    assert team_project["local_usage"] == "sync-supported"
 
     table_result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
 
     assert table_result.exit_code == 0
     assert "Personal (personal)" in table_result.stdout
     assert "Team (organization)" in table_result.stdout
-    assert "cloud-only" in table_result.stdout
+    assert "cloud-only" not in table_result.stdout
 
 
 def test_project_list_workspace_discovery_failure_warns_and_uses_fallback(
@@ -835,10 +836,10 @@ def test_project_list_attaches_local_state_to_one_duplicate_cloud_project(
     assert filtered_team_row["is_default"] is False
 
 
-def test_project_list_hides_bisync_flag_for_attached_team_workspace(
+def test_project_list_shows_sync_for_attached_team_workspace(
     runner: CliRunner, write_config, tmp_path, monkeypatch
 ):
-    """Bisync is only supported for personal workspaces."""
+    """A Team project with a local sync path syncs via push/pull, so it shows sync (#1596)."""
     local_path = (tmp_path / "team-main").as_posix()
     write_config(
         {
@@ -918,10 +919,10 @@ def test_project_list_hides_bisync_flag_for_attached_team_workspace(
 
     assert team_row["cli_route"] == "cloud"
     assert team_row["mcp_stdio"] == "https"
-    assert team_row["sync"] is False
-    assert team_row["sync_supported"] is False
-    assert team_row["sync_reason"] == "organization workspace"
-    assert team_row["local_usage"] == "cloud-only"
+    assert team_row["sync"] is True
+    assert team_row["sync_supported"] is True
+    assert team_row["sync_reason"] is None
+    assert team_row["local_usage"] == "sync-supported"
     assert team_row["is_default"] is True
 
 

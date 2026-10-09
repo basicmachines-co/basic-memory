@@ -1,8 +1,10 @@
 """Cloud sync commands for Basic Memory projects.
 
-Commands for syncing, bisyncing, and checking integrity between local and cloud
-project instances. These were previously in project.py but belong here since
-they are cloud-specific operations.
+`bm cloud pull` / `bm cloud push` are the supported way to move files between a
+local project and Basic Memory Cloud, on Personal and Team workspaces alike. The
+rclone mirror commands (`sync`, `bisync`, `bisync-reset`) are deprecated (#1596):
+they still run on Personal workspaces, warn on every run, and refuse Team
+workspaces with the push/pull command to use instead.
 """
 
 import os
@@ -59,14 +61,20 @@ from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
 
+MIRROR_DEPRECATION_NOTICE = (
+    "`bm cloud {command}` is deprecated and will be removed in a future release.\n"
+    "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
+    "(additive upload) instead. They work on Personal and Team workspaces."
+)
+
 TEAM_WORKSPACE_BISYNC_UNSUPPORTED = (
-    "The bisync operation is only supported on Personal workspaces.\n"
+    "`bm cloud bisync` is deprecated and does not run on Team workspaces.\n"
     "Use `bm cloud pull --name {name}` / `bm cloud push --name {name}` instead."
 )
 
 TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
-    "The sync operation mirrors local onto the shared bucket and can delete a "
-    "teammate's files, so it is only supported on Personal workspaces.\n"
+    "`bm cloud sync` is deprecated and does not run on Team workspaces: it mirrors "
+    "local onto the shared bucket and can delete a teammate's files.\n"
     "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
     "(additive upload) instead."
 )
@@ -99,6 +107,12 @@ class ConflictStrategy(str, Enum):
 
 
 # --- Shared helpers ---
+
+
+def _warn_mirror_deprecated(command: str, name: str) -> None:
+    """Print the deprecation notice every deprecated mirror command shows on each run."""
+    notice = MIRROR_DEPRECATION_NOTICE.format(command=command, name=shlex.quote(name))
+    console.print(f"[yellow]{notice}[/yellow]")
 
 
 def _has_cloud_credentials(config: BasicMemoryConfig) -> bool:
@@ -272,7 +286,7 @@ def _get_sync_project(
 # --- Commands ---
 
 
-@cloud_app.command("sync")
+@cloud_app.command("sync", deprecated=True)
 def sync_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to sync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
@@ -280,7 +294,7 @@ def sync_project_command(
 ) -> None:
     """One-way mirror: local -> cloud (make cloud identical to local).
 
-    Personal workspaces only. This deletes cloud files not present locally —
+    Use `bm cloud push` / `bm cloud pull` instead. Personal workspaces only. This deletes cloud files not present locally —
     including files matching .bmignore, even if they synced before the pattern
     was added — so on Team workspaces use `bm cloud push` (additive upload) /
     `bm cloud pull` (fetch) instead. Preview deletions with --dry-run.
@@ -291,6 +305,7 @@ def sync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _warn_mirror_deprecated("sync", name)
     target_workspace = _require_personal_workspace(
         name,
         config,
@@ -782,7 +797,7 @@ def push_project_command(
     )
 
 
-@cloud_app.command("bisync")
+@cloud_app.command("bisync", deprecated=True)
 def bisync_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to bisync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
@@ -791,9 +806,9 @@ def bisync_project_command(
 ) -> None:
     """Two-way mirror: local <-> cloud (bidirectional sync).
 
-    Personal workspaces only. This mirror can delete and overwrite files on both
-    sides, so on Team workspaces use `bm cloud pull` (fetch) / `bm cloud push`
-    (additive upload) instead.
+    Use `bm cloud pull` (fetch) / `bm cloud push` (additive upload) instead.
+    Personal workspaces only: this mirror can delete and overwrite files on
+    both sides.
 
     Examples:
       bm cloud bisync --name research --resync  # First time
@@ -802,6 +817,7 @@ def bisync_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
+    _warn_mirror_deprecated("bisync", name)
     _require_personal_workspace(name, config)
 
     try:
@@ -859,9 +875,10 @@ def check_project_command(
 ) -> None:
     """Verify file integrity between local and cloud (no changes made).
 
-    Personal workspaces only: check compares against the Personal workspace
-    mirror remote. On Team workspaces use `bm cloud pull --dry-run` /
-    `bm cloud push --dry-run` to preview differences instead.
+    Legacy, Personal workspaces only: check compares against the Personal
+    workspace mirror remote used by the deprecated `sync` / `bisync` commands.
+    Use `bm cloud pull --dry-run` / `bm cloud push --dry-run` to preview
+    differences instead.
 
     Example:
       bm cloud check --name research
@@ -903,14 +920,14 @@ def check_project_command(
         raise typer.Exit(1)
 
 
-@cloud_app.command("bisync-reset")
+@cloud_app.command("bisync-reset", deprecated=True)
 def bisync_reset(
     name: str = typer.Argument(..., help="Project name to reset bisync state for"),
 ) -> None:
     """Clear bisync state for a project.
 
-    Personal workspaces only (bisync is a Personal-workspace mirror; on Team
-    workspaces use `bm cloud pull` / `bm cloud push` instead).
+    `bm cloud bisync` is deprecated; use `bm cloud pull` / `bm cloud push`
+    instead. Personal workspaces only.
 
     This removes the bisync metadata files, forcing a fresh --resync on next bisync.
     Useful when bisync gets into an inconsistent state or when remote path changes.
@@ -918,6 +935,7 @@ def bisync_reset(
     import shutil
 
     config = ConfigManager().config
+    _warn_mirror_deprecated("bisync-reset", name)
     if _has_cloud_credentials(config):
         _require_personal_workspace(name, config)
 
@@ -1008,8 +1026,8 @@ def setup_project_sync(
 
         console.print(f"[green]Sync configured for project '{name}'[/green]")
         console.print(f"\nLocal sync path: {resolved_path}")
-        # Lead with the Team-safe additive commands (work on any workspace); the
-        # `sync`/`bisync` mirrors are Personal-workspace-only.
+        # Push/pull is the supported sync workflow on every workspace; the
+        # `sync`/`bisync` mirrors are deprecated (#1596), so they are not suggested.
         console.print("\nNext steps:")
         console.print(
             f"  1. Preview a pull: {shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run')}"
@@ -1019,10 +1037,6 @@ def setup_project_sync(
         )
         console.print(
             f"  3. Upload local changes: {shell_command('bm', 'cloud', 'push', '--name', name)}"
-        )
-        console.print(
-            f"  Personal workspaces can also mirror with: "
-            f"{shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
         )
     except Exception as e:
         console.print(f"[red]Error configuring sync: {str(e)}[/red]")

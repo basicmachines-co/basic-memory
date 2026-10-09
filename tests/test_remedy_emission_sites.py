@@ -41,9 +41,7 @@ JUSTIFIED_SITES: dict[tuple[str, str], str] = {
         "cloud remedy; ProjectItem does not carry the resolved routing mode"
     ),
     ("cli/commands/project.py", "add_project"): (
-        "the `bm project index` hints sit under `if not effective_cloud_mode`, and the "
-        "`bm cloud bisync` one is the Personal-only aside printed after the Team-safe "
-        "pull/push steps"
+        "the `bm project index` hints sit under `if not effective_cloud_mode`"
     ),
     ("cli/commands/command_utils.py", "report_project_readiness"): (
         "only reached after a local index pass, so the local command is the one that "
@@ -61,10 +59,6 @@ JUSTIFIED_SITES: dict[tuple[str, str], str] = {
         "names `bm project index` only when local_index_available, which handle_changes "
         "sets from the project's mode; a cloud project's watched copy gets a permissions "
         "hint instead"
-    ),
-    ("cli/commands/cloud/project_sync.py", "setup_project_sync"): (
-        "the Personal-only mirror is offered as an aside after the Team-safe pull/push "
-        "next steps, and labelled as such"
     ),
 }
 
