@@ -1813,6 +1813,8 @@ async def test_edit_note_reports_unknown_outcome_when_no_response_arrives(
     payload = json.loads(str(json_failure.value))
     assert payload["error"] == "EDIT_OUTCOME_UNKNOWN"
     assert "connection dropped" in payload["detail"]
+    # The suggested check names the routed project by id, not a reusable name.
+    assert f'project_id="{test_project.external_id}"' in payload["message"]
 
 
 @pytest.mark.asyncio

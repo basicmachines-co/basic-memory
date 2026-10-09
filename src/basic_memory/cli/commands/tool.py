@@ -989,9 +989,16 @@ def edit_note(
 
         _print_json(result)
     except ToolError as e:
-        # A failed edit is a tool error whose message, in JSON mode, is the
-        # structured result; report it the same way as an error field.
-        typer.echo(f"Error: {_tool_error_payload(e).get('error') or e}", err=True)
+        # A failed edit is a tool error whose message, in JSON mode, is the structured
+        # result. Same contract as write-note: error (and any guidance, such as the
+        # read-before-retry warning for an unknown outcome) on stderr, the result on
+        # stdout, exit 1.
+        payload = _tool_error_payload(e)
+        typer.echo(f"Error: {payload.get('error') or e}", err=True)
+        if payload.get("message"):
+            typer.echo(payload["message"], err=True)
+        if payload:
+            _print_json(payload)
         raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
