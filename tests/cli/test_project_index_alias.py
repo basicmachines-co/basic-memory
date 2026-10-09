@@ -33,3 +33,13 @@ def test_project_index_delegates_to_the_shared_reindex_implementation(monkeypatc
 
     assert result.exit_code == 0, result.output
     assert calls == [{"embeddings": True, "search": True, "full": False, "project": "research"}]
+
+
+def test_project_index_help_shows_user_text_not_developer_rationale():
+    """`--help` is for users; the design rationale lives in a code comment (#1635)."""
+    result = runner.invoke(cli_app, ["project", "index", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "Index a project's files so its notes become searchable." in result.output
+    assert "#1440" not in result.output
+    assert "run_reindex_command" not in result.output
