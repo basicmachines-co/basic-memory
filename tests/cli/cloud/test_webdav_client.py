@@ -121,78 +121,115 @@ def test_etag_content_hash_only_accepts_single_part_digests(etag, expected):
 
 
 @pytest.mark.asyncio
-async def test_list_project_files_walks_subdirectories():
-    """The service lists one level at a time, so a full listing is a walk."""
-    listings = {
-        "/webdav/research": _multistatus(
-            "/webdav/research/",
-            _file_entry("/webdav/research/top.md", "top.md", 4)
-            + _dir_entry("/webdav/research/notes/", "notes"),
-        ),
-        # Nested collections report only their basename in displayname, so the
-        # walk composes the relative path from the directory it is listing.
-        "/webdav/research/notes": _multistatus(
-            "/webdav/research/notes/",
-            _file_entry("/webdav/research/notes/deep.md", "deep.md", 9),
-        ),
-    }
-    seen: list[tuple[str, str]] = []
+async def test_list_project_files_sends_one_recursive_propfind():
+    """One `Depth: infinity` request lists the whole project (#1604)."""
+    listing = _multistatus(
+        "/webdav/research/",
+        _dir_entry("/webdav/research/notes/", "notes")
+        + _dir_entry("/webdav/research/notes/deep/", "deep")
+        + _file_entry("/webdav/research/notes/deep/deeper.md", "deeper.md", 2)
+        + _file_entry("/webdav/research/notes/deep.md", "deep.md", 9)
+        + _file_entry("/webdav/research/top.md", "top.md", 4),
+    )
+    seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.method, request.url.path))
-        assert request.headers["Depth"] == "1"
-        return httpx.Response(207, text=listings[request.url.path])
+        seen.append(request)
+        return httpx.Response(207, text=listing)
 
     async with _client(handler) as client:
         files = await list_project_files(client, "research")
 
-    assert [f.path for f in files] == ["top.md", "notes/deep.md"]
-    assert all(method == "PROPFIND" for method, _ in seen)
-    assert [path for _, path in seen] == ["/webdav/research", "/webdav/research/notes"]
+    assert [(request.method, request.url.path) for request in seen] == [
+        ("PROPFIND", "/webdav/research")
+    ]
+    assert seen[0].headers["Depth"] == "infinity"
+    # Nested paths come from the hrefs; collections are not files.
+    assert [f.path for f in files] == ["notes/deep/deeper.md", "notes/deep.md", "top.md"]
 
-    top = files[0]
+    top = files[2]
     assert top.size == 4
     assert top.etag == "d41d8cd98f00b204e9800998ecf8427e"
     assert top.modified == datetime(2026, 6, 8, 10, 30, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
-async def test_list_project_files_keeps_a_child_that_shadows_the_request_path():
-    """Only the first response is the collection itself; a same-named child stays."""
+async def test_list_project_files_keeps_a_directory_named_like_its_parent():
+    """`notes/notes/a.md` is a real nested file, not a repeat of `notes/a.md`."""
+    listing = _multistatus(
+        "/webdav/research/",
+        _dir_entry("/webdav/research/notes/", "notes")
+        + _dir_entry("/webdav/research/notes/notes/", "notes")
+        + _file_entry("/webdav/research/notes/a.md", "a.md", 1)
+        + _file_entry("/webdav/research/notes/notes/a.md", "a.md", 1),
+    )
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/webdav/research":
-            return httpx.Response(
-                207,
-                text=_multistatus(
-                    "/webdav/research/", _dir_entry("/webdav/research/notes/", "notes")
-                ),
-            )
-        if request.url.path == "/webdav/research/notes":
-            # The service names a nested collection by its basename, so this
-            # child's href collides with the collection being listed. It is
-            # still a real child and its contents must not be dropped.
-            return httpx.Response(
-                207,
-                text=_multistatus(
-                    "/webdav/research/notes/",
-                    _dir_entry("/webdav/research/notes/", "notes")
-                    + _file_entry("/webdav/research/notes/a.md", "a.md", 1),
-                ),
-            )
-        assert request.url.path == "/webdav/research/notes/notes"
-        return httpx.Response(
-            207,
-            text=_multistatus(
-                "/webdav/research/notes/notes/",
-                _file_entry("/webdav/research/notes/notes/a.md", "a.md", 1),
-            ),
-        )
+        return httpx.Response(207, text=listing)
 
     async with _client(handler) as client:
         files = await list_project_files(client, "research")
 
     assert [f.path for f in files] == ["notes/a.md", "notes/notes/a.md"]
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_decodes_percent_encoded_nested_hrefs():
+    listing = _multistatus(
+        "/webdav/My%20Research/",
+        _dir_entry("/webdav/My%20Research/drafts%20%26%20ideas/", "drafts &amp; ideas")
+        + _file_entry(
+            "/webdav/My%20Research/drafts%20%26%20ideas/100%25%20done.md", "100% done.md", 3
+        ),
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(207, text=listing)
+
+    async with _client(handler) as client:
+        files = await list_project_files(client, "My Research")
+
+    assert [f.path for f in files] == ["drafts & ideas/100% done.md"]
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_refuses_a_single_level_answer():
+    """A service that ignores `Depth: infinity` must not be read as a full listing.
+
+    Its answer names subdirectories with nothing inside them. Planning from it
+    would treat every nested cloud file as absent, so the client stops instead of
+    walking the directories itself.
+    """
+    listing = _multistatus(
+        "/webdav/research/",
+        _file_entry("/webdav/research/top.md", "top.md", 4)
+        + _dir_entry("/webdav/research/notes/", "notes"),
+    )
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(207, text=listing)
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match="does not yet support the recursive listing"):
+            await list_project_files(client, "research")
+
+    assert seen == ["/webdav/research"]
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_reports_a_refused_recursive_listing():
+    """The RFC 4918 finite-depth refusal names the cause rather than a bare 403."""
+    refusal = """<?xml version="1.0" encoding="utf-8"?>
+<D:error xmlns:D="DAV:"><D:propfind-finite-depth/></D:error>"""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text=refusal)
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match="more files than one listing may describe"):
+            await list_project_files(client, "research")
 
 
 @pytest.mark.asyncio
@@ -221,7 +258,7 @@ async def test_list_project_files_falls_back_to_the_href_for_a_name():
 
 
 @pytest.mark.asyncio
-async def test_list_project_files_reports_an_entry_with_no_name():
+async def test_list_project_files_reports_an_entry_with_no_href():
     body = _multistatus(
         "/webdav/research/",
         "<D:response><D:propstat><D:prop><D:resourcetype/></D:prop></D:propstat></D:response>",
@@ -231,7 +268,42 @@ async def test_list_project_files_reports_an_entry_with_no_name():
         return httpx.Response(207, text=body)
 
     async with _client(handler) as client:
-        with pytest.raises(WebdavError, match="no name"):
+        with pytest.raises(WebdavError, match="no href"):
+            await list_project_files(client, "research")
+
+
+@pytest.mark.parametrize(
+    ("href", "match"),
+    [
+        ("/webdav/elsewhere/a.md", "outside it"),
+        ("/webdav/research/", "repeats the collection"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_list_project_files_rejects_an_href_that_is_not_a_descendant(href, match):
+    body = _multistatus("/webdav/research/", _file_entry(href, "a.md", 1))
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(207, text=body)
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match=match):
+            await list_project_files(client, "research")
+
+
+@pytest.mark.asyncio
+async def test_list_project_files_rejects_a_display_name_the_href_contradicts():
+    """An href that decodes to a different name cannot be trusted to address the file."""
+    body = _multistatus(
+        "/webdav/research/",
+        _file_entry("/webdav/research/100%25done.md", "100%25done.md", 1),
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(207, text=body)
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match="at an href that decodes to"):
             await list_project_files(client, "research")
 
 
@@ -508,8 +580,8 @@ def _rate_limited(retry_after: str | None = "4") -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_propfind_walk_survives_a_rate_limit(recorded_waits):
-    """A 429 mid-walk must not abort the transfer.
+async def test_propfind_listing_survives_a_rate_limit(recorded_waits):
+    """A 429 on the listing must not abort the transfer.
 
     This is the reported failure: one throttled PROPFIND aborted the whole
     project walk, and because each re-run restarted at the first directory the
