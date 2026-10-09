@@ -13,6 +13,16 @@
   "conflict"`, `error: "NOTE_ALREADY_EXISTS"` and so on). `bm tool write-note` is
   unchanged: error on stderr, payload on stdout, exit status 1.
 
+- **#1688**: A failed or refused `edit_note` is an MCP tool error (`isError`), as a
+  refused `write_note` is (#1683). A refused write, such as the "modified concurrently"
+  conflict when two clients append to one note, came back as an ordinary result whose
+  text said "Edit Failed", so a client checking `isError` counted the append as written
+  and never retried it. A refusal comes only from a write that rolled back, so a refused
+  append is never in the note. In JSON mode the error message is the same payload as
+  before. `bm tool edit-note` prints the error and exits with status 1. This reinstates
+  #1662, which was reverted when its concurrency test found appends reported as refused
+  that had landed; #1688 fixed that cause first. Thanks to @sammywachtel.
+
 - **#1600**: `bm project remove` on a cloud-routed project always deletes the project's
   cloud files; there is no longer a way to keep them. It warns that the files can be
   recovered only from a cloud snapshot (`bm cloud snapshot list`) and asks for
