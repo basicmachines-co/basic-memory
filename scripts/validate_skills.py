@@ -88,25 +88,44 @@ def validate_skills(skills_root: Path) -> None:
     print(f"validated {len(skill_dirs)} skills in {skills_root}")
 
 
+# Skills OpenClaw does not expose. The OpenClaw plugin registers a narrower tool
+# surface than the MCP server (no recent_activity or list_directory, no
+# build_context timeframe, no search_notes page_size, write_note requires folder),
+# so a skill written against the full MCP surface leads OpenClaw agents into
+# rejected calls. Add a skill here only with the reason it stays out.
+OPENCLAW_EXCLUDED_SKILLS = {
+    "memory-capture": "omits search_notes.query; uses write_note.directory",
+    "memory-ci-capture": "CI-only; runs under bm ci, not an interactive agent",
+    "memory-continue": "uses recent_activity and build_context.timeframe",
+    "memory-curate": "uses list_directory and unsupported parameters",
+}
+
+
 def validate_openclaw_manifest(skills_root: Path) -> None:
-    """Require the OpenClaw manifest to list every memory-* skill.
+    """Require every memory-* skill to be listed in the OpenClaw manifest or excluded.
 
     OpenClaw's fetch-skills copies every memory-* directory into the npm package,
-    but OpenClaw only exposes the skills its manifest enumerates. A skill missing
-    from the manifest ships in the package yet stays invisible to users.
+    but OpenClaw only exposes the skills its manifest enumerates. A new skill must
+    either be listed there or carry an explicit exclusion above, so nobody ships a
+    skill to OpenClaw users by accident or leaves one out without a reason.
     """
     manifest_path = skills_root.parent / "integrations" / "openclaw" / "openclaw.plugin.json"
     entries: list[str] = json.loads(manifest_path.read_text())["skills"]
     listed = set(entries)
-    expected = {f"skills/{path.name}" for path in skills_root.glob("memory-*") if path.is_dir()}
+    skill_names = {path.name for path in skills_root.glob("memory-*") if path.is_dir()}
+    expected = {f"skills/{name}" for name in skill_names - OPENCLAW_EXCLUDED_SKILLS.keys()}
 
     missing = sorted(expected - listed)
-    stale = sorted(listed - expected)
+    unexpected = sorted(listed - expected)
     duplicates = sorted({entry for entry in entries if entries.count(entry) > 1})
-    if missing or stale or duplicates:
+    unknown_exclusions = sorted(OPENCLAW_EXCLUDED_SKILLS.keys() - skill_names)
+    if missing or unexpected or duplicates or unknown_exclusions:
         raise SystemExit(
             f"{manifest_path}: skills array out of sync with {skills_root}; "
-            f"missing={missing} stale={stale} duplicates={duplicates}"
+            f"missing={missing} unexpected={unexpected} duplicates={duplicates} "
+            f"unknown_exclusions={unknown_exclusions}. List the skill in the manifest, "
+            "or add it to OPENCLAW_EXCLUDED_SKILLS in scripts/validate_skills.py "
+            "with the reason it stays out."
         )
 
 

@@ -114,4 +114,4 @@ These skills are also bundled in the [`@basicmemory/openclaw-basic-memory`](../i
 bun run fetch-skills
 ```
 
-Then add any new path to the `skills` array in `integrations/openclaw/openclaw.plugin.json` and commit the monorepo change.
+Then add any new path to the `skills` array in `integrations/openclaw/openclaw.plugin.json` and commit the monorepo change. OpenClaw registers fewer tools and parameters than the MCP server, so check the skill's calls against `integrations/openclaw/tools/`. If the skill needs tools OpenClaw lacks, add it to `OPENCLAW_EXCLUDED_SKILLS` in `scripts/validate_skills.py` with the reason instead. `just package-check-skills` fails until a new skill is in one place or the other.
