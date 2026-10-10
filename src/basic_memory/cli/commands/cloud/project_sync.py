@@ -12,9 +12,12 @@ import shlex
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import override
 
 import typer
 from rich.console import Console
+from typer._click.core import Context
+from typer.core import TyperCommand
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
@@ -58,6 +61,7 @@ from basic_memory.schemas.cloud import (
 )
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -104,6 +108,23 @@ class ConflictStrategy(str, Enum):
     keep_local = "keep-local"
     keep_cloud = "keep-cloud"
     keep_both = "keep-both"
+
+
+class MirrorCommand(TyperCommand):
+    """A deprecated mirror command that prints only our own deprecation notice.
+
+    Click prints "DeprecationWarning: The command 'sync' is deprecated." before
+    any command whose ``deprecated`` flag is set, and Typer reads the same flag
+    to mark the command ``(deprecated)`` in help. The mirror commands keep the
+    flag for the help marker and print MIRROR_DEPRECATION_NOTICE themselves,
+    which names the pull/push commands to run, so this skips Click's line.
+    """
+
+    @override
+    def invoke(self, ctx: Context) -> object:
+        # Typer builds every command from a decorated function.
+        assert self.callback is not None
+        return ctx.invoke(self.callback, **ctx.params)
 
 
 # --- Shared helpers ---
@@ -211,7 +232,9 @@ def _require_personal_workspace(
     try:
         workspace = run_with_cleanup(_get_workspace_for_project(name, config))
     except Exception as exc:
-        console.print(f"[red]Error resolving workspace for project '{name}': {exc}[/red]")
+        console.print(
+            f"[red]Error resolving workspace for project '{literal(name)}': {literal(exc)}[/red]"
+        )
         raise typer.Exit(1)
 
     if workspace.workspace_type != "personal":
@@ -250,10 +273,12 @@ def _require_local_sync_path(name: str, config: BasicMemoryConfig) -> str:
     local_sync_path = (sync_entry.local_sync_path or sync_entry.path) if sync_entry else None
 
     if not local_sync_path or not os.path.isabs(local_sync_path):
-        console.print(f"[red]Error: Project '{name}' has no local sync path configured[/red]")
+        console.print(
+            f"[red]Error: Project '{literal(name)}' has no local sync path configured[/red]"
+        )
         console.print(
             f"\nConfigure sync with: "
-            f"{shell_command('bm', 'cloud', 'sync-setup', name, '~/path/to/local')}"
+            f"{literal(shell_command('bm', 'cloud', 'sync-setup', name, '~/path/to/local'))}"
         )
         raise typer.Exit(1)
 
@@ -288,7 +313,7 @@ def _get_sync_project(
 # --- Commands ---
 
 
-@cloud_app.command("sync", deprecated=True)
+@cloud_app.command("sync", deprecated=True, cls=MirrorCommand)
 def sync_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to sync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
@@ -330,7 +355,7 @@ def sync_project_command(
                 _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
             )
         if not project_data:
-            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
         sync_project, local_sync_path = _get_sync_project(
@@ -341,20 +366,20 @@ def sync_project_command(
         )
 
         # Run sync
-        console.print(f"[blue]Syncing {name} (local -> cloud)...[/blue]")
+        console.print(f"[blue]Syncing {literal(name)} (local -> cloud)...[/blue]")
         success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
 
         if success:
-            console.print(f"[green]{name} synced successfully[/green]")
+            console.print(f"[green]{literal(name)} synced successfully[/green]")
         else:
-            console.print(f"[red]{name} sync failed[/red]")
+            console.print(f"[red]{literal(name)} sync failed[/red]")
             raise typer.Exit(1)
 
     except RcloneError as e:
-        console.print(f"[red]Sync error: {e}[/red]")
+        console.print(f"[red]Sync error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -408,7 +433,7 @@ def prune_project_command(
                 _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
             )
         if not project_data:
-            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
         # Prune inspects and deletes only remote files, so unlike sync/bisync it
@@ -421,7 +446,7 @@ def prune_project_command(
         )
 
         console.print(
-            f"[blue]Scanning {name} for cloud files matching {get_bmignore_path()}...[/blue]"
+            f"[blue]Scanning {literal(name)} for cloud files matching {literal(get_bmignore_path())}...[/blue]"
         )
         # Trigger: preview and deletion are separated by an interactive prompt.
         # Why: the remote and .bmignore can both change while the prompt is open.
@@ -435,12 +460,12 @@ def prune_project_command(
         )
 
         if not matches:
-            console.print(f"[green]No cloud files in {name} match .bmignore[/green]")
+            console.print(f"[green]No cloud files in {literal(name)} match .bmignore[/green]")
             return
 
         console.print(f"[yellow]{len(matches)} cloud file(s) match .bmignore:[/yellow]")
         for path in matches:
-            console.print(f"  [yellow]-[/yellow] {path}")
+            console.print(f"  [yellow]-[/yellow] {literal(path)}")
 
         if dry_run:
             console.print(
@@ -464,19 +489,19 @@ def prune_project_command(
         )
 
         if success:
-            console.print(f"[green]Pruned ignored files from {name}[/green]")
+            console.print(f"[green]Pruned ignored files from {literal(name)}[/green]")
         else:
-            console.print(f"[red]{name} prune failed[/red]")
+            console.print(f"[red]{literal(name)} prune failed[/red]")
             raise typer.Exit(1)
 
     except RcloneError as e:
-        console.print(f"[red]Prune error: {e}[/red]")
+        console.print(f"[red]Prune error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except typer.Exit:
         # Already-handled exits (not found, cancelled, failed) propagate cleanly.
         raise
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -487,7 +512,7 @@ def _print_conflict_abort(name: str, direction: TransferDirection, plan: Transfe
         f"local and cloud.[/red]"
     )
     for path in plan.conflicts:
-        console.print(f"  [yellow]*[/yellow] {path}")
+        console.print(f"  [yellow]*[/yellow] {literal(path)}")
     console.print("\nRe-run with one of:")
     console.print("  [dim]--on-conflict keep-cloud[/dim]  take the cloud version")
     console.print("  [dim]--on-conflict keep-local[/dim]  keep your local version")
@@ -527,7 +552,7 @@ def _check_plan(
             f"{compare_failure.format(count=len(plan.errors))}[/red]"
         )
         for path in plan.errors:
-            console.print(f"  [red]![/red] {path}")
+            console.print(f"  [red]![/red] {literal(path)}")
         raise typer.Exit(1)
 
     if plan.conflicts and on_conflict is ConflictStrategy.fail:
@@ -537,7 +562,7 @@ def _check_plan(
 
 def _report_transfer_complete(name: str, direction: TransferDirection, plan: TransferPlan) -> None:
     """Announce success and account for what was deliberately left alone."""
-    console.print(f"[green]{name} {direction} completed successfully[/green]")
+    console.print(f"[green]{literal(name)} {direction} completed successfully[/green]")
 
     # Without a sync baseline (see #862) we cannot tell an intentional delete
     # from a file the other side simply never had, so deletions never sync.
@@ -569,7 +594,7 @@ def _run_webdav_directional_transfer(
     with force_routing(cloud=True):
         project_data = run_with_cleanup(_get_cloud_project(name, workspace_id=workspace.tenant_id))
     if not project_data:
-        console.print(f"[red]Error: Project '{name}' not found[/red]")
+        console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
         raise typer.Exit(1)
 
     local_root = Path(_require_local_sync_path(name, config))
@@ -587,7 +612,7 @@ def _run_webdav_directional_transfer(
 
     # --- Transfer ---
     arrow = "cloud -> local" if direction == "pull" else "local -> cloud"
-    console.print(f"[blue]{direction.capitalize()} {name} ({arrow})...[/blue]")
+    console.print(f"[blue]{direction.capitalize()} {literal(name)} ({arrow})...[/blue]")
 
     run_with_cleanup(
         webdav_project_transfer(
@@ -642,7 +667,9 @@ def _run_directional_transfer(
                 _get_workspace_for_project(name, config, workspace_override=workspace)
             )
         except Exception as exc:
-            console.print(f"[red]Error resolving workspace for project '{name}': {exc}[/red]")
+            console.print(
+                f"[red]Error resolving workspace for project '{literal(name)}': {literal(exc)}[/red]"
+            )
             raise typer.Exit(1)
 
         # Trigger: the resolved workspace is shared (an organization workspace).
@@ -676,8 +703,10 @@ def _run_directional_transfer(
             setup_parts = ["bm", "cloud", "setup"]
             if not target_workspace.is_default:
                 setup_parts += ["--workspace", target_workspace.slug]
-            console.print(f"[red]Workspace '{target_workspace.slug}' is not set up for sync.[/red]")
-            console.print(f"\nRun: {shell_command(*setup_parts)}")
+            console.print(
+                f"[red]Workspace '{literal(target_workspace.slug)}' is not set up for sync.[/red]"
+            )
+            console.print(f"\nRun: {literal(shell_command(*setup_parts))}")
             raise typer.Exit(1)
 
         # Get tenant info for bucket name, scoped to the resolved workspace
@@ -691,7 +720,7 @@ def _run_directional_transfer(
                 _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
             )
         if not project_data:
-            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
         sync_project, _ = _get_sync_project(name, config, project_data, remote_name=remote_name)
@@ -702,7 +731,7 @@ def _run_directional_transfer(
 
         # --- Transfer ---
         arrow = "cloud -> local" if direction == "pull" else "local -> cloud"
-        console.print(f"[blue]{direction.capitalize()} {name} ({arrow})...[/blue]")
+        console.print(f"[blue]{direction.capitalize()} {literal(name)} ({arrow})...[/blue]")
 
         conflict_suffix = datetime.now().strftime("%Y%m%d-%H%M%S")
         success = project_transfer(
@@ -717,19 +746,19 @@ def _run_directional_transfer(
         )
 
         if not success:
-            console.print(f"[red]{name} {direction} failed[/red]")
+            console.print(f"[red]{literal(name)} {direction} failed[/red]")
             raise typer.Exit(1)
 
         _report_transfer_complete(name, direction, plan)
 
     except (RcloneError, WebdavError) as e:
-        console.print(f"[red]{direction.capitalize()} error: {e}[/red]")
+        console.print(f"[red]{direction.capitalize()} error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except typer.Exit:
         # Already-handled exits (not found, conflicts, errors) propagate cleanly.
         raise
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -800,7 +829,7 @@ def push_project_command(
     )
 
 
-@cloud_app.command("bisync", deprecated=True)
+@cloud_app.command("bisync", deprecated=True, cls=MirrorCommand)
 def bisync_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to bisync"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
@@ -836,19 +865,19 @@ def bisync_project_command(
         with force_routing(cloud=True):
             project_data = run_with_cleanup(_get_cloud_project(name))
         if not project_data:
-            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
         sync_project, local_sync_path = _get_sync_project(name, config, project_data)
 
         # Run bisync
-        console.print(f"[blue]Bisync {name} (local <-> cloud)...[/blue]")
+        console.print(f"[blue]Bisync {literal(name)} (local <-> cloud)...[/blue]")
         success = project_bisync(
             sync_project, bucket_name, dry_run=dry_run, resync=resync, verbose=verbose
         )
 
         if success:
-            console.print(f"[green]{name} bisync completed successfully[/green]")
+            console.print(f"[green]{literal(name)} bisync completed successfully[/green]")
 
             # Update config — sync_entry is guaranteed non-None because
             # _get_sync_project validated local_sync_path (which comes from sync_entry)
@@ -861,14 +890,14 @@ def bisync_project_command(
             sync_entry.bisync_initialized = True
             ConfigManager().save_config(config)
         else:
-            console.print(f"[red]{name} bisync failed[/red]")
+            console.print(f"[red]{literal(name)} bisync failed[/red]")
             raise typer.Exit(1)
 
     except RcloneError as e:
-        console.print(f"[red]Bisync error: {e}[/red]")
+        console.print(f"[red]Bisync error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -902,29 +931,29 @@ def check_project_command(
         with force_routing(cloud=True):
             project_data = run_with_cleanup(_get_cloud_project(name))
         if not project_data:
-            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
         sync_project, local_sync_path = _get_sync_project(name, config, project_data)
 
         # Run check
-        console.print(f"[blue]Checking {name} integrity...[/blue]")
+        console.print(f"[blue]Checking {literal(name)} integrity...[/blue]")
         match = project_check(sync_project, bucket_name, one_way=one_way)
 
         if match:
-            console.print(f"[green]{name} files match[/green]")
+            console.print(f"[green]{literal(name)} files match[/green]")
         else:
-            console.print(f"[yellow]!{name} has differences[/yellow]")
+            console.print(f"[yellow]!{literal(name)} has differences[/yellow]")
 
     except RcloneError as e:
-        console.print(f"[red]Check error: {e}[/red]")
+        console.print(f"[red]Check error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
-@cloud_app.command("bisync-reset", deprecated=True)
+@cloud_app.command("bisync-reset", deprecated=True, cls=MirrorCommand)
 def bisync_reset(
     name: str = typer.Argument(..., help="Project name to reset bisync state for"),
 ) -> None:
@@ -947,23 +976,23 @@ def bisync_reset(
         state_path = get_project_bisync_state(name)
 
         if not state_path.exists():
-            console.print(f"[yellow]No bisync state found for project '{name}'[/yellow]")
+            console.print(f"[yellow]No bisync state found for project '{literal(name)}'[/yellow]")
             return
 
         # Remove the entire state directory
         shutil.rmtree(state_path)
-        console.print(f"[green]Cleared bisync state for project '{name}'[/green]")
+        console.print(f"[green]Cleared bisync state for project '{literal(name)}'[/green]")
         console.print("\nNext steps:")
         console.print(
             f"  1. Preview: "
-            f"{shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run')}"
+            f"{literal(shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run'))}"
         )
         console.print(
-            f"  2. Sync: {shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
+            f"  2. Sync: {literal(shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync'))}"
         )
 
     except Exception as e:
-        console.print(f"[red]Error clearing bisync state: {str(e)}[/red]")
+        console.print(f"[red]Error clearing bisync state: {literal(str(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -1028,20 +1057,20 @@ def setup_project_sync(
             except Exception:
                 pass  # Project may already exist locally; reconcile on next startup
 
-        console.print(f"[green]Sync configured for project '{name}'[/green]")
-        console.print(f"\nLocal sync path: {resolved_path}")
+        console.print(f"[green]Sync configured for project '{literal(name)}'[/green]")
+        console.print(f"\nLocal sync path: {literal(resolved_path)}")
         # Push/pull is the supported sync workflow on every workspace; the
         # `sync`/`bisync` mirrors are deprecated (#1596), so they are not suggested.
         console.print("\nNext steps:")
         console.print(
-            f"  1. Preview a pull: {shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run')}"
+            f"  1. Preview a pull: {literal(shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run'))}"
         )
         console.print(
-            f"  2. Fetch from cloud: {shell_command('bm', 'cloud', 'pull', '--name', name)}"
+            f"  2. Fetch from cloud: {literal(shell_command('bm', 'cloud', 'pull', '--name', name))}"
         )
         console.print(
-            f"  3. Upload local changes: {shell_command('bm', 'cloud', 'push', '--name', name)}"
+            f"  3. Upload local changes: {literal(shell_command('bm', 'cloud', 'push', '--name', name))}"
         )
     except Exception as e:
-        console.print(f"[red]Error configuring sync: {str(e)}[/red]")
+        console.print(f"[red]Error configuring sync: {literal(str(e))}[/red]")
         raise typer.Exit(1)

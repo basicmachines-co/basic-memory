@@ -14,6 +14,7 @@ from basic_memory.config import ConfigManager, get_project_config
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
+from basic_memory.cli.markup import literal
 
 if TYPE_CHECKING:
     from basic_memory.markdown import MarkdownProcessor
@@ -66,7 +67,9 @@ def import_chatgpt(
         config = get_project_config()
         # Process the file
         base_path = config.home / folder
-        console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
+        console.print(
+            f"\nImporting chats from {literal(conversations_json)}...writing to {literal(base_path)}"
+        )
 
         # Create importer and run import
         # Deferred: importer stack loads at import-command run time only (#886).

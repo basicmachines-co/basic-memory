@@ -34,6 +34,7 @@ from basic_memory.ci.project_updates import (
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
+from basic_memory.cli.markup import literal
 
 # MCP tool functions are imported inside the async helpers below: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
@@ -124,18 +125,18 @@ def setup(
             console.print(
                 "[yellow]Auto BM GitHub workflow already exists; generated files unchanged[/yellow]"
             )
-        console.print(f"Repository: {owner}/{repo}")
-        console.print(f"Project: {project}")
+        console.print(f"Repository: {literal(owner)}/{literal(repo)}")
+        console.print(f"Project: {literal(project)}")
         if seeded:
             verb = "Updated" if refresh_schemas else "Seeded"
-            console.print(f"{verb} schemas: {', '.join(seeded)}")
+            console.print(f"{verb} schemas: {literal(', '.join(seeded))}")
         else:
             console.print("Schema notes already exist; nothing seeded")
         console.print("\nAdd these GitHub secrets before enabling the workflow:")
         console.print("- OPENAI_API_KEY")
         console.print("- BASIC_MEMORY_API_KEY")
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{literal(exc)}[/red]")
         raise typer.Exit(1) from exc
 
 
@@ -183,11 +184,11 @@ def collect(
         )
         _write_github_output("eligible", str(context.eligible).lower())
         _write_github_output("skip_reason", context.skip_reason or "")
-        console.print(f"Wrote project update context to {output}")
+        console.print(f"Wrote project update context to {literal(output)}")
         if not context.eligible:
-            console.print(f"Skipped: {context.skip_reason}")
+            console.print(f"Skipped: {literal(context.skip_reason)}")
     except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{literal(exc)}[/red]")
         raise typer.Exit(1) from exc
 
 
@@ -201,7 +202,7 @@ def agent_schema(
     """Write the temporary Codex structured-output schema."""
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_agent_synthesis_schema(), encoding="utf-8")
-    console.print(f"Wrote agent synthesis schema to {output}")
+    console.print(f"Wrote agent synthesis schema to {literal(output)}")
 
 
 @ci_app.command()
@@ -229,7 +230,7 @@ def publish(
         config = load_project_update_config(config_path)
         context = ProjectUpdateContext.model_validate(_read_json(context_path))
         if not context.eligible:
-            console.print(f"Auto BM skipped: {context.skip_reason}")
+            console.print(f"Auto BM skipped: {literal(context.skip_reason)}")
             return
 
         synthesis = AgentSynthesis.model_validate(_read_json(synthesis_path))
@@ -242,7 +243,7 @@ def publish(
 
         console.print(json.dumps(result, indent=2, sort_keys=True, default=str))
     except (ValueError, ValidationError) as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{literal(exc)}[/red]")
         raise typer.Exit(1) from exc
 
 

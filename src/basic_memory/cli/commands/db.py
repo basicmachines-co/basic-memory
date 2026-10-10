@@ -20,6 +20,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import report_project_readiness, run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.utils import generate_permalink
+from basic_memory.cli.markup import literal
 
 console = Console()
 REINDEX_ERROR_SUMMARY_MAX_LENGTH = 240
@@ -115,7 +116,7 @@ def _abort_if_mcp_processes_alive() -> None:
         "and return phantom search results (see #765).[/yellow]"
     )
     for pid, cmd in zombies:
-        console.print(f"  PID {pid}: {cmd}")
+        console.print(f"  PID {pid}: {literal(cmd)}")
     console.print("\n[bold]How to clean up:[/bold]")
     console.print("  1. Quit Claude Desktop and any other MCP clients.")
     if os.name == "nt":
@@ -168,7 +169,7 @@ async def _reindex_projects(app_config):
             projects = await project_repository.get_active_projects(session)
 
         for project in projects:
-            console.print(f"  Indexing [cyan]{project.name}[/cyan]...")
+            console.print(f"  Indexing [cyan]{literal(project.name)}[/cyan]...")
             logger.info(f"Starting project index for project: {project.name}")
             result = await run_local_project_index_for_project(
                 project,
@@ -238,7 +239,7 @@ def reset(
                     logger.info(f"Deleted: {path}")
                 except OSError as e:
                     console.print(
-                        f"[red]Error:[/red] Cannot delete {path.name}: {e}\n"
+                        f"[red]Error:[/red] Cannot delete {literal(path.name)}: {literal(e)}\n"
                         "The database may be in use by another process (e.g., MCP server).\n"
                         "Please close Claude Desktop or any other Basic Memory clients and try again."
                     )
@@ -407,18 +408,18 @@ async def _reindex(
                 project_mode = app_config.get_project_mode(project)
                 if project_mode == ProjectMode.CLOUD:
                     console.print(
-                        f"[yellow]Project '{project}' is a cloud project.[/yellow]\n"
+                        f"[yellow]Project '{literal(project)}' is a cloud project.[/yellow]\n"
                         "Reindexing is a local operation — cloud projects are "
                         "indexed on the server."
                     )
                 else:
-                    console.print(f"[red]Project '{project}' not found.[/red]")
+                    console.print(f"[red]Project '{literal(project)}' not found.[/red]")
                 raise typer.Exit(1)
 
         embedding_entities_total = 0
         embedding_errors_total = 0
         for proj in projects:
-            console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
+            console.print(f"\n[bold]Project: [cyan]{literal(proj.name)}[/cyan][/bold]")
 
             if search:
                 # Trigger: the project-index scan below reconciles deletes against

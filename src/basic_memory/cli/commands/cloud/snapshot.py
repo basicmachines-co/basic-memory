@@ -18,6 +18,7 @@ from basic_memory.cli.commands.cloud.api_client import (
 )
 from basic_memory.cli.commands.cloud.schemas import BucketSnapshotBrowseResponse
 from basic_memory.config import ConfigManager
+from basic_memory.cli.markup import literal
 
 console = Console()
 snapshot_app = typer.Typer(help="Manage bucket snapshots")
@@ -66,21 +67,23 @@ def create(
             created_at = _format_timestamp(data.get("created_at", ""))
 
             console.print("[green]Snapshot created successfully[/green]")
-            console.print(f"  ID: {snapshot_id}")
-            console.print(f"  Version: {snapshot_version}")
-            console.print(f"  Created: {created_at}")
-            console.print(f"  Description: {description}")
+            console.print(f"  ID: {literal(snapshot_id)}")
+            console.print(f"  Version: {literal(snapshot_version)}")
+            console.print(f"  Created: {literal(created_at)}")
+            console.print(f"  Description: {literal(description)}")
 
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
-            console.print(f"[red]Failed to create snapshot: {e}[/red]")
+            console.print(f"[red]Failed to create snapshot: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_create())
@@ -150,14 +153,16 @@ def list_snapshots(
 
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
-            console.print(f"[red]Failed to list snapshots: {e}[/red]")
+            console.print(f"[red]Failed to list snapshots: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_list())
@@ -201,9 +206,9 @@ def delete(
                     desc = data.get("description") or data.get("name", "unnamed")
                     created_at = _format_timestamp(data.get("created_at", ""))
                     console.print("\nSnapshot to delete:")
-                    console.print(f"  ID: {snapshot_id}")
-                    console.print(f"  Description: {desc}")
-                    console.print(f"  Created: {created_at}")
+                    console.print(f"  ID: {literal(snapshot_id)}")
+                    console.print(f"  Description: {literal(desc)}")
+                    console.print(f"  Created: {literal(created_at)}")
                 except CloudAPIError:
                     # If we can't fetch details, proceed with confirmation anyway
                     pass
@@ -220,24 +225,26 @@ def delete(
                 url=f"{host_url}/api/bucket-snapshots/{snapshot_id}",
             )
 
-            console.print(f"[green]Snapshot {snapshot_id} deleted successfully[/green]")
+            console.print(f"[green]Snapshot {literal(snapshot_id)} deleted successfully[/green]")
 
         except typer.Exit:
             # Re-raise typer.Exit without modification - it's used for clean exits
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Snapshot not found: {snapshot_id}[/red]")
+                console.print(f"[red]Snapshot not found: {literal(snapshot_id)}[/red]")
             else:
-                console.print(f"[red]Failed to delete snapshot: {e}[/red]")
+                console.print(f"[red]Failed to delete snapshot: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_delete())
@@ -270,27 +277,29 @@ def show(
             data = response.json()
 
             console.print("[bold blue]Snapshot Details[/bold blue]")
-            console.print(f"  ID: {data.get('id', 'unknown')}")
-            console.print(f"  Bucket: {data.get('bucket_name', 'unknown')}")
-            console.print(f"  Version: {data.get('snapshot_version', 'unknown')}")
-            console.print(f"  Name: {data.get('name', '-')}")
-            console.print(f"  Description: {data.get('description') or '-'}")
+            console.print(f"  ID: {literal(data.get('id', 'unknown'))}")
+            console.print(f"  Bucket: {literal(data.get('bucket_name', 'unknown'))}")
+            console.print(f"  Version: {literal(data.get('snapshot_version', 'unknown'))}")
+            console.print(f"  Name: {literal(data.get('name', '-'))}")
+            console.print(f"  Description: {literal(data.get('description') or '-')}")
             console.print(f"  Auto: {'yes' if data.get('auto', False) else 'no'}")
-            console.print(f"  Created: {_format_timestamp(data.get('created_at', ''))}")
+            console.print(f"  Created: {literal(_format_timestamp(data.get('created_at', '')))}")
 
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Snapshot not found: {snapshot_id}[/red]")
+                console.print(f"[red]Snapshot not found: {literal(snapshot_id)}[/red]")
             else:
-                console.print(f"[red]Failed to get snapshot details: {e}[/red]")
+                console.print(f"[red]Failed to get snapshot details: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_show())
@@ -345,26 +354,28 @@ def browse(
             )
             for file_info in browse_response.files:
                 size_kb = file_info.size // 1024
-                console.print(f"  {file_info.key} ({size_kb} KB)")
+                console.print(f"  {literal(file_info.key)} ({size_kb} KB)")
 
             console.print(
-                f"\n[dim]Use 'bm cloud restore <path> --snapshot {snapshot_id}' "
+                f"\n[dim]Use 'bm cloud restore <path> --snapshot {literal(snapshot_id)}' "
                 f"to restore files[/dim]"
             )
 
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Snapshot not found: {snapshot_id}[/red]")
+                console.print(f"[red]Snapshot not found: {literal(snapshot_id)}[/red]")
             else:
-                console.print(f"[red]Failed to browse snapshot: {e}[/red]")
+                console.print(f"[red]Failed to browse snapshot: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_browse())

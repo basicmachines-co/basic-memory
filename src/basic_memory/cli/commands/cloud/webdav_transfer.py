@@ -59,6 +59,7 @@ from basic_memory.cli.commands.cloud.webdav import (
 )
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_cloud_control_plane_client
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -200,7 +201,7 @@ async def webdav_project_transfer(
     if dry_run:
         console.print(f"[dim]Dry run: {len(transfers)} file(s) would be transferred.[/dim]")
         for transfer in transfers:
-            console.print(f"  [dim]{transfer.describe()}[/dim]")
+            console.print(f"  [dim]{literal(transfer.describe())}[/dim]")
         return
 
     # Root-mounted /webdav needs the control-plane base — see the note in
@@ -277,7 +278,7 @@ async def _run_transfers(
 
     async def move(transfer: _Transfer) -> None:
         if verbose:
-            console.print(f"  {transfer.describe()}")
+            console.print(f"  {literal(transfer.describe())}")
         if direction == "pull":
             written = await _pull_file(client, project, local_root, transfer)
         else:
@@ -503,7 +504,7 @@ def _report_appeared(appeared: list[str]) -> None:
         "was planned and were left untouched:[/yellow]"
     )
     for path in appeared:
-        console.print(f"  [yellow]*[/yellow] {path}")
+        console.print(f"  [yellow]*[/yellow] {literal(path)}")
     console.print("[dim]Re-run to compare them and resolve with --on-conflict.[/dim]")
 
 

@@ -13,6 +13,7 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.file_utils import format_file
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -125,7 +126,7 @@ async def run_format(
                     + list(path.rglob("*.canvas"))
                 )
             else:
-                console.print(f"[red]Path not found: {path}[/red]")
+                console.print(f"[red]Path not found: {literal(path)}[/red]")
                 raise typer.Exit(1)
         else:
             # Format all files in project
@@ -133,7 +134,7 @@ async def run_format(
             project_path = Path(project_config.home)
 
             if not project_path.exists():
-                console.print(f"[red]Project path not found: {project_path}[/red]")
+                console.print(f"[red]Project path not found: {literal(project_path)}[/red]")
                 raise typer.Exit(1)
 
             # Find all markdown and json files
@@ -160,7 +161,7 @@ async def run_format(
         if errors:
             console.print(f"[red]Errors: {len(errors)} file(s)[/red]")
             for path, error in errors:
-                console.print(f"  [red]{path}[/red]: {error}")
+                console.print(f"  [red]{literal(path)}[/red]: {literal(error)}")
 
     finally:
         # Restore original setting
@@ -194,6 +195,6 @@ def format(
     except Exception as e:
         if not isinstance(e, typer.Exit):
             logger.error(f"Error formatting files: {e}")
-            console.print(f"[red]Error formatting files: {e}[/red]")
+            console.print(f"[red]Error formatting files: {literal(e)}[/red]")
             raise typer.Exit(code=1)
         raise

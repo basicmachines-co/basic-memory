@@ -17,6 +17,7 @@ from rich.console import Console
 
 import basic_memory
 from basic_memory.config import ConfigManager
+from basic_memory.cli.markup import literal
 
 PACKAGE_NAME = "basic-memory"
 PYPI_JSON_URL = "https://pypi.org/pypi/basic-memory/json"
@@ -247,7 +248,7 @@ def print_update_status(console: Console, text: str, style: str) -> None:
     Outcome: fall back to a plain, unstyled write that needs no new imports.
     """
     try:
-        console.print(f"[{style}]{text}[/{style}]")
+        console.print(f"[{style}]{literal(text)}[/{style}]")
     except Exception as exc:
         logger.warning(
             f"Rich console print failed after update, falling back to plain output: {exc}"

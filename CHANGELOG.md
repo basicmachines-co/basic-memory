@@ -354,6 +354,13 @@
 
 ### Bug Fixes
 
+- **#1720**: CLI output prints project names, paths, and error messages as typed.
+  Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
+  `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`
+  crashed the command with `MarkupError`. The deprecated `bm cloud sync`, `bisync` and
+  `bisync-reset` now print only their own deprecation notice, without Click's extra
+  "DeprecationWarning: The command ... is deprecated." line.
+
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
   variables that override `config.json`, redacted the same way as the file dump. It
   used to print only the file, which can disagree with what the server is using. Other

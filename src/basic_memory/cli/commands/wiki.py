@@ -12,6 +12,7 @@ from rich.console import Console
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
+from basic_memory.cli.markup import literal
 
 if TYPE_CHECKING:
     from basic_memory.index.local_wiki_projection import LocalWikiInspection
@@ -201,7 +202,7 @@ def _run_wiki_command(
             )
         )
     except (LocalWikiWriteConflict, OSError, ValueError) as error:
-        console.print(f"[red]Wiki {command} failed: {error}[/red]")
+        console.print(f"[red]Wiki {literal(command)} failed: {literal(error)}[/red]")
         raise typer.Exit(1) from error
 
     if json_output:
@@ -413,8 +414,8 @@ def _render_report(report: WikiCommandReport) -> None:
             f"create {project.created}, update {project.updated}, unchanged {project.unchanged}"
         )
         prefix = "would rebuild" if report.dry_run else project.state
-        console.print(f"[{color}]{project.project}: {prefix}[/{color}] ({counts})")
+        console.print(f"[{color}]{literal(project.project)}: {prefix}[/{color}] ({counts})")
         for conflict in project.conflicts:
-            console.print(f"  [red]- {conflict}[/red]")
+            console.print(f"  [red]- {literal(conflict)}[/red]")
         for warning in project.warnings:
-            console.print(f"  [yellow]- {warning}[/yellow]")
+            console.print(f"  [yellow]- {literal(warning)}[/yellow]")

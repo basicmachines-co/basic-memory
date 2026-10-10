@@ -1286,3 +1286,63 @@ def test_migration_notice_keeps_markup_in_project_names(monkeypatch, command):
     result = runner.invoke(app, ["cloud", command, "--name", "[bold]oops[/bold]"])
 
     assert "bm cloud pull --name '[bold]oops[/bold]'" in _plain(result.output)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["cloud", "sync", "--name", "research"],
+        ["cloud", "bisync", "--name", "research"],
+        ["cloud", "bisync-reset", "research"],
+    ],
+)
+def test_mirror_commands_print_one_deprecation_notice(monkeypatch, tmp_path, argv):
+    """Only our notice prints; Click's generic DeprecationWarning line is dropped (#1720)."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
+    monkeypatch.setattr(
+        project_sync_command,
+        "get_project_bisync_state",
+        lambda _name: tmp_path / "missing-state",
+    )
+
+    result = runner.invoke(app, argv)
+
+    output = _plain(result.output)
+    assert "DeprecationWarning" not in output
+    assert output.count("is deprecated and will be removed") == 1
+
+
+@pytest.mark.parametrize("name", ["proj [x]", "a[/b]c", "[bold]x[/bold]"])
+def test_bisync_reset_prints_bracketed_project_names_verbatim(monkeypatch, tmp_path, name):
+    """Bracketed names survive in status lines; a closing tag used to crash (#1720)."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
+    monkeypatch.setattr(
+        project_sync_command,
+        "get_project_bisync_state",
+        lambda _name: tmp_path / "missing-state",
+    )
+
+    result = runner.invoke(app, ["cloud", "bisync-reset", name])
+
+    assert result.exit_code == 0, result.output
+    assert f"No bisync state found for project '{name}'" in _plain(result.output)
+
+
+def test_workspace_resolution_error_prints_bracketed_name_verbatim(
+    monkeypatch, config_manager, capsys
+):
+    """The workspace error names the project as typed (#1720)."""
+    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    config = config_manager.load_config()
+    monkeypatch.setattr(
+        project_sync_command,
+        "get_available_workspaces",
+        lambda: _async_value([]),
+    )
+
+    with pytest.raises(typer.Exit):
+        project_sync_command._require_personal_workspace("proj [x]", config)
+
+    assert "Error resolving workspace for project 'proj [x]'" in _plain(capsys.readouterr().out)

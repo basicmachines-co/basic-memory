@@ -12,6 +12,7 @@ from basic_memory.schemas.cloud import (
     format_workspace_selection_choices,
     workspace_matches_identifier,
 )
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -28,10 +29,10 @@ def list_workspaces() -> None:
     try:
         workspaces = run_with_cleanup(_list())
     except RuntimeError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
+        console.print(f"[red]Error: {literal(exc)}[/red]")
         raise typer.Exit(1)
     except Exception as exc:  # pragma: no cover
-        console.print(f"[red]Error listing workspaces: {exc}[/red]")
+        console.print(f"[red]Error listing workspaces: {literal(exc)}[/red]")
         raise typer.Exit(1)
 
     if not workspaces:
@@ -90,7 +91,7 @@ def set_default_workspace(
     try:
         workspaces = run_with_cleanup(_list())
     except RuntimeError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
+        console.print(f"[red]Error: {literal(exc)}[/red]")
         raise typer.Exit(1)
 
     if not workspaces:
@@ -100,15 +101,17 @@ def set_default_workspace(
     matches = [ws for ws in workspaces if workspace_matches_identifier(ws, identifier)]
 
     if not matches:
-        console.print(f"[red]Error: Workspace '{identifier}' not found[/red]")
-        console.print(f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]")
+        console.print(f"[red]Error: Workspace '{literal(identifier)}' not found[/red]")
+        console.print(f"[dim]Available:\n{literal(format_workspace_choices(workspaces))}[/dim]")
         raise typer.Exit(1)
 
     if len(matches) > 1:
-        console.print(f"[red]Error: Workspace '{identifier}' matches multiple workspaces.[/red]")
+        console.print(
+            f"[red]Error: Workspace '{literal(identifier)}' matches multiple workspaces.[/red]"
+        )
         console.print(
             "[dim]Choose one of these matching workspaces by slug:\n"
-            f"{format_workspace_selection_choices(matches)}[/dim]"
+            f"{literal(format_workspace_selection_choices(matches))}[/dim]"
         )
         raise typer.Exit(1)
 
@@ -119,5 +122,5 @@ def set_default_workspace(
     config_manager.save_config(config, persist_env_keys={"default_workspace"})
 
     console.print(
-        f"[green]Default workspace set to '{selected.name}' ({selected.tenant_id})[/green]"
+        f"[green]Default workspace set to '{literal(selected.name)}' ({literal(selected.tenant_id)})[/green]"
     )

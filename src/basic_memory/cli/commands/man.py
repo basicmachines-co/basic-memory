@@ -26,6 +26,7 @@ from basic_memory.cli.commands.tool import (
     _validate_output_flags,
 )
 from basic_memory.man import bundled_pages, find_page, parse_page_ref
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -243,7 +244,7 @@ def install(
 
     for page in pages:
         shutil.copyfile(page, man1 / page.name)
-        console.print(f"installed {man1 / page.name}")
+        console.print(f"installed {literal(man1 / page.name)}")
 
     # Trigger: the chosen root is provably absent from manpath output.
     # Why: a silent install into an unsearched directory looks like success
@@ -251,8 +252,8 @@ def install(
     # Outcome: actionable hint; unknown (None) stays quiet to avoid false alarms.
     if _man_root_on_manpath(man_root) is False:
         console.print(
-            f"\n[yellow]{man_root} is not on your manpath.[/yellow] Add it with:\n"
-            f'  export MANPATH="{man_root}:$MANPATH"'
+            f"\n[yellow]{literal(man_root)} is not on your manpath.[/yellow] Add it with:\n"
+            f'  export MANPATH="{literal(man_root)}:$MANPATH"'
         )
 
     console.print("\nTry: [bold]man bm[/bold]")

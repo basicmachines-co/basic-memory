@@ -47,6 +47,7 @@ from basic_memory.schemas.cloud import (
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.utils import generate_permalink, normalize_project_path, shell_command
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -303,15 +304,19 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
         workspaces = run_with_cleanup(get_available_workspaces())
         matches = [ws for ws in workspaces if workspace_matches_identifier(ws, workspace)]
         if not matches:
-            console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
+            console.print(f"[red]Error: Workspace '{literal(workspace)}' not found[/red]")
             if workspaces:
-                console.print(f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]")
+                console.print(
+                    f"[dim]Available:\n{literal(format_workspace_choices(workspaces))}[/dim]"
+                )
             raise typer.Exit(1)
         if len(matches) > 1:
-            console.print(f"[red]Error: Workspace '{workspace}' matches multiple workspaces.[/red]")
+            console.print(
+                f"[red]Error: Workspace '{literal(workspace)}' matches multiple workspaces.[/red]"
+            )
             console.print(
                 "[dim]Choose one of these matching workspaces by slug:\n"
-                f"{format_workspace_selection_choices(matches)}[/dim]"
+                f"{literal(format_workspace_selection_choices(matches))}[/dim]"
             )
             raise typer.Exit(1)
         return matches[0].tenant_id
@@ -345,7 +350,7 @@ def list_projects(
     try:
         validate_routing_flags(local, cloud)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
     async def _list_projects(ws: str | None = None):
@@ -391,19 +396,21 @@ def list_projects(
                     ws for ws in workspaces if workspace_matches_identifier(ws, workspace_filter)
                 ]
                 if not matches:
-                    console.print(f"[red]Error: Workspace '{workspace_filter}' not found[/red]")
+                    console.print(
+                        f"[red]Error: Workspace '{literal(workspace_filter)}' not found[/red]"
+                    )
                     if workspaces:
                         console.print(
-                            f"[dim]Available:\n{format_workspace_choices(workspaces)}[/dim]"
+                            f"[dim]Available:\n{literal(format_workspace_choices(workspaces))}[/dim]"
                         )
                     raise typer.Exit(1)
                 if len(matches) > 1:
                     console.print(
-                        f"[red]Error: Workspace '{workspace_filter}' matches multiple workspaces.[/red]"
+                        f"[red]Error: Workspace '{literal(workspace_filter)}' matches multiple workspaces.[/red]"
                     )
                     console.print(
                         "[dim]Choose one of these matching workspaces by slug:\n"
-                        f"{format_workspace_selection_choices(matches)}[/dim]"
+                        f"{literal(format_workspace_selection_choices(matches))}[/dim]"
                     )
                     raise typer.Exit(1)
                 selected_workspaces = matches
@@ -712,14 +719,16 @@ def list_projects(
 
         console.print(table)
         if cloud_error is not None:
-            console.print(f"[yellow]Cloud project discovery failed: {cloud_error}[/yellow]")
+            console.print(
+                f"[yellow]Cloud project discovery failed: {literal(cloud_error)}[/yellow]"
+            )
             console.print(
                 "[dim]Showing local projects only. "
                 "Run 'bm cloud login' or 'bm cloud api-key save <key>' if this is a credentials issue.[/dim]"
             )
         if cloud_workspace_error is not None:
             console.print(
-                f"[yellow]Cloud workspace discovery failed: {cloud_workspace_error}[/yellow]"
+                f"[yellow]Cloud workspace discovery failed: {literal(cloud_workspace_error)}[/yellow]"
             )
             console.print(
                 "[dim]Showing cloud projects from the configured/default workspace only.[/dim]"
@@ -727,12 +736,12 @@ def list_projects(
         for failed_workspace, error in failed_cloud_workspaces:
             console.print(
                 f"[yellow]Cloud project discovery failed for workspace "
-                f"{failed_workspace.name}: {error}[/yellow]"
+                f"{literal(failed_workspace.name)}: {literal(error)}[/yellow]"
             )
     except typer.Exit:
         raise
     except Exception as e:
-        console.print(f"[red]Error listing projects: {str(e)}[/red]")
+        console.print(f"[red]Error listing projects: {literal(str(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -820,11 +829,15 @@ def _abort_after_project_created(
     # printed one (the reindex pass does) -- so only the state and remedy are
     # missing. Anything else still needs its message shown.
     detail = "" if isinstance(error, typer.Exit) else f": {error}"
-    console.print(f"[yellow]Project '{name}' was created, but {step} failed{detail}[/yellow]")
+    console.print(
+        f"[yellow]Project '{literal(name)}' was created, but {literal(step)} failed{literal(detail)}[/yellow]"
+    )
     if retry_add_after_repair:
         console.print(f"Fix the failed step before re-running 'bm project add'. {remedy}")
     else:
-        console.print(f"Do not re-run 'bm project add' — '{name}' already exists. {remedy}")
+        console.print(
+            f"Do not re-run 'bm project add' — '{literal(name)}' already exists. {remedy}"
+        )
     raise typer.Exit(1)
 
 
@@ -879,7 +892,7 @@ def add_project(
     try:
         validate_routing_flags(local, cloud)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
     config = ConfigManager().config
@@ -898,7 +911,7 @@ def add_project(
         try:
             resolved_visibility = _normalize_project_visibility(visibility)
         except ValueError as e:
-            console.print(f"[red]Error: {e}[/red]")
+            console.print(f"[red]Error: {literal(e)}[/red]")
             raise typer.Exit(1)
         resolved_workspace_id = _resolve_workspace_id(config, workspace)
         # Cloud mode: path auto-generated from name, local sync is optional
@@ -947,7 +960,7 @@ def add_project(
     try:
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_add_project())
-        console.print(f"[green]{result.message}[/green]")
+        console.print(f"[green]{literal(result.message)}[/green]")
     except Exception as create_error:
         # Only "remote exists, config missing" may proceed. A name already in
         # this machine's config is genuinely added, so a creation failure there
@@ -965,10 +978,10 @@ def add_project(
             )
         )
         if existing is None:
-            console.print(f"[red]Error adding project: {str(create_error)}[/red]")
+            console.print(f"[red]Error adding project: {literal(str(create_error))}[/red]")
             raise typer.Exit(1)
         console.print(
-            f"[green]Project '{name}' already exists at {existing.path}; "
+            f"[green]Project '{literal(name)}' already exists at {literal(existing.path)}; "
             f"adopting it into this machine's config.[/green]"
         )
 
@@ -1087,7 +1100,9 @@ def add_project(
 
         # Save local sync path to config if in cloud mode
         if local_sync_path:
-            console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
+            console.print(
+                f"\n[green]Local sync path configured: {literal(local_sync_path)}[/green]"
+            )
             # Push/pull is the supported sync workflow on every workspace; the
             # bisync mirror is deprecated (#1596), so it is not suggested here.
             # Mirrors `bm cloud sync-setup`.
@@ -1176,7 +1191,7 @@ def remove_project(
     try:
         validate_routing_flags(local, cloud)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
     # A display name and its permalink address the same entry, and the API
@@ -1225,17 +1240,17 @@ def remove_project(
     #   yes unless --yes was passed. Declining exits without deleting anything.
     if cloud_routed:
         console.print(
-            f"[yellow]Removing cloud project '{name}' permanently deletes all of its files "
+            f"[yellow]Removing cloud project '{literal(name)}' permanently deletes all of its files "
             "in cloud storage. They can be recovered only from a cloud snapshot "
             "(`bm cloud snapshot list`).[/yellow]"
         )
         if local_path_config and delete_local_files:
             console.print(
-                f"[yellow]The local sync directory {local_path_config} will also be "
+                f"[yellow]The local sync directory {literal(local_path_config)} will also be "
                 "deleted.[/yellow]"
             )
         elif local_path_config:
-            console.print(f"The local sync directory {local_path_config} will be kept.")
+            console.print(f"The local sync directory {literal(local_path_config)} will be kept.")
         if not yes and not typer.confirm(f"Delete cloud project '{name}' and its cloud files?"):
             console.print("[yellow]Remove cancelled - nothing deleted[/yellow]")
             raise typer.Exit(0)
@@ -1265,7 +1280,7 @@ def remove_project(
         # Remove project from cloud/API
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_remove_project())
-        console.print(f"[green]{result.message}[/green]")
+        console.print(f"[green]{literal(result.message)}[/green]")
         if cloud_routed:
             console.print(_cloud_file_delete_message(result.file_delete_status))
 
@@ -1294,7 +1309,7 @@ def remove_project(
                 entry.bisync_initialized = False
                 entry.last_sync = None
                 console.print(
-                    f"[yellow]'{entry_name}' is still the default project in local config. "
+                    f"[yellow]'{literal(entry_name)}' is still the default project in local config. "
                     "Choose another with `bm project default <name> --local`, then run "
                     f"`{command_hint('bm', 'project', 'remove', entry_name, '--local')}` to drop this entry.[/yellow]"
                 )
@@ -1313,9 +1328,11 @@ def remove_project(
                 import shutil
 
                 shutil.rmtree(local_dir)
-                console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
+                console.print(
+                    f"[green]Removed local sync directory: {literal(local_path_config)}[/green]"
+                )
             elif local_dir.exists():
-                console.print(f"[yellow]Local files kept at {local_path_config}[/yellow]")
+                console.print(f"[yellow]Local files kept at {literal(local_path_config)}[/yellow]")
 
         # Clean up bisync state if it exists
         if bisync_state_path is not None and bisync_state_path.exists():
@@ -1326,7 +1343,7 @@ def remove_project(
 
     except Exception as e:
         # str() of httpx transport errors is often empty (#1034) — never print a blank error.
-        console.print(f"[red]Error removing project: {str(e) or repr(e)}[/red]")
+        console.print(f"[red]Error removing project: {literal(str(e) or repr(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -1380,9 +1397,9 @@ def set_default_project(
     try:
         with force_routing(local=local):
             result = run_with_cleanup(_set_default())
-        console.print(f"[green]{result.message}[/green]")
+        console.print(f"[green]{literal(result.message)}[/green]")
     except Exception as e:
-        console.print(f"[red]Error setting default project: {str(e)}[/red]")
+        console.print(f"[red]Error setting default project: {literal(str(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -1410,7 +1427,7 @@ def move_project(
     try:
         with force_routing(local=True):
             result = run_with_cleanup(_move_project())
-        console.print(f"[green]{result.message}[/green]")
+        console.print(f"[green]{literal(result.message)}[/green]")
 
         # Show important file movement reminder
         console.print()  # Empty line for spacing
@@ -1427,7 +1444,7 @@ def move_project(
         )
 
     except Exception as e:
-        console.print(f"[red]Error moving project: {str(e)}[/red]")
+        console.print(f"[red]Error moving project: {literal(str(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -1539,7 +1556,7 @@ def set_cloud(
 
     # Validate project exists in config
     if name not in config.projects:
-        console.print(f"[red]Error: Project '{name}' not found in config[/red]")
+        console.print(f"[red]Error: Project '{literal(name)}' not found in config[/red]")
         raise typer.Exit(1)
 
     # Validate credentials: API key or OAuth session
@@ -1574,12 +1591,12 @@ def set_cloud(
     config.projects[name].last_sync = None
     config_manager.save_config(config)
 
-    console.print(f"[green]Project '{name}' set to cloud mode[/green]")
+    console.print(f"[green]Project '{literal(name)}' set to cloud mode[/green]")
     if resolved_workspace_id:
-        console.print(f"[dim]Workspace: {resolved_workspace_id}[/dim]")
+        console.print(f"[dim]Workspace: {literal(resolved_workspace_id)}[/dim]")
     if detached and previous_path:
         console.print(
-            f"[dim]Local index entry removed. Files at {previous_path} are preserved on disk.[/dim]"
+            f"[dim]Local index entry removed. Files at {literal(previous_path)} are preserved on disk.[/dim]"
         )
     console.print("[dim]MCP tools and CLI commands for this project will route through cloud[/dim]")
 
@@ -1613,14 +1630,14 @@ def set_local(
 
     # Validate project exists in config
     if name not in config.projects:
-        console.print(f"[red]Error: Project '{name}' not found in config[/red]")
+        console.print(f"[red]Error: Project '{literal(name)}' not found in config[/red]")
         raise typer.Exit(1)
 
     entry = config.projects[name]
     candidate = local_path or entry.path
     if not candidate:
         console.print(
-            f"[red]Error: --local-path is required for '{name}' "
+            f"[red]Error: --local-path is required for '{literal(name)}' "
             "(no previous local path is recorded)[/red]"
         )
         raise typer.Exit(1)
@@ -1639,8 +1656,8 @@ def set_local(
     config.projects[name].path = resolved_path
     config_manager.save_config(config)
 
-    console.print(f"[green]Project '{name}' set to local mode[/green]")
-    console.print(f"[dim]Path: {resolved_path}[/dim]")
+    console.print(f"[green]Project '{literal(name)}' set to local mode[/green]")
+    console.print(f"[dim]Path: {literal(resolved_path)}[/dim]")
     console.print("[dim]MCP tools and CLI commands for this project will use local transport[/dim]")
 
 
@@ -1662,7 +1679,7 @@ def ls_project_command(
     try:
         validate_routing_flags(local, cloud)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
     # Determine routing: explicit flags take precedence, otherwise check project mode
@@ -1719,7 +1736,7 @@ def ls_project_command(
             with force_routing(cloud=True):
                 project_data = run_with_cleanup(_get_project())
             if not project_data:
-                console.print(f"[red]Error: Project '{name}' not found[/red]")
+                console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
                 raise typer.Exit(1)
 
             sync_project = SyncProject(
@@ -1732,7 +1749,7 @@ def ls_project_command(
             with force_routing(local=True):
                 project_data = run_with_cleanup(_get_project())
             if not project_data:
-                console.print(f"[red]Error: Project '{name}' not found[/red]")
+                console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
                 raise typer.Exit(1)
 
             # For cloud-mode projects accessed with --local, use local_sync_path
@@ -1753,14 +1770,14 @@ def ls_project_command(
             heading += ":[/bold]"
             console.print(heading)
             for file in files:
-                console.print(f"  {file}")
+                console.print(f"  {literal(file)}")
             console.print(f"\n[dim]Total: {len(files)} files[/dim]")
         else:
             prefix = f"[yellow]No files found in {name} ({target_label})"
             console.print(prefix + (f"/{path}" if path else "") + "[/yellow]")
 
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -1781,7 +1798,7 @@ def display_project_info(
     try:
         validate_routing_flags(local, cloud)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
 
     try:

@@ -30,6 +30,7 @@ from basic_memory.cli.commands.cloud.api_client import (
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import resolve_configured_workspace
 from basic_memory.schemas.cloud import WorkspaceInfo
+from basic_memory.cli.markup import literal
 
 console = Console()
 share_app = typer.Typer(help="Manage public share links for notes")
@@ -86,9 +87,9 @@ def _ambiguous(matches: list[WorkspaceInfo], identifier: str) -> WorkspaceInfo:
     """
     candidates = "\n".join(f"  - {ws.slug} (tenant_id: {ws.tenant_id})" for ws in matches)
     console.print(
-        f"[red]Workspace '{identifier}' is ambiguous; it matches multiple workspaces.[/red]\n"
+        f"[red]Workspace '{literal(identifier)}' is ambiguous; it matches multiple workspaces.[/red]\n"
         "[yellow]Re-run with a unique workspace slug or tenant_id:[/yellow]\n"
-        f"{candidates}"
+        f"{literal(candidates)}"
     )
     raise typer.Exit(1)
 
@@ -112,9 +113,9 @@ async def _resolve_workspace_to_tenant_id(identifier: str) -> str:
     if match is None:
         available = "\n".join(f"  - {ws.slug}" for ws in workspaces)
         console.print(
-            f"[red]Workspace '{identifier}' was not found.[/red]\n"
+            f"[red]Workspace '{literal(identifier)}' was not found.[/red]\n"
             "[yellow]Use one of these workspace slugs (or a tenant_id):[/yellow]\n"
-            f"{available}"
+            f"{literal(available)}"
         )
         raise typer.Exit(1)
     return match.tenant_id
@@ -168,7 +169,7 @@ def _parse_expires_at(value: str) -> str:
         dt = datetime.fromisoformat(value)
     except ValueError:
         console.print(
-            f"[red]Invalid --expires-at value '{value}'. "
+            f"[red]Invalid --expires-at value '{literal(value)}'. "
             "Use ISO format, e.g. 2099-12-31 or 2099-12-31T23:59:00.[/red]"
         )
         raise typer.Exit(1)
@@ -177,14 +178,14 @@ def _parse_expires_at(value: str) -> str:
 
 def _print_share_details(data: dict[str, Any]) -> None:
     """Print a single share's fields in the snapshot-style detail layout."""
-    console.print(f"  Token: {data.get('token', 'unknown')}")
-    console.print(f"  URL: [blue underline]{data.get('share_url', '-')}[/blue underline]")
-    console.print(f"  Project: {data.get('project_name', '-')}")
-    console.print(f"  Note: {data.get('note_permalink', '-')}")
+    console.print(f"  Token: {literal(data.get('token', 'unknown'))}")
+    console.print(f"  URL: [blue underline]{literal(data.get('share_url', '-'))}[/blue underline]")
+    console.print(f"  Project: {literal(data.get('project_name', '-'))}")
+    console.print(f"  Note: {literal(data.get('note_permalink', '-'))}")
     console.print(f"  Enabled: {'yes' if data.get('enabled', False) else 'no'}")
-    console.print(f"  Expires: {_format_timestamp(data.get('expires_at'))}")
+    console.print(f"  Expires: {literal(_format_timestamp(data.get('expires_at')))}")
     console.print(f"  Views: {data.get('view_count', 0)}")
-    console.print(f"  Created: {_format_timestamp(data.get('created_at'))}")
+    console.print(f"  Created: {literal(_format_timestamp(data.get('created_at')))}")
 
 
 @share_app.command("create")
@@ -251,17 +252,21 @@ def create(
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Note not found: {permalink} (project: {project})[/red]")
+                console.print(
+                    f"[red]Note not found: {literal(permalink)} (project: {literal(project)})[/red]"
+                )
             else:
-                console.print(f"[red]Failed to create share link: {e}[/red]")
+                console.print(f"[red]Failed to create share link: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_create())
@@ -350,14 +355,16 @@ def list_shares(
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
-            console.print(f"[red]Failed to list share links: {e}[/red]")
+            console.print(f"[red]Failed to list share links: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_list())
@@ -449,17 +456,19 @@ def update(
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Share not found: {token}[/red]")
+                console.print(f"[red]Share not found: {literal(token)}[/red]")
             else:
-                console.print(f"[red]Failed to update share link: {e}[/red]")
+                console.print(f"[red]Failed to update share link: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_update())
@@ -511,23 +520,25 @@ def revoke(
                 headers=await _workspace_headers(workspace=workspace),
             )
 
-            console.print(f"[green]Share {token} revoked successfully[/green]")
+            console.print(f"[green]Share {literal(token)} revoked successfully[/green]")
 
         except typer.Exit:
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Share not found: {token}[/red]")
+                console.print(f"[red]Share not found: {literal(token)}[/red]")
             else:
-                console.print(f"[red]Failed to revoke share link: {e}[/red]")
+                console.print(f"[red]Failed to revoke share link: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_revoke())

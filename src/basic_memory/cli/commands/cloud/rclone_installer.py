@@ -10,6 +10,7 @@ from rich.markup import escape
 
 from basic_memory.utils import shell_command
 from rich.console import Console
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -44,12 +45,12 @@ def run_command(command: list[str], check: bool = True) -> subprocess.CompletedP
         console.print(f"[dim]Running: {escape(shell_command(*command))}[/dim]")
         result = subprocess.run(command, capture_output=True, text=True, check=check)
         if result.stdout:
-            console.print(f"[dim]Output: {result.stdout.strip()}[/dim]")
+            console.print(f"[dim]Output: {literal(result.stdout.strip())}[/dim]")
         return result
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Command failed: {e}[/red]")
+        console.print(f"[red]Command failed: {literal(e)}[/red]")
         if e.stderr:
-            console.print(f"[red]Error output: {e.stderr}[/red]")
+            console.print(f"[red]Error output: {literal(e.stderr)}[/red]")
         raise RcloneInstallError(f"Command failed: {e}") from e
     except FileNotFoundError as e:
         raise RcloneInstallError(f"Command not found: {shell_command(*command)}") from e
@@ -243,7 +244,7 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
         return
 
     platform_name = platform_override or get_platform()
-    console.print(f"[blue]Installing rclone for {platform_name}...[/blue]")
+    console.print(f"[blue]Installing rclone for {literal(platform_name)}...[/blue]")
 
     try:
         if platform_name == "macos":

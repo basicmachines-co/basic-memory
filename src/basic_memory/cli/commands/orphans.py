@@ -15,6 +15,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas.v2.graph import GraphNode
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -62,7 +63,7 @@ def orphans(
             return
 
         if not entities:
-            console.print(f"[green]No orphan entities in project '{project_name}'[/green]")
+            console.print(f"[green]No orphan entities in project '{literal(project_name)}'[/green]")
             return
 
         table = Table(title=f"{project_name}: Entities Without Relations ({len(entities)} total)")
@@ -82,7 +83,7 @@ def orphans(
         if json_output:
             print(json.dumps({"error": str(exc)}, indent=2))
         else:
-            console.print(f"[red]Error: {exc}[/red]")
+            console.print(f"[red]Error: {literal(exc)}[/red]")
         raise typer.Exit(code=1)
     except typer.Exit:
         raise
@@ -91,5 +92,5 @@ def orphans(
         if json_output:
             print(json.dumps({"error": str(exc)}, indent=2))
         else:
-            console.print(f"[red]Error: {exc}[/red]")
+            console.print(f"[red]Error: {literal(exc)}[/red]")
         raise typer.Exit(code=1)  # pragma: no cover
