@@ -740,15 +740,16 @@ async def edit_note(
             # Set once the create or PATCH request leaves this process; the handler below
             # needs it to tell a refusal from a write whose outcome is unknown.
             write_sent = False
-            # The note the edit targets; a revision conflict names it (#1719).
-            resolved_note: EntityResolveResponse | None = None
+            # The note the edit targets; a revision conflict re-reads it by id (#1719).
+            target_entity_id: str | None = None
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            # Use typed KnowledgeClient for API calls; the failure handler below also
+            # uses it to name the note in a revision conflict.
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
             # Use the PATCH endpoint to edit the entity
             try:
-                # Import here to avoid circular import
-                from basic_memory.mcp.clients import KnowledgeClient
-
-                # Use typed KnowledgeClient for API calls
-                knowledge_client = KnowledgeClient(client, active_project.external_id)
                 unresolved_project_route: UnresolvedProjectRouteError | None = None
                 try:
                     _, entity_identifier, _ = await resolve_project_and_path(
@@ -809,7 +810,7 @@ async def edit_note(
                             ),
                         )
                     entity_id = resolved_entity.external_id
-                    resolved_note = resolved_entity
+                    target_entity_id = entity_id
                 except EditRefused:
                     # The cross-project refusal above must not be read as a missing note:
                     # its text says "Not Found", which would route it to auto-create.
@@ -1076,9 +1077,20 @@ async def edit_note(
                 conflict = _revision_conflict_detail(e) if expected_checksum is not None else None
                 if conflict is not None:
                     current_checksum = conflict.get("db_checksum")
-                    # Same shape as write_note's conflict: the note is named while it
-                    # still exists; a deleted note (no current checksum) has no identity.
-                    named_note = resolved_note if current_checksum is not None else None
+                    # Same shape as write_note's conflict (#1719): the note is named while
+                    # it still exists, as it reads now, since the winning write may have
+                    # retitled or moved it after this edit resolved it. A deleted note
+                    # (no current checksum) has no identity.
+                    named_note: EntityResolveResponse | None = None
+                    if current_checksum is not None and target_entity_id is not None:
+                        try:
+                            named_note = await knowledge_client.resolve_entity_response(
+                                target_entity_id, strict=True
+                            )
+                        except ToolError:
+                            # Deleted after the conflict: the refusal still stands and
+                            # carries its checksum; there is just nothing left to name.
+                            named_note = None
                     _raise_edit_failure(
                         output_format,
                         {
