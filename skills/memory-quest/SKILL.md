@@ -62,10 +62,11 @@ With approval, call `write_note` once:
 - `project`: the chosen project's `qualified_name`
 - `metadata`: `{"memory_quest_code": "<the code exactly as the user gave it>", "memory_quest_guidance": "active"}`
 - `content`: the template below, unchanged except where it says to fill in
+- `overwrite`: `false`. Always pass it: when it's omitted, `write_note` follows the user's `write_note_overwrite_default` setting and could silently replace an existing note.
 
 Pass the code and guidance in `metadata`, never inside `content`. They must arrive as frontmatter fields for the cloud to recognize the write.
 
-If `write_note` reports that the note already exists, read it first with `read_note`. Only an earlier Memory Quest attempt — a `memory_master` note with a `memory_quest_code` field — may be replaced: say so, then call `write_note` again with the same arguments plus `overwrite: true`. If it is anything else, don't overwrite it. Tell the user what's there and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
+If `write_note` reports that the note already exists, read it with `read_note`, passing the same `project`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `write_note` again with the same arguments, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
 
 ### 6. Tell the user what happens next
 
