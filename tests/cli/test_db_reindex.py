@@ -926,6 +926,33 @@ def test_reindex_with_deferred_embeddings_reports_incomplete_and_exits_one(
     assert "Reindex complete!" not in output
 
 
+def test_reindex_incomplete_quotes_the_project_in_the_continue_command(
+    monkeypatch,
+    session_maker,
+):
+    """A project name with spaces still yields a command that runs as printed."""
+    stats = _vector_stats(total_entities=2, embedded=1, skipped=0, errors=0, deferred=1)
+    _configure_embedding_runtime(monkeypatch, session_maker, stats)
+    printed_lines: list[str] = []
+    monkeypatch.setattr(
+        db_cmd.console,
+        "print",
+        lambda message="", *args, **kwargs: printed_lines.append(str(message)),
+    )
+    spaced = SimpleNamespace(id=1, name="My Notes", permalink="my-notes", path="/tmp/my-notes")
+
+    class SpacedProjectRepository:
+        async def get_active_projects(self, session):
+            return [spaced]
+
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", SpacedProjectRepository)
+
+    result = runner.invoke(app, ["reindex", "--embeddings"])
+
+    assert result.exit_code == 1
+    assert "bm reindex --embeddings --project 'My Notes'" in "\n".join(printed_lines)
+
+
 # --- `bm project add` indexing (#1635) ---
 
 
