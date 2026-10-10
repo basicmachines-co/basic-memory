@@ -108,8 +108,10 @@ def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
         return None
     # The persisted embedding identity is what decides whether stored vectors are
     # reusable, so it is the definition of "the same embeddings": it covers the model,
-    # dimensions, and document/query prefixes.
-    measured = configured_embedding_provider_identity(BasicMemoryConfig())
+    # dimensions, and document/query prefixes. model_construct() yields the field
+    # defaults without reading BASIC_MEMORY_* overrides, which would otherwise make an
+    # env-configured model compare equal to itself.
+    measured = configured_embedding_provider_identity(BasicMemoryConfig.model_construct())
     if configured_embedding_provider_identity(config) != measured:
         return None
     # A user who raised the search floor above the advisory's keeps the stricter one.

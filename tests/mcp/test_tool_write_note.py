@@ -1739,6 +1739,14 @@ def test_similar_notes_floor_ignores_provider_spelling():
     assert similar_notes_min_similarity(config) == SIMILAR_NOTES_MIN_SIMILARITY
 
 
+def test_similar_notes_floor_defers_for_a_model_set_by_environment(monkeypatch):
+    """An env-configured model is not the measured default just because both read env."""
+    monkeypatch.setenv(
+        "BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    assert similar_notes_min_similarity(BasicMemoryConfig()) is None
+
+
 def test_similar_notes_floor_keeps_a_stricter_search_floor():
     config = BasicMemoryConfig(semantic_min_similarity=0.8)
     assert similar_notes_min_similarity(config) == 0.8
