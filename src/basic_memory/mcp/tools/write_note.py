@@ -27,7 +27,9 @@ from basic_memory.mcp.project_context import get_project_client, add_project_met
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
     NoteCreated,
@@ -94,20 +96,21 @@ def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
 
     Cosine scores are model-specific: on OpenAI's text-embedding-3-small correct
     paraphrases cluster near 0.37, so the floor measured on the default model would hide
-    real duplicates there. Other models keep semantic_min_similarity, which users tune
-    for their model. The model is read from this process's config, which describes the
-    server a local write reaches; a write routed elsewhere with a non-default local model
-    falls back to that server's floor, the behavior before the advisory floor existed.
+    real duplicates there. Only the exact embedding setup it was measured on gets the
+    floor; anything else keeps semantic_min_similarity, which users tune for their model.
+    The setup is read from this process's config, which describes the server a local
+    write reaches; a write routed elsewhere with a different local setup falls back to
+    that server's floor, the behavior before the advisory floor existed.
     """
-    defaults = BasicMemoryConfig.model_fields
-    # Compare what the provider factory would load: provider names are matched
-    # case-insensitively and the short model name aliases the canonical FastEmbed one.
-    resolve_model = FastEmbedEmbeddingProvider.resolve_model_name
-    provider = config.semantic_embedding_provider.strip().lower()
-    model = resolve_model(config.semantic_embedding_model)
-    measured_provider = defaults["semantic_embedding_provider"].default
-    measured_model = resolve_model(defaults["semantic_embedding_model"].default)
-    if (provider, model) != (measured_provider, measured_model):
+    # Only FastEmbed can be the measured setup; checking it first also keeps the
+    # identity resolution away from provider configs it would reject.
+    if config.semantic_embedding_provider.strip().lower() != "fastembed":
+        return None
+    # The persisted embedding identity is what decides whether stored vectors are
+    # reusable, so it is the definition of "the same embeddings": it covers the model,
+    # dimensions, and document/query prefixes.
+    measured = configured_embedding_provider_identity(BasicMemoryConfig())
+    if configured_embedding_provider_identity(config) != measured:
         return None
     # A user who raised the search floor above the advisory's keeps the stricter one.
     return max(config.semantic_min_similarity, SIMILAR_NOTES_MIN_SIMILARITY)

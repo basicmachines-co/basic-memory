@@ -72,14 +72,9 @@ class FastEmbedEmbeddingProvider:
         self._model: TextEmbedding | None = None
         self._model_lock = asyncio.Lock()
 
-    @classmethod
-    def resolve_model_name(cls, model_name: str) -> str:
-        """Return the FastEmbed model name a configured name loads, after our aliases."""
-        return cls._MODEL_ALIASES.get(model_name, model_name)
-
     def _resolved_model_name(self) -> str:
         """Return the FastEmbed model name after applying our local aliases."""
-        return self.resolve_model_name(self.model_name)
+        return self._MODEL_ALIASES.get(self.model_name, self.model_name)
 
     def _create_model(self) -> "TextEmbedding":
         try:
