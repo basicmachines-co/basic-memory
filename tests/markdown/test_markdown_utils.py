@@ -72,12 +72,15 @@ class TestEntityModelFromMarkdown:
         # Should preserve the existing external_id
         assert entity.external_id == existing_external_id
 
+    # Identity comes from the schema name, not the note type, so sidecars written
+    # before the extracted_text rename keep the same derived external_id.
+    @pytest.mark.parametrize("note_type", ["extracted_text", "document"])
     @pytest.mark.parametrize("existing_id", [None, "12345678-1234-1234-1234-123456789012"])
     def test_generated_document_identity_comes_from_its_source(
-        self, existing_id: str | None
+        self, existing_id: str | None, note_type: str
     ) -> None:
         source_id = "11111111-1111-1111-1111-111111111111"
-        markdown = self._create_markdown(note_type="document")
+        markdown = self._create_markdown(note_type=note_type)
         markdown.frontmatter.metadata.update(
             {"schema": "schema/document-extraction", "source": {"entity_external_id": source_id}}
         )
@@ -89,7 +92,7 @@ class TestEntityModelFromMarkdown:
 
     @pytest.mark.parametrize("source", [None, {}, {"entity_external_id": "invalid-uuid"}])
     def test_generated_document_rejects_invalid_source_identity(self, source: object) -> None:
-        markdown = self._create_markdown(note_type="document")
+        markdown = self._create_markdown(note_type="extracted_text")
         markdown.frontmatter.metadata.update(
             {"schema": "schema/document-extraction", "source": source}
         )

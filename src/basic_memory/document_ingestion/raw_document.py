@@ -2,7 +2,7 @@
 
 The uploaded source file stays its own file entity. This module maps one stable
 source snapshot plus a bounded extractor's output into Core's document contract
-(a ``type: document`` note and its ``document_ingestion_run`` note) and
+(a ``type: extracted_text`` sidecar note and its ``document_ingestion_run`` note) and
 orchestrates the read / extract / revalidate / write sequence behind narrow
 protocols. Extractors are chosen by the source entity's media type; PDF,
 Office, and CSV each map into the same parser-neutral :class:`ExtractedDocument`.
@@ -113,7 +113,11 @@ class ExtractedDocument:
 
 @dataclass(frozen=True, slots=True)
 class RawDocumentArtifacts:
-    """Deterministic raw document values before accepted-note timestamps."""
+    """Deterministic raw document values before accepted-note timestamps.
+
+    ``extraction`` is the full record, page map included, that the run note
+    stores. The sidecar in ``document_markdown`` carries only its summary.
+    """
 
     source: DocumentSourceV1
     extraction: DocumentExtractionV1
@@ -303,12 +307,14 @@ def build_raw_document_artifacts_from_extracted(
     )
     # Raw extraction is untrusted semantic input: keep the body searchable but
     # opt out of observation/relation parsing until a bounded enrichment pass.
+    # The sidecar carries only the extraction summary; the per-page map stays on
+    # the run note (artifacts.extraction) so long PDFs keep small frontmatter.
     document = DocumentMarkdownV1(
         frontmatter=DocumentNoteFrontmatterV1(
             title=PurePosixPath(source.entity.file_path).name,
             tags=("document", extracted.kind, "generated"),
             source=source_contract,
-            extraction=extraction,
+            extraction=extraction.summary(),
             ingestion=ingestion,
             document=DocumentMetadataV1(kind=extracted.kind),
             bm_parse_semantics=False,
@@ -512,6 +518,11 @@ def require_document_run_identity(
 ) -> None:
     """Fail unless an accepted document and its run note agree on provenance.
 
+    Extraction agreement ignores the page map unless the document has one. New
+    sidecars store only the summary, so the run note is the map's home and must
+    carry it whenever its profile is the mapped pdf-inspector profile. Sidecars
+    written before the map moved still hold a copy, which must equal the run's.
+
     This compares frontmatter only. The run note's ``output.raw.checksum`` is
     deliberately not compared to the document's accepted db_checksum here: a
     source move re-accepts the document (new checksum) before the run note is
@@ -525,8 +536,16 @@ def require_document_run_identity(
     if document.frontmatter.ingestion.stage is not DocumentIngestionStage.raw:
         raise RuntimeError("Existing ingestion run document is no longer at the raw stage")
     require_matching_source_identity(document.frontmatter.source, run.frontmatter.source)
+    if run_extraction.profile == PDF_RAW_EXTRACTION_PROFILE and run_extraction.page_map is None:
+        raise RuntimeError("Existing raw ingestion run is missing its extraction page map")
+    document_extraction = document.frontmatter.extraction
+    extraction_matches = (
+        document_extraction == run_extraction
+        if isinstance(document_extraction, DocumentExtractionV1)
+        else document_extraction == run_extraction.summary()
+    )
     if (
-        document.frontmatter.extraction != run_extraction
+        not extraction_matches
         or document.frontmatter.ingestion.run_id != run.frontmatter.ingestion.run_id
         or document.frontmatter.ingestion.pipeline_version
         != run.frontmatter.ingestion.pipeline_version
