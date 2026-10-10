@@ -41,6 +41,7 @@ class RecordingEmbeddingProvider:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sections", [300, 600])
 @pytest.mark.parametrize("force_full", [False, True])
+@pytest.mark.parametrize("small_first", [False, True])
 async def test_reindex_drains_real_repository_shards(
     search_service: SearchService,
     entity_service: EntityService,
@@ -48,6 +49,7 @@ async def test_reindex_drains_real_repository_shards(
     monkeypatch: pytest.MonkeyPatch,
     sections: int,
     force_full: bool,
+    small_first: bool,
 ) -> None:
     """Exercise >256 and >512 actual chunks, including pre-existing partial vectors."""
     provider = RecordingEmbeddingProvider()
@@ -89,6 +91,12 @@ async def test_reindex_drains_real_repository_shards(
     initial_text_count = len(provider.embedded_texts)
     provider.embedded_texts.clear()
 
+    # find_all has no ordering contract. Exercise both valid orders explicitly.
+    monkeypatch.setattr(
+        service.entity_repository,
+        "find_all",
+        AsyncMock(return_value=[small, large] if small_first else [large, small]),
+    )
     batches: list[list[int]] = []
     sync_batch = service.sync_entity_vectors_batch
 
@@ -113,12 +121,11 @@ async def test_reindex_drains_real_repository_shards(
     assert set(batches[0]) == {large.id, small.id}
     assert all(batch == [large.id] for batch in batches[1:])
     remaining_large_chunks = initial.chunks_total - (0 if force_full else initial_text_count)
-    completion_order = (
-        [small.id, large.id] if remaining_large_chunks > 256 else [large.id, small.id]
-    )
-    assert progress == [
-        (entity_id, index, 2) for index, entity_id in enumerate(completion_order, 1)
-    ]
+    assert [event[1:] for event in progress] == [(1, 2), (2, 2)]
+    assert {event[0] for event in progress} == {large.id, small.id}
+    if remaining_large_chunks > 256:
+        # Only a later-pass completion has a required position in the sequence.
+        assert [event[0] for event in progress] == [small.id, large.id]
     assert clear.await_count == int(force_full)
     reconcile.assert_awaited_once()
     expected_embeddings = initial.chunks_total + 1 - (0 if force_full else initial_text_count)
