@@ -377,8 +377,9 @@
   Relations the note owns keep the bare form, and JSON output is unchanged.
 
 - **#1720**: `edit_note` `insert_after_section` no longer puts a blank line between an
-  inserted list item and the section's first list item, which split one list in two. A
-  paragraph inserted above a paragraph still gets the blank line that keeps them apart.
+  inserted list item and the section's list, which split one list in two. The item joins
+  the list directly, below any blank line under the heading. A paragraph inserted above
+  a paragraph still gets the blank line that keeps them apart.
 
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
   variables that override `config.json`, redacted the same way as the file dump. It
