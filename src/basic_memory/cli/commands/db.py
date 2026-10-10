@@ -19,7 +19,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import report_project_readiness, run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, shell_command
 from basic_memory.cli.markup import literal
 
 console = Console()
@@ -571,7 +571,7 @@ async def _reindex(
             for name in incomplete_projects:
                 console.print(
                     "  Continue with "
-                    f"[green]bm reindex --embeddings --project {literal(name)}[/green] "
+                    f"[green]{literal(shell_command('bm', 'reindex', '--embeddings', '--project', name))}[/green] "
                     "(without --full, which would start over)."
                 )
             raise typer.Exit(code=1)
