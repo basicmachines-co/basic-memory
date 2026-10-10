@@ -365,7 +365,8 @@
   search. A `--full` rerun cleared vectors and repeated the same first shard. The
   reindex now re-runs deferred notes until none remain, clearing vectors only once for
   `--full`. If a pass stops making progress, it reports how many notes still have
-  pending chunks, says how to continue, and exits non-zero. Reported by @beru-ant-king.
+  pending chunks, says how to continue, and exits non-zero. Reported by @beru-ant-king;
+  @lastguru-net independently reached the same fix in #1730.
 - **#1720**: CLI output prints project names, paths, and error messages as typed.
   Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
   `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`
