@@ -8,6 +8,7 @@ from rich.console import Console
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -24,7 +25,8 @@ def prune(
 ) -> None:
     """Remove index entries for files your ignore patterns now exclude.
 
-    Indexing skips files matched by ~/.basic-memory/.bmignore and the project's
+    Indexing skips files matched by .bmignore in the Basic Memory config directory
+    ($BASIC_MEMORY_CONFIG_DIR, default ~/.basic-memory) and the project's
     .gitignore, but entries indexed before a pattern was added stay in the index:
     the files are still on disk, so the scan's delete guard keeps them. Like
     `git rm --cached`, prune removes the index entries (entity, relations, search
@@ -55,7 +57,7 @@ async def _prune(
         raise typer.Exit(1)
     if app_config.get_project_mode(project_name) == ProjectMode.CLOUD:
         console.print(
-            f"[yellow]Project '{project_name}' is a cloud project.[/yellow]\n"
+            f"[yellow]Project '{literal(project_name)}' is a cloud project.[/yellow]\n"
             "Prune is a local operation — use `bm cloud prune` for cloud projects."
         )
         raise typer.Exit(1)
@@ -69,22 +71,24 @@ async def _prune(
         projects = await ProjectRepository().get_active_projects(session)
     matches = [candidate for candidate in projects if candidate.name == project_name]
     if not matches:
-        console.print(f"[red]Project '{project_name}' not found.[/red]")
+        console.print(f"[red]Project '{literal(project_name)}' not found.[/red]")
         raise typer.Exit(1)
     target = matches[0]
 
     dependencies = await LocalProjectIndexRuntimeFactory().dependencies_for_project(target)
     console.print(
-        f"[blue]Scanning {target.name} for indexed files matching ignore patterns...[/blue]"
+        f"[blue]Scanning {literal(target.name)} for indexed files matching ignore patterns...[/blue]"
     )
     paths = await list_ignored_indexed_paths(dependencies)
     if not paths:
-        console.print(f"[green]No indexed files in {target.name} match the ignore patterns[/green]")
+        console.print(
+            f"[green]No indexed files in {literal(target.name)} match the ignore patterns[/green]"
+        )
         return
 
     console.print(f"[yellow]{len(paths)} indexed file(s) match the ignore patterns:[/yellow]")
     for path in paths:
-        console.print(f"  [yellow]-[/yellow] {path}")
+        console.print(f"  [yellow]-[/yellow] {literal(path)}")
     if dry_run:
         console.print("\n[dim]Dry run: nothing removed. Re-run without --dry-run to prune.[/dim]")
         return

@@ -27,7 +27,8 @@ only when requested:
 pip install "basic-memory[milvus]"
 ```
 
-You can always override with `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true|false`.
+Semantic search is always on. If the SQLite vector extension cannot load (for example under a
+Python build without extension loading), Basic Memory logs why and falls back to keyword-only search.
 
 ### Platform Compatibility
 
@@ -52,7 +53,6 @@ After installation, Intel Mac users have two runtime options:
 **Option 1: Use OpenAI embeddings (recommended)**
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
@@ -62,7 +62,6 @@ export OPENAI_API_KEY=sk-...
 Keep the same pinned installation and use FastEmbed (default provider):
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=fastembed
 ```
 
@@ -77,7 +76,6 @@ pip install basic-memory
 2. (Optional) Explicitly enable semantic search:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
 
 3. Index your project files and build vector embeddings:
@@ -108,7 +106,6 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 
 | Config Field | Env Var | Default | Description |
 |---|---|---|---|
-| `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto (`true` when semantic deps are available) | Enable semantic search. Required before vector/hybrid modes work. |
 | `semantic_vector_index` | `BASIC_MEMORY_SEMANTIC_VECTOR_INDEX` | `"pgvector"` | Postgres vector storage adapter: `"pgvector"` or first-party `"milvus"` through the `basic-memory[milvus]` extra. SQLite always uses its built-in `sqlite-vec` adapter. |
 | `milvus_uri` | `BASIC_MEMORY_MILVUS_URI` | Unset | Milvus, Milvus Lite, or Zilliz Cloud connection URI. Required when `semantic_vector_index="milvus"`. |
 | `milvus_token` | `BASIC_MEMORY_MILVUS_TOKEN` | Unset | Optional Milvus or Zilliz Cloud authentication token. |
@@ -141,7 +138,6 @@ FastEmbed runs entirely locally using ONNX models — no API key, no network cal
 ```bash
 # Install basic-memory and enable semantic search
 pip install basic-memory
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
 
 #### Choose another local model
@@ -255,7 +251,6 @@ Uses OpenAI's embeddings API for higher-dimensional vectors. Requires an API key
 - **Tradeoff**: Higher quality embeddings, requires API calls and an OpenAI key
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
@@ -269,7 +264,6 @@ Inference, LM Studio, or Ollama's OpenAI shim — without moving to the
 experimental LiteLLM provider:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=your-model
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE=http://localhost:8080/v1
@@ -293,7 +287,6 @@ Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Coh
 For the full option reference, provider setup examples, and live validation harness, see [LiteLLM Provider](litellm-provider.md).
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=cohere/embed-english-v3.0
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=1024
@@ -480,7 +473,6 @@ change `text`, `title`, or `permalink` search behavior.
 Use the default local FastEmbed provider:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_RERANKER_ENABLED=true
 ```
 
@@ -491,7 +483,6 @@ process-wide model instance and cache.
 To use a hosted reranker through LiteLLM:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_RERANKER_ENABLED=true
 export BASIC_MEMORY_RERANKER_PROVIDER=litellm
 export BASIC_MEMORY_RERANKER_MODEL=cohere/rerank-v3.5
@@ -609,12 +600,15 @@ The advisory is deliberately a question, not a decision. On the default
 note score in the same similarity band (roughly 0.78–0.94 on a 200-note vault
 with no true duplicates), so no threshold separates them and no scores are
 shown. Ranking is reliable — the note an agent probably meant is almost always
-first — which is why the list is short and ordered. Only creates ask the index;
+first — which is why the list is short and ordered. On the default model the probe
+uses its own floor, 0.70, above search's `semantic_min_similarity`: notes on
+unrelated topics scored at most 0.67 against their nearest neighbor, so below 0.70
+the list was only noise (#1718). Other models keep `semantic_min_similarity`,
+because their scores sit on a different scale. Only creates ask the index;
 an overwrite already names its target. The probe is always attempted rather
-than gated on the local `semantic_search_enabled` setting, because a local MCP
-can route a write to a cloud project whose server has semantic search on while
-the local install does not; a server that declines the probe (semantic search
-disabled, no embedding provider) or cannot complete it (a transport failure)
+than gated on local state, because a local MCP can route a write to a cloud
+project whose server can run semantic search while the local install cannot; a
+server that declines the probe (vector runtime unavailable, no embedding provider) or cannot complete it (a transport failure)
 suppresses the section, and the write is still reported as successful.
 
 ## The Reindex Command
@@ -626,7 +620,7 @@ files written directly to disk. `bm reindex --embeddings` intentionally skips fi
 only rebuilds vectors for entities already present in the database.
 
 ```bash
-# Rebuild everything (FTS + embeddings if semantic is enabled)
+# Rebuild everything (FTS + embeddings)
 bm reindex
 
 # Only rebuild vector embeddings (notes must already be indexed)
@@ -642,7 +636,6 @@ bm reindex -p my-project
 ### When You Need to Reindex
 
 - **Upgrade note**: Migration now performs a one-time automatic embedding backfill on upgrade.
-- **Manual enable case**: If you explicitly had `semantic_search_enabled=false` and then turn it on
 - **Provider change**: After switching between `fastembed`, `openai`, and `litellm`
 - **Model change**: After changing `semantic_embedding_model`
 - **Dimension change**: After changing `semantic_embedding_dimensions`
@@ -655,10 +648,16 @@ The reindex command shows progress with embedded/skipped/error counts:
 ```
 Project: main
   Building vector embeddings...
-  ✓ Embeddings complete: 142 entities embedded, 0 skipped, 0 errors
+  ✓ Embeddings complete: 142 entities embedded, 0 skipped, 0 errors, 0 with pending chunks
 
 Reindex complete!
 ```
+
+A note with more than 256 chunks is embedded in shards of 256. The reindex keeps
+running passes until every shard is embedded. If a pass makes no progress, the
+command reports `Embeddings incomplete` with the number of notes that still have
+pending chunks and exits non-zero. Rerun `bm reindex --embeddings` without `--full`
+to continue from the chunks already stored; `--full` clears them and starts over.
 
 ## How It Works
 

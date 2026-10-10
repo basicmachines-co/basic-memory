@@ -5,7 +5,9 @@ writing the replacement left an existing note with no search rows at all.
 """
 
 import pytest
+from asyncpg.exceptions import DeadlockDetectedError
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
 from basic_memory.models import Entity
@@ -144,3 +146,52 @@ async def test_fts_chunk_failure_keeps_previous_rows_and_chunks(
     monkeypatch.undo()
     await search_service.index_entity_data(entity, content="replacement body")
     assert await _fts_chunk_count(session_maker, entity) == before_chunks
+
+
+def _driver_failure(driver_error: BaseException) -> IntegrityError:
+    """A DBAPI error raised from the driver's error, as the asyncpg dialect raises it."""
+    adapted = Exception(str(driver_error))
+    adapted.__cause__ = driver_error
+    return IntegrityError("INSERT INTO search_index ...", {}, adapted)
+
+
+def _fail_replacement_with(monkeypatch, repository, error: BaseException) -> None:
+    async def fail(search_index_rows, session=None):
+        raise error
+
+    monkeypatch.setattr(repository, "bulk_index_items", fail)
+
+
+@pytest.mark.asyncio
+async def test_a_refresh_that_lost_a_race_returns_and_keeps_the_previous_projection(
+    monkeypatch, search_service, full_entity, entity_repository, session_maker
+):
+    """Losing to a concurrent refresh is logged, not raised (#1681)."""
+    entity = await _reload(session_maker, entity_repository, full_entity)
+    await search_service.index_entity_data(entity, content="original body")
+    before = await _projection(search_service, entity)
+
+    _fail_replacement_with(
+        monkeypatch,
+        search_service.repository,
+        _driver_failure(DeadlockDetectedError("deadlock detected")),
+    )
+    await search_service.index_entity_data(entity, content="replacement body")
+
+    assert await _projection(search_service, entity) == before
+
+
+@pytest.mark.asyncio
+async def test_any_other_database_failure_still_raises(
+    monkeypatch, search_service, full_entity, entity_repository, session_maker
+):
+    entity = await _reload(session_maker, entity_repository, full_entity)
+    await search_service.index_entity_data(entity, content="original body")
+    before = await _projection(search_service, entity)
+
+    failure = _driver_failure(ValueError("value too long for type character varying"))
+    _fail_replacement_with(monkeypatch, search_service.repository, failure)
+    with pytest.raises(IntegrityError):
+        await search_service.index_entity_data(entity, content="replacement body")
+
+    assert await _projection(search_service, entity) == before

@@ -36,7 +36,8 @@ async def test_batch_index_reports_bytes_indexed_and_zero_for_current_file(
 ) -> None:
     path = "notes/billing-note.md"
     (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
-    (project_config.home / path).write_text(NOTE_CONTENT, encoding="utf-8")
+    # newline="\n" keeps the file's bytes equal to NOTE_CONTENT on Windows too
+    (project_config.home / path).write_text(NOTE_CONTENT, encoding="utf-8", newline="\n")
     expected_bytes = len(NOTE_CONTENT.encode("utf-8"))
     runtime = await LocalProjectIndexRuntimeFactory().runtime_for_project(test_project)
     # The observed checksum lets the checker compare against the index and
@@ -76,7 +77,7 @@ async def test_single_file_index_reports_bytes_indexed(
 ) -> None:
     path = "notes/billing-note.md"
     (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
-    (project_config.home / path).write_text(NOTE_CONTENT, encoding="utf-8")
+    (project_config.home / path).write_text(NOTE_CONTENT, encoding="utf-8", newline="\n")
     dependencies = await LocalProjectIndexRuntimeFactory().dependencies_for_project(test_project)
 
     result = await dependencies.file_indexer.index_file(path, source="index")

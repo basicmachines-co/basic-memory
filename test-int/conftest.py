@@ -55,6 +55,8 @@ from typing import AsyncGenerator, Generator, Literal
 
 import pytest
 import pytest_asyncio
+
+from fake_embeddings import use_fake_embeddings
 from pathlib import Path
 from alembic import command
 from alembic.config import Config
@@ -81,6 +83,7 @@ from basic_memory.config import (
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.models.base import Base
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from fastapi import FastAPI
 
@@ -96,6 +99,12 @@ from basic_memory.mcp import tools  # noqa: F401
 # =============================================================================
 # By default, integration tests run against SQLite.
 # Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
+
+
+@pytest.fixture(autouse=True)
+def _fake_embeddings(request, monkeypatch):
+    """Use the deterministic test embedder; see tests/fake_embeddings.py."""
+    use_fake_embeddings(request, monkeypatch)
 
 
 @pytest.fixture(scope="session")
@@ -315,6 +324,14 @@ async def engine_factory(
             autoflush=False,
         )
 
+        # Semantic search is always on, and production creates vector storage (the
+        # chunk manifest and pgvector tables) at database initialization. The reset
+        # above drops it, so run that same initialization here. Vector storage is
+        # shared by every project, so any valid project id builds it.
+        await PostgresSearchRepository(
+            session_maker, project_id=1, app_config=app_config
+        ).init_search_index()
+
         # Set module-level state to prevent MCP lifespan from re-initializing
         # This ensures get_or_create_db() sees an existing engine and skips initialization
         db._engine = postgres_engine
@@ -417,13 +434,6 @@ def app_config(
         index_changes=False,  # Disable file indexing in tests - prevents lifespan from starting blocking task
         database_backend=database_backend,
         database_url=database_url,
-        # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec
-        #          are importable, which they are in dev and CI environments.
-        # Why: with it on, every test that syncs pays the ONNX embedding stack (~5-7s per
-        #      sync) — embeddings are covered by test-int/semantic/, which configures
-        #      semantic_search_enabled explicitly in its own conftest.
-        # Outcome: non-semantic integration tests skip embedding work entirely.
-        semantic_search_enabled=False,
     )
     return app_config
 

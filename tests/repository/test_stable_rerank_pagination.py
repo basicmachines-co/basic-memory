@@ -214,11 +214,20 @@ async def test_hybrid_tail_orders_by_chunk_position_before_collapse(
         HydratedChunk(
             entity_id=700,
             chunk_key=f"entity:700:{i}",
+            source_key=("entity", 700),
             chunk_text=f"auth {i}",
             similarity=1 - i / 1000,
         )
         for i in range(100)
-    ] + [HydratedChunk(entity_id=730, chunk_key="entity:730:0", chunk_text="oauth", similarity=0.8)]
+    ] + [
+        HydratedChunk(
+            entity_id=730,
+            chunk_key="entity:730:0",
+            source_key=("entity", 730),
+            chunk_text="oauth",
+            similarity=0.8,
+        )
+    ]
     windows = _stub_vector_stream(monkeypatch, stream)
 
     async def search(limit: int, offset: int = 0) -> list[SearchIndexRow]:
@@ -263,16 +272,25 @@ async def test_fixed_prefix_keeps_the_passages_the_fixed_window_read(
         HydratedChunk(
             entity_id=700,
             chunk_key=f"entity:700:{i}",
+            source_key=("entity", 700),
             chunk_text=f"first {i}",
             similarity=1 - i / 1000,
         )
         for i in range(7)
     ] + [
         HydratedChunk(
-            entity_id=730, chunk_key="entity:730:0", chunk_text="ORIGINAL PASSAGE", similarity=0.9
+            entity_id=730,
+            chunk_key="entity:730:0",
+            source_key=("entity", 730),
+            chunk_text="ORIGINAL PASSAGE",
+            similarity=0.9,
         ),
         HydratedChunk(
-            entity_id=730, chunk_key="entity:730:1", chunk_text="LATER PASSAGE", similarity=0.8
+            entity_id=730,
+            chunk_key="entity:730:1",
+            source_key=("entity", 730),
+            chunk_text="LATER PASSAGE",
+            similarity=0.8,
         ),
     ]
     _stub_vector_stream(monkeypatch, stream)

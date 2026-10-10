@@ -136,6 +136,7 @@ async def get_memory_context(
         ge=0,
         le=MAX_CONTEXT_RELATED_RESULTS,
     ),
+    include_observations: bool = Query(True),
 ) -> GraphContext:
     """Get rich context from memory:// URI.
 
@@ -153,6 +154,8 @@ async def get_memory_context(
         page: Page number for pagination
         page_size: Number of primary items per page
         max_related: Maximum total related entities to include
+        include_observations: Load each entity's observations. Graph-shape callers
+            (compact discovery) pass False so the observation query never runs.
 
     Returns:
         GraphContext with the entity and its related context
@@ -189,6 +192,7 @@ async def get_memory_context(
                 limit=limit,
                 offset=offset,
                 max_related=max_related,
+                include_observations=include_observations,
             )
         with logfire.span(
             "api.memory.build_context.shape_response",

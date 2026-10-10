@@ -13,7 +13,6 @@ type DropReason = Literal[
     "model_mismatch",
     "index_mismatch",
     "readiness_changed",
-    "malformed_key",
 ]
 type MinSimilaritySource = Literal["query", "config"]
 
@@ -38,6 +37,9 @@ class HydrationDropped:
     reason: DropReason
     stored_model: str | None
     stored_index: str | None
+    # The search row the dropped chunk belongs to, from its manifest row. None when the
+    # adapter returned a key the manifest no longer holds.
+    key: TraceKey | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,7 +578,8 @@ async def classify_hydration_drops(
         # in the same fixed-size windows used by authoritative manifest hydration.
         result = await session.execute(
             text(
-                "SELECT entity_id, chunk_key, embedding_model, vector_index, embedding_status "
+                "SELECT entity_id, chunk_key, embedding_model, vector_index, embedding_status, "
+                "source_type, source_row_id "
                 f"FROM search_vector_chunks WHERE {scope_predicate} AND ("
                 + " OR ".join(predicates)
                 + ")"
@@ -594,9 +597,11 @@ async def classify_hydration_drops(
             reason: DropReason = "not_in_manifest"
             stored_model = None
             stored_index = None
+            key: TraceKey | None = None
         else:
             stored_model = str(stored["embedding_model"])
             stored_index = str(stored["vector_index"])
+            key = (str(stored["source_type"]), int(stored["source_row_id"]))
             if stored_model != dropped.configured_model:
                 reason = "model_mismatch"
             elif stored_index != dropped.configured_index:
@@ -617,6 +622,7 @@ async def classify_hydration_drops(
                 reason=reason,
                 stored_model=stored_model,
                 stored_index=stored_index,
+                key=key,
             )
         )
     return tuple(classified)

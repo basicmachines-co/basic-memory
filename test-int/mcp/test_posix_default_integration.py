@@ -85,7 +85,6 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
                 "grep",
                 {
                     "pattern": "retry",
-                    "literal": True,
                     "context_lines": 1,
                     "project": test_project.name,
                 },

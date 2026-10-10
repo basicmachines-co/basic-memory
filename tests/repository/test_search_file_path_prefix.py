@@ -323,6 +323,7 @@ async def test_semantic_retrieval_honors_the_scope(
                 HydratedChunk(
                     entity_id=row_id,
                     chunk_key=f"entity:{row_id}:0",
+                    source_key=("entity", row_id),
                     chunk_text="subtree scope fixture",
                     similarity=0.9,
                 )

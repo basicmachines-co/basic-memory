@@ -20,6 +20,7 @@ from basic_memory.schemas.base import Entity
 from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.schemas.search import SearchQuery
 from basic_memory.schemas import ProjectIndexRunResponse
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -150,7 +151,7 @@ async def run_doctor() -> None:
                 # Use the resolved path from the server — when project_root is configured,
                 # the actual project directory differs from the requested temp_path
                 project_path = Path(status.new_project.path)
-                console.print(f"[green]OK[/green] Created doctor project: {project_name}")
+                console.print(f"[green]OK[/green] Created doctor project: {literal(project_name)}")
 
                 # --- DB -> File: create an entity via API ---
                 knowledge_client = KnowledgeClient(client, project_id)
@@ -247,7 +248,7 @@ def doctor(
         # str() of a message-less exception (e.g. httpx.ReadTimeout) is empty;
         # fall back to repr so the failure line always names the error (#1027).
         error_detail = str(e) or repr(e)
-        console.print(f"[red]Doctor failed: {error_detail}[/red]")
+        console.print(f"[red]Doctor failed: {literal(error_detail)}[/red]")
         raise typer.Exit(code=1)
     except Exception as e:
         error_detail = str(e) or repr(e)

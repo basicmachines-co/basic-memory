@@ -33,9 +33,7 @@ def test_overwrite_reports_lock_and_exits_nonzero(app: FastAPI, test_project: Pr
     assert refused.exit_code != 0
     # Debug logging may include the initial create conflict. Check the CLI's
     # actual failure message so logs cannot mask a misleading final result.
-    errors = [
-        line for line in refused.stderr.splitlines() if line.startswith("Error during write_note:")
-    ]
+    errors = [line for line in refused.stderr.splitlines() if line.startswith("Error: ")]
     assert len(errors) == 1, refused.output
     assert "locked: true" in errors[0]
     assert "Note already exists" not in errors[0]

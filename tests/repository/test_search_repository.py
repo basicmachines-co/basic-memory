@@ -317,6 +317,31 @@ async def test_sqlite_word_query_keeps_terms_in_one_search_column(search_reposit
 
 
 @pytest.mark.asyncio
+async def test_not_excludes_a_term_found_in_any_column(search_repository, search_entity):
+    """NOT applies to the whole note, not to each searched column on its own."""
+    search_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="Coffee Brewing",
+        content_stems="pour over gives clarity",
+        content_snippet="pour over gives clarity",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+    assert await search_repository.search(search_text="coffee NOT pour") == []
+    assert await search_repository.count(search_text="coffee NOT pour") == 0
+    kept = await search_repository.search(search_text="coffee NOT decaf")
+    assert [row.permalink for row in kept] == [search_entity.permalink]
+
+
+@pytest.mark.asyncio
 async def test_index_item_upsert_on_duplicate_permalink(search_repository, search_entity):
     """Test that indexing the same permalink twice uses upsert instead of failing.
 
@@ -645,6 +670,18 @@ class TestSearchTermPreparation:
             assert fts_query(search_repository).prepare_search_term("hello*") == "hello*"
             assert fts_query(search_repository).prepare_search_term("test*world") == "test*world"
 
+    def test_multi_word_query_with_a_wildcard(self, search_repository):
+        """A wildcard on one word of several must stay valid query syntax on both backends."""
+        prepare = fts_query(search_repository).prepare_search_term
+        if is_postgres_backend(search_repository):
+            # Every word joins with "&"; a bare "foo cache:*" is rejected by to_tsquery.
+            assert prepare("foo cache*") == "foo:* & cache:*"
+            assert prepare("IT-644 cache*") == "IT-644:* & cache:*"
+            assert prepare("IT-644 *cache") == "IT-644:* & cache:*"
+        else:
+            assert prepare("foo cache*") == "foo* AND cache*"
+            assert prepare("IT-644 cache*") == '"IT-644"* AND cache*'
+
     def test_boolean_operators_preserved(self, search_repository):
         """Boolean operators should be preserved without modification."""
         if is_postgres_backend(search_repository):
@@ -743,9 +780,14 @@ class TestSearchTermPreparation:
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        assert fts_query(search_repository).prepare_search_term('say "hello"') == '"say ""hello"""*'
+        # A caller-quoted word stays a phrase; the other words are AND-joined.
         assert (
-            fts_query(search_repository).prepare_search_term("it's working") == '"it\'s working"*'
+            fts_query(search_repository).prepare_search_term('say "hello"') == 'say* AND "hello"*'
+        )
+        # An apostrophe needs quoting, but only for its own word.
+        assert (
+            fts_query(search_repository).prepare_search_term("it's working")
+            == '"it\'s"* AND working*'
         )
 
     def test_file_paths_no_prefix_wildcard(self, search_repository):
@@ -783,27 +825,82 @@ class TestSearchTermPreparation:
         # This reproduces the bug where "Basic Memory v0.13.0b2" becomes "Basic* AND Memory* AND v0.13.0b2*"
         # which causes FTS5 syntax errors because v0.13.0b2* is not valid FTS5 syntax
         result = fts_query(search_repository).prepare_search_term("Basic Memory v0.13.0b2")
-        # Should be quoted because of dots in v0.13.0b2
-        assert result == '"Basic Memory v0.13.0b2"*'
+        # Only the dotted token is quoted; quoting the whole query as one phrase would
+        # require the words to be adjacent in the text.
+        assert result == 'Basic* AND Memory* AND "v0.13.0b2"*'
 
     def test_mixed_special_characters_in_multi_word_queries(self, search_repository):
-        """Multi-word queries with special characters in any word should be fully quoted."""
+        """Each word with special characters is quoted on its own; the rest stay bare."""
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        # Any word containing special characters should cause the entire phrase to be quoted
         assert (
             fts_query(search_repository).prepare_search_term("config.json file")
-            == '"config.json file"*'
+            == '"config.json"* AND file*'
         )
         assert (
             fts_query(search_repository).prepare_search_term("user@email.com account")
-            == '"user@email.com account"*'
+            == '"user@email.com"* AND account*'
         )
         assert (
             fts_query(search_repository).prepare_search_term("node.js and react")
-            == '"node.js and react"*'
+            == '"node.js"* AND and* AND react*'
         )
+
+    def test_punctuated_identifiers_with_other_terms(self, search_repository):
+        """Ticket ids, flags and colon tokens next to plain words must not collapse the
+        query into one exact phrase, which returns nothing (#1657)."""
+        if is_postgres_backend(search_repository):
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
+
+        prepare = fts_query(search_repository).prepare_search_term
+        assert prepare("IT-644 cacheability") == '"IT-644"* AND cacheability*'
+        assert prepare("#344 #336 Dev bundle") == '"#344"* AND "#336"* AND Dev* AND bundle*'
+        assert prepare("cim --diff acli") == 'cim* AND "--diff"* AND acli*'
+        assert prepare("queue:run") == '"queue:run"*'
+        # A caller-quoted multi-word phrase survives as one phrase.
+        assert prepare('"Monday never bumps" updated_at') == '"Monday never bumps"* AND updated_at*'
+        # A single caller-quoted term is not quoted a second time.
+        assert prepare('"mirror-image"') == '"mirror-image"*'
+        # A file path inside a multi-word query keeps its exact match.
+        assert prepare("notes/plan.md draft") == '"notes/plan.md" AND draft*'
+        # A word with no letters or digits has no tokens; as an empty phrase it would
+        # make the whole AND match nothing.
+        assert prepare("Note & Symbols") == "Note* AND Symbols*"
+        # A caller's trailing wildcard is kept once, never doubled into "cache**".
+        assert prepare("IT-644 cache*") == '"IT-644"* AND cache*'
+        assert prepare("IT-6* cacheability") == '"IT-6"* AND cacheability*'
+        # A leading wildcard is not FTS5 syntax, so the word is quoted as text.
+        assert prepare("IT-644 *cache") == '"IT-644"* AND "*cache"*'
+
+    @pytest.mark.asyncio
+    async def test_punctuated_word_matches_when_the_words_are_not_adjacent(
+        self, search_repository, search_entity
+    ):
+        """End to end: both words occur in the note, in different sentences (#1657)."""
+        await search_repository.index_item(
+            SearchIndexRow(
+                id=search_entity.id,
+                type=SearchItemType.ENTITY.value,
+                title="CDN rollout",
+                content_stems="cdn rollout",
+                content_snippet=(
+                    "Ticket IT-644 tracks the CDN rollout.\n\n"
+                    "Later we measured cacheability of static assets."
+                ),
+                permalink=search_entity.permalink,
+                file_path=search_entity.file_path,
+                entity_id=search_entity.id,
+                metadata={"note_type": search_entity.note_type},
+                created_at=search_entity.created_at,
+                updated_at=search_entity.updated_at,
+                project_id=search_repository.project_id,
+            )
+        )
+
+        for query in ("IT-644 cacheability", "IT-644 cache*", "IT-644 *cacheability"):
+            results = await search_repository.search(search_text=query)
+            assert search_entity.id in [result.id for result in results], query
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters_returns_results(self, search_repository):

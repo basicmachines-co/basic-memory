@@ -12,6 +12,7 @@ from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
+from basic_memory.mcp.tools.read_note import format_note_metadata
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
 from typing import override
@@ -579,6 +580,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
                 file_path="TODO.md",
                 content="---\ntitle: TODO\n---\n\n# TODO - Priorities & Tasks\n",
                 entity_metadata={"title": "TODO"},
+                db_checksum="abc123",
             )
 
     class FakeResourceClient:
@@ -1454,3 +1456,99 @@ async def test_unavailable_resolver_does_not_prove_markdown_path_missing(
 
     with pytest.raises(ToolError, match="resolver unavailable"):
         await read_note("notes/present.md", project=test_project.name, output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
+    """The checksum read_note returns is the revision write_note's expected_checksum checks."""
+    written = await write_note(
+        project=test_project.name,
+        title="Guarded Note",
+        directory="test",
+        content="first revision",
+        output_format="json",
+    )
+    assert isinstance(written, dict)
+
+    read = await read_note("test/guarded-note", project=test_project.name, output_format="json")
+    assert isinstance(read, dict)
+    assert read["checksum"] == written["checksum"]
+
+    replaced = await write_note(
+        project=test_project.name,
+        title="Guarded Note",
+        directory="test",
+        content="second revision",
+        overwrite=True,
+        expected_checksum=read["checksum"],
+        output_format="json",
+    )
+    assert isinstance(replaced, dict)
+    assert replaced["action"] == "updated"
+
+    with pytest.raises(ToolError, match="revision conflict"):
+        await write_note(
+            project=test_project.name,
+            title="Guarded Note",
+            directory="test",
+            content="stale third revision",
+            overwrite=True,
+            expected_checksum=read["checksum"],
+        )
+
+
+# --- Line ranges past the end of the document (#1634) ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["text", "json"])
+async def test_line_scan_past_end_reports_document_length(
+    app, test_project, entity_repository, session_maker, output_format
+):
+    """A start_line past the last line raises a clear error instead of 'Lines 500-N'."""
+    await write_note(
+        project=test_project.name,
+        title="Short Lines",
+        directory="notes",
+        content="one\ntwo",
+    )
+    full = await read_note(
+        "notes/Short Lines.md",
+        project=test_project.name,
+        include_frontmatter=True,
+        output_format="json",
+    )
+    assert isinstance(full, dict)
+    total = len(full["content"].splitlines())
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_file_path(session, "notes/Short Lines.md")
+    assert stored is not None
+
+    # The path resolves first; the exact UUID takes the direct-read branch.
+    for identifier in ("notes/Short Lines.md", stored.external_id):
+        with pytest.raises(
+            ToolError,
+            match=f"start_line 500 is past the end of the document \\({total} lines\\)",
+        ):
+            await read_note(
+                identifier,
+                project=test_project.name,
+                start_line=500,
+                end_line=510,
+                output_format=output_format,
+            )
+
+
+def test_format_note_metadata_prints_the_full_checksum_and_marks_missing_values():
+    """The text metadata read never truncates the checksum, and says when it has none."""
+    checksum = "c" * 64
+    text = format_note_metadata(
+        {"title": "T", "permalink": None, "file_path": "t.md", "checksum": checksum}
+    )
+    assert text.splitlines() == [
+        "# Note metadata",
+        "title: T",
+        "permalink: unknown",
+        "file_path: t.md",
+        f"checksum: {checksum}",
+    ]

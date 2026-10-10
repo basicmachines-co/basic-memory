@@ -194,7 +194,16 @@ def test_write_note_expected_checksum_passthrough(mock_mcp_write):
 @patch(
     "basic_memory.mcp.tools.write_note",
     new_callable=AsyncMock,
-    return_value={"action": "conflict", "error": "NOTE_REVISION_CONFLICT", "checksum": "b" * 64},
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "action": "conflict",
+                "error": "NOTE_REVISION_CONFLICT",
+                "checksum": None,
+                "currentChecksum": "b" * 64,
+            }
+        )
+    ),
 )
 def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
     """A stale --expected-checksum is a failed write for exit-code-driven scripts."""
@@ -216,7 +225,10 @@ def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
     )
 
     assert result.exit_code == 1
-    assert "NOTE_REVISION_CONFLICT" in result.output
+    assert "Error: NOTE_REVISION_CONFLICT" in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "NOTE_REVISION_CONFLICT"
+    assert payload["currentChecksum"] == "b" * 64
 
 
 @patch(
@@ -584,6 +596,67 @@ def test_edit_note_error_response(mock_mcp_edit):
     )
 
     assert result.exit_code == 1
+
+
+@patch(
+    "basic_memory.mcp.tools.edit_note",
+    new_callable=AsyncMock,
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "checksum": None,
+                "operation": "append",
+                "fileCreated": False,
+                "error": "The note was modified concurrently. Reload the latest content and retry.",
+            }
+        )
+    ),
+)
+def test_edit_note_reports_a_tool_error_payload_and_exits_nonzero(
+    mock_mcp_edit: AsyncMock,
+) -> None:
+    """A failed edit: error on stderr, the structured result on stdout, as write-note does."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: The note was modified concurrently." in result.stderr
+    assert json.loads(result.stdout)["fileCreated"] is False
+
+
+@patch(
+    "basic_memory.mcp.tools.edit_note",
+    new_callable=AsyncMock,
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "operation": "append",
+                "fileCreated": False,
+                "error": "EDIT_OUTCOME_UNKNOWN",
+                "detail": "Network error: the connection dropped",
+                "message": "The edit may have been applied. Read the note before retrying.",
+            }
+        )
+    ),
+)
+def test_edit_note_unknown_outcome_keeps_the_read_before_retry_warning(
+    mock_mcp_edit: AsyncMock,
+) -> None:
+    """A lost response must not reach the user as a bare error code (or a script retries)."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: EDIT_OUTCOME_UNKNOWN" in result.stderr
+    assert "Read the note before retrying" in result.stderr
+    assert json.loads(result.stdout)["detail"] == "Network error: the connection dropped"
 
 
 # --- build-context ---

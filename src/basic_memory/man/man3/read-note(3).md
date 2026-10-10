@@ -22,7 +22,7 @@ MCP:
 ```
 read_note(identifier, project=None, project_id=None, page=1, page_size=10,
           output_format="text", include_frontmatter=False, start_line=None,
-          end_line=None)
+          end_line=None, include_content=True)
 ```
 
 CLI:
@@ -63,6 +63,7 @@ Accepted identifier forms (all verified):
 - **include_frontmatter** (boolean, optional, default: False) — For unsliced JSON reads, include opening YAML in content; parsed frontmatter is returned either way. Explicit line ranges are never stripped. CLI: --frontmatter (--include-frontmatter is a deprecated alias).
 - **start_line** (integer | null, optional, default: None) — First document line to read (1-based, inclusive). Defaults to 1 when only end_line is given. Line scans count the full Markdown, including frontmatter, matching cat's default line coordinates.
 - **end_line** (integer | null, optional, default: None) — Last document line to read (inclusive); omitted means EOF. Out-of-file ranges return empty content; invalid/reversed ranges fail. With either bound, text output is numbered and JSON carries coordinates, has_more, and next_start_line/next_end_line. include_frontmatter does not strip an explicitly addressed range. Edits between calls may shift lines.
+- **include_content** (boolean, optional, default: True) — Default true. Set to false to return only the note's metadata — title, permalink, file_path, the full accepted-revision checksum, and updated_at — without the body. Use it to refresh the checksum that edit_note/write_note take as expected_checksum without reading the whole note. Cannot be combined with start_line/end_line.
 
 ## MCP USAGE
 

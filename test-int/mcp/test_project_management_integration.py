@@ -391,19 +391,22 @@ async def test_case_insensitive_project_switching(mcp_server, app, test_project,
         # (Project creation is case-preserving but operations can use different cases)
 
         # Test that we can reference the project with different cases in operations
-        for test_input in test_cases:
-            # Test write_note with case-insensitive project reference
+        for index, test_input in enumerate(test_cases):
+            # Test write_note with case-insensitive project reference. The index keeps
+            # titles distinct: titles differing only by case share one permalink, and
+            # the second write would be refused as an existing note.
+            title = f"Case Test {index} {test_input}"
             write_result = await client.call_tool(
                 "write_note",
                 {
                     "project": test_input,  # Use different case
-                    "title": f"Case Test {test_input}",
+                    "title": title,
                     "directory": "case-test",
                     "content": f"# Case Test\n\nTesting with {test_input}",
                 },
             )
             assert len(write_result.content) == 1
-            assert f"Case Test {test_input}".lower() in write_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
+            assert title.lower() in write_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
 
         # Clean up
         await client.call_tool("delete_project", {"project_name": project_name})

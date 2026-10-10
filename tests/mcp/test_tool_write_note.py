@@ -1,5 +1,6 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+import json
 from datetime import datetime, timezone
 from textwrap import dedent
 from typing import Any
@@ -11,15 +12,18 @@ from basic_memory import db
 from basic_memory import config as config_module
 from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.clients import KnowledgeClient
-from basic_memory.mcp.tools import write_note, read_note, delete_note
+from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
+    SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
     _compose_similarity_probe,
     _compose_workspace_project_route,
+    similar_notes_min_similarity,
 )
 from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.schemas.v2.note_write import NoteCreated
@@ -988,14 +992,15 @@ class TestWriteNoteSecurityValidation:
         ]
 
         for attack_folder in attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Test Note",
-                directory=attack_folder,
-                content="# Test Content\nThis should be blocked by security validation.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Test Note",
+                    directory=attack_folder,
+                    content="# Test Content\nThis should be blocked by security validation.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
             assert attack_folder in result
@@ -1017,14 +1022,15 @@ class TestWriteNoteSecurityValidation:
         ]
 
         for attack_folder in attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Test Note",
-                directory=attack_folder,
-                content="# Test Content\nThis should be blocked by security validation.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Test Note",
+                    directory=attack_folder,
+                    content="# Test Content\nThis should be blocked by security validation.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
             assert attack_folder in result
@@ -1046,14 +1052,15 @@ class TestWriteNoteSecurityValidation:
         ]
 
         for attack_folder in attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Test Note",
-                directory=attack_folder,
-                content="# Test Content\nThis should be blocked by security validation.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Test Note",
+                    directory=attack_folder,
+                    content="# Test Content\nThis should be blocked by security validation.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
             assert attack_folder in result
@@ -1074,14 +1081,15 @@ class TestWriteNoteSecurityValidation:
         ]
 
         for attack_folder in attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Test Note",
-                directory=attack_folder,
-                content="# Test Content\nThis should be blocked by security validation.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Test Note",
+                    directory=attack_folder,
+                    content="# Test Content\nThis should be blocked by security validation.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
             assert attack_folder in result
@@ -1100,14 +1108,15 @@ class TestWriteNoteSecurityValidation:
         ]
 
         for attack_folder in attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Test Note",
-                directory=attack_folder,
-                content="# Test Content\nThis should be blocked by security validation.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Test Note",
+                    directory=attack_folder,
+                    content="# Test Content\nThis should be blocked by security validation.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
@@ -1209,16 +1218,17 @@ class TestWriteNoteSecurityValidation:
     async def test_write_note_security_with_all_parameters(self, app, test_project):
         """Test security validation works with all write_note parameters."""
         # Test that security validation is applied even when all other parameters are provided
-        result = await write_note(
-            project=test_project.name,
-            title="Security Test with All Params",
-            directory="../../../etc/malicious",
-            content="# Malicious Content\nThis should be blocked by security validation.",
-            tags=["malicious", "test"],
-            note_type="guide",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Security Test with All Params",
+                directory="../../../etc/malicious",
+                content="# Malicious Content\nThis should be blocked by security validation.",
+                tags=["malicious", "test"],
+                note_type="guide",
+            )
+        result = str(exc_info.value)
 
-        assert isinstance(result, str)
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
         assert "../../../etc/malicious" in result
@@ -1227,12 +1237,14 @@ class TestWriteNoteSecurityValidation:
     async def test_write_note_security_logging(self, app, test_project, caplog):
         """Test that security violations are properly logged."""
         # Attempt path traversal attack
-        result = await write_note(
-            project=test_project.name,
-            title="Security Logging Test",
-            directory="../../../etc/passwd_folder",
-            content="# Test Content\nThis should trigger security logging.",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Security Logging Test",
+                directory="../../../etc/passwd_folder",
+                content="# Test Content\nThis should trigger security logging.",
+            )
+        result = str(exc_info.value)
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
@@ -1300,14 +1312,15 @@ class TestWriteNoteSecurityEdgeCases:
         ]
 
         for attack_folder in unicode_attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Unicode Attack Test",
-                directory=attack_folder,
-                content="# Unicode Attack\nThis should be blocked.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Unicode Attack Test",
+                    directory=attack_folder,
+                    content="# Unicode Attack\nThis should be blocked.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
@@ -1317,14 +1330,15 @@ class TestWriteNoteSecurityEdgeCases:
         # Create a very long path traversal attack
         long_attack_folder = "../" * 1000 + "etc/malicious"
 
-        result = await write_note(
-            project=test_project.name,
-            title="Long Attack Test",
-            directory=long_attack_folder,
-            content="# Long Attack\nThis should be blocked.",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Long Attack Test",
+                directory=long_attack_folder,
+                content="# Long Attack\nThis should be blocked.",
+            )
+        result = str(exc_info.value)
 
-        assert isinstance(result, str)
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
 
@@ -1340,14 +1354,15 @@ class TestWriteNoteSecurityEdgeCases:
         ]
 
         for attack_folder in case_attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Case Variation Attack Test",
-                directory=attack_folder,
-                content="# Case Attack\nThis should be blocked.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Case Variation Attack Test",
+                    directory=attack_folder,
+                    content="# Case Attack\nThis should be blocked.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
@@ -1363,18 +1378,18 @@ class TestWriteNoteSecurityEdgeCases:
         ]
 
         for attack_folder in whitespace_attack_folders:
-            result = await write_note(
-                project=test_project.name,
-                title="Whitespace Attack Test",
-                directory=attack_folder,
-                content="# Whitespace Attack\nThis should be blocked.",
-            )
+            with pytest.raises(ToolError) as exc_info:
+                await write_note(
+                    project=test_project.name,
+                    title="Whitespace Attack Test",
+                    directory=attack_folder,
+                    content="# Whitespace Attack\nThis should be blocked.",
+                )
+            result = str(exc_info.value)
 
-            assert isinstance(result, str)
             # The attack should still be blocked even with whitespace
-            if ".." in attack_folder.strip() or "~" in attack_folder.strip():
-                assert "# Error" in result
-                assert "paths must stay within project boundaries" in result
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
 
 
 class TestWriteNoteOverwriteGuard:
@@ -1393,12 +1408,14 @@ class TestWriteNoteOverwriteGuard:
         assert "# Created note" in result1
 
         # Second write without overwrite should be blocked
-        result2 = await write_note(
-            project=test_project.name,
-            title="Guard Test",
-            directory="guard",
-            content="# Guard Test\n\nReplacement content",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Guard Test",
+                directory="guard",
+                content="# Guard Test\n\nReplacement content",
+            )
+        result2 = str(exc_info.value)
         assert "# Error: Note already exists" in result2
         assert "Guard Test" in result2
         assert "edit_note" in result2
@@ -1418,14 +1435,15 @@ class TestWriteNoteOverwriteGuard:
             content="# Explicit False\n\nOriginal",
         )
 
-        result = await write_note(
-            project=test_project.name,
-            title="Explicit False",
-            directory="guard",
-            content="# Explicit False\n\nReplacement",
-            overwrite=False,
-        )
-        assert "# Error: Note already exists" in result
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Explicit False",
+                directory="guard",
+                content="# Explicit False\n\nReplacement",
+                overwrite=False,
+            )
+        assert "# Error: Note already exists" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_write_note_overwrite_true_replaces(self, app, test_project):
@@ -1452,6 +1470,42 @@ class TestWriteNoteOverwriteGuard:
         assert "Original content" not in content
 
     @pytest.mark.asyncio
+    async def test_write_note_stale_expected_checksum_raises(self, app, test_project):
+        """A stale expected_checksum refuses the overwrite as a tool error."""
+        created = await write_note(
+            project=test_project.name,
+            title="Stale Checksum",
+            directory="guard",
+            content="# Stale Checksum\n\nOriginal content",
+            output_format="json",
+        )
+        assert isinstance(created, dict)
+        stale_checksum = created["checksum"]
+
+        await write_note(
+            project=test_project.name,
+            title="Stale Checksum",
+            directory="guard",
+            content="# Stale Checksum\n\nSecond revision",
+            overwrite=True,
+        )
+
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="Stale Checksum",
+                directory="guard",
+                content="# Stale Checksum\n\nLost update",
+                overwrite=True,
+                expected_checksum=stale_checksum,
+            )
+        assert "revision conflict" in str(exc_info.value)
+
+        content = await read_note("guard/stale-checksum", project=test_project.name)
+        assert "Second revision" in content
+        assert "Lost update" not in content
+
+    @pytest.mark.asyncio
     async def test_write_note_overwrite_error_json_format(self, app, test_project):
         """JSON output returns structured error with NOTE_ALREADY_EXISTS."""
         await write_note(
@@ -1461,18 +1515,89 @@ class TestWriteNoteOverwriteGuard:
             content="# JSON Guard\n\nOriginal",
         )
 
-        result = await write_note(
-            project=test_project.name,
-            title="JSON Guard",
-            directory="guard",
-            content="# JSON Guard\n\nReplacement",
-            output_format="json",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await write_note(
+                project=test_project.name,
+                title="JSON Guard",
+                directory="guard",
+                content="# JSON Guard\n\nReplacement",
+                output_format="json",
+            )
+        result = json.loads(str(exc_info.value))
         assert isinstance(result, dict)
         assert result["error"] == "NOTE_ALREADY_EXISTS"
         assert result["action"] == "conflict"
         assert result["title"] == "JSON Guard"
         assert result["permalink"] is not None
+
+    @pytest.mark.asyncio
+    async def test_write_note_conflict_after_move_names_the_note_at_the_path(
+        self, app, test_project
+    ):
+        """After a move, the conflict names the note at the path, not the moved one (#1634)."""
+        await write_note(
+            project=test_project.name, title="Mover", directory="dirA", content="original"
+        )
+        await move_note(
+            "dirA/Mover.md", destination_path="dirB/Mover.md", project=test_project.name
+        )
+        # The moved note keeps the path's original permalink, so this one is suffixed.
+        replacement = await write_note(
+            project=test_project.name,
+            title="Mover",
+            directory="dirA",
+            content="replacement",
+            output_format="json",
+        )
+        assert isinstance(replacement, dict)
+        assert replacement["file_path"] == "dirA/Mover.md"
+
+        with pytest.raises(ToolError) as json_refusal:
+            await write_note(
+                project=test_project.name,
+                title="Mover",
+                directory="dirA",
+                content="refused",
+                output_format="json",
+            )
+        conflict = json.loads(str(json_refusal.value))
+        assert conflict["error"] == "NOTE_ALREADY_EXISTS"
+        assert conflict["permalink"] == replacement["permalink"]
+        assert conflict["file_path"] == "dirA/Mover.md"
+        named = await read_note(
+            conflict["external_id"], project=test_project.name, output_format="json"
+        )
+        assert isinstance(named, dict)
+        assert named["file_path"] == "dirA/Mover.md"
+
+        with pytest.raises(ToolError) as text_refusal:
+            await write_note(
+                project=test_project.name, title="Mover", directory="dirA", content="refused"
+            )
+        assert f'edit_note("{replacement["permalink"]}"' in str(text_refusal.value)
+
+    @pytest.mark.asyncio
+    async def test_write_note_conflict_qualifies_the_permalink_in_a_workspace(
+        self, app, test_project
+    ):
+        with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+            created = await write_note(
+                project=test_project.name,
+                title="Team Guard",
+                directory="team",
+                content="original",
+                output_format="json",
+            )
+            assert isinstance(created, dict)
+            with pytest.raises(ToolError) as refusal:
+                await write_note(
+                    project=test_project.name,
+                    title="Team Guard",
+                    directory="team",
+                    content="refused",
+                    output_format="json",
+                )
+        assert json.loads(str(refusal.value))["permalink"] == created["permalink"]
 
     @pytest.mark.asyncio
     async def test_write_note_config_overwrite_default_true(
@@ -1605,6 +1730,46 @@ def test_similarity_probe_is_bounded_to_the_index_chunk_size():
     assert len(probe) <= SIMILAR_NOTES_PROBE_CHARS
 
 
+def test_similar_notes_floor_applies_on_the_measured_default_model():
+    assert similar_notes_min_similarity(BasicMemoryConfig()) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
+def test_similar_notes_floor_ignores_provider_spelling():
+    config = BasicMemoryConfig(semantic_embedding_provider=" FastEmbed ")
+    assert similar_notes_min_similarity(config) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
+def test_similar_notes_floor_defers_for_a_model_set_by_environment(monkeypatch):
+    """An env-configured model is not the measured default just because both read env."""
+    monkeypatch.setenv(
+        "BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    assert similar_notes_min_similarity(BasicMemoryConfig()) is None
+
+
+def test_similar_notes_floor_keeps_a_stricter_search_floor():
+    config = BasicMemoryConfig(semantic_min_similarity=0.8)
+    assert similar_notes_min_similarity(config) == 0.8
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {
+            "semantic_embedding_provider": "openai",
+            "semantic_embedding_model": "text-embedding-3-small",
+        },
+        {"semantic_embedding_model": "paraphrase-multilingual-MiniLM-L12-v2"},
+        # Prefixes change the text that is embedded, so the measurement does not cover them.
+        {"semantic_embedding_document_prefix": "passage: "},
+        {"semantic_embedding_query_prefix": "query: "},
+    ],
+)
+def test_similar_notes_floor_defers_to_the_server_for_other_models(overrides):
+    """Scores are model-specific, so an unmeasured model keeps semantic_min_similarity."""
+    assert similar_notes_min_similarity(BasicMemoryConfig(**overrides)) is None
+
+
 def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
     rows = [
         # The freshly written note, already indexed: matched by file_path ...
@@ -1709,6 +1874,8 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert call["payload"]["retrieval_mode"] == "vector"
     assert call["payload"]["entity_types"] == ["entity"]
     assert call["payload"]["text"].startswith("BU Mapping Analysis\n\n# BU Mapping Analysis")
+    # The advisory asks a stricter question than search relevance (#1718).
+    assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY
     assert call["page"] == 1
     assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
 

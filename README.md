@@ -419,7 +419,6 @@ their existing ranking.
 Enable the default local FastEmbed reranker:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_RERANKER_ENABLED=true
 ```
 
@@ -427,7 +426,6 @@ The default model is `jinaai/jina-reranker-v1-tiny-en`. To use a hosted
 reranker through LiteLLM instead:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_RERANKER_ENABLED=true
 export BASIC_MEMORY_RERANKER_PROVIDER=litellm
 export BASIC_MEMORY_RERANKER_MODEL=cohere/rerank-v3.5

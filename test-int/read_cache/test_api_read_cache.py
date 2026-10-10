@@ -1103,8 +1103,7 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
         created_paths.append(response.json()["file_path"])
 
     destination_paths = tuple(
-        source_path.replace("move-source/", "move-destination/", 1)
-        for source_path in created_paths
+        source_path.replace("move-source/", "move-destination/", 1) for source_path in created_paths
     )
     # Reads serve accepted note content, so the generation must advance once each move's
     # accepted state commits; the bytes reach the new path afterwards.

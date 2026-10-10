@@ -40,7 +40,7 @@ type: note
 """
 
 
-def _pristine_env(home: Path) -> dict[str, str]:
+def _pristine_env(home: Path, fastembed_cache: Path) -> dict[str, str]:
     """A profile with no Basic Memory state, and none inherited from the developer or CI."""
     env = {
         key: value
@@ -58,12 +58,10 @@ def _pristine_env(home: Path) -> dict[str, str]:
         # describe the message rather than the runner's window.
         COLUMNS="240",
         LINES="60",
-        # fastembed is a core dependency, so semantic search is on by default and
-        # an index pass would download an embedding model onto the runner. These
-        # tests are about index-on-add and the readiness phases, not embeddings;
-        # the embeddings stage settles at 0/0 with this off, and the stage's own
-        # counting is covered in tests/services/test_project_readiness.py.
-        BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED="false",
+        # Semantic search is always on, so indexing embeds with the real model.
+        # One temporary cache for the module keeps the model to a single download
+        # without touching the developer's or runner's real profile.
+        FASTEMBED_CACHE_PATH=str(fastembed_cache),
     )
     return env
 
@@ -98,17 +96,26 @@ def _readiness(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     return payload["readiness"]
 
 
+@pytest.fixture(scope="module")
+def fastembed_cache(tmp_path_factory) -> Path:
+    """A FastEmbed model cache shared by this module's tests and nothing else."""
+    return tmp_path_factory.mktemp("fastembed_cache")
+
+
 @pytest.mark.slow
-def test_project_add_indexes_files_already_on_disk(tmp_path):
+def test_project_add_indexes_files_already_on_disk(tmp_path, fastembed_cache):
     """Notes present at add time are queryable with no manual reindex in between."""
     home = tmp_path / "home"
     home.mkdir()
-    env = _pristine_env(home)
+    env = _pristine_env(home, fastembed_cache)
     notes = tmp_path / "adopted"
     _seed_notes(notes)
 
     add = _bm(["project", "add", "adopted", str(notes)], env)
     assert add.returncode == 0, add.stderr
+    # The add runs the same visible pass as `bm project index` rather than one
+    # silent API request (#1635).
+    assert "Rebuilding full-text search index" in add.stdout
 
     # No reindex is run here. That is the entire point of the test.
     search = _bm(["tool", "search-notes", "Alpha Note", "--project", "adopted", "--json"], env)
@@ -118,7 +125,9 @@ def test_project_add_indexes_files_already_on_disk(tmp_path):
 
 
 @pytest.mark.slow
-def test_no_wait_leaves_a_never_indexed_project_that_status_reports_honestly(tmp_path):
+def test_no_wait_leaves_a_never_indexed_project_that_status_reports_honestly(
+    tmp_path, fastembed_cache
+):
     """--no-wait opts out, names the state, and `status --json` keeps it distinguishable.
 
     A never-indexed project and an idle one both have zero pending work. Before
@@ -127,7 +136,7 @@ def test_no_wait_leaves_a_never_indexed_project_that_status_reports_honestly(tmp
     """
     home = tmp_path / "home"
     home.mkdir()
-    env = _pristine_env(home)
+    env = _pristine_env(home, fastembed_cache)
     notes = tmp_path / "deferred"
     _seed_notes(notes)
 

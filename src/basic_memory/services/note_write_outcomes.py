@@ -28,7 +28,14 @@ class Updated:
 
 @dataclass(frozen=True, slots=True)
 class AlreadyExists:
+    """A note already owns the requested path and the write did not overwrite it.
+
+    ``note`` is the note found at the path. It is None only when a concurrent create
+    refused the path and no note is found there afterward.
+    """
+
     file_path: str
+    note: NoteLocation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +52,12 @@ class Locked:
 class RevisionConflict:
     """The note at the path is no longer the revision the caller expected to replace.
 
-    ``current_db_checksum`` is None when no note owns the path any more.
+    ``current_db_checksum`` and ``note`` are None when no note owns the path any more.
     """
 
     file_path: str
     current_db_checksum: str | None
+    note: NoteLocation | None = None
 
 
 @dataclass(frozen=True, slots=True)

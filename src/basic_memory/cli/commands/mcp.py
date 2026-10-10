@@ -1,8 +1,9 @@
 """MCP server command with streamable HTTP transport."""
 
+import ipaddress
 import os
 import threading
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import typer
 from loguru import logger
@@ -23,11 +24,62 @@ class _DeferredMcpServer:
 mcp_server = _DeferredMcpServer()
 
 
+type HttpTransport = Literal["streamable-http", "sse"]
+
+
+def http_guard_options(transport: HttpTransport) -> dict[str, Any]:
+    """Return the `run` kwargs that install FastMCP's Host/Origin guard for a transport.
+
+    In "auto" mode the guard checks Host and Origin only for connections arriving on
+    a loopback address. That closes DNS rebinding from a browser tab and leaves
+    0.0.0.0 container binds (Docker bridge) usable.
+    """
+    # Trigger: streamable-http transport.
+    # Why: FastMCP builds its own guard there from host_origin_protection and the
+    #      configured FASTMCP_HTTP_ALLOWED_HOSTS / FASTMCP_HTTP_ALLOWED_ORIGINS.
+    # Outcome: delegate to FastMCP; adding our middleware too would guard twice.
+    if transport == "streamable-http":
+        return {"host_origin_protection": "auto"}
+
+    # SSE: FastMCP 4.0.3's create_sse_app ignores host_origin_protection, so install
+    # the same guard ourselves with the allowlists create_streamable_http_app would
+    # read from fastmcp.settings.
+    # Deferred: fastmcp/starlette are heavy and the CLI import path must stay light
+    # (tests/cli/test_cli_exit.py guards this).
+    import fastmcp
+    from fastmcp.server.http import HostOriginGuardMiddleware
+    from starlette.middleware import Middleware
+
+    guard = Middleware(
+        HostOriginGuardMiddleware,
+        allowed_hosts=fastmcp.settings.http_allowed_hosts,
+        allowed_origins=fastmcp.settings.http_allowed_origins,
+        mode="auto",
+    )
+    return {"middleware": [guard]}
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return True when an HTTP bind host only accepts connections from this machine."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        # Hostnames other than localhost can resolve to any interface, so treat
+        # them as exposed rather than guessing what they resolve to.
+        return False
+
+
 @app.command()
 def mcp(
     transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
     host: str = typer.Option(
-        "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
+        "127.0.0.1",
+        help=(
+            "Host for HTTP transports. Defaults to loopback; use 0.0.0.0 to allow "
+            "external connections (no authentication)"
+        ),
     ),
     port: int = typer.Option(8000, help="Port for HTTP transports"),
     path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
@@ -119,10 +171,26 @@ def mcp(
             transport=transport,
         )
     elif transport == "streamable-http" or transport == "sse":
+        # Trigger: HTTP/SSE bind host is not a loopback address.
+        # Why: these transports have no inbound authentication, so every MCP tool
+        #      (write_note, delete_note, create_memory_project, ...) is reachable by
+        #      anyone who can reach the port.
+        # Outcome: warn on stderr and in the MCP log; startup proceeds because
+        #          containers legitimately bind 0.0.0.0 behind their own network.
+        if not is_loopback_host(host):
+            warning = (
+                f"MCP {transport} transport is bound to {host}, which is reachable from "
+                "other machines. This server has no authentication; bind to 127.0.0.1 "
+                "unless the network is trusted."
+            )
+            typer.echo(f"Warning: {warning}", err=True)
+            logger.warning(warning)
+
         mcp_server.run(
             transport=transport,
             host=host,
             port=port,
             path=path,
             log_level="INFO",
+            **http_guard_options(transport),
         )

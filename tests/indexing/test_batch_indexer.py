@@ -410,6 +410,66 @@ async def test_batch_indexer_preserves_markdown_semantic_timestamps_on_reindex(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_keeps_created_at_when_a_rewrite_moves_the_file_ctime(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """Reindexing a rewritten note keeps its creation time (#1716).
+
+    Without a frontmatter `created`, the parser falls back to the file's ctime,
+    which every atomic rewrite moves. Only a declared `created` may change it.
+    """
+    path = "notes/undeclared-created.md"
+    absolute_path = project_config.home / path
+    frontmatter = "---\ntitle: Undeclared Created\ntype: note\n---\n"
+    first_ctime = datetime(2024, 3, 1, 9, 0, tzinfo=UTC)
+    rewrite_ctime = datetime(2025, 6, 1, 9, 0, tzinfo=UTC)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    await _create_file(absolute_path, f"{frontmatter}First body\n")
+    first_input = await _load_input(file_service, path)
+    first_input.created_at = first_ctime
+    assert (await batch_indexer.index_files({path: first_input}, max_concurrent=1)).errors == []
+
+    await _create_file(absolute_path, f"{frontmatter}Second body\n")
+    rewrite_input = await _load_input(file_service, path)
+    rewrite_input.created_at = rewrite_ctime
+    assert (await batch_indexer.index_files({path: rewrite_input}, max_concurrent=1)).errors == []
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        rewritten = await entity_repository.get_by_file_path(session, path)
+    assert rewritten is not None
+    assert rewritten.created_at == first_ctime
+
+    # The author's declared creation time is the one value allowed to move it.
+    await _create_file(
+        absolute_path,
+        "---\ntitle: Undeclared Created\ntype: note\ncreated: 2023-01-02T03:04:05Z\n---\n"
+        "Third body\n",
+    )
+    declared_input = await _load_input(file_service, path)
+    declared_input.created_at = rewrite_ctime
+    assert (await batch_indexer.index_files({path: declared_input}, max_concurrent=1)).errors == []
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        declared = await entity_repository.get_by_file_path(session, path)
+    assert declared is not None
+    assert declared.created_at == datetime(2023, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_returns_original_markdown_content_when_no_frontmatter_rewrite(
     app_config,
     entity_service,
@@ -605,6 +665,41 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
         {"entity_id": source.id},
     )
     assert relation_rows.scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_drops_path_links_that_climb_out_of_the_project(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """A Markdown link past the project root is prose, not an unresolved relation (#1634)."""
+    source_path = "links/sub/source.md"
+    await _create_file(
+        project_config.home / source_path,
+        "# Source\n\n[outside](../../../../outside.md) and [inside](../../Inside.md)\n",
+    )
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {source_path: await _load_input(file_service, source_path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    indexed_source = next(indexed for indexed in result.indexed if indexed.path == source_path)
+    assert [relation.target_name for relation in indexed_source.relations] == ["../../Inside.md"]
 
 
 @pytest.mark.asyncio

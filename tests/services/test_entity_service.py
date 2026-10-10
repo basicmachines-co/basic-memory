@@ -15,6 +15,9 @@ from basic_memory.config import ProjectConfig, BasicMemoryConfig, DatabaseBacken
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
+from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
+from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService, _fenced_code_line_flags
@@ -59,6 +62,9 @@ class _DeleteTestEmbeddingProvider:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vectorize(text) for text in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
 
     @staticmethod
     def _vectorize(text: str) -> list[float]:
@@ -366,6 +372,14 @@ async def test_delete_entity_removes_search_and_vector_state(
     repository._semantic_enabled = True
     repository._embedding_provider = _DeleteTestEmbeddingProvider()
     repository._vector_dimensions = repository._embedding_provider.dimensions
+    # The repository built its vector index for the default provider; rebuild it for
+    # this provider's dimensions.
+    scope = build_vector_index_scope(repository._app_config, repository._embedding_provider)
+    repository._semantic_vector_index = (
+        SQLiteVecIndex(repository.session_maker, scope)
+        if app_config.database_backend == DatabaseBackend.SQLITE
+        else PgVectorIndex(repository.session_maker, scope)
+    )
     repository._vector_tables_initialized = False
     await search_service.init_search_index()
 
@@ -1857,6 +1871,64 @@ async def test_edit_entity_insert_after_section(
     assert file_content.index("## Section 1") < file_content.index(
         "Inserted after section 1 heading"
     )
+    # A paragraph inserted above a paragraph keeps a blank line, so they stay apart.
+    assert "Inserted after section 1 heading\n\nSection 1 content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_keeps_a_list_tight(
+    entity_service: EntityService, file_service: FileService
+):
+    """A list item inserted above a list item does not split the list (#1720)."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert Into List",
+            directory="docs",
+            note_type="note",
+            content="# Origins\n\n## Observations\n- [origin] Ethiopia\n- [origin] Colombia\n",
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="insert_after_section",
+        content="- [origin] Kenya",
+        section="## Observations",
+    )
+
+    file_content, _ = await file_service.read_file(file_service.get_entity_path(updated))
+    assert (
+        "## Observations\n- [origin] Kenya\n- [origin] Ethiopia\n- [origin] Colombia"
+        in file_content
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_keeps_a_spaced_list_tight(
+    entity_service: EntityService, file_service: FileService
+):
+    """With a blank line under the heading, the item joins the list below it (#1720)."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert Into Spaced List",
+            directory="docs",
+            note_type="note",
+            content="# Origins\n\n## Observations\n\n- [origin] Ethiopia\n- [origin] Colombia\n",
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="insert_after_section",
+        content="- [origin] Kenya",
+        section="## Observations",
+    )
+
+    file_content, _ = await file_service.read_file(file_service.get_entity_path(updated))
+    assert (
+        "## Observations\n\n- [origin] Kenya\n- [origin] Ethiopia\n- [origin] Colombia"
+        in file_content
+    )
 
 
 @pytest.mark.asyncio
@@ -2309,3 +2381,21 @@ async def test_delete_directory_entity_deleted_between_query_and_delete(
     # Call delete_entity with the stale entity ID - should return True, not raise
     result = await entity_service.delete_entity(entities[0].id)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_path_link_that_climbs_out_of_the_project_is_not_a_relation(
+    entity_service: EntityService,
+):
+    """A Markdown link past the project root is prose, not an unresolved relation (#1634)."""
+    entity, created = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Climber",
+            directory="links/sub",
+            note_type="note",
+            content="[outside](../../../../outside.md) and [inside](../../Inside.md)",
+        )
+    )
+
+    assert created is True
+    assert [relation.to_name for relation in entity.relations] == ["../../Inside.md"]

@@ -102,7 +102,7 @@ def raw_document() -> DocumentMarkdownV1:
             created=CANONICAL_CREATED,
             modified=CANONICAL_MODIFIED,
             source=source(),
-            extraction=extraction(),
+            extraction=extraction().summary(),
             ingestion=DocumentIngestionV1(
                 stage=DocumentIngestionStage.raw,
                 pipeline_version="bm-document-ingest-v1",
@@ -132,7 +132,7 @@ def test_document_markdown_round_trip_is_canonical() -> None:
     second = assemble_document_markdown(document)
 
     assert first == second
-    assert first.startswith("---\nschema_version: '1'\ntitle: Report\ntype: document\n")
+    assert first.startswith("---\nschema_version: '1'\ntitle: Report\ntype: extracted_text\n")
     assert first.endswith("[[Not a relation]]\n")
     assert "\r" not in first
     assert parse_document_markdown(first) == DocumentMarkdownV1(
@@ -506,6 +506,7 @@ def test_agent_enrichment_preserves_provenance_and_requires_raw_checksum() -> No
 
     enriched = enrich_document_markdown(raw, agent_output, target_ingestion)
 
+    assert enriched.frontmatter.type == "extracted_text"
     assert enriched.frontmatter.source == raw.frontmatter.source
     assert enriched.frontmatter.extraction == raw.frontmatter.extraction
     assert enriched.frontmatter.ingestion == target_ingestion

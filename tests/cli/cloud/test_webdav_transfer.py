@@ -5,6 +5,7 @@ surface, so every `--on-conflict` strategy is proven to behave the way it does o
 the Personal (rclone) path.
 """
 
+import asyncio
 import errno
 import hashlib
 import importlib
@@ -20,6 +21,7 @@ import pytest
 from basic_memory.cli.commands.cloud.transfer import TransferPlan
 from basic_memory.cli.commands.cloud.webdav import RemoteFile, WebdavError
 from basic_memory.cli.commands.cloud.webdav_transfer import (
+    TRANSFER_CONCURRENCY,
     build_transfer_plan,
     scan_local_files,
     webdav_project_diff,
@@ -342,6 +344,40 @@ async def test_pull_keep_both_writes_the_incoming_copy_beside_the_local_one(conf
 
 
 @pytest.mark.asyncio
+async def test_pull_keep_both_conflict_copy_wins_a_shared_destination(
+    config_home, tmp_path, capsys
+):
+    """A conflict copy whose name is also a new file keeps the plan's order.
+
+    Transfers run concurrently, so the conflict copy is made the slower download
+    here. It must still claim the shared name, because it is first in the plan.
+    """
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local version")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/webdav/research/dup.md":
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, content=b"cloud dup")
+        return httpx.Response(200, content=b"cloud file with the copy's name")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(conflicts=["dup.md"], new=["dup.conflict-S.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-both",
+        conflict_suffix="S",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert (root / "dup.md").read_text() == "local version"
+    assert (root / "dup.conflict-S.md").read_text() == "cloud dup"
+    assert "dup.conflict-S.md" in _plain(capsys.readouterr().out)
+
+
+@pytest.mark.asyncio
 async def test_push_uploads_new_files_with_their_local_mtime(config_home, tmp_path):
     root = tmp_path / "research"
     _write(root, "notes/new.md", "local content", mtime=1780000000)
@@ -541,6 +577,100 @@ async def test_transfer_stops_on_a_refused_upload(config_home, tmp_path):
             workspace_id="team-tenant",
             client_cm_factory=_client_factory(handler),
         )
+
+
+# --- Concurrency ---
+
+
+@pytest.mark.parametrize("direction", ["pull", "push"])
+@pytest.mark.asyncio
+async def test_transfers_run_concurrently_up_to_the_bound(config_home, tmp_path, direction):
+    """Files move several at a time (#1604), never more than the bound at once."""
+    root = tmp_path / "research"
+    root.mkdir()
+    paths = [f"notes/n-{index:02d}.md" for index in range(TRANSFER_CONCURRENCY * 3)]
+    if direction == "push":
+        for path in paths:
+            _write(root, path, path)
+
+    in_flight = 0
+    peak = 0
+    moved: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
+        in_flight += 1
+        peak = max(peak, in_flight)
+        # Yield so every worker that can start a request does so before any finishes.
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        moved.append(request.url.path)
+        if request.method == "GET":
+            return httpx.Response(200, content=b"from cloud")
+        return httpx.Response(201)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        direction,
+        TransferPlan(new=paths),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert peak == TRANSFER_CONCURRENCY
+    assert sorted(moved) == [f"/webdav/research/{path}" for path in paths]
+    if direction == "pull":
+        assert sorted(p.name for p in (root / "notes").iterdir()) == sorted(
+            path.split("/")[-1] for path in paths
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_transfer_stops_the_batch_and_names_the_file(config_home, tmp_path):
+    """One failure cancels the transfers still in flight and leaves nothing half-written."""
+    root = tmp_path / "research"
+    root.mkdir()
+    paths = ["bad.md"] + [f"slow-{index}.md" for index in range(TRANSFER_CONCURRENCY * 2)]
+    cancelled: list[str] = []
+    others_in_flight = 0
+    batch_full = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal others_in_flight
+        if request.url.path == "/webdav/research/bad.md":
+            # Fail only once every other worker holds a request open.
+            await batch_full.wait()
+            return httpx.Response(500, text="storage exploded")
+        others_in_flight += 1
+        if others_in_flight == TRANSFER_CONCURRENCY - 1:
+            batch_full.set()
+        try:
+            # Never answers on its own: only the failure can end this request.
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(request.url.path)
+            raise
+        raise AssertionError("unreachable")
+
+    with pytest.raises(WebdavError) as caught:
+        await webdav_project_transfer(
+            "research",
+            root,
+            "pull",
+            TransferPlan(new=paths),
+            workspace_id="team-tenant",
+            client_cm_factory=_client_factory(handler),
+        )
+
+    message = str(caught.value)
+    assert message.startswith("Transfer stopped after 0 file(s): Failed to download bad.md")
+    assert "storage exploded" in message
+    # Every other worker's request was cancelled rather than left running.
+    assert len(cancelled) == TRANSFER_CONCURRENCY - 1
+    assert list(root.iterdir()) == []
 
 
 # --- Diff over the wire ---
@@ -938,7 +1068,12 @@ async def test_pull_leaves_content_written_into_the_destination_during_the_downl
         client_cm_factory=_client_factory(handler),
     )
 
-    assert observed == [[]]  # nothing staged at the destination before the bytes existed
+    # Nothing holds the destination name before the bytes exist. The download
+    # streams into a hidden staging file beside it, which no editor opens.
+    [names] = observed
+    assert "raced.md" not in names
+    assert all(name.startswith(".raced.md.") and name.endswith(".part") for name in names)
+    assert sorted(p.name for p in root.iterdir()) == ["raced.md"]
     assert (root / "raced.md").read_text() == "editor content"
 
 

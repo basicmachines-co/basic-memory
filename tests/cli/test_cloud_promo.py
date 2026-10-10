@@ -1,5 +1,6 @@
 """Tests for CLI cloud promo messaging."""
 
+import json
 from io import StringIO
 
 from rich.console import Console
@@ -251,7 +252,8 @@ def test_cloud_promo_command_off_sets_opt_out(monkeypatch):
         def load_config(self):
             return self._config
 
-        def save_config(self, config):
+        def save_config(self, config, *, persist_env_keys=frozenset()):
+            assert persist_env_keys == {"cloud_promo_opt_out"}
             self.saved_config = config
 
     monkeypatch.setattr(
@@ -285,7 +287,8 @@ def test_cloud_promo_command_on_clears_opt_out(monkeypatch):
         def load_config(self):
             return self._config
 
-        def save_config(self, config):
+        def save_config(self, config, *, persist_env_keys=frozenset()):
+            assert persist_env_keys == {"cloud_promo_opt_out"}
             self.saved_config = config
 
     monkeypatch.setattr(
@@ -315,3 +318,36 @@ def test_is_interactive_session_returns_false_when_streams_closed(monkeypatch):
 
     monkeypatch.setattr("sys.stdin", ClosedStream())
     assert _is_interactive_session() is False
+
+
+def test_cloud_promo_command_persists_opt_out_under_env_override(config_home, monkeypatch):
+    """`bm cloud promo` writes the key it names even while its env var is set (#1631).
+
+    Other env-overridden settings stay out of the file.
+    """
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+    config_file = ConfigManager().config_file
+    config_file.write_text(
+        json.dumps(
+            {
+                "env": "test",
+                "projects": {"main": {"path": str(config_home / "main"), "mode": "local"}},
+                "default_project": "main",
+                "cloud_promo_opt_out": False,
+                "log_level": "INFO",
+            }
+        )
+    )
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_PROMO_OPT_OUT", "false")
+    monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
+
+    result = CliRunner().invoke(app, ["cloud", "promo", "--off"])
+
+    assert result.exit_code == 0, result.output
+    written = json.loads(config_file.read_text())
+    assert written["cloud_promo_opt_out"] is True
+    assert written["log_level"] == "INFO"

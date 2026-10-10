@@ -44,13 +44,14 @@ URL forms: `"folder/note"`, `"memory://folder/note"`, and patterns
 (`"folder/*"` — but see GOTCHAS for cloud projects). Each traversal step
 costs two depth levels internally (relation, then entity).
 
-Use `compact=True` for graph discovery without note or observation bodies.
-JSON keeps the graph shape, identifiers, categories,
-relations and pagination; text omits the observation section and note bodies.
-Observation titles become their categories and their content-derived permalinks
-become owning-file paths, which can be passed to `read_note`.
+Use `compact=True` for graph discovery without note bodies or entity observation
+lists. The server skips loading observations, so compact calls do less work as
+well as returning less. JSON keeps the graph shape, identifiers, relations and
+pagination; text omits the observation section and note bodies. Observations
+that appear as primary or related results keep their category as the title and
+their owning-file path as the permalink, which can be passed to `read_note`.
 Read selected notes with `read_note`. The default response is unchanged.
-This reduces MCP output, not API traversal work, and is not a fixed token limit.
+Compact output is not a fixed token limit.
 
 ## PARAMETERS
 
@@ -63,7 +64,7 @@ This reduces MCP output, not API traversal work, and is not a fixed token limit.
 - **page_size** (integer, optional, default: 10) — Number of primary results to return per page (default: 10, maximum: 50)
 - **max_related** (integer, optional, default: 10) — Maximum total related results to return (default: 10, maximum: 100)
 - **output_format** (string, optional, default: "json") — Response format - "json" for structured JSON dict, "text" for compact markdown text
-- **compact** (boolean, optional, default: False) — Omit note and observation bodies for graph discovery. Preserve identifiers, relation targets and pagination; use read_note for selected content. This reduces response size, not traversal work or a guaranteed token budget.
+- **compact** (boolean, optional, default: False) — Omit note bodies and entity observation lists for graph discovery; the server skips loading observations. Preserve identifiers, relation targets and pagination; use read_note for selected content. Not a guaranteed token budget.
 
 ## MCP USAGE
 

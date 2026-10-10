@@ -23,6 +23,7 @@ from basic_memory.document_ingestion.raw_document import (
     build_raw_ingestion_run_markdown,
 )
 from basic_memory.schemas.document import (
+    DocumentExtractionSummaryV1,
     parse_document_markdown,
     parse_document_ingestion_run_markdown,
 )
@@ -84,7 +85,9 @@ def test_inspect_pdf_bytes_maps_native_output(monkeypatch: pytest.MonkeyPatch) -
     assert result.markdown == "<!-- Page 1 -->\n\n# Page one\n\n<!-- Page 2: OCR required -->"
 
 
-def test_page_map_survives_document_and_run_serialization(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_page_map_lives_on_the_run_note_and_resolves_the_sidecar_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     engine = fake_engine(pages=(FakePage(0, False, "é🙂\r\nQuote"), FakePage(1, True, "")))
     monkeypatch.setattr(pdf_inspector_worker, "pdf_inspector", engine)
     extracted = pdf_inspector_worker.inspect_pdf_bytes(
@@ -111,24 +114,29 @@ def test_page_map_survives_document_and_run_serialization(monkeypatch: pytest.Mo
     )
     document = parse_document_markdown(artifacts.document_markdown)
     assert document.frontmatter.extraction.profile == "pdf-inspector-v2"
+    # The sidecar keeps the summary only; the run note is the page map's home.
+    assert isinstance(document.frontmatter.extraction, DocumentExtractionSummaryV1)
+    assert "page_map" not in artifacts.document_markdown
     run = parse_document_ingestion_run_markdown(
         build_raw_ingestion_run_markdown(
             artifacts, raw_checksum="sha256:" + "b" * 64, raw_created_at=now
         )
     )
-    assert run.frontmatter.extraction == document.frontmatter.extraction
-    page_map = document.frontmatter.extraction.page_map
+    run_extraction = run.frontmatter.extraction
+    assert run_extraction is not None
+    assert run_extraction.summary() == document.frontmatter.extraction
+    page_map = run_extraction.page_map
     assert page_map is not None
     assert page_map == extracted.page_map
+    # Offsets address the raw sidecar body, so the run's map resolves spans in it.
     start = document.body.index("é🙂")
     assert page_map.resolve_span(document.body, start=start, end=start + 2) == (1,)
     start = document.body.index("OCR required")
     assert page_map.resolve_span(document.body, start=start, end=start + 3) == (2,)
     with pytest.raises(ValueError, match="every physical page"):
         PdfInspectorOutput.model_validate({**extracted.model_dump(), "page_count": 3})
-    extraction = document.frontmatter.extraction
     with pytest.raises(ValueError, match="every physical page"):
-        type(extraction).model_validate({**extraction.model_dump(), "page_count": 3})
+        type(run_extraction).model_validate({**run_extraction.model_dump(), "page_count": 3})
 
 
 @pytest.mark.parametrize(

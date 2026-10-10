@@ -1,21 +1,35 @@
 """Write note tool for Basic Memory MCP server."""
 
 import dataclasses
+import json
 import textwrap
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal, assert_never
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Annotated,
+    List,
+    Literal,
+    NoReturn,
+    Optional,
+    Union,
+    assert_never,
+)
 
 import logfire
 from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
     NoteCreated,
@@ -52,6 +66,14 @@ SIMILAR_NOTES_LIMIT = 3
 # The vector index embeds a note's title and opening content as its first chunk, so the
 # probe copies that shape and length to land in the same neighborhood as the note itself.
 SIMILAR_NOTES_PROBE_CHARS = 900
+# The advisory asks "might this be the same note?", a stricter question than search's
+# "is this relevant at all?" (semantic_min_similarity, 0.55). Measured on the default
+# bge-small-en-v1.5 model (#1718): rewrites of an existing note scored 0.77-0.93 against
+# it (0.78-0.87 on the Moby Dick vault, #1259), while the nearest neighbor of a note on an
+# unrelated topic topped out at 0.67. Below this floor the list was only noise; near the
+# top, a duplicate and a closely related note still share one band, so ranking decides.
+# The number holds for that model only; see similar_notes_min_similarity.
+SIMILAR_NOTES_MIN_SIMILARITY = 0.70
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -67,6 +89,47 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     """Build the text used to look for existing notes near a freshly written one."""
     body = remove_frontmatter(content)
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
+    """Return the advisory's similarity floor, or None to use the server's own.
+
+    Cosine scores are model-specific: on OpenAI's text-embedding-3-small correct
+    paraphrases cluster near 0.37, so the floor measured on the default model would hide
+    real duplicates there. Only the exact embedding setup it was measured on gets the
+    floor; anything else keeps semantic_min_similarity, which users tune for their model.
+    The setup is read from this process's config, which describes the server a local
+    write reaches; a write routed elsewhere with a different local setup falls back to
+    that server's floor, the behavior before the advisory floor existed.
+    """
+    # Only FastEmbed can be the measured setup; checking it first also keeps the
+    # identity resolution away from provider configs it would reject.
+    if config.semantic_embedding_provider.strip().lower() != "fastembed":
+        return None
+    # The persisted embedding identity is what decides whether stored vectors are
+    # reusable, so it is the definition of "the same embeddings": it covers the model,
+    # dimensions, and document/query prefixes. model_construct() yields the field
+    # defaults without reading BASIC_MEMORY_* overrides, which would otherwise make an
+    # env-configured model compare equal to itself.
+    measured = configured_embedding_provider_identity(BasicMemoryConfig.model_construct())
+    if configured_embedding_provider_identity(config) != measured:
+        return None
+    # A user who raised the search floor above the advisory's keeps the stricter one.
+    return max(config.semantic_min_similarity, SIMILAR_NOTES_MIN_SIMILARITY)
+
+
+def similar_notes_query(title: str, content: str, *, min_similarity: float | None) -> SearchQuery:
+    """Build the search that asks which existing notes might be the one just written.
+
+    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
+    parentheses and boolean words in ordinary prose as operators.
+    """
+    return SearchQuery(
+        text=_compose_similarity_probe(title, content),
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        entity_types=[SearchItemType.ENTITY],
+        min_similarity=min_similarity,
+    )
 
 
 def _collapse_similar_notes(
@@ -105,17 +168,10 @@ async def _find_similar_notes(
     content: str,
     exclude_file_path: str,
     exclude_permalink: str | None,
+    min_similarity: float | None,
 ) -> list[SimilarNote]:
-    """Ask the vector index which existing notes sit closest to the note just written.
-
-    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
-    parentheses and boolean words in ordinary prose as operators.
-    """
-    query = SearchQuery(
-        text=_compose_similarity_probe(title, content),
-        retrieval_mode=SearchRetrievalMode.VECTOR,
-        entity_types=[SearchItemType.ENTITY],
-    )
+    """Ask the vector index which existing notes sit closest to the note just written."""
+    query = similar_notes_query(title, content, min_similarity=min_similarity)
     # One extra row leaves room for the new note's own hit before collapsing.
     response = await search_client.search(
         query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
@@ -312,14 +368,23 @@ async def write_note(
                   beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
+                   Overwrite replaces the body but merges frontmatter: keys the existing
+                   note has and this write does not set (custom fields) are kept, while
+                   keys this write sets (title, type, tags, metadata, or frontmatter in
+                   content) replace the old values. Existing frontmatter that cannot be
+                   parsed is discarded rather than merged. To remove a key, rewrite it
+                   with edit_note or edit the file.
         expected_checksum: Optional revision precondition for overwrite=True: the checksum
-                   of the note you read (from a JSON write_note or edit_note result). The
+                   of the note you read (from a JSON read_note, write_note or edit_note
+                   result). The
                    note is replaced only while it is still that revision; otherwise the
                    tool reports a revision conflict with the current checksum and changes
                    nothing. Omit it to replace the note unconditionally.
         output_format: "text" returns a markdown summary. "json" returns
-                       machine-readable metadata; on conflict it returns action: "conflict"
-                       with an error code instead of raising.
+                       machine-readable metadata. A refused write (note exists, revision
+                       conflict, moved target, disallowed directory) is a tool error; in
+                       JSON mode its message is the payload with action: "conflict" and an
+                       error code.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -435,16 +500,19 @@ async def write_note(
                     directory=directory,
                     project=active_project.name,
                 )
-                if output_format == "json":
-                    return {
+                _raise_write_refusal(
+                    output_format,
+                    {
                         "title": title,
                         "permalink": None,
                         "file_path": None,
                         "checksum": None,
                         "action": "created",
                         "error": "SECURITY_VALIDATION_ERROR",
-                    }
-                return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
+                    },
+                    f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay "
+                    "within project boundaries",
+                )
 
             # Process tags using the helper function
             tag_list = parse_tags(tags)
@@ -484,47 +552,83 @@ async def write_note(
                     action = "Created"
                 case NoteUpdated(entity=result):
                     action = "Updated"
-                case NoteAlreadyExists():
-                    if output_format == "json":
-                        return {
+                case NoteAlreadyExists() as existing:
+                    # Trigger: a note already owns the requested path.
+                    # Why: the permalink computed from this request can name another
+                    #      note. After a move, the moved note keeps the path's original
+                    #      permalink and the note now at the path has a suffixed one, so
+                    #      the computed value would steer edit_note to the wrong note.
+                    # Outcome: the refusal names the note the API found at the path, by
+                    #          its stored permalink, or by file path when the API could
+                    #          not name it (an older server, or a lost create race).
+                    existing_permalink = existing.permalink
+                    conflict_workspace = current_workspace_permalink_context()
+                    if existing_permalink and conflict_workspace is not None:
+                        existing_permalink = build_qualified_permalink_reference(
+                            active_project.permalink,
+                            existing_permalink,
+                            workspace_permalink=conflict_workspace.workspace_slug,
+                        )
+                    _raise_write_refusal(
+                        output_format,
+                        {
                             "title": title,
-                            "permalink": entity.permalink,
-                            "file_path": None,
+                            "permalink": existing_permalink,
+                            "file_path": existing.file_path,
+                            "external_id": existing.external_id,
                             "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_ALREADY_EXISTS",
-                        }
-                    return _format_overwrite_error(title, entity.permalink, active_project.name)
+                        },
+                        _format_overwrite_error(
+                            title, existing_permalink or existing.file_path, active_project.name
+                        ),
+                    )
                 case NoteTargetMoved() as moved:
-                    if output_format == "json":
-                        return {
+                    _raise_write_refusal(
+                        output_format,
+                        {
                             "title": moved.title,
                             "permalink": moved.permalink,
                             "file_path": moved.file_path,
                             "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_PATH_CONFLICT",
-                        }
-                    return (
+                        },
                         "# Error: Note is at a different path\n\n"
                         f"The requested note is now at `{moved.file_path}`. "
                         f"Read or edit it using `{moved.external_id}`. "
-                        "Use overwrite=False to create a separate note at the requested path."
+                        "Use overwrite=False to create a separate note at the requested path.",
                     )
                 case NoteLocked(message=message):
                     raise ToolError(message)
                 case NoteRevisionConflict(db_checksum=current_checksum) as conflict:
-                    if output_format == "json":
-                        return {
-                            "title": title,
-                            "permalink": entity.permalink,
+                    # Same shape as edit_note's conflict (#1719): nothing was written,
+                    # so checksum is null; currentChecksum is the revision to retry
+                    # against; identity names the note at the path, or is null once
+                    # no note owns it.
+                    conflict_permalink = conflict.permalink
+                    conflict_workspace = current_workspace_permalink_context()
+                    if conflict_permalink and conflict_workspace is not None:
+                        conflict_permalink = build_qualified_permalink_reference(
+                            active_project.permalink,
+                            conflict_permalink,
+                            workspace_permalink=conflict_workspace.workspace_slug,
+                        )
+                    _raise_write_refusal(
+                        output_format,
+                        {
+                            "title": conflict.title,
+                            "permalink": conflict_permalink,
                             "file_path": conflict.file_path if current_checksum else None,
-                            "checksum": current_checksum,
+                            "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_REVISION_CONFLICT",
-                        }
-                    return _format_revision_conflict(
-                        title, conflict.file_path, current_checksum, active_project.name
+                            "currentChecksum": current_checksum,
+                        },
+                        _format_revision_conflict(
+                            title, conflict.file_path, current_checksum, active_project.name
+                        ),
                     )
                 case _:
                     assert_never(outcome)
@@ -549,6 +653,7 @@ async def write_note(
                         content=content,
                         exclude_file_path=result.file_path,
                         exclude_permalink=result.permalink,
+                        min_similarity=similar_notes_min_similarity(ConfigManager().config),
                     )
                 except ToolError as probe_error:
                     # ToolError is what the search client raises when the API refuses or
@@ -658,6 +763,16 @@ async def write_note(
             return add_project_metadata(summary_result, active_project.name)
 
 
+def _raise_write_refusal(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a refused write as a tool error, keeping the guidance for the caller.
+
+    Every refusal here happens before anything is written. A returned "# Error" string
+    reads as success to MCP clients that check isError; raising makes the result an
+    error while the message still carries the same help (or the JSON payload).
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
+
+
 def _format_revision_conflict(
     title: str, file_path: str, current_checksum: str | None, project_name: str
 ) -> str:
@@ -683,21 +798,24 @@ def _format_revision_conflict(
         Project: {project_name}""")
 
 
-def _format_overwrite_error(title: str, permalink: str | None, project_name: str) -> str:
-    """Format a helpful error when write_note is blocked by the overwrite guard."""
+def _format_overwrite_error(title: str, identifier: str, project_name: str) -> str:
+    """Format a helpful error when write_note is blocked by the overwrite guard.
+
+    ``identifier`` names the note that owns the path: its permalink, or its file path.
+    """
     return textwrap.dedent(f"""\
         # Error: Note already exists
 
-        **"{title}"** already exists (permalink: `{permalink}`).
+        **"{title}"** already exists (`{identifier}`).
 
         `write_note` does not overwrite by default. Choose an option:
 
         | Goal | Action |
         |------|--------|
-        | Append content | `edit_note("{permalink}", operation="append", content="...")` |
-        | Prepend content | `edit_note("{permalink}", operation="prepend", content="...")` |
-        | Replace a section | `edit_note("{permalink}", operation="replace_section", section="...", content="...")` |
+        | Append content | `edit_note("{identifier}", operation="append", content="...")` |
+        | Prepend content | `edit_note("{identifier}", operation="prepend", content="...")` |
+        | Replace a section | `edit_note("{identifier}", operation="replace_section", section="...", content="...")` |
         | Full replace | `write_note(title="{title}", content="...", directory="...", overwrite=True)` |
-        | Inspect first | `read_note("{permalink}")` |
+        | Inspect first | `read_note("{identifier}")` |
 
         Project: {project_name}""")

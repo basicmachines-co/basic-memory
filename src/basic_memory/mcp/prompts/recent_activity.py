@@ -15,7 +15,10 @@ from basic_memory.mcp.tools.recent_activity import recent_activity
 
 @mcp.prompt(
     name="recent_activity",
-    description="Get recent activity from a specific project or across all projects",
+    description=(
+        "Get recent activity from one project: the given one, else the default project. "
+        "Lists every project only when no default is set"
+    ),
 )
 async def recent_activity_prompt(
     timeframe: Annotated[
@@ -25,19 +28,22 @@ async def recent_activity_prompt(
     project: Annotated[
         Optional[str],
         Field(
-            description="Specific project to get activity from (None for discovery across all projects)"
+            description=(
+                "Project to get activity from (None uses the default project; every "
+                "project is listed only when no default is set)"
+            )
         ),
     ] = None,
 ) -> str:
-    """Get recent activity from a specific project or across all projects.
+    """Get recent activity from one project.
 
     This prompt helps you see what's changed recently in the knowledge base.
-    In discovery mode (project=None), it shows activity across all projects.
-    In project-specific mode, it shows detailed activity for one project.
+    With project=None it uses the active or default project, like the tool;
+    it shows activity across all projects only when no project resolves.
 
     Args:
         timeframe: How far back to look for activity (e.g. '1d', '1 week')
-        project: Specific project to get activity from (None for discovery across all projects)
+        project: Project to get activity from (None uses the default project)
 
     Returns:
         Formatted summary of recent activity
@@ -51,12 +57,15 @@ async def recent_activity_prompt(
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly
     # and add prompt-specific guidance
-    target = project if project else "all projects"
+    # A bare call resolves to the default project, or to every project when no
+    # default is configured. Only the tool knows which, and its summary states
+    # the scope, so the header names a project only when the caller gave one.
+    scope = f" from project '{project}'" if project else ""
 
     prompt_guidance = dedent(f"""
         # Recent Activity Context
 
-        This is a memory retrieval session showing recent activity from {target}.
+        This is a memory retrieval session showing recent activity{scope}.
 
         {activity_summary}
 

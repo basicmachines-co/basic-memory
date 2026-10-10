@@ -51,6 +51,9 @@ class IndexMarkdownEntity(Protocol):
     @property
     def checksum(self) -> str | None: ...
 
+    @property
+    def content_type(self) -> str: ...
+
 
 class IndexMarkdownEntityRepository(Protocol):
     """Repository capability needed by markdown file indexing adapters."""
@@ -269,6 +272,7 @@ class FileIndexer:
             content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
             indexed_bytes=synced.indexed_bytes,
+            content_type=synced.entity.content_type,
             content_superseded=content_superseded,
         )
 

@@ -27,15 +27,16 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationResult,
     AcceptedNoteUpdateMutation,
-    load_existing_markdown_note_content,
     load_accepted_note_mutation_project,
     resolve_accepted_note_schema_directory,
-    reject_stale_base_checksum,
     run_accepted_note_create,
     run_accepted_note_delete,
     run_accepted_note_edit,
     run_accepted_note_move,
     run_accepted_note_update,
+)
+from basic_memory.indexing.accepted_note_write_runner import (
+    refresh_accepted_note_search_index,
 )
 from basic_memory.indexing.relation_persistence import (
     RelationGenerationPublication,
@@ -254,7 +255,25 @@ class NoteContentMutationService:
         self,
         result: AcceptedNoteMutationResult,
     ) -> AcceptedNoteChange:
-        """Run post-commit graph publication and expose the accepted response."""
+        """Run post-commit derived work and expose the accepted response."""
+        if result.search_row is not None:
+            try:
+                await refresh_accepted_note_search_index(
+                    self.session_maker,
+                    row=result.search_row,
+                    repositories=self.mutation_dependencies.write_repositories,
+                )
+            except Exception:
+                # Trigger: the hot search refresh fails after accepted content committed.
+                # Why: the row is derived state, rewritten by the note's materialization
+                #   index; failing the response would report a committed write as failed
+                #   and strand that materialization (#1681).
+                # Outcome: preserve the accepted change and log the repairable failure.
+                logger.exception(
+                    "Search refresh failed after accepted note commit; continuing "
+                    "materialization: entity_id={}",
+                    result.search_row.entity_id,
+                )
         try:
             await self._publish_relation_generation(result.relation_publication)
         except Exception:
@@ -402,14 +421,18 @@ class NoteContentMutationService:
                     load_relations=False,
                 )
                 if existing is not None:
-                    if not overwrite:
-                        return AlreadyExists(data.file_path)
-                    target = NoteLocation(
+                    existing_note = NoteLocation(
                         str(existing.external_id),
                         existing.title,
                         existing.file_path,
                         existing.permalink,
                     )
+                    # The refusal names the note at the path. A permalink derived from
+                    # the request can belong to a different note, such as one moved
+                    # away from this path that kept its permalink (#1634).
+                    if not overwrite:
+                        return AlreadyExists(data.file_path, existing_note)
+                    target = existing_note
                 elif overwrite:
                     # A supplied frontmatter permalink is the identity preparation
                     # would use. Check it before generated path aliases to avoid
@@ -475,14 +498,51 @@ class NoteContentMutationService:
                 case 423, _:
                     return Locked(str(error.detail))
                 case 409, _ if target is None:
-                    return AlreadyExists(data.file_path)
+                    # A concurrent create claimed the path after the lookup above.
+                    # Name the note that won it, so the refusal never falls back to
+                    # an identifier derived from the request (#1634).
+                    async with self.session_maker() as session:
+                        winner = await entity_repository.get_by_file_path(
+                            session, data.file_path, load_relations=False
+                        )
+                    return AlreadyExists(
+                        data.file_path,
+                        NoteLocation(
+                            str(winner.external_id),
+                            winner.title,
+                            winner.file_path,
+                            winner.permalink,
+                        )
+                        if winner is not None
+                        else None,
+                    )
                 # update_note reports a moved base revision in the stable
                 # base-checksum wire shape (issue #1445); it is an expected outcome.
                 case 409, {
                     "message": str() as message,
                     "db_checksum": (str() | None) as current,
                 } if expected_checksum is not None and message == STALE_BASE_CHECKSUM_MESSAGE:
-                    return RevisionConflict(data.file_path, current_db_checksum=current)
+                    # The pre-lock lookup can predate the winning write, which may have
+                    # retitled the note, so name it as it reads now (#1719). A note
+                    # deleted under the update lock has no current revision and no name.
+                    current_note: NoteLocation | None = None
+                    if target is not None and current is not None:
+                        async with self.session_maker() as session:
+                            winner = await entity_repository.get_by_external_id(
+                                session, target.external_id, load_relations=False
+                            )
+                        if winner is not None:
+                            current_note = NoteLocation(
+                                str(winner.external_id),
+                                winner.title,
+                                winner.file_path,
+                                winner.permalink,
+                            )
+                    return RevisionConflict(
+                        data.file_path,
+                        current_db_checksum=current,
+                        note=current_note,
+                    )
                 case _:
                     raise
 
@@ -637,8 +697,9 @@ class NoteContentMutationService:
         PATCH caller -- an assistant appending to a note through MCP -- has no
         synced revision to condition on.
 
-        The read shares this transaction with the edit, so the runner plans
-        against the same db_version the precondition just checked.
+        The runner checks it against the row it locks for the edit and maps a
+        lost compare-and-set to the same structured 409, so every guarded
+        refusal comes from one place.
         """
         actor_context = self._resolve_actor(
             "edit",
@@ -658,17 +719,6 @@ class NoteContentMutationService:
                 invalidate_on_rejection=freshening_may_have_published,
             ):
                 async with accepted_note_transaction(self.session_maker) as session:
-                    if base_checksum is not None:
-                        _, _, current_note_content = await load_existing_markdown_note_content(
-                            session,
-                            project_external_id=project_external_id,
-                            entity_external_id=entity_external_id,
-                            dependencies=self.mutation_dependencies,
-                        )
-                        if current_note_content.db_checksum != base_checksum:
-                            reject_stale_base_checksum(
-                                current_db_checksum=current_note_content.db_checksum
-                            )
                     result = await run_accepted_note_edit(
                         session,
                         request=AcceptedNoteEditMutation(
@@ -682,6 +732,7 @@ class NoteContentMutationService:
                                 author=actor_context.author,
                             ),
                             source=actor_context.source,
+                            base_checksum=base_checksum,
                         ),
                         dependencies=self.mutation_dependencies,
                     )

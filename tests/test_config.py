@@ -1167,49 +1167,14 @@ class TestPlatformNativePathSeparators:
 class TestSemanticSearchConfig:
     """Test semantic search configuration options."""
 
-    def test_semantic_search_enabled_defaults_to_true_when_semantic_modules_are_available(
-        self, monkeypatch
-    ):
-        """Semantic search defaults on when fastembed and sqlite_vec are importable."""
-        import basic_memory.config as config_module
-
-        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
-        monkeypatch.setattr(
-            config_module.importlib.util,
-            "find_spec",
-            lambda name: object() if name in {"fastembed", "sqlite_vec"} else None,
-        )
-        config = BasicMemoryConfig()
-        assert config.semantic_search_enabled is True
-
-    def test_semantic_search_enabled_defaults_to_false_when_any_semantic_module_is_unavailable(
-        self, monkeypatch
-    ):
-        """Semantic search defaults off when required semantic modules are missing."""
-        import basic_memory.config as config_module
-
-        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
-        monkeypatch.setattr(
-            config_module.importlib.util,
-            "find_spec",
-            lambda name: object() if name == "fastembed" else None,
-        )
-        config = BasicMemoryConfig()
-        assert config.semantic_search_enabled is False
-
-    def test_semantic_search_enabled_env_var_overrides_dependency_default(self, monkeypatch):
-        """Environment overrides should win over dependency-based defaults."""
-        import basic_memory.config as config_module
-
-        monkeypatch.setattr(config_module.importlib.util, "find_spec", lambda name: None)
-
-        monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "true")
-        enabled = BasicMemoryConfig()
-        assert enabled.semantic_search_enabled is True
-
+    def test_legacy_semantic_search_enabled_setting_is_ignored(self, monkeypatch):
+        """Semantic search is always on; configs and env vars that still set the old
+        flag keep loading instead of failing validation."""
         monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "false")
-        disabled = BasicMemoryConfig()
-        assert disabled.semantic_search_enabled is False
+        config = BasicMemoryConfig(**{"semantic_search_enabled": False})
+
+        assert "semantic_search_enabled" not in BasicMemoryConfig.model_fields
+        assert not hasattr(config, "semantic_search_enabled")
 
     def test_semantic_embedding_dimensions_defaults_to_none(self):
         """Dimensions should default to None, letting the provider choose."""
@@ -1261,11 +1226,6 @@ class TestSemanticSearchConfig:
 
         with pytest.raises(Exception):
             BasicMemoryConfig(semantic_postgres_prepare_concurrency=17)
-
-    def test_semantic_search_enabled_description_mentions_both_backends(self):
-        """Description should not say 'SQLite only' anymore."""
-        field_info = BasicMemoryConfig.model_fields["semantic_search_enabled"]
-        assert "SQLite only" not in (field_info.description or "")
 
     def test_semantic_min_similarity_defaults_to_055(self):
         """Threshold defaults to 0.55 to filter irrelevant vector results."""

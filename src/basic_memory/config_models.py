@@ -1,6 +1,5 @@
 """Configuration management for basic-memory."""
 
-import importlib.util
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -59,14 +58,6 @@ class DatabaseBackend(str, Enum):
 # Default reranker model — a small local fastembed cross-encoder.
 # LiteLLM cannot route this name, so the litellm provider requires an explicit override.
 DEFAULT_FASTEMBED_RERANK_MODEL = "jinaai/jina-reranker-v1-tiny-en"
-
-
-def _default_semantic_search_enabled() -> bool:
-    """Enable semantic search by default when required local semantic dependencies exist."""
-    required_modules = ("fastembed", "sqlite_vec")
-    return all(
-        importlib.util.find_spec(module_name) is not None for module_name in required_modules
-    )
 
 
 def resolve_data_dir() -> Path:
@@ -142,7 +133,8 @@ class CloudProjectConfig(BaseModel):
         default=None, description="Timestamp of last successful sync operation"
     )
     bisync_initialized: bool = Field(
-        default=False, description="Whether rclone bisync baseline has been established"
+        default=False,
+        description="Whether rclone bisync baseline has been established (bisync is deprecated)",
     )
 
 
@@ -171,7 +163,7 @@ class ProjectEntry(BaseModel):
     )
     bisync_initialized: bool = Field(
         default=False,
-        description="Whether rclone bisync baseline has been established",
+        description="Whether rclone bisync baseline has been established (bisync is deprecated)",
     )
     last_sync: Optional[datetime] = Field(
         default=None,
@@ -249,10 +241,6 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     # Semantic search configuration
-    semantic_search_enabled: bool = Field(
-        default_factory=_default_semantic_search_enabled,
-        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic dependencies (included by default).",
-    )
     semantic_vector_index: Literal["pgvector", "milvus"] = Field(
         default="pgvector",
         description=(
@@ -1002,8 +990,6 @@ class BasicMemoryConfig(BaseSettings):
     def validate_reranker_config(self) -> "BasicMemoryConfig":
         """Fail fast on reranker configs that cannot work.
 
-        - Reranking runs only on vector/hybrid retrieval, so it needs semantic search;
-          accepting reranker_enabled=True without it would silently never rerank.
         - FastEmbed exposes a finite registered model catalog, so reject typos while
           loading config instead of deferring them to the first search request.
         - The default model is a local fastembed cross-encoder that litellm cannot
@@ -1011,11 +997,6 @@ class BasicMemoryConfig(BaseSettings):
         """
         if not self.reranker_enabled:
             return self
-        if not self.semantic_search_enabled:
-            raise ValueError(
-                "reranker_enabled=True requires semantic_search_enabled=True "
-                "(reranking operates on vector/hybrid search results)."
-            )
         provider = self.reranker_provider.strip().lower()
         if provider not in {"fastembed", "litellm"}:
             raise ValueError("reranker_provider must be one of: fastembed, litellm")

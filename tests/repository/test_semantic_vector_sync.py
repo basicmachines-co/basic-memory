@@ -338,6 +338,9 @@ def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
             "chunk_key": f"chunk-{index:03d}",
             "chunk_text": "text",
             "source_hash": "hash",
+            "source_type": "entity",
+            "source_row_id": 1,
+            "chunk_index": index,
         }
         for index in range(semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE + 1)
     ]
@@ -377,9 +380,17 @@ async def test_prepare_window_read_helpers_handle_empty_inputs() -> None:
         session,
         [],
     )
+    projector_owned_entity_ids = (
+        await semantic_vector_sync.fetch_prepare_window_projector_owned_entity_ids(
+            repository,
+            session,
+            [],
+        )
+    )
 
     assert source_rows == {}
     assert existing_rows == {}
+    assert projector_owned_entity_ids == set()
     manifest_sql = semantic_vector_sync.prepare_window_existing_rows_sql(":entity_id_0")
     assert "embedding_status" in manifest_sql
     assert "search_vector_embeddings" not in manifest_sql
@@ -429,7 +440,7 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
     async def write_scope():
         yield
 
-    def _stub_plan(repository, *, entity_id, source_rows, existing_rows):
+    def _stub_plan(repository, *, entity_id, source_rows, existing_rows, projector_owned):
         if entity_id == 1:
             return skip_result
         if entity_id == 4:
@@ -454,6 +465,11 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
     fetch_existing_rows = AsyncMock(return_value={})
     monkeypatch.setattr(repository, "_fetch_prepare_window_source_rows", fetch_source_rows)
     monkeypatch.setattr(repository, "_fetch_prepare_window_existing_rows", fetch_existing_rows)
+    monkeypatch.setattr(
+        repository,
+        "_fetch_prepare_window_projector_owned_entity_ids",
+        AsyncMock(return_value=set()),
+    )
     monkeypatch.setattr(repository, "_uses_external_vector_index", Mock(return_value=True))
     monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
     monkeypatch.setattr(semantic_vector_sync, "plan_entity_vector_jobs_prefetched", _stub_plan)
@@ -543,6 +559,9 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         "chunk_key": "new",
         "chunk_text": "text",
         "source_hash": "source-hash",
+        "source_type": "entity",
+        "source_row_id": 1,
+        "chunk_index": 0,
     }
     stale_row = semantic_vector_sync.VectorChunkState(
         id=7,
@@ -551,6 +570,8 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         entity_fingerprint="old-fingerprint",
         embedding_model="model",
         has_embedding=True,
+        source_row_id=1,
+        chunk_index=0,
     )
     monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[record]))
     monkeypatch.setattr(
@@ -603,6 +624,9 @@ async def test_prefetched_prepare_returns_unchanged_entity_without_write(monkeyp
         "chunk_key": "existing",
         "chunk_text": "text",
         "source_hash": "source-hash",
+        "source_type": "entity",
+        "source_row_id": 1,
+        "chunk_index": 0,
     }
     existing_row = semantic_vector_sync.VectorChunkState(
         id=7,
@@ -611,6 +635,8 @@ async def test_prefetched_prepare_returns_unchanged_entity_without_write(monkeyp
         entity_fingerprint="fingerprint",
         embedding_model="model",
         has_embedding=True,
+        source_row_id=1,
+        chunk_index=0,
     )
     monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[record]))
     monkeypatch.setattr(

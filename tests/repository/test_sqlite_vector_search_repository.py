@@ -38,6 +38,7 @@ from basic_memory.repository.semantic_vector_sync import (
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository import sqlite_vec_index as sqlite_vec_index_module
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLITE_VEC_MAX_K, SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -226,6 +227,12 @@ def _enable_semantic(
     provider = embedding_provider or StubEmbeddingProvider()
     search_repository._embedding_provider = provider
     search_repository._vector_dimensions = provider.dimensions
+    # The repository built its vector index for the default provider; rebuild it for
+    # this provider's dimensions.
+    search_repository._semantic_vector_index = SQLiteVecIndex(
+        search_repository.session_maker,
+        build_vector_index_scope(search_repository._app_config, provider),
+    )
     search_repository._vector_tables_initialized = False
 
 
@@ -237,7 +244,6 @@ def _make_sqlite_repo_for_unit_tests() -> SQLiteSearchRepository:
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         semantic_embedding_sync_batch_size=8,
     )
     repo = SQLiteSearchRepository(
@@ -278,6 +284,9 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
             "chunk_key",
             "chunk_text",
             "source_hash",
+            "source_type",
+            "source_row_id",
+            "chunk_index",
             "entity_fingerprint",
             "embedding_model",
             "vector_index",
@@ -308,10 +317,10 @@ async def test_sqlite_vec_recreated_storage_invalidates_ready_manifest(search_re
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                "905, 905, :project_id, 'entity:905:0', 'text', 'hash', "
+                "905, 905, :project_id, 'entity:905:0', 'entity', 905, 0, 'text', 'hash', "
                 "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
             ),
             {
@@ -333,6 +342,131 @@ async def test_sqlite_vec_recreated_storage_invalidates_ready_manifest(search_re
 
 
 @pytest.mark.asyncio
+async def test_sqlite_legacy_chunk_keys_are_rekeyed_in_place_keeping_vectors(search_repository):
+    """A pre-location chunk table is upgraded in place, not rebuilt.
+
+    Rebuilding would drop every embedding and re-embed the whole local database. The
+    upgrade keeps each chunk row id, which is how sqlite-vec finds its vector.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec storage upgrade is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    chunk_text = "decision: Ledger notes stay in plain Markdown"
+    source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await search_repository._ensure_sqlite_vec_loaded(session)
+        await session.execute(text("DROP TABLE search_vector_chunks"))
+        await session.execute(
+            text(
+                "CREATE TABLE search_vector_chunks ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, "
+                "project_id INTEGER NOT NULL, chunk_key TEXT NOT NULL, "
+                "chunk_text TEXT NOT NULL, source_hash TEXT NOT NULL, "
+                "entity_fingerprint TEXT NOT NULL, embedding_model TEXT NOT NULL, "
+                "vector_index TEXT NOT NULL, embedding_status TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks (id, entity_id, project_id, chunk_key, "
+                "chunk_text, source_hash, entity_fingerprint, embedding_model, vector_index, "
+                "embedding_status) VALUES (920, 9, :project_id, 'observation:77:0', "
+                ":chunk_text, :source_hash, 'fingerprint', :embedding_model, 'sqlite-vec', "
+                "'ready')"
+            ),
+            {
+                "project_id": search_repository.project_id,
+                "chunk_text": chunk_text,
+                "source_hash": source_hash,
+                "embedding_model": search_repository._embedding_model_key(),
+            },
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, project_id, embedding, source_hash) "
+                "VALUES (920, :project_id, :embedding, :source_hash)"
+            ),
+            {
+                "project_id": search_repository.project_id,
+                "embedding": "[1.0, 0.0, 0.0, 0.0]",
+                "source_hash": source_hash,
+            },
+        )
+        await session.commit()
+
+    search_repository._vector_tables_initialized = False
+    await search_repository._ensure_vector_tables()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await search_repository._ensure_sqlite_vec_loaded(session)
+        chunk = (
+            await session.execute(
+                text(
+                    "SELECT chunk_key, source_type, source_row_id, chunk_index "
+                    "FROM search_vector_chunks WHERE id = 920"
+                )
+            )
+        ).one()
+        vector_rows = (
+            await session.execute(
+                text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = 920")
+            )
+        ).scalar_one()
+
+    assert chunk.chunk_key == f"observation:{source_hash}:0"
+    assert (chunk.source_type, chunk.source_row_id, chunk.chunk_index) == ("observation", 77, 0)
+    assert vector_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_chunk_manifest_is_upgraded_with_semantic_search_disabled(search_repository):
+    """`bm inspect` reads the manifest even when semantic search is off.
+
+    The upgrade therefore runs in init_search_index(), not only in vector setup, which
+    never runs when semantic search is disabled or sqlite-vec fails to load.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite chunk manifest upgrade is local SQLite-only.")
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+        await session.execute(
+            text(
+                "CREATE TABLE search_vector_chunks ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, entity_id INTEGER NOT NULL, "
+                "project_id INTEGER NOT NULL, chunk_key TEXT NOT NULL, "
+                "chunk_text TEXT NOT NULL, source_hash TEXT NOT NULL, "
+                "entity_fingerprint TEXT NOT NULL, embedding_model TEXT NOT NULL, "
+                "vector_index TEXT NOT NULL, embedding_status TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks (id, entity_id, project_id, chunk_key, "
+                "chunk_text, source_hash, entity_fingerprint, embedding_model, vector_index, "
+                "embedding_status) VALUES (930, 31, :project_id, 'entity:31:0', 'text', "
+                "'hash', 'fingerprint', 'model', 'sqlite-vec', 'ready')"
+            ),
+            {"project_id": search_repository.project_id},
+        )
+        await session.commit()
+
+    search_repository._semantic_enabled = False
+    await search_repository.init_search_index()
+
+    manifest = await search_repository.get_entity_chunk_manifest(31)
+    assert [(row.source_type, row.source_row_id, row.chunk_index) for row in manifest] == [
+        ("entity", 31, 0)
+    ]
+    assert manifest[0].chunk_key == "entity:hash:0"
+
+
+@pytest.mark.asyncio
 async def test_disabled_semantic_cleanup_deletes_sqlite_vec_rows(search_repository):
     """Project cleanup must not strand sqlite-vec rows when semantic search is disabled."""
     if not isinstance(search_repository, SQLiteSearchRepository):
@@ -348,10 +482,10 @@ async def test_disabled_semantic_cleanup_deletes_sqlite_vec_rows(search_reposito
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                "906, 906, :project_id, 'entity:906:0', 'text', 'hash', "
+                "906, 906, :project_id, 'entity:906:0', 'entity', 906, 0, 'text', 'hash', "
                 "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
             ),
             {
@@ -399,10 +533,10 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":id, :entity_id, :project_id, :chunk_key, 'text', :source_hash, "
+                ":id, :entity_id, :project_id, :chunk_key, 'entity', :entity_id, 0, 'text', :source_hash, "
                 "'fingerprint', :embedding_model, :vector_index, :embedding_status)"
             ),
             [
@@ -569,10 +703,10 @@ async def test_sqlite_vec_search_reads_every_project_in_scope(search_repository)
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":id, :entity_id, :project_id, :chunk_key, 'text', 'hash', "
+                ":id, :entity_id, :project_id, :chunk_key, 'entity', :entity_id, 0, 'text', 'hash', "
                 "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
             ),
             [
@@ -630,10 +764,10 @@ async def _seed_ready_vectors(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":id, :id, :project_id, :chunk_key, 'text', 'hash', "
+                ":id, :id, :project_id, :chunk_key, 'entity', :id, 0, 'text', 'hash', "
                 "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
             ),
             [
@@ -829,10 +963,10 @@ async def test_sqlite_vec_delete_requires_pending_source_generation(search_repos
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                "907, 907, :project_id, :chunk_key, 'text', 'hash', "
+                "907, 907, :project_id, :chunk_key, 'entity', 907, 0, 'text', 'hash', "
                 "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
             ),
             {
@@ -1018,10 +1152,10 @@ async def test_ready_commit_failure_retries_same_stable_adapter_key(
         inserted = await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, "
+                ":entity_id, :project_id, :chunk_key, 'entity', :entity_id, 0, :chunk_text, :source_hash, "
                 ":entity_fingerprint, :embedding_model, :vector_index, 'pending'"
                 ") RETURNING id"
             ),
@@ -1507,6 +1641,9 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
                 "chunk_key": "entity:1:0",
                 "chunk_text": "chunk text",
                 "source_hash": "hash",
+                "source_type": "entity",
+                "source_row_id": 1,
+                "chunk_index": 0,
             }
         ]
 
@@ -1555,6 +1692,9 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
     monkeypatch.setattr(repo, "_prepare_entity_write_scope", _track_write_scope)
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
@@ -1588,6 +1728,9 @@ async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_w
                 "chunk_key": "entity:1:0",
                 "chunk_text": "chunk text",
                 "source_hash": "hash",
+                "source_type": "entity",
+                "source_row_id": 1,
+                "chunk_index": 0,
             }
         ]
 
@@ -1629,6 +1772,9 @@ async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_w
     )
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
     monkeypatch.setattr(repo, "_prepare_vector_session", _stub_prepare_vector_session)
     monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
@@ -1871,3 +2017,24 @@ async def test_embedding_index_reports_only_chunks_actually_embedded(search_repo
 
     assert first.chunks_embedded > 0
     assert second.chunks_embedded == 0
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_load_failure_falls_back_to_keyword_search(search_repository, monkeypatch):
+    """A sqlite-vec binary that fails to load must not abort startup (#711).
+
+    Extension loading exists here, but an incompatible wheel or a SQLite build that
+    denies loading makes load_extension raise OperationalError. With no config flag
+    left to turn semantic search off, startup has to fall back to keyword-only.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec loading is local SQLite-only.")
+    import sqlite_vec
+
+    # Injected: a loadable path that does not exist, as a broken wheel would leave.
+    monkeypatch.setattr(sqlite_vec, "loadable_path", lambda: "/nonexistent/vec0")
+
+    await search_repository.init_search_index()
+
+    assert search_repository._semantic_enabled is False
+    assert await search_repository.semantic_effectively_enabled() is False

@@ -26,6 +26,18 @@ _COMPARISON_OPERATORS = {
     "$lt": "lt",
     "$lte": "lte",
 }
+# Every operator the operator form accepts, in the order error messages list them.
+SUPPORTED_METADATA_OPERATORS = (
+    "$gt",
+    "$gte",
+    "$lt",
+    "$lte",
+    "$in",
+    "$between",
+    "$contains",
+    "$exists",
+)
+_SUPPORTED_OPERATORS_TEXT = ", ".join(SUPPORTED_METADATA_OPERATORS)
 
 
 @dataclass(frozen=True)
@@ -146,6 +158,77 @@ def _refuse_null(values: Iterable[Any], raw_key: str, op: str) -> None:
         )
 
 
+def _canonical_operator(raw_op: object, raw_key: str) -> str:
+    """Name one operator in its `$` spelling, or refuse it with the supported list.
+
+    Trigger: an agent writes `{"started": {"gte": "2026-01-01"}}` or `{"in": [...]}`.
+    Why: bare operator names are the Elasticsearch range spelling, and agents
+         reach for it often enough to show up in production 400s. The operator
+         form is unambiguous — a dict value is always operators, because nested
+         frontmatter keys are addressed with dot notation, never a nested dict —
+         so `gte` cannot mean anything but `$gte`.
+    Outcome: one canonical name per operator; anything else is refused with the
+             full supported list so the caller can correct itself on retry.
+    """
+    if isinstance(raw_op, str):
+        op = raw_op if raw_op.startswith("$") else f"${raw_op}"
+        if op in SUPPORTED_METADATA_OPERATORS:
+            return op
+    raise ValueError(
+        f"Unsupported operator '{raw_op}' in metadata filter for '{raw_key}'; "
+        f"supported operators: {_SUPPORTED_OPERATORS_TEXT}"
+    )
+
+
+def _parse_operator(
+    path_parts: List[str], raw_key: str, op: str, value: Any
+) -> ParsedMetadataFilter:
+    """Parse one canonical operator and its operand into a clause."""
+    if op == "$in":
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"$in requires a non-empty list for '{raw_key}'")
+        _refuse_null(value, raw_key, op)
+        return ParsedMetadataFilter(path_parts, "in", [_normalize_scalar(v) for v in value])
+
+    if op in _COMPARISON_OPERATORS:
+        _refuse_null([value], raw_key, op)
+        if _is_numeric_value(value):
+            return ParsedMetadataFilter(
+                path_parts, _COMPARISON_OPERATORS[op], _normalize_numeric(value, raw_key), "numeric"
+            )
+        return ParsedMetadataFilter(
+            path_parts, _COMPARISON_OPERATORS[op], _normalize_scalar(value), "text"
+        )
+
+    if op == "$between":
+        if not isinstance(value, list) or len(value) != 2:
+            raise ValueError(f"$between requires [min, max] for '{raw_key}'")
+        _refuse_null(value, raw_key, op)
+        if _is_numeric_collection(value):
+            return ParsedMetadataFilter(
+                path_parts, "between", [_normalize_numeric(v, raw_key) for v in value], "numeric"
+            )
+        return ParsedMetadataFilter(
+            path_parts, "between", [_normalize_scalar(v) for v in value], "text"
+        )
+
+    if op == "$contains":
+        # The operator spelling of the bare-list form: one value or a list, all
+        # of which must be present in the array.
+        values = value if isinstance(value, list) else [value]
+        if not values:
+            raise ValueError(f"$contains requires a value or a non-empty list for '{raw_key}'")
+        _refuse_null(values, raw_key, op)
+        return ParsedMetadataFilter(path_parts, "contains", [_normalize_scalar(v) for v in values])
+
+    # $exists asks whether the note carries a value at this path. Both backends
+    # extract a missing key and an explicit JSON null as SQL NULL, so "exists"
+    # means "has a non-null value", the exact negation of the null-equality form.
+    if not isinstance(value, bool):
+        raise ValueError(f"$exists requires true or false for '{raw_key}'")
+    return ParsedMetadataFilter(path_parts, "is_not_null" if value else "is_null", None)
+
+
 def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter]:
     """Parse metadata filters into normalized clauses.
 
@@ -156,6 +239,10 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
     - {"priority": {"$in": ["high", "critical"]}}
     - {"schema.confidence": {"$gt": 0.7}}
     - {"schema.confidence": {"$between": [0.3, 0.6]}}
+    - {"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}  # operators AND together
+    - {"tags": {"$contains": "security"}}
+    - {"owner": {"$exists": True}}  # has a non-null value
+    Operators may be written without the `$` ({"started": {"gte": ...}}).
     """
     parsed: List[ParsedMetadataFilter] = []
 
@@ -168,58 +255,19 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
 
         path_parts = list(path.parts)
 
-        # Operator form
+        # Operator form. Several operators on one key AND together, so a range is
+        # {"$gte": a, "$lt": b} — the Mongo spelling agents write unprompted.
+        # Each becomes its own clause; the SQL compilers number clauses, not keys.
         if isinstance(raw_value, dict):
-            if len(raw_value) != 1:
-                raise ValueError(f"Invalid metadata filter for '{raw_key}': {raw_value}")
-            raw_op, value = next(iter(raw_value.items()))
-            if not isinstance(raw_op, str):
+            if not raw_value:
                 raise ValueError(
-                    f"Unsupported operator '{raw_op}' in metadata filter for '{raw_key}'"
+                    f"Empty operator object for metadata filter '{raw_key}'; "
+                    f"supported operators: {_SUPPORTED_OPERATORS_TEXT}"
                 )
-            op = raw_op
-
-            if op == "$in":
-                if not isinstance(value, list) or not value:
-                    raise ValueError(f"$in requires a non-empty list for '{raw_key}'")
-                _refuse_null(value, raw_key, op)
-                parsed.append(
-                    ParsedMetadataFilter(path_parts, "in", [_normalize_scalar(v) for v in value])
-                )
-                continue
-
-            if op in _COMPARISON_OPERATORS:
-                _refuse_null([value], raw_key, op)
-                if _is_numeric_value(value):
-                    normalized = _normalize_numeric(value, raw_key)
-                    comparison = "numeric"
-                else:
-                    normalized = _normalize_scalar(value)
-                    comparison = "text"
-                parsed.append(
-                    ParsedMetadataFilter(
-                        path_parts,
-                        _COMPARISON_OPERATORS[op],
-                        normalized,
-                        comparison,
-                    )
-                )
-                continue
-
-            if op == "$between":
-                if not isinstance(value, list) or len(value) != 2:
-                    raise ValueError(f"$between requires [min, max] for '{raw_key}'")
-                _refuse_null(value, raw_key, op)
-                if _is_numeric_collection(value):
-                    normalized = [_normalize_numeric(v, raw_key) for v in value]
-                    comparison = "numeric"
-                else:
-                    normalized = [_normalize_scalar(v) for v in value]
-                    comparison = "text"
-                parsed.append(ParsedMetadataFilter(path_parts, "between", normalized, comparison))
-                continue
-
-            raise ValueError(f"Unsupported operator '{op}' in metadata filter for '{raw_key}'")
+            for raw_op, value in raw_value.items():
+                op = _canonical_operator(raw_op, raw_key)
+                parsed.append(_parse_operator(path_parts, raw_key, op, value))
+            continue
 
         # Array contains (all)
         if isinstance(raw_value, list):

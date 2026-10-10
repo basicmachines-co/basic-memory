@@ -23,6 +23,7 @@ from rich.table import Table
 from basic_memory.cli.app import app
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.redaction import SECRET_FIELDS, URL_FIELDS, redact_url
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -151,7 +152,7 @@ def _resolve_settings() -> list[ConfigSetting]:
 def _require_known_key(key: str) -> None:
     """Exit with guidance unless `key` is a configurable scalar setting."""
     if key not in CONFIGURABLE_FIELDS:
-        console.print(f"[red]Error: '{key}' is not a recognized setting.[/red]")
+        console.print(f"[red]Error: '{literal(key)}' is not a recognized setting.[/red]")
         console.print("[dim]Run 'bm config list' to see all available settings.[/dim]")
         raise typer.Exit(1)
 
@@ -187,12 +188,12 @@ def config_get(
     _require_known_key(key)
 
     config = ConfigManager().config
-    console.print(f"{key} = {_render_value(key, getattr(config, key))}")
+    console.print(f"{literal(key)} = {literal(_render_value(key, getattr(config, key)))}")
 
     env_var = _env_var_name(key)
     if env_var in os.environ:
         env_value = _redact_for_display(key, os.environ[env_var])
-        console.print(f"[yellow]Overridden by ${env_var} = {env_value}[/yellow]")
+        console.print(f"[yellow]Overridden by ${literal(env_var)} = {literal(env_value)}[/yellow]")
 
 
 @config_app.command("set")
@@ -210,6 +211,24 @@ def config_set(
     config_manager = ConfigManager()
     config = config_manager.load_config()
 
+    # Trigger: the setting is default_project
+    # Why: the model's load-time validator replaces an unknown default with the
+    #      first project so stale config files still load. An explicit `set` must
+    #      not get that silent substitution (#1635). A display name such as
+    #      "My Project" names the same project as its key `my-project`, as in
+    #      `bm project default`.
+    # Outcome: the value is stored as the canonical config key, or the command
+    #          exits nonzero with the known projects and config.json is untouched
+    if key == "default_project":
+        project_key, _ = config_manager.get_project(value)
+        if project_key is None:
+            console.print(f"[red]Error: '{literal(value)}' is not a configured project.[/red]")
+            console.print(
+                f"[dim]Known projects: {literal(', '.join(sorted(config.projects)))}[/dim]"
+            )
+            raise typer.Exit(1)
+        value = project_key
+
     # Validate the whole config with the candidate applied, so `value` is coerced and
     # constrained by the same rules that guard a hand-edited config.json.
     candidate = config.model_dump(mode="json")
@@ -217,19 +236,23 @@ def config_set(
     try:
         validated = BasicMemoryConfig.model_validate(candidate)
     except ValidationError as e:
-        console.print(f"[red]Error: invalid value for '{key}':[/red]")
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]Error: invalid value for '{literal(key)}':[/red]")
+        console.print(f"[red]{literal(e)}[/red]")
         raise typer.Exit(1)
 
     setattr(config, key, getattr(validated, key))
-    config_manager.save_config(config)
+    # The named key is written even when its env var overrides it; every other
+    # env-overridden setting keeps its on-disk value (#1631).
+    config_manager.save_config(config, persist_env_keys={key})
 
-    console.print(f"[green]{key} = {_render_value(key, getattr(config, key))}[/green]")
+    console.print(
+        f"[green]{literal(key)} = {literal(_render_value(key, getattr(config, key)))}[/green]"
+    )
 
     env_var = _env_var_name(key)
     if env_var in os.environ:
         console.print(
-            f"[yellow]Note: ${env_var} is set and will override this file value "
+            f"[yellow]Note: ${literal(env_var)} is set and will override this file value "
             "until the environment variable is unset.[/yellow]"
         )
 
@@ -246,6 +269,8 @@ def config_unset(
 
     default_value = BasicMemoryConfig.model_fields[key].get_default(call_default_factory=True)
     setattr(config, key, default_value)
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={key})
 
-    console.print(f"[green]{key} reverted to default: {_render_value(key, default_value)}[/green]")
+    console.print(
+        f"[green]{literal(key)} reverted to default: {literal(_render_value(key, default_value))}[/green]"
+    )

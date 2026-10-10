@@ -46,8 +46,6 @@ from basic_memory.cli.commands.routing import force_routing, validate_routing_fl
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
-VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
-
 # Shared Rich console (stderr=False so output goes to stdout, matching _print_json).
 console = Console()
 
@@ -657,6 +655,8 @@ def write_note(
     bm tool write-note --title "My Note" --folder "notes" --local
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
     from basic_memory.mcp.tools import write_note as mcp_write_note
 
     try:
@@ -695,19 +695,17 @@ def write_note(
                 )
             )
 
-        # MCP tool returns an error field on failure in JSON mode (e.g.
-        # NOTE_ALREADY_EXISTS on a blocked overwrite, NOTE_REVISION_CONFLICT on a
-        # stale --expected-checksum, SECURITY_VALIDATION_ERROR).
-        # Trigger: result carries a non-empty `error`.
-        # Why: parity with delete-note/edit-note/search-notes so exit-code-driven
-        #      scripts detect a failed/blocked write instead of seeing exit 0.
-        # Outcome: print the error to stderr and exit non-zero.
-        if isinstance(result, dict) and result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
-            _print_json(result)
-            raise typer.Exit(1)
-
         _print_json(result)
+    except ToolError as e:
+        # A refused write (NOTE_ALREADY_EXISTS, NOTE_REVISION_CONFLICT, NOTE_PATH_CONFLICT,
+        # SECURITY_VALIDATION_ERROR) is a tool error whose message, in JSON mode, is the
+        # structured result. Scripts keep the same contract: error on stderr, the result
+        # on stdout, exit 1.
+        payload = _tool_error_payload(e)
+        typer.echo(f"Error: {payload.get('error') or e}", err=True)
+        if payload:
+            _print_json(payload)
+        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -916,7 +914,13 @@ def edit_note(
     ] = None,
     section: Annotated[
         Optional[str],
-        typer.Option("--section", help="Section heading for replace_section operation"),
+        typer.Option(
+            "--section",
+            help=(
+                "Section heading for section-based operations: replace_section, "
+                "insert_before_section, insert_after_section"
+            ),
+        ),
     ] = None,
     expected_replacements: int = typer.Option(
         1,
@@ -949,16 +953,22 @@ def edit_note(
     ),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Edit an existing markdown note using append/prepend/find_replace/replace_section.
+    """Edit an existing markdown note.
+
+    Operations: append, prepend, find_replace, replace_section,
+    insert_before_section, insert_after_section.
 
     Examples:
 
     bm tool edit-note my-note --operation append --content "new content"
     bm tool edit-note my-note --operation find_replace --find-text "old" --content "new"
+    bm tool edit-note my-note --operation insert_after_section --section "## Notes" --content "new line"
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated"
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
     from basic_memory.mcp.tools import edit_note as mcp_edit_note
 
     try:
@@ -986,6 +996,18 @@ def edit_note(
             raise typer.Exit(1)
 
         _print_json(result)
+    except ToolError as e:
+        # A failed edit is a tool error whose message, in JSON mode, is the structured
+        # result. Same contract as write-note: error (and any guidance, such as the
+        # read-before-retry warning for an unknown outcome) on stderr, the result on
+        # stdout, exit 1.
+        payload = _tool_error_payload(e)
+        typer.echo(f"Error: {payload.get('error') or e}", err=True)
+        if payload.get("message"):
+            typer.echo(payload["message"], err=True)
+        if payload:
+            _print_json(payload)
+        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

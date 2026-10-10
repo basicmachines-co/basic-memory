@@ -29,8 +29,33 @@ async def _execute(project_service: ProjectService, query, params=None):
         return await project_service.repository.execute_query(session, query, params or {})
 
 
+async def _drop_real_vector_storage(project_service: ProjectService) -> None:
+    """Remove the vector table semantic search created, so the stub can replace it.
+
+    Semantic search is always on, so search setup has usually already created the
+    real sqlite-vec (or pgvector) table. Dropping a vec0 table needs the extension
+    loaded.
+    """
+    async with db.scoped_session(project_service.session_maker) as session:
+        if not _is_postgres():
+            connection = await session.connection()
+            raw_connection = await connection.get_raw_connection()
+            driver_connection = raw_connection.driver_connection
+            assert driver_connection is not None
+            # Python builds without extension loading never create the vec0 table
+            # (search falls back to keywords, #711), so there is nothing to unload.
+            if hasattr(driver_connection, "enable_load_extension"):
+                import sqlite_vec
+
+                await driver_connection.enable_load_extension(True)
+                await driver_connection.load_extension(sqlite_vec.loadable_path())
+        await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+        await session.commit()
+
+
 async def _create_embeddings_stub(project_service: ProjectService) -> None:
     """Create portable built-in storage for status tests."""
+    await _drop_real_vector_storage(project_service)
     await _execute(
         project_service,
         text(
@@ -50,25 +75,6 @@ async def _scalar_regular_query(session, query, params=None):
     """Execute a vector count against the portable regular-table test double."""
     result = await session.execute(query, params or {})
     return result.scalar()
-
-
-@pytest.mark.asyncio
-async def test_embedding_status_semantic_disabled(project_service: ProjectService, test_project):
-    """When semantic search is disabled, return minimal status with zero counts."""
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=False)
-        ),
-    ):
-        status = await project_service.get_embedding_status(test_project.id)
-
-    assert isinstance(status, EmbeddingStatus)
-    assert status.semantic_search_enabled is False
-    assert status.reindex_recommended is False
-    assert status.total_chunks == 0
-    assert status.total_embeddings == 0
 
 
 @pytest.mark.parametrize(
@@ -108,9 +114,7 @@ async def test_embedding_status_does_not_construct_provider(
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch(
             "basic_memory.repository.embedding_provider_factory.create_embedding_provider",
@@ -119,7 +123,7 @@ async def test_embedding_status_does_not_construct_provider(
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
-    assert status.semantic_search_enabled is True
+    assert status.embedding_provider is not None
 
 
 @pytest.mark.asyncio
@@ -139,13 +143,10 @@ async def test_embedding_status_vector_tables_missing(
     with patch.object(
         type(project_service),
         "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
-        ),
+        new_callable=lambda: property(lambda self: _config_manager_with()),
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
-    assert status.semantic_search_enabled is True
     assert status.embedding_provider == "fastembed"
     assert status.embedding_model == "bge-small-en-v1.5"
     assert status.vector_tables_exist is False
@@ -184,9 +185,7 @@ async def test_embedding_status_treats_legacy_sqlite_manifest_as_unavailable(
     with patch.object(
         type(project_service),
         "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
-        ),
+        new_callable=lambda: property(lambda self: _config_manager_with()),
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
@@ -205,9 +204,7 @@ async def test_embedding_status_entities_without_chunks(
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch.object(
             project_service.repository,
@@ -218,7 +215,6 @@ async def test_embedding_status_entities_without_chunks(
         status = await project_service.get_embedding_status(test_project.id)
     await _drop_embeddings_stub(project_service)
 
-    assert status.semantic_search_enabled is True
     assert status.vector_tables_exist is True
     # test_graph creates entities indexed in search_index, but no vector chunks
     assert status.total_indexed_entities > 0
@@ -252,9 +248,7 @@ async def test_embedding_status_orphaned_chunks(
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch.object(
             project_service.repository,
@@ -319,9 +313,7 @@ async def test_embedding_status_external_index_counts_only_current_ready_manifes
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch(
             "basic_memory.services.project_service.resolve_semantic_vector_index_name",
@@ -335,7 +327,6 @@ async def test_embedding_status_external_index_counts_only_current_ready_manifes
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
-    assert status.semantic_search_enabled is True
     assert status.vector_tables_exist is True
     assert status.total_chunks == 4
     assert status.total_embeddings == 1
@@ -367,9 +358,7 @@ async def test_embedding_status_reports_missing_builtin_storage(
     with patch.object(
         type(project_service),
         "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
-        ),
+        new_callable=lambda: property(lambda self: _config_manager_with()),
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
@@ -405,9 +394,7 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch.object(
             project_service.repository,
@@ -418,7 +405,6 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
         status = await project_service.get_embedding_status(test_project.id)
     await _drop_embeddings_stub(project_service)
 
-    assert status.semantic_search_enabled is True
     assert status.vector_tables_exist is False
     assert status.reindex_recommended is True
     assert "sqlite-vec is unavailable" in (status.reindex_reason or "")
@@ -461,9 +447,7 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch.object(
             project_service.repository,
@@ -512,9 +496,7 @@ async def test_embedding_status_excludes_stale_entity_ids(
         patch.object(
             type(project_service),
             "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
-            ),
+            new_callable=lambda: property(lambda self: _config_manager_with()),
         ),
         patch.object(
             project_service.repository,
@@ -555,14 +537,11 @@ async def test_get_project_info_includes_embedding_status(
 # --- Helper ---
 
 
-def _config_manager_with(semantic_search_enabled: bool):
-    """Create a ConfigManager whose config has the given semantic_search_enabled value."""
+def _config_manager_with():
+    """Create a ConfigManager for the embedding status checks."""
     from basic_memory.config import ConfigManager
 
-    cm = ConfigManager()
-    # Patch the config object in-place
-    cm.config.semantic_search_enabled = semantic_search_enabled
-    return cm
+    return ConfigManager()
 
 
 async def _insert_manifest_chunk(
@@ -576,16 +555,16 @@ async def _insert_manifest_chunk(
     embedding_status: str = "ready",
 ) -> int:
     """Insert one manifest row with explicit backend and readiness identity."""
-    config = _config_manager_with(semantic_search_enabled=True).config
+    config = _config_manager_with().config
     active_vector_index = resolve_semantic_vector_index_name(config, config.database_backend)
     active_embedding_identity = configured_embedding_provider_identity(config)
     result = await _execute(
         project_service,
         text(
             "INSERT INTO search_vector_chunks "
-            "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
+            "(entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
             "entity_fingerprint, embedding_model, vector_index, embedding_status) "
-            "VALUES (:entity_id, :project_id, :chunk_key, 'test text', 'hash', "
+            "VALUES (:entity_id, :project_id, :chunk_key, 'entity', :entity_id, 0, 'test text', 'hash', "
             "'fingerprint', :embedding_identity, :vector_index, :embedding_status) "
             "RETURNING id"
         ),
@@ -599,3 +578,39 @@ async def _insert_manifest_chunk(
         },
     )
     return int(result.scalar_one())
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_reports_keyword_only_host(
+    project_service: ProjectService, test_project, monkeypatch
+):
+    """On a host that cannot load sqlite-vec (#711), status says so instead of
+    recommending a reindex that would skip every note."""
+    from basic_memory.services import project_service as project_service_module
+
+    # Injected: this host can load sqlite-vec, so the fallback is simulated.
+    monkeypatch.setattr(project_service_module, "semantic_runtime_available", lambda _c: False)
+
+    status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_runtime_available is False
+    assert status.reindex_recommended is False
+    assert status.reindex_reason is None
+
+
+def test_embedding_status_still_emits_the_deprecated_semantic_field():
+    """CLIs released before the flag was removed require semantic_search_enabled
+    when they read project info from an upgraded server."""
+    assert EmbeddingStatus().model_dump()["semantic_search_enabled"] is True
+    keyword_only = EmbeddingStatus(vector_runtime_available=False).model_dump(mode="json")
+    assert keyword_only["semantic_search_enabled"] is False
+
+
+def test_embedding_status_reads_the_legacy_field_from_older_servers():
+    """A server released before the flag was removed sends only semantic_search_enabled."""
+    legacy = EmbeddingStatus.model_validate({"semantic_search_enabled": False})
+    assert legacy.vector_runtime_available is False
+    current = EmbeddingStatus.model_validate(
+        {"semantic_search_enabled": True, "vector_runtime_available": False}
+    )
+    assert current.vector_runtime_available is False

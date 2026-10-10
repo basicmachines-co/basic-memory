@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import logfire
@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
+from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
 from basic_memory.runtime.vector_sync import (
     VECTOR_SYNC_SAMPLE_ERROR_LIMIT,
     VectorSyncBatchResult,
@@ -136,6 +137,15 @@ class EntityVectorShardPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class ChunkMetadataUpdate:
+    """A reused chunk whose embedding stays but whose location or fingerprint moved."""
+
+    row_id: int
+    source_row_id: int
+    chunk_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class DeleteEntityVectorPreparePlan:
     """Delete stale vector state for an entity with no indexable source rows."""
 
@@ -144,6 +154,9 @@ class DeleteEntityVectorPreparePlan:
     prepare_start: float
     source_rows_count: int
     expected_deletions: list[StagedVectorDeletion]
+    # True when the entity is deliberately kept out of semantic search, so the
+    # cleanup reports a skip instead of ordinary sync work.
+    entity_skipped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +170,7 @@ class UpsertEntityVectorPreparePlan:
     existing_by_key: dict[str, VectorChunkState]
     stale_ids: list[int]
     stale_deletions: list[StagedVectorDeletion]
-    metadata_update_ids: list[int]
+    metadata_updates: list[ChunkMetadataUpdate]
     scheduled_records: list[VectorChunkRecord]
     entity_fingerprint: str
     embedding_model: str
@@ -222,6 +235,8 @@ class VectorChunkState:
     entity_fingerprint: str
     embedding_model: str
     has_embedding: bool
+    source_row_id: int
+    chunk_index: int
     vector_index: str = ""
     embedding_status: str = ""
 
@@ -705,11 +720,39 @@ async def fetch_prepare_window_source_rows(
     return grouped_rows
 
 
+async def fetch_prepare_window_projector_owned_entity_ids(
+    repository: SearchRepositoryBase,
+    session: AsyncSession,
+    entity_ids: list[int],
+) -> set[int]:
+    """Return window entities whose current accepted revision the Wiki projector wrote.
+
+    Ownership follows note_content.last_source rather than the file name, so a
+    hand-written index.md stays embedded and a generated page that a person or
+    agent edits is embedded again on its next sync.
+    """
+    if not entity_ids:
+        return set()
+
+    placeholders, params = repository._prepare_window_entity_params(entity_ids)
+    params["projector_source"] = NOTE_SOURCE_WIKI_PROJECTOR
+    result = await session.execute(
+        text(
+            "SELECT entity_id FROM note_content "
+            f"WHERE project_id = :project_id AND entity_id IN ({placeholders}) "
+            "AND last_source = :projector_source"
+        ),
+        params,
+    )
+    return {int(row.entity_id) for row in result.fetchall()}
+
+
 def prepare_window_existing_rows_sql(placeholders: str) -> str:
     """Build SQL for existing chunk and embedding rows in one prepare window."""
     return (
         "SELECT c.entity_id, c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
-        "c.embedding_model, c.vector_index, c.embedding_status "
+        "c.embedding_model, c.vector_index, c.embedding_status, "
+        "c.source_row_id, c.chunk_index "
         "FROM search_vector_chunks c "
         f"WHERE c.project_id = :project_id AND c.entity_id IN ({placeholders}) "
         "ORDER BY c.entity_id ASC, c.chunk_key ASC"
@@ -740,6 +783,8 @@ async def fetch_prepare_window_existing_rows(
                 embedding_model=str(row["embedding_model"]),
                 vector_index=str(row["vector_index"]),
                 embedding_status=str(row["embedding_status"]),
+                source_row_id=int(row["source_row_id"]),
+                chunk_index=int(row["chunk_index"]),
                 has_embedding=(
                     str(row["embedding_status"]) == "ready"
                     and str(row["vector_index"]) == repository._semantic_vector_index_name
@@ -766,6 +811,11 @@ async def prepare_entity_vector_jobs_window(
             existing_rows_by_entity = await repository._fetch_prepare_window_existing_rows(
                 session, entity_ids
             )
+            projector_owned_entity_ids = (
+                await repository._fetch_prepare_window_projector_owned_entity_ids(
+                    session, entity_ids
+                )
+            )
     except Exception as exc:
         # Trigger: the shared read pass failed before we had entity-level diffs.
         # Why: once the window-level read session breaks, we cannot safely
@@ -782,6 +832,7 @@ async def prepare_entity_vector_jobs_window(
                 entity_id=entity_id,
                 source_rows=source_rows_by_entity.get(entity_id, []),
                 existing_rows=existing_rows_by_entity.get(entity_id, []),
+                projector_owned=entity_id in projector_owned_entity_ids,
             )
         except Exception as exc:
             prepared_by_index[index] = exc
@@ -834,6 +885,9 @@ async def prepare_entity_vector_jobs_window(
                                 existing_rows=locked_existing_rows.get(
                                     original_plan.entity_id,
                                     [],
+                                ),
+                                projector_owned=(
+                                    original_plan.entity_id in projector_owned_entity_ids
                                 ),
                             )
                             if isinstance(replanned, PreparedEntityVectorSync):
@@ -933,6 +987,7 @@ def plan_entity_vector_jobs_prefetched(
     entity_id: int,
     source_rows: list[Any],
     existing_rows: list[VectorChunkState],
+    projector_owned: bool = False,
 ) -> PreparedEntityVectorSync | EntityVectorPreparePlan:
     """Plan one entity from prefetched rows without opening a write transaction."""
     sync_start = time.perf_counter()
@@ -956,6 +1011,18 @@ def plan_entity_vector_jobs_prefetched(
                 for row in existing_rows
             ],
         )
+
+    # Trigger: the Wiki projector wrote this entity's current accepted revision
+    #   (a generated index.md or log.md).
+    # Why: those pages are link lists and change logs that every projection
+    #   rewrites; embedding them costs worker time and adds noise to semantic
+    #   results. Their search rows and relations stay, because the graph uses
+    #   their links. Only the vectors go.
+    # Outcome: plan the same cleanup as an entity with no semantic source rows,
+    #   so existing vectors are deleted and nothing is embedded, and report the
+    #   entity as skipped.
+    if projector_owned:
+        return replace(delete_entity_chunks(), entity_skipped=True)
 
     if not source_rows:
         return delete_entity_chunks()
@@ -1015,7 +1082,7 @@ def plan_entity_vector_jobs_prefetched(
             prepare_seconds=prepare_seconds,
         )
 
-    metadata_update_ids: list[int] = []
+    metadata_updates: list[ChunkMetadataUpdate] = []
     pending_records: list[VectorChunkRecord] = []
     skipped_chunks_count = 0
     for record in chunk_records:
@@ -1026,6 +1093,10 @@ def plan_entity_vector_jobs_prefetched(
 
         same_source_hash = current.source_hash == record["source_hash"]
         same_entity_fingerprint = current.entity_fingerprint == current_entity_fingerprint
+        same_location = (
+            current.source_row_id == record["source_row_id"]
+            and current.chunk_index == record["chunk_index"]
+        )
         same_embedding_model = current.embedding_model == current_embedding_model
         same_vector_index = current.vector_index in {"", current_vector_index}
 
@@ -1035,8 +1106,16 @@ def plan_entity_vector_jobs_prefetched(
             and same_embedding_model
             and same_vector_index
         ):
-            if not same_entity_fingerprint:
-                metadata_update_ids.append(current.id)
+            # The text is unchanged, so the embedding is reused. Only the manifest's
+            # pointer to the (possibly recreated) search row and the fingerprint move.
+            if not same_entity_fingerprint or not same_location:
+                metadata_updates.append(
+                    ChunkMetadataUpdate(
+                        row_id=current.id,
+                        source_row_id=record["source_row_id"],
+                        chunk_index=record["chunk_index"],
+                    )
+                )
             skipped_chunks_count += 1
             continue
 
@@ -1063,7 +1142,7 @@ def plan_entity_vector_jobs_prefetched(
         existing_by_key=existing_by_key,
         stale_ids=stale_ids,
         stale_deletions=stale_deletions,
-        metadata_update_ids=metadata_update_ids,
+        metadata_updates=metadata_updates,
         scheduled_records=scheduled_records,
         entity_fingerprint=current_entity_fingerprint,
         embedding_model=current_embedding_model,
@@ -1090,6 +1169,7 @@ async def apply_entity_vector_prepare_plan(
             sync_start=plan.sync_start,
             source_rows_count=plan.source_rows_count,
             embedding_jobs=[],
+            entity_skipped=plan.entity_skipped,
             prepare_seconds=time.perf_counter() - plan.prepare_start,
             delete_entity_vectors=True,
             staged_deletions=staged_deletions,
@@ -1104,19 +1184,23 @@ async def apply_entity_vector_prepare_plan(
             plan.entity_id,
             expected_deletions=plan.stale_deletions,
         )
-    for row_id in plan.metadata_update_ids:
+    for update in plan.metadata_updates:
         await session.execute(
             text(
                 "UPDATE search_vector_chunks "
                 "SET entity_fingerprint = :entity_fingerprint, "
                 "embedding_model = :embedding_model, "
+                "source_row_id = :source_row_id, "
+                "chunk_index = :chunk_index, "
                 f"updated_at = {timestamp_expr} "
                 "WHERE id = :id"
             ),
             {
-                "id": row_id,
+                "id": update.row_id,
                 "entity_fingerprint": plan.entity_fingerprint,
                 "embedding_model": plan.embedding_model,
+                "source_row_id": update.source_row_id,
+                "chunk_index": update.chunk_index,
             },
         )
 
@@ -1184,6 +1268,8 @@ async def upsert_scheduled_chunk_records(
                     text(
                         "UPDATE search_vector_chunks "
                         "SET chunk_text = :chunk_text, source_hash = :source_hash, "
+                        "source_type = :source_type, source_row_id = :source_row_id, "
+                        "chunk_index = :chunk_index, "
                         "entity_fingerprint = :entity_fingerprint, "
                         "embedding_model = :embedding_model, "
                         "vector_index = :vector_index, "
@@ -1195,6 +1281,9 @@ async def upsert_scheduled_chunk_records(
                         "id": current.id,
                         "chunk_text": record["chunk_text"],
                         "source_hash": record["source_hash"],
+                        "source_type": record["source_type"],
+                        "source_row_id": record["source_row_id"],
+                        "chunk_index": record["chunk_index"],
                         "entity_fingerprint": entity_fingerprint,
                         "embedding_model": embedding_model,
                         "vector_index": repository._semantic_vector_index_name,
@@ -1215,10 +1304,12 @@ async def upsert_scheduled_chunk_records(
             text(
                 "INSERT INTO search_vector_chunks ("
                 "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "source_type, source_row_id, chunk_index, "
                 "entity_fingerprint, embedding_model, updated_at"
                 ", vector_index, embedding_status"
                 ") VALUES ("
                 ":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, "
+                ":source_type, :source_row_id, :chunk_index, "
                 ":entity_fingerprint, :embedding_model, "
                 f"{timestamp_expr}, :vector_index, 'pending'"
                 ") RETURNING id"
@@ -1229,6 +1320,9 @@ async def upsert_scheduled_chunk_records(
                 "chunk_key": record["chunk_key"],
                 "chunk_text": record["chunk_text"],
                 "source_hash": record["source_hash"],
+                "source_type": record["source_type"],
+                "source_row_id": record["source_row_id"],
+                "chunk_index": record["chunk_index"],
                 "entity_fingerprint": entity_fingerprint,
                 "embedding_model": embedding_model,
                 "vector_index": repository._semantic_vector_index_name,

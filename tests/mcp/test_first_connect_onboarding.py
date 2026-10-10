@@ -32,6 +32,8 @@ def test_server_sets_first_connect_instructions():
     assert "/raw/...md" in instructions
     # Offer-not-act: the model must be told not to write unprompted.
     assert "unprompted" in instructions
+    # find refuses an unqualified root path with several projects, like grep and tail (#1634).
+    assert "and for `find` without a project-qualified path" in instructions
 
 
 # --- recent_activity empty-state (lever 1b, primary) ---

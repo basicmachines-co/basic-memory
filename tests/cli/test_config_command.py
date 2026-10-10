@@ -97,6 +97,17 @@ def test_config_get_unknown_key(runner, write_config):
     assert "not a recognized setting" in result.output
 
 
+@pytest.mark.parametrize("key", ["proj [x]", "a[/b]c"])
+def test_config_get_unknown_key_prints_bracketed_key_verbatim(runner, write_config, key):
+    """A bracketed key is echoed as typed, not read as Rich markup (#1720)."""
+    write_config(_base_config())
+
+    result = runner.invoke(app, ["config", "get", key])
+
+    assert result.exit_code == 1
+    assert f"'{key}' is not a recognized setting" in " ".join(result.output.split())
+
+
 def test_config_get_renders_enum_value_not_repr(runner, write_config):
     """Enum-typed settings (e.g. database_backend) must show their value, not `Class.MEMBER`."""
     write_config(_base_config())
@@ -179,6 +190,55 @@ def test_config_set_coerces_bool_from_string(runner, write_config):
 
     assert result.exit_code == 0, result.output
     assert "format_on_save = True" in result.output
+
+
+def test_config_set_default_project_rejects_unknown_project(runner, write_config):
+    """An unknown default_project fails instead of being swapped for the first project (#1635)."""
+    config_file = write_config(_base_config())
+
+    result = runner.invoke(app, ["config", "set", "default_project", "nosuch"])
+
+    assert result.exit_code == 1
+    assert "'nosuch' is not a configured project" in result.output
+    assert "main" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "main"
+
+
+def test_config_set_default_project_accepts_known_project(runner, write_config):
+    config_file = write_config(
+        _base_config(
+            projects={
+                "main": {"path": "/tmp/main", "mode": "local"},
+                "research": {"path": "/tmp/research", "mode": "local"},
+            }
+        )
+    )
+
+    result = runner.invoke(app, ["config", "set", "default_project", "research"])
+
+    assert result.exit_code == 0, result.output
+    assert "default_project = research" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "research"
+
+
+def test_config_set_default_project_stores_the_canonical_key_for_a_display_name(
+    runner, write_config
+):
+    """ "My Test Project" names the project keyed `my-test-project`, as `bm project default` does."""
+    config_file = write_config(
+        _base_config(
+            projects={
+                "main": {"path": "/tmp/main", "mode": "local"},
+                "my-test-project": {"path": "/tmp/my-test-project", "mode": "local"},
+            }
+        )
+    )
+
+    result = runner.invoke(app, ["config", "set", "default_project", "My Test Project"])
+
+    assert result.exit_code == 0, result.output
+    assert "default_project = my-test-project" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "my-test-project"
 
 
 def test_config_set_rejects_structured_field(runner, write_config):
@@ -447,3 +507,34 @@ def test_config_set_warns_when_env_var_overrides(runner, write_config, monkeypat
 
     assert result.exit_code == 0, result.output
     assert "BASIC_MEMORY_CLI_OUTPUT_STYLE is set" in result.output
+
+    # The named key is written even though the env var overrides it.
+    written = json.loads((Path.home() / ".basic-memory" / "config.json").read_text())
+    assert written["cli_output_style"] == "rich"
+
+
+def test_config_set_keeps_other_env_overrides_out_of_the_file(runner, write_config, monkeypatch):
+    """Setting one key must not persist a different key's env override (#1631)."""
+    config_file = write_config(_base_config(log_level="INFO"))
+    monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("BASIC_MEMORY_CLI_OUTPUT_STYLE", "plain")
+
+    result = runner.invoke(app, ["config", "set", "kebab_filenames", "true"])
+
+    assert result.exit_code == 0, result.output
+    written = json.loads(config_file.read_text())
+    assert written["kebab_filenames"] is True
+    assert written["log_level"] == "INFO"
+    assert "cli_output_style" not in written
+
+
+def test_config_unset_writes_the_default_for_an_env_overridden_key(
+    runner, write_config, monkeypatch
+):
+    config_file = write_config(_base_config(cli_output_style="plain"))
+    monkeypatch.setenv("BASIC_MEMORY_CLI_OUTPUT_STYLE", "plain")
+
+    result = runner.invoke(app, ["config", "unset", "cli_output_style"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(config_file.read_text())["cli_output_style"] == "rich"

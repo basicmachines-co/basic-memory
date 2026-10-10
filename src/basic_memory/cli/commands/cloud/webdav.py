@@ -20,11 +20,16 @@ express per-project access.
 """
 
 import asyncio
+import os
 import re
 import xml.etree.ElementTree as ElementTree
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -47,15 +52,15 @@ _PROPFIND_BODY = (
 _CONTENT_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{32}")
 
 # The service meters every request on this transport, and a transfer of any real
-# size will meet its own rate limit: enumerating a project costs one PROPFIND per
-# directory, and the transfer that follows costs one request per file. A 429 is
+# size will meet its own rate limit: the transfer that follows the project
+# listing costs one request per file. A 429 is
 # therefore an ordinary step in a healthy transfer rather than a failure, and the
 # response carries a Retry-After telling us when the window resets.
 #
 # Retrying is what makes progress possible at all. Before this, a single 429
-# aborted the whole transfer, and since every re-run restarts the walk at the
-# first directory, a project past the per-minute ceiling could never finish no
-# matter how long the user waited (#2039).
+# aborted the whole transfer, and since every re-run started over, a project
+# past the per-minute ceiling could never finish no matter how long the user
+# waited (#2039).
 _RATE_LIMIT_MAX_ATTEMPTS = 6
 # A single wait is capped so an implausible Retry-After cannot hang the CLI, and
 # floored at one second so a "retry immediately" answer cannot spin.
@@ -83,12 +88,14 @@ class RemoteFile:
     modified: datetime | None
 
 
-@dataclass(frozen=True)
-class DownloadedFile:
-    """A file fetched over ``GET``, with whatever validators came back with it."""
+# File bodies move in chunks of this size, in both directions. A transfer runs
+# several files at once (#1604), so holding each whole file in memory would
+# multiply peak memory by the number of files in flight.
+_STREAM_CHUNK_BYTES = 1024 * 1024
 
-    content: bytes
-    modified: datetime | None
+# A request body is either fixed bytes or a factory that opens a fresh stream.
+# A stream can be read once, so a retried upload needs a new one per attempt.
+type RequestBody = bytes | str | Callable[[], AsyncIterator[bytes]] | None
 
 
 @dataclass(frozen=True)
@@ -187,15 +194,16 @@ def _retry_after_seconds(response: httpx.Response) -> float:
     return min(max(seconds, _RATE_LIMIT_MIN_WAIT_SECONDS), _RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
-async def _request_with_rate_limit_retry(
+@asynccontextmanager
+async def _rate_limited_request(
     client: httpx.AsyncClient,
     method: str,
     request_path: str,
     *,
-    content: bytes | str | None = None,
+    content: RequestBody = None,
     headers: dict[str, str] | None = None,
-) -> httpx.Response:
-    """Send one request, waiting out any rate-limit rejections.
+) -> AsyncIterator[httpx.Response]:
+    """Send one request, waiting out any rate-limit rejections, and stream the answer.
 
     Every request this module sends is safe to repeat: the reads have no body,
     and the one write carries the same bytes and headers each time, so a replay
@@ -203,73 +211,128 @@ async def _request_with_rate_limit_retry(
     explicitly rather than forwarded, so a caller cannot quietly add a parameter
     that makes a retry something other than the same request again.
 
-    A 429 on the final attempt is returned rather than raised, so the caller's
+    A successful response body is left unread, so a download can go to disk as it
+    arrives. Any other response (a redirect from a proxy as well as an error) is
+    read in full: it is small, and the caller's error message quotes it. The
+    response is closed when the block exits.
+
+    A 429 on the final attempt is yielded rather than raised, so the caller's
     own error handling reports it with the rate-limit detail attached.
     """
-    for remaining in range(_RATE_LIMIT_MAX_ATTEMPTS - 1, -1, -1):
-        response = await client.request(method, request_path, content=content, headers=headers)
-        if response.status_code != httpx.codes.TOO_MANY_REQUESTS or remaining == 0:
-            return response
+    attempt = 1
+    while True:
+        body = content if content is None or isinstance(content, bytes | str) else content()
+        request = client.build_request(method, request_path, content=body, headers=headers)
+        response = await client.send(request, stream=True)
+        if (
+            response.status_code != httpx.codes.TOO_MANY_REQUESTS
+            or attempt == _RATE_LIMIT_MAX_ATTEMPTS
+        ):
+            break
+        await response.aclose()
         await _sleep(_retry_after_seconds(response))
+        attempt += 1
 
-    raise AssertionError("unreachable: the loop returns on its final attempt")
+    try:
+        if not response.is_success:
+            await response.aread()
+        yield response
+    finally:
+        await response.aclose()
+
+
+def _file_chunks(stream: BinaryIO) -> Callable[[], AsyncIterator[bytes]]:
+    """A body factory that rewinds one open file and reads it on every call.
+
+    The file is opened once by the caller, so a retry replays the file that was
+    validated and measured, even if the path is replaced during a Retry-After wait.
+    """
+
+    async def chunks() -> AsyncIterator[bytes]:
+        stream.seek(0)
+        while chunk := stream.read(_STREAM_CHUNK_BYTES):
+            yield chunk
+
+    return chunks
 
 
 async def list_project_files(client: httpx.AsyncClient, project: str) -> list[RemoteFile]:
-    """Enumerate every file in a cloud project.
+    """Enumerate every file in a cloud project with one recursive PROPFIND.
 
-    Constraint: PROPFIND answers for one collection at a time (a ``Depth: 1``
-    listing), so a whole-project listing is a walk. Subdirectories are visited
-    breadth-first, and each path is listed only once, so a response that repeats
-    a directory already walked cannot send the walk round in circles.
+    The service answers ``Depth: infinity`` with every file below the project in
+    a single multistatus document. This replaced a walk of one ``Depth: 1``
+    request per directory, which took most of a transfer's time (#1604).
 
     Raises:
-        WebdavError: If the service rejects a listing or returns XML we cannot
+        WebdavError: If the service rejects the listing, refuses a recursive
+            listing, answers with a single-level one, or returns XML we cannot
             interpret.
     """
-    files: list[RemoteFile] = []
-    pending = [""]  # project-relative directories; "" is the project root
-    visited: set[str] = set()
-
-    while pending:
-        rel_dir = pending.pop(0)
-        if rel_dir in visited:
-            continue
-        visited.add(rel_dir)
-
-        for entry in await _propfind(client, project, rel_dir):
-            if entry.is_collection:
-                pending.append(entry.rel_path)
-            else:
-                files.append(
-                    RemoteFile(
-                        path=entry.rel_path,
-                        size=entry.size,
-                        etag=entry.etag,
-                        modified=entry.modified,
-                    )
+    request_path = webdav_path(project)
+    try:
+        async with _rate_limited_request(
+            client,
+            "PROPFIND",
+            request_path,
+            content=_PROPFIND_BODY,
+            headers={"Depth": "infinity", "Content-Type": "application/xml"},
+        ) as response:
+            # Trigger: the service refused the recursive listing (RFC 4918 9.1).
+            # Why: it does this for a project larger than one response may describe.
+            # A per-directory walk would work around it, but silently falling back
+            # would hide that the service has drawn a line here.
+            # Outcome: stop with a message that names the cause.
+            if response.status_code == httpx.codes.FORBIDDEN and _is_finite_depth_refusal(
+                response.text
+            ):
+                raise WebdavError(
+                    f"The cloud refused to list project '{project}' in one request: it has "
+                    "more files than one listing may describe. Push and pull cannot run "
+                    "on this project yet."
                 )
+            response.raise_for_status()
+            await response.aread()
+            listing_xml = response.text
+    except httpx.HTTPError as exc:
+        raise WebdavError(f"Failed to list cloud project '{project}': {_describe(exc)}") from exc
 
-    return files
+    entries = _parse_propfind(listing_xml, request_path=request_path)
+    _require_recursive_listing(entries, project)
+    return [
+        RemoteFile(
+            path=entry.rel_path,
+            size=entry.size,
+            etag=entry.etag,
+            modified=entry.modified,
+        )
+        for entry in entries
+        if not entry.is_collection
+    ]
 
 
-async def download_file(client: httpx.AsyncClient, project: str, rel_path: str) -> DownloadedFile:
-    """Fetch one file, along with the last-modified time the service reports.
+async def download_file(
+    client: httpx.AsyncClient, project: str, rel_path: str, sink: BinaryIO
+) -> datetime | None:
+    """Write one file's bytes into ``sink`` as they arrive.
+
+    Returns:
+        The last-modified time the service reports, or None when it sends none.
 
     Raises:
-        WebdavError: If the service refuses the download.
+        WebdavError: If the service refuses the download or the connection fails
+            partway. ``sink`` may then hold a partial body; the caller discards it.
     """
     request_path = webdav_path(project, rel_path)
     try:
-        response = await _request_with_rate_limit_retry(client, "GET", request_path)
-        response.raise_for_status()
+        async with _rate_limited_request(client, "GET", request_path) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes(_STREAM_CHUNK_BYTES):
+                sink.write(chunk)
+            modified = _parse_http_date(response.headers.get("Last-Modified"))
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to download {rel_path}: {_describe(exc)}") from exc
 
-    return DownloadedFile(
-        content=response.content,
-        modified=_parse_http_date(response.headers.get("Last-Modified")),
-    )
+    return modified
 
 
 async def upload_file(
@@ -277,11 +340,15 @@ async def upload_file(
     project: str,
     rel_path: str,
     *,
-    content: bytes,
-    mtime: int,
+    source: Path,
     create_only: bool = False,
 ) -> bool:
-    """Write one file, advertising the local modification time.
+    """Write one local file, advertising its modification time.
+
+    The body is read from ``source`` in chunks as it is sent, with the size
+    declared up front as Content-Length, so the service can refuse an oversized
+    file before reading it. A file that changes size mid-upload fails the
+    request rather than sending bytes that disagree with the declared length.
 
     ``X-OC-Mtime`` (the ownCloud/Nextcloud convention) is what `bm cloud upload`
     already sends, so the two write paths look identical to the service.
@@ -300,21 +367,28 @@ async def upload_file(
         WebdavError: If the service refuses the upload for any other reason.
     """
     request_path = webdav_path(project, rel_path)
-    headers = {"X-OC-Mtime": str(mtime)}
-    if create_only:
-        headers["If-None-Match"] = "*"
+    with source.open("rb") as stream:
+        # Measured from the open handle, so the declared size and mtime describe
+        # exactly the file every attempt sends.
+        stat = os.fstat(stream.fileno())
+        headers = {
+            "X-OC-Mtime": str(int(stat.st_mtime)),
+            "Content-Length": str(stat.st_size),
+        }
+        if create_only:
+            headers["If-None-Match"] = "*"
 
-    try:
-        response = await _request_with_rate_limit_retry(
-            client, "PUT", request_path, content=content, headers=headers
-        )
-        # Checked before raise_for_status: a refused precondition is the answer
-        # this call asked for, not a failure.
-        if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
-            return False
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
+        try:
+            async with _rate_limited_request(
+                client, "PUT", request_path, content=_file_chunks(stream), headers=headers
+            ) as response:
+                # Checked before raise_for_status: a refused precondition is the
+                # answer this call asked for, not a failure.
+                if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
+                    return False
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
 
     return True
 
@@ -322,29 +396,22 @@ async def upload_file(
 # --- PROPFIND parsing ---
 
 
-async def _propfind(client: httpx.AsyncClient, project: str, rel_dir: str) -> list[_Entry]:
-    """List one collection, returning its immediate children."""
-    request_path = webdav_path(project, rel_dir)
+def _is_finite_depth_refusal(xml_text: str) -> bool:
+    """Whether a 403 body is the RFC 4918 refusal of an infinite-depth PROPFIND."""
     try:
-        response = await _request_with_rate_limit_retry(
-            client,
-            "PROPFIND",
-            request_path,
-            content=_PROPFIND_BODY,
-            headers={"Depth": "1", "Content-Type": "application/xml"},
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise WebdavError(f"Failed to list cloud project '{project}': {_describe(exc)}") from exc
-
-    return _parse_propfind(response.text, request_path=request_path, rel_dir=rel_dir)
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError:
+        return False
+    return root.find(f"{DAV_NS}propfind-finite-depth") is not None
 
 
-def _parse_propfind(xml_text: str, *, request_path: str, rel_dir: str) -> list[_Entry]:
-    """Turn a multistatus document into this collection's immediate children.
+def _parse_propfind(xml_text: str, *, request_path: str) -> list[_Entry]:
+    """Turn a recursive multistatus document into the collection's descendants.
 
-    The document is served by the authenticated cloud service, not by arbitrary
-    third parties, so it is parsed with the standard library parser.
+    Each entry's project-relative path comes from its href, because a nested
+    entry's display name is only its basename. The document is served by the
+    authenticated cloud service, not by arbitrary third parties, so it is parsed
+    with the standard library parser.
     """
     try:
         root = ElementTree.fromstring(xml_text)
@@ -354,26 +421,35 @@ def _parse_propfind(xml_text: str, *, request_path: str, rel_dir: str) -> list[_
     entries: list[_Entry] = []
     for index, response in enumerate(root.findall(f"{DAV_NS}response")):
         href = _text(response.find(f"{DAV_NS}href"))
+        if href is None:
+            raise WebdavError(
+                f"The cloud listing for '{request_path}' contains an entry with no href"
+            )
 
         # Trigger: the first response element describes the collection we asked
-        # for (RFC 4918 includes the resource itself in a Depth: 1 listing).
-        # Why: only the first is checked — a subdirectory whose href happens to
-        # collide with the request path is still a real child, and dropping it
-        # would silently hide every file beneath it.
+        # for (RFC 4918 includes the resource itself in a listing).
+        # Why: only the first is checked; any later entry naming the collection
+        # again is malformed and is rejected by _relative_path below.
         # Outcome: skip the self entry, keep everything else.
-        if index == 0 and href is not None and _same_path(href, request_path):
+        if index == 0 and _same_path(href, request_path):
             continue
 
+        rel_path = _relative_path(href, request_path)
         props = _merged_props(response)
-        name = _entry_name(props, href)
-        if name is None:
+
+        # The display name is redundant with the href's last segment. A mismatch
+        # means the href was not percent-encoded the way it must be, so the path
+        # it yields cannot be trusted to name the right file.
+        display_name = _text(props.get("displayname"))
+        if display_name and display_name != rel_path.rsplit("/", 1)[-1]:
             raise WebdavError(
-                f"The cloud listing for '{request_path}' contains an entry with no name"
+                f"The cloud listing for '{request_path}' names {display_name!r} "
+                f"at an href that decodes to {rel_path!r}"
             )
 
         entries.append(
             _Entry(
-                rel_path=f"{rel_dir}/{name}" if rel_dir else name,
+                rel_path=rel_path,
                 is_collection=_is_collection(props),
                 size=_parse_size(props),
                 etag=normalize_etag(_text(props.get("getetag"))),
@@ -382,6 +458,54 @@ def _parse_propfind(xml_text: str, *, request_path: str, rel_dir: str) -> list[_
         )
 
     return entries
+
+
+def _relative_path(href: str, request_path: str) -> str:
+    """Return the path an href names relative to the collection that was listed.
+
+    Raises:
+        WebdavError: If the href lies outside that collection, or names the
+            collection itself.
+    """
+    collection = unquote(request_path).rstrip("/") + "/"
+    path = _href_path(href)
+    if not path.startswith(collection):
+        raise WebdavError(f"The cloud listing for '{request_path}' names {href!r}, outside it")
+    rel_path = path.removeprefix(collection).strip("/")
+    if not rel_path:
+        raise WebdavError(f"The cloud listing for '{request_path}' repeats the collection itself")
+    return rel_path
+
+
+def _require_recursive_listing(entries: list[_Entry], project: str) -> None:
+    """Refuse a listing that only describes the top level of the project.
+
+    The service derives every collection in a recursive listing from the files
+    beneath it, so each collection there has at least one listed file. A service
+    that ignores ``Depth: infinity`` answers with one level: subdirectories with
+    nothing listed inside them. Planning from that would treat every nested
+    cloud file as absent.
+
+    Raises:
+        WebdavError: If a collection in the listing has no listed file beneath it.
+    """
+    directories_with_files = {
+        parent.as_posix()
+        for entry in entries
+        if not entry.is_collection
+        for parent in PurePosixPath(entry.rel_path).parents
+    }
+    empty = [
+        entry.rel_path
+        for entry in entries
+        if entry.is_collection and entry.rel_path not in directories_with_files
+    ]
+    if empty:
+        raise WebdavError(
+            f"The cloud answered the listing of project '{project}' one level deep, so it "
+            "does not yet support the recursive listing (Depth: infinity) this version "
+            "of bm needs. Retry after the cloud service has been updated."
+        )
 
 
 def _merged_props(response: ElementTree.Element) -> dict[str, ElementTree.Element]:
@@ -399,21 +523,6 @@ def _merged_props(response: ElementTree.Element) -> dict[str, ElementTree.Elemen
         for child in prop:
             props.setdefault(child.tag.removeprefix(DAV_NS), child)
     return props
-
-
-def _entry_name(props: dict[str, ElementTree.Element], href: str | None) -> str | None:
-    """Resolve an entry's basename.
-
-    ``displayname`` is preferred because it is the literal name, free of any URL
-    encoding. The href's last segment is the fallback for servers that omit it.
-    """
-    display_name = _text(props.get("displayname"))
-    if display_name:
-        return display_name
-    if href is None:
-        return None
-    segments = [segment for segment in _href_path(href).split("/") if segment]
-    return segments[-1] if segments else None
 
 
 def _is_collection(props: dict[str, ElementTree.Element]) -> bool:

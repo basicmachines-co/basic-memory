@@ -1,4 +1,4 @@
-"""Exercise line reads and literal grep through real project-scoped API clients."""
+"""Exercise line reads and keyword grep through real project-scoped API clients."""
 
 import json
 from typing import Any
@@ -24,10 +24,8 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
     lines = full["content"].splitlines()
     expected_matches = [n for n, line in enumerate(lines, 1) if "retry" in line]
 
-    result = await grep(
-        "retry", literal=True, context_lines=1, max_matches=2, project=test_project.name
-    )
-    ordinary = await grep("retry", literal=True, project=test_project.name)
+    result = await grep("retry", context_lines=1, max_matches=2, project=test_project.name)
+    ordinary = await grep("retry", project=test_project.name)
     assert len(json.dumps(result)) < len(json.dumps(ordinary)) / 2
     assert result["pagination_scope"] == "search_candidates"
     row = result["results"][0]
@@ -95,17 +93,15 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
         assert last["content"] == lines[-1]
         assert last["has_more"] is False
         assert last["next_start_line"] is None and last["next_end_line"] is None
-    empty = await read_note(
-        "Bounds", start_line=1000, output_format="json", project=test_project.name
-    )
-    assert isinstance(empty, dict)
-    assert empty["content"] == "" and empty["has_more"] is False
+    # A range past the last line is an error, not an empty "Lines 1000-N" read (#1634).
+    with pytest.raises(ToolError, match="start_line 1000 is past the end of the document"):
+        await read_note("Bounds", start_line=1000, output_format="json", project=test_project.name)
 
 
 @pytest.mark.asyncio
 async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monkeypatch) -> None:
     await write_note(title="One Get", directory="test", content="alpha", project=test_project.name)
-    found = await grep("alpha", literal=True, project=test_project.name)
+    found = await grep("alpha", project=test_project.name)
     identifier = found["results"][0]["external_id"]
     original = KnowledgeClient.get_entity
     calls: list[tuple[str, str | None]] = []
@@ -162,17 +158,13 @@ async def test_grep_candidate_pagination_survives_no_current_match(
         return entity.model_copy(update={"content": "already fixed\n"})
 
     monkeypatch.setattr(KnowledgeClient, "get_entity", changed_content)
-    first = await grep(
-        "retry", literal=True, context_lines=0, page_size=1, project=test_project.name
-    )
+    first = await grep("retry", context_lines=0, page_size=1, project=test_project.name)
     assert first["has_more"] is True
     row = first["results"][0]
     assert row["match_count"] == 0 and row["windows"] == []
     assert row["total_lines"] == 1
     assert row["next_match_line"] is None
-    second = await grep(
-        "retry", literal=True, context_lines=0, page=2, page_size=1, project=test_project.name
-    )
+    second = await grep("retry", context_lines=0, page=2, page_size=1, project=test_project.name)
     assert second["results"][0]["external_id"] != row["external_id"]
 
 
@@ -195,7 +187,7 @@ async def test_grep_refuses_missing_candidate_identity(client, test_project, mon
 
     monkeypatch.setattr(SearchClient, "search", old_server)
     with pytest.raises(ToolError, match="external_id"):
-        await grep("retry", literal=True, context_lines=0, project=test_project.name)
+        await grep("retry", context_lines=0, project=test_project.name)
 
 
 @pytest.mark.parametrize(
@@ -208,21 +200,21 @@ async def test_invalid_read_bounds_fail_before_routing(bounds: dict[str, int]) -
 
 
 @pytest.mark.parametrize(
-    ("literal", "context_lines", "max_matches", "page_size", "pattern"),
+    ("semantic", "context_lines", "max_matches", "page_size", "pattern"),
     [
-        (False, 1, 10, 10, "retry"),
-        (True, -1, 10, 10, "retry"),
-        (True, 11, 10, 10, "retry"),
-        (True, 0, 0, 10, "retry"),
-        (True, 0, 101, 10, "retry"),
-        (True, 0, 10, 101, "retry"),
-        (True, None, 3, 10, "retry"),
-        (True, 0, 10, 10, "a\nb"),
+        (True, 1, 10, 10, "retry"),
+        (False, -1, 10, 10, "retry"),
+        (False, 11, 10, 10, "retry"),
+        (False, 0, 0, 10, "retry"),
+        (False, 0, 101, 10, "retry"),
+        (False, 0, 10, 101, "retry"),
+        (False, None, 3, 10, "retry"),
+        (False, 0, 10, 10, "a\nb"),
     ],
 )
 @pytest.mark.asyncio
 async def test_invalid_grep_options_fail_before_routing(
-    literal: bool,
+    semantic: bool,
     context_lines: int | None,
     max_matches: int,
     page_size: int,
@@ -231,7 +223,7 @@ async def test_invalid_grep_options_fail_before_routing(
     with pytest.raises(ValueError):
         await grep(
             pattern,
-            literal=literal,
+            semantic=semantic,
             context_lines=context_lines,
             max_matches=max_matches,
             page_size=page_size,

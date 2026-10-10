@@ -43,9 +43,14 @@ async def import_document(path: Path, project: str | None) -> tuple[str, RawDocu
     async with get_client(project_name=project_name) as client:
         project_item = await get_active_project(client, project_name, None)
         project_home = Path(project_item.path).expanduser().resolve()
-        source = path.expanduser().resolve()
+        # Trigger: the user passed a relative path such as `files/data.csv`
+        # Why: the source must live inside the project, so a project-relative path
+        #      is the natural spelling, and it matches `bm ls`/`bm cat` (#1635)
+        # Outcome: relative paths resolve against the project root; absolute and
+        #          `~` paths are used as given (joining onto an absolute path keeps it)
+        source = (project_home / path.expanduser()).resolve()
         if not source.is_file():
-            raise typer.BadParameter(f"File not found: {path}")
+            raise typer.BadParameter(f"File not found: {source}")
         if not source.is_relative_to(project_home):
             raise typer.BadParameter(
                 f"{path} is not inside project {project_item.name!r} ({project_home}). "
@@ -85,8 +90,9 @@ def document(
         Path,
         typer.Argument(
             help=(
-                "Source file path. It must be inside the selected project; copy external files "
-                "into the project first."
+                "Source file path inside the selected project. A relative path is resolved "
+                "against the project root, not the current directory; an absolute path must "
+                "point inside the project. Copy external files into the project first."
             )
         ),
     ],

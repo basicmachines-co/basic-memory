@@ -482,7 +482,9 @@ async def test_write_note_rejects_equivalent_legacy_markdown_filename(
                 "directory": "filename-conflicts",
                 "content": "# Site Roadmap\n\nReplacement body.",
             },
+            raise_on_error=False,
         )
+        assert rejected.is_error
         rejected_text = rejected.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "# Error: Note already exists" in rejected_text
         assert "edit_note" in rejected_text
@@ -625,7 +627,9 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
                 "directory": "guard",
                 "content": "# MCP Guard Test\n\nReplacement content via MCP.",
             },
+            raise_on_error=False,
         )
+        assert result2.is_error
         response_text = result2.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "# Error: Note already exists" in response_text
         assert "edit_note" in response_text
@@ -675,21 +679,28 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
         revision_b = updated["checksum"]
         assert revision_b != revision_a
 
-        stale_json = _json_content(
-            await client.call_tool(
-                "write_note",
-                {
-                    **note,
-                    "content": "Stale replacement.",
-                    "overwrite": True,
-                    "expected_checksum": revision_a,
-                    "output_format": "json",
-                },
-            )
+        stale_json_result = await client.call_tool(
+            "write_note",
+            {
+                **note,
+                "content": "Stale replacement.",
+                "overwrite": True,
+                "expected_checksum": revision_a,
+                "output_format": "json",
+            },
+            raise_on_error=False,
         )
+        assert stale_json_result.is_error
+        stale_json = _json_content(stale_json_result)
         assert stale_json["action"] == "conflict"
         assert stale_json["error"] == "NOTE_REVISION_CONFLICT"
-        assert stale_json["checksum"] == revision_b
+        # Same shape as edit_note's conflict (#1719): nothing written, the current
+        # revision under currentChecksum, and the note at the path named.
+        assert stale_json["checksum"] is None
+        assert stale_json["currentChecksum"] == revision_b
+        assert stale_json["title"] == updated["title"]
+        assert stale_json["permalink"] == updated["permalink"]
+        assert stale_json["file_path"] == updated["file_path"]
 
         stale_text = await client.call_tool(
             "write_note",
@@ -699,7 +710,9 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
                 "overwrite": True,
                 "expected_checksum": revision_a,
             },
+            raise_on_error=False,
         )
+        assert stale_text.is_error
         text = stale_text.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "# Error: Note revision conflict" in text
         assert f'expected_checksum="{revision_b}"' in text

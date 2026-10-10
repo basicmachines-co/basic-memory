@@ -27,6 +27,7 @@ memory-curate/SKILL.md          # Knowledge-graph curation: orphans, relations, 
 memory-continue/SKILL.md        # Resume prior work by rebuilding context from the graph
 memory-capture/SKILL.md         # Capture a thread's current state into one coherent note
 memory-quest/SKILL.md           # Finish Memory Quest Mission 8 with a verified Memory Master note
+memory-comark/SKILL.md          # ::bm-* charts, boards, and live views in notes (references/components.md)
 ```
 
 There is no code to compile — this is a pure markdown project. Run `just check`

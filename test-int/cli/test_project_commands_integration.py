@@ -170,7 +170,9 @@ def test_remove_main_project(app, app_config, config_manager):
         assert result.exit_code == 0
         config_after_list = config_manager.load_config()
         assert "main" not in config_after_list.projects
-        assert "new_default" in config_after_list.projects
+        # `project add` indexes through the same pass as `bm project index`
+        # (#1635), whose config reconciliation stores the normalized key.
+        assert "new-default" in config_after_list.projects
 
 
 def test_local_project_remove_keeps_files_without_delete_notes(app, app_config, config_manager):

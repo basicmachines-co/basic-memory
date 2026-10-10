@@ -179,6 +179,9 @@ CREATE TABLE IF NOT EXISTS search_vector_chunks (
     chunk_key TEXT NOT NULL,
     chunk_text TEXT NOT NULL,
     source_hash TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
     entity_fingerprint TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
     vector_index TEXT NOT NULL,
@@ -203,6 +206,9 @@ CREATE TABLE IF NOT EXISTS search_vector_chunks (
     chunk_key TEXT NOT NULL,
     chunk_text TEXT NOT NULL,
     source_hash TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
     entity_fingerprint TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
     vector_index TEXT NOT NULL,
@@ -220,6 +226,73 @@ CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE = DDL("""
 CREATE UNIQUE INDEX IF NOT EXISTS uix_search_vector_chunks_entity_key
 ON search_vector_chunks (project_id, entity_id, chunk_key)
 """)
+
+
+CHUNK_LOCATION_COLUMNS = frozenset({"source_type", "source_row_id", "chunk_index"})
+
+# Every column of the current SQLite chunk table, used to recognize its schema.
+SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS = frozenset(
+    {
+        "id",
+        "entity_id",
+        "project_id",
+        "chunk_key",
+        "chunk_text",
+        "source_hash",
+        "entity_fingerprint",
+        "embedding_model",
+        "vector_index",
+        "embedding_status",
+        "updated_at",
+    }
+    | CHUNK_LOCATION_COLUMNS
+)
+
+# Upgrade a SQLite chunk table whose keys still embed the search row id
+# ("observation:5:0"): split the location into columns, then re-key each chunk by its
+# content ("observation:<sha256>:<occurrence>"). Mirrors Alembic revision 0040.
+SQLITE_CHUNK_LOCATION_UPGRADE = (
+    "ALTER TABLE search_vector_chunks ADD COLUMN source_type TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE search_vector_chunks ADD COLUMN source_row_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE search_vector_chunks ADD COLUMN chunk_index INTEGER NOT NULL DEFAULT 0",
+    """
+    UPDATE search_vector_chunks SET
+        source_type = substr(chunk_key, 1, instr(chunk_key, ':') - 1),
+        source_row_id = CAST(
+            substr(
+                substr(chunk_key, instr(chunk_key, ':') + 1),
+                1,
+                instr(substr(chunk_key, instr(chunk_key, ':') + 1), ':') - 1
+            ) AS INTEGER
+        ),
+        chunk_index = CAST(
+            substr(
+                substr(chunk_key, instr(chunk_key, ':') + 1),
+                instr(substr(chunk_key, instr(chunk_key, ':') + 1), ':') + 1
+            ) AS INTEGER
+        )
+    """,
+    """
+    UPDATE search_vector_chunks SET chunk_key = (
+        SELECT ranked.source_type || ':' || ranked.source_hash || ':' || ranked.occurrence
+        FROM (
+            SELECT id, source_type, source_hash,
+                ROW_NUMBER() OVER (
+                    PARTITION BY project_id, entity_id, source_type, source_hash
+                    ORDER BY source_row_id, chunk_index, id
+                ) - 1 AS occurrence
+            FROM search_vector_chunks
+        ) AS ranked
+        WHERE ranked.id = search_vector_chunks.id
+    )
+    """,
+    # Built-in indexes find vectors by chunk row id, so re-keying keeps them. An
+    # external index (Milvus) stores the old key itself; re-embed those chunks.
+    """
+    UPDATE search_vector_chunks SET embedding_status = 'pending'
+    WHERE vector_index NOT IN ('', 'sqlite-vec', 'pgvector')
+    """,
+)
 
 
 def create_sqlite_search_vector_embeddings(dimensions: int) -> DDL:

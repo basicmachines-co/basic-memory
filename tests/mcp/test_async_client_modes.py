@@ -686,3 +686,35 @@ async def test_get_client_workspace_selector_without_credentials_fails_fast(
     with pytest.raises(RuntimeError, match="cloud workspace was requested"):
         async with get_client(workspace="team-slug"):
             pass
+
+
+def test_routes_off_host_follows_get_client_precedence(monkeypatch, config_manager):
+    """Factory, then --local/--cloud, then each project's mode, as get_client routes."""
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.async_client import routes_off_host
+
+    cfg = config_manager.load_config()
+    cfg.projects["cloud-notes"] = ProjectEntry(path="/tmp/cloud-notes", mode=ProjectMode.CLOUD)
+    cfg.projects["local-notes"] = ProjectEntry(path="/tmp/local-notes", mode=ProjectMode.LOCAL)
+
+    # Project modes decide when nothing overrides them.
+    assert routes_off_host(cfg, ["cloud-notes"]) is True
+    assert routes_off_host(cfg, ["local-notes"]) is False
+    assert routes_off_host(cfg, ["cloud-notes", "local-notes"]) is False
+
+    # An explicit --cloud flag sends a local project off-host; --local keeps a cloud one.
+    monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "true")
+    assert routes_off_host(cfg, ["local-notes"]) is True
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD")
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+    assert routes_off_host(cfg, ["cloud-notes"]) is False
+
+    # An injected factory wins over everything.
+    @asynccontextmanager
+    async def factory(workspace=None):
+        async with httpx.AsyncClient(base_url="https://example.test") as client:
+            yield client
+
+    set_client_factory(factory)
+    assert routes_off_host(cfg, ["local-notes"]) is True

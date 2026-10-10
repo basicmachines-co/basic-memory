@@ -64,7 +64,6 @@ async def test_export_real_project(tmp_path):
             {
                 "projects": {"My Project": {"path": str(root)}},
                 "default_project": "My Project",
-                "semantic_search_enabled": False,
                 "index_changes": False,
                 "env": "dev",
             }

@@ -451,6 +451,13 @@ def test_slice_line_range_end_clamps_to_total_lines():
     assert (sliced.start_line, sliced.end_line) == (13, 13)
 
 
+def test_slice_line_range_starting_past_end_is_an_error():
+    """A range past the last line fails instead of serving an inverted 500-13 range (#1634)."""
+    error = _slice_error(_DOC, lines=LineRange(start=500, end=510))
+
+    assert error.message == "start_line 500 is past the end of the document (13 lines)"
+
+
 def test_slice_single_line_range():
     sliced = _slice(_DOC, lines=LineRange(start=5, end=5))
 
@@ -462,6 +469,12 @@ def test_slice_empty_document_yields_empty_slice():
 
     assert sliced.content == ""
     assert sliced.total_lines == 0
+
+
+def test_slice_empty_document_rejects_ranges_past_line_one():
+    error = _slice_error("", lines=LineRange(start=2, end=None))
+
+    assert error.message == "start_line 2 is past the end of the document (0 lines)"
 
 
 def test_slice_section_and_lines_are_mutually_exclusive():

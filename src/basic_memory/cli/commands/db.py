@@ -17,8 +17,10 @@ from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.command_utils import report_project_readiness, run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.utils import generate_permalink, shell_command
+from basic_memory.cli.markup import literal
 
 console = Console()
 REINDEX_ERROR_SUMMARY_MAX_LENGTH = 240
@@ -114,7 +116,7 @@ def _abort_if_mcp_processes_alive() -> None:
         "and return phantom search results (see #765).[/yellow]"
     )
     for pid, cmd in zombies:
-        console.print(f"  PID {pid}: {cmd}")
+        console.print(f"  PID {pid}: {literal(cmd)}")
     console.print("\n[bold]How to clean up:[/bold]")
     console.print("  1. Quit Claude Desktop and any other MCP clients.")
     if os.name == "nt":
@@ -167,7 +169,7 @@ async def _reindex_projects(app_config):
             projects = await project_repository.get_active_projects(session)
 
         for project in projects:
-            console.print(f"  Indexing [cyan]{project.name}[/cyan]...")
+            console.print(f"  Indexing [cyan]{literal(project.name)}[/cyan]...")
             logger.info(f"Starting project index for project: {project.name}")
             result = await run_local_project_index_for_project(
                 project,
@@ -237,7 +239,7 @@ def reset(
                     logger.info(f"Deleted: {path}")
                 except OSError as e:
                     console.print(
-                        f"[red]Error:[/red] Cannot delete {path.name}: {e}\n"
+                        f"[red]Error:[/red] Cannot delete {literal(path.name)}: {literal(e)}\n"
                         "The database may be in use by another process (e.g., MCP server).\n"
                         "Please close Claude Desktop or any other Basic Memory clients and try again."
                     )
@@ -290,18 +292,34 @@ def run_reindex_command(
     config_manager = ConfigManager()
     app_config = config_manager.config
 
-    if embeddings and not app_config.semantic_search_enabled:
-        console.print(
-            "[yellow]Semantic search is not enabled.[/yellow] "
-            "Set [cyan]semantic_search_enabled: true[/cyan] in config to use embeddings."
-        )
-        embeddings = False
-        if not search:
-            raise typer.Exit(0)
-
     run_with_cleanup(
         _reindex(app_config, search=search, embeddings=embeddings, full=full, project=project)
     )
+
+
+async def index_project_and_report_readiness(project: str) -> None:
+    """Index a just-added project the way `bm project index` does, then report readiness.
+
+    `bm project add` used to index through the API in one foreground request,
+    which embeds inline and prints nothing until it returns: a 1000-note project
+    sat silent for two minutes between "added successfully" and the final count
+    (#1635). `_reindex` runs the search pass and then the embedding pass under the
+    progress bar `bm reindex` shows, so the add reports progress and leaves the
+    project in the state its own remedy, `bm project index`, would.
+
+    It is incremental (`full=False`) for the same reason the remedy is: change
+    detection sees every file of a never-indexed project as new, and an adopted,
+    already-indexed project only redoes what changed.
+    """
+    app_config = ConfigManager().config
+    await _reindex(
+        app_config,
+        search=True,
+        embeddings=True,
+        full=False,
+        project=project,
+    )
+    await report_project_readiness(project)
 
 
 @app.command()
@@ -377,24 +395,32 @@ async def _reindex(
             projects = await project_repository.get_active_projects(session)
 
         if project:
-            projects = [p for p in projects if p.name == project]
+            # Trigger: the caller names the project as typed, e.g. `new_default`.
+            # Why: config reconciliation above stores normalized names
+            #      (`new-default`), so exact name equality can miss the project
+            #      the caller just registered; the API resolves by permalink too.
+            # Outcome: `bm project add new_default` and `bm project index
+            #          new_default` index the project they name.
+            project_permalink = generate_permalink(project)
+            projects = [p for p in projects if p.permalink == project_permalink]
             if not projects:
                 # Check if it's a cloud-only project — those can't be reindexed locally
                 project_mode = app_config.get_project_mode(project)
                 if project_mode == ProjectMode.CLOUD:
                     console.print(
-                        f"[yellow]Project '{project}' is a cloud project.[/yellow]\n"
+                        f"[yellow]Project '{literal(project)}' is a cloud project.[/yellow]\n"
                         "Reindexing is a local operation — cloud projects are "
                         "indexed on the server."
                     )
                 else:
-                    console.print(f"[red]Project '{project}' not found.[/red]")
+                    console.print(f"[red]Project '{literal(project)}' not found.[/red]")
                 raise typer.Exit(1)
 
         embedding_entities_total = 0
         embedding_errors_total = 0
+        incomplete_projects: list[str] = []
         for proj in projects:
-            console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
+            console.print(f"\n[bold]Project: [cyan]{literal(proj.name)}[/cyan][/bold]")
 
             if search:
                 # Trigger: the project-index scan below reconciles deletes against
@@ -484,15 +510,27 @@ async def _reindex(
                         progress_callback=on_progress,
                         force_full=full,
                     )
-                    progress.update(task, completed=stats["total_entities"])
+                    # Entities still owed chunks are not finished, so the bar stops
+                    # short of 100% instead of claiming work it did not do (#1726).
+                    progress.update(
+                        task,
+                        total=stats["total_entities"],
+                        completed=stats["total_entities"] - stats["deferred"],
+                    )
 
+                embedding_status = (
+                    "[yellow]incomplete[/yellow] Embeddings incomplete"
+                    if stats["deferred"]
+                    else "[green]done[/green] Embeddings complete"
+                )
                 console.print(
-                    "  [green]done[/green] Embeddings complete "
+                    f"  {embedding_status} "
                     f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
                     f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
                     f"{stats['embedded']} entities embedded, "
                     f"{stats['skipped']} skipped, "
-                    f"{stats['errors']} errors"
+                    f"{stats['errors']} errors, "
+                    f"{stats['deferred']} with pending chunks"
                 )
                 if stats["sample_errors"]:
                     console.print(
@@ -501,6 +539,8 @@ async def _reindex(
                     )
                 embedding_entities_total += stats["total_entities"]
                 embedding_errors_total += stats["errors"]
+                if stats["deferred"]:
+                    incomplete_projects.append(proj.name)
                 if stats["total_entities"] == 0 and not search:
                     # Trigger: embeddings-only mode found no database entities.
                     # Why: this mode rebuilds derived vectors; it does not discover files.
@@ -517,6 +557,23 @@ async def _reindex(
         # Outcome: the command preserves useful output but no longer reports false success.
         if embedding_entities_total > 0 and embedding_errors_total == embedding_entities_total:
             console.print("\n[red]Reindex failed: all vector embedding attempts failed.[/red]")
+            raise typer.Exit(code=1)
+
+        # Trigger: an embedding drain stopped while entities still had pending chunks.
+        # Why: deferred work is neither embedded nor failed; reporting success would
+        # hide missing vectors from semantic search (#1726).
+        # Outcome: name the projects, point at the incremental run that continues
+        # from the stored chunks, and exit non-zero so scripts notice.
+        if incomplete_projects:
+            console.print(
+                "\n[yellow]Reindex incomplete: some entities still have pending chunks.[/yellow]"
+            )
+            for name in incomplete_projects:
+                console.print(
+                    "  Continue with "
+                    f"[green]{literal(shell_command('bm', 'reindex', '--embeddings', '--project', name))}[/green] "
+                    "(without --full, which would start over)."
+                )
             raise typer.Exit(code=1)
 
         console.print("\n[green]Reindex complete![/green]")

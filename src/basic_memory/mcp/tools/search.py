@@ -1,7 +1,7 @@
 """Search tools for Basic Memory MCP server."""
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import Annotated, List, Optional, Dict, Any, Literal, cast
@@ -22,7 +22,7 @@ from basic_memory.utils import (
     parse_tags,
     strict_search_tags,
 )
-from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.async_client import get_client, routes_off_host
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.index_readiness import project_index_required
 from basic_memory.mcp.project_context import (
@@ -41,6 +41,7 @@ from basic_memory.schemas.search import (
     SearchRetrievalMode,
 )
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
+from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
 _SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
 _NO_SEARCH_CRITERIA_MESSAGE = (
@@ -51,6 +52,17 @@ _NO_SEARCH_CRITERIA_MESSAGE = (
 )
 # Alias common column/model names to their frontmatter key equivalents. Users often
 # pass "note_type" (the entity model column) when the frontmatter field is "type".
+
+METADATA_FILTERS_DESCRIPTION = (
+    "Structured frontmatter filters, {field: condition}. Nested fields use dot notation "
+    '("schema.confidence"). Conditions: a value for equality ({"status": "draft"}); null '
+    'for absent-or-null ({"owner": null}); a list for array-contains-all ({"tags": ["a", "b"]}); '
+    "or an operator object using $gt, $gte, $lt, $lte, $in (list), $between ([min, max]), "
+    '$contains (value or list), $exists (true/false), e.g. {"priority": {"$in": ["high"]}}. '
+    'Several operators on one field AND together: {"started": {"$gte": "2026-01-01", '
+    '"$lt": "2026-02-01"}}. The leading $ is optional.'
+)
+
 _METADATA_KEY_ALIASES = {"note_type": "type"}
 _VALID_SEARCH_TYPES = ("hybrid", "permalink", "semantic", "text", "title", "vector")
 
@@ -184,10 +196,32 @@ def _compact_search_response(response: SearchResponse) -> SearchResponse:
     )
 
 
-def _default_search_type() -> str:
-    """Pick default search mode from config, falling back to auto-detection.
+# Uppercase AND/OR/NOT standing alone (or beside parentheses) is full-text query syntax.
+_BOOLEAN_OPERATOR = re.compile(r"(?<![^\s()])(?:AND|OR|NOT)(?![^\s()])")
 
-    Priority: config default_search_type > auto-detect (hybrid if semantic enabled, else text).
+
+def _search_type_for(
+    search_type: str | None, query: str | None, project_names: Sequence[str]
+) -> str:
+    """The search type to run: the caller's choice, else a default suited to the query.
+
+    Trigger: no explicit search_type and the query uses Boolean operators.
+    Why: the vector half of hybrid search has no notion of NOT or AND, so it adds back
+         notes the Boolean expression excludes ("coffee NOT pour" returned the note
+         about pour-over).
+    Outcome: such queries run as full-text search; others use the configured default.
+    """
+    if search_type:
+        return search_type
+    if query and _BOOLEAN_OPERATOR.search(query):
+        return "text"
+    return _default_search_type(project_names)
+
+
+def _default_search_type(project_names: Sequence[str]) -> str:
+    """Pick default search mode from config, falling back to what the target can run.
+
+    Priority: config default_search_type > hybrid where vector search can run > text.
     """
     try:
         config = get_container().config
@@ -197,7 +231,13 @@ def _default_search_type() -> str:
     if config.default_search_type:
         return config.default_search_type
 
-    return "hybrid" if config.semantic_search_enabled else "text"
+    # A host that cannot load sqlite-vec runs keyword-only (#711); defaulting to
+    # hybrid there would turn every plain search into a semantic-unavailable error.
+    # Searches that leave this process (Cloud, or an injected client factory) run on
+    # Cloud's Postgres, which always has vectors, so the local runtime does not
+    # limit them.
+    remote = routes_off_host(config, project_names)
+    return "hybrid" if remote or semantic_runtime_available(config) else "text"
 
 
 def _is_service_unavailable_error(error: BaseException) -> bool:
@@ -231,15 +271,17 @@ def _format_search_error_response(
     """Format helpful error responses for search failures that guide users to successful searches."""
 
     # Semantic config/dependency errors
-    if "semantic search is disabled" in error_message.lower():
+    if "semantic search is unavailable" in error_message.lower():
         return dedent(f"""
-            # Search Failed - Semantic Search Disabled
+            # Search Failed - Semantic Search Unavailable
 
-            You requested `{search_type}` search for query '{query}', but semantic search is disabled.
+            You requested `{search_type}` search for query '{query}', but the vector search
+            runtime failed to load when Basic Memory started, so search is keyword-only.
 
-            ## How to enable
-            1. Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true`
-            2. Restart the Basic Memory server/process
+            ## How to fix
+            1. Check the Basic Memory startup log for the cause (usually sqlite-vec could
+               not load under this Python build)
+            2. Reinstall under a Python with SQLite extension support, then restart
 
             ## Alternative now
             - Run FTS search instead:
@@ -850,7 +892,7 @@ async def _search_all_projects(
             return response.model_dump(mode="json", exclude_none=True)
         return _format_search_markdown(response, scope_label, query)
 
-    effective_search_type = search_type or _default_search_type()
+    effective_search_type = _search_type_for(search_type, query, [ref.name for ref in project_refs])
     search_query = _build_search_query(
         query=query,
         search_type=effective_search_type,
@@ -1085,6 +1127,9 @@ async def search_notes(
     metadata_filters: Annotated[
         Dict[str, Any] | None,
         BeforeValidator(coerce_dict),
+        # The schema description is what a client's model actually reads; the
+        # docstring's grammar section is often truncated or skimmed.
+        Field(description=METADATA_FILTERS_DESCRIPTION),
     ] = None,
     # strict_search_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to
     # match the tag: query shorthand below and write_note's documented tags convention
@@ -1202,13 +1247,17 @@ async def search_notes(
     - `search_notes("query", project="my-project", metadata_filters={"priority": {"$in": ["high"]}})`
 
     ### Structured Metadata Filters
-    Filters are exact matches on frontmatter metadata. Supported forms:
+    Filters match frontmatter metadata. Supported forms:
     - Equality: `{"status": "in-progress"}`
     - Array contains (all): `{"tags": ["security", "oauth"]}`
     - Operators:
       - `$in`: `{"priority": {"$in": ["high", "critical"]}}`
       - `$gt`, `$gte`, `$lt`, `$lte`: `{"schema.confidence": {"$gt": 0.7}}`
       - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
+      - `$contains`: `{"tags": {"$contains": "security"}}`
+      - `$exists`: `{"owner": {"$exists": true}}` (has a non-null value)
+    - Several operators on one key AND together: `{"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}`
+    - The `$` is optional: `{"started": {"gte": "2026-01-01"}}` works too.
     - Nested keys use dot notation (e.g., `"schema.confidence"`).
 
     ### Filter-only Searches
@@ -1584,7 +1633,7 @@ async def search_notes(
                 )
                 if is_memory_url:
                     query = resolved_query
-            effective_search_type = search_type or _default_search_type()
+            effective_search_type = _search_type_for(search_type, query, [active_project.name])
             if is_memory_url:
                 effective_search_type = "permalink"
 

@@ -71,7 +71,8 @@ def _exact_external_id(identifier: str) -> str | None:
         "Read a markdown note by title or permalink, optionally a numbered line range. "
         "If the identifier doesn't resolve directly, a note whose title matches it "
         "exactly (case-insensitive) is returned with full content; otherwise it returns "
-        "related-note suggestions from text search instead of content."
+        "related-note suggestions from text search instead of content. Pass "
+        "include_content=false to get only the note's metadata and checksum."
     ),
     tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
@@ -107,6 +108,7 @@ async def read_note(
     context: Context | None = None,
     start_line: int | None = None,
     end_line: int | None = None,
+    include_content: bool = True,
 ) -> str | dict[str, Any]:
     """Return the raw markdown for a note, or guidance text if no match is found.
 
@@ -162,10 +164,16 @@ async def read_note(
             With either bound, text output is numbered and JSON carries coordinates,
             has_more, and next_start_line/next_end_line. include_frontmatter does
             not strip an explicitly addressed range. Edits between calls may shift lines.
+        include_content: Default true. Set to false to return only the note's metadata —
+            title, permalink, file_path, the full accepted-revision checksum, and
+            updated_at — without the body. Use it to refresh the checksum that
+            edit_note/write_note take as expected_checksum without reading the whole
+            note. Cannot be combined with start_line/end_line.
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        Markdown content, a numbered line scan, or helpful guidance if not found.
+        Markdown content, a numbered line scan, note metadata, or helpful guidance if
+        not found.
 
     Examples:
         # Read by permalink
@@ -179,6 +187,9 @@ async def read_note(
 
         # Read recent meeting notes
         read_note(identifier="Weekly Standup", project="team-docs")
+
+        # Fetch only the metadata and current checksum, without the body
+        read_note(identifier="specs/search-spec", project="my-research", include_content=False)
 
         # Page through fallback-search suggestions when nothing matches directly
         read_note("unknown topic", page=2, page_size=5)
@@ -205,6 +216,11 @@ async def read_note(
     if end_line is not None and end_line < (start_line or 1):
         raise ValueError(f"end_line must be >= start_line, got {end_line}")
     line_scan = start_line is not None or end_line is not None
+    if line_scan and not include_content:
+        raise ValueError("include_content=False cannot be combined with start_line/end_line")
+    # Metadata reads and line scans both need an exact entity, so they share the
+    # structured resolution path that JSON reads use instead of the text resource read.
+    structured_read = output_format == "json" or line_scan or not include_content
     lines_param = f"{start_line or 1}-{'' if end_line is None else end_line}" if line_scan else None
 
     # Detect project from a memory URL or permalink prefix before routing.
@@ -230,6 +246,7 @@ async def read_note(
         page_size=page_size,
         output_format=output_format,
         include_frontmatter=include_frontmatter,
+        include_content=include_content,
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -287,6 +304,8 @@ async def read_note(
             resource_client = ResourceClient(client, active_project.external_id)
 
             async def _read_resolved_note(entity_id: str) -> str | dict[str, Any]:
+                if not include_content:
+                    return await _read_note_metadata(entity_id)
                 # Only explicit line scans use the sliced API in text mode. Ordinary
                 # text reads retain their resource path; UUID JSON reads stay one GET.
                 payload = await read_note_json_by_external_id(
@@ -312,6 +331,21 @@ async def read_note(
                     "next_start_line": last + 1 if last < total else None,
                     "next_end_line": min(total, last + width) if last < total else None,
                 }
+
+            async def _read_note_metadata(entity_id: str) -> str | dict[str, Any]:
+                # One entity GET carries the accepted checksum; the body it also
+                # returns stays in-process and never reaches the caller.
+                entity = await knowledge_client.get_entity(entity_id)
+                metadata = {
+                    "title": entity.title,
+                    "permalink": entity.permalink,
+                    "file_path": entity.file_path,
+                    "checksum": entity.db_checksum,
+                    "updated_at": entity.updated_at.isoformat(),
+                }
+                if output_format == "json":
+                    return metadata
+                return format_note_metadata(metadata)
 
             def _not_found_json_payload() -> dict[str, Any]:
                 return {
@@ -373,7 +407,7 @@ async def read_note(
                 # JSON searches return a dict even when empty. Text here is a
                 # formatted search failure, not evidence that the note is absent.
                 if not isinstance(response, dict):
-                    if output_format == "json" or line_scan:
+                    if structured_read:
                         raise RuntimeError(f"Fallback search failed: {response}")
                     return {}
                 return cast(dict[str, object], response)
@@ -394,7 +428,7 @@ async def read_note(
                 return value if isinstance(value, str) and value else None
 
             resolver_miss = False
-            if output_format == "json" or line_scan:
+            if structured_read:
                 exact_external_id = _exact_external_id(entity_path)
                 if exact_external_id is not None:
                     try:
@@ -518,7 +552,7 @@ async def read_note(
                     logger.info(f"No exact title match found for: {identifier}")
                     break
 
-            if result is not None and (output_format == "json" or line_scan):
+            if result is not None and structured_read:
                 # An exact candidate identifies a note; retrieval failures must surface
                 # as operational errors instead of suggesting that it is missing.
                 entity_id = _result_external_id(result)
@@ -571,6 +605,19 @@ async def read_note(
                 ]
                 return payload
             return format_related_results(active_project.name, identifier, text_candidates)
+
+
+def format_note_metadata(metadata: dict[str, Any]) -> str:
+    """Format a metadata-only read as plain key/value lines.
+
+    The checksum is printed in full: it is the token edit_note and write_note take
+    as expected_checksum, so a truncated one would be useless.
+    """
+    lines = ["# Note metadata"]
+    lines.extend(
+        f"{key}: {value if value is not None else 'unknown'}" for key, value in metadata.items()
+    )
+    return "\n".join(lines)
 
 
 def format_not_found_message(project: str | None, identifier: str) -> str:

@@ -66,7 +66,9 @@ Related ecosystem context:
 - Basic Memory does not execute note content as code. Notes are returned as
   data to the LLM.
 - Basic Memory does not open network ports by default. The MCP server uses
-  stdio; the optional REST API is intended for localhost use.
+  stdio; the optional REST API is intended for localhost use. The optional
+  `streamable-http` and `sse` MCP transports bind to `127.0.0.1` unless `--host`
+  says otherwise, and reject foreign `Host`/`Origin` headers on loopback.
 - Basic Memory is designed for single-user local knowledge bases and does not
   implement access controls between operating-system users.
 
@@ -75,4 +77,6 @@ Related ecosystem context:
 - MCP config `command` points to `uvx` or a trusted binary, not a shell string.
 - Project paths in Basic Memory config come from trusted local configuration.
 - If exposing the REST API, bind it only to localhost.
+- Only pass a non-loopback `--host` (such as `0.0.0.0`) to `basic-memory mcp`
+  on a trusted network. The HTTP transports have no authentication.
 - Review any third-party MCP servers before adding them to your host config.

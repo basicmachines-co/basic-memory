@@ -502,6 +502,14 @@ def setup_logging(
         logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
         return
 
+    # Trigger: a traceback is logged while a request is being handled, for example by the
+    #   API's catch-all exception handler.
+    # Why: diagnose=True calls repr() on every value named in every frame of the traceback,
+    #   synchronously. Each ASGI middleware frame holds `scope`, and under FastAPI 0.139
+    #   repr(scope) is about 190 MB (its "fastapi" entry carries the route's dependency
+    #   tree), so one unhandled exception costs seconds of CPU on the event loop.
+    # Outcome: the long-lived sinks keep the full traceback (backtrace=True) and drop the
+    #   per-frame value dump. Test mode above keeps diagnose=True.
     # Add file handler with rotation
     if log_to_file:
         # Trigger: Windows does not allow renaming an open file held by another process.
@@ -524,19 +532,21 @@ def setup_logging(
             rotation="10 MB",
             retention=5,
             backtrace=True,
-            diagnose=True,
+            diagnose=False,
             enqueue=False,
             colorize=False,
         )
 
     # Add stdout handler (for Docker/cloud)
     if log_to_stdout:
-        logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
+        logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=False, colorize=True)
 
     # Add Logfire sink when telemetry bootstrap enabled it for this process.
+    # logfire.loguru_handler() sets no diagnose, so loguru's default (True) would bring
+    # back the per-frame repr() cost on every process that ships logs to Logfire.
     logfire_handler = telemetry.get_logfire_handler()
     if logfire_handler is not None:
-        logger.add(**logfire_handler)
+        logger.add(**logfire_handler, diagnose=False)
 
     # Bind structured context for cloud observability
     if structured_context:

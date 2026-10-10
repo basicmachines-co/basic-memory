@@ -36,11 +36,43 @@ from basic_memory.read_cache import (
     read_cache_request_digest,
 )
 from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
+from basic_memory.repository.metadata_filters import parse_metadata_filters
+from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
+from basic_memory.services.search_service import SearchService
 from basic_memory.services.search_guidance import unspaced_script_query_hint
 
 # App registration mounts this router at /v2/projects/{project_id}.
 router = APIRouter(tags=["search"])
+
+
+async def _search_with_exact_count(
+    search_service: SearchService,
+    query: SearchQuery,
+    *,
+    limit: int,
+    offset: int,
+) -> tuple[list[SearchIndexRow], int]:
+    """Run the page query and its exact count together, as one owned unit of work.
+
+    Trigger: either query fails while the other is still running.
+    Why: asyncio.gather propagates the first failure but leaves its sibling
+         running with no owner — a count kept querying after its request had
+         already answered 400, then raised an exception nobody retrieved.
+    Outcome: a TaskGroup cancels the sibling and waits for it before anything
+             leaves this function. The first failure is re-raised bare, not as an
+             ExceptionGroup, so search_error_boundary maps it to the same status
+             as before.
+    """
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            results_task = task_group.create_task(
+                search_service.search(query, limit=limit, offset=offset)
+            )
+            total_task = task_group.create_task(search_service.count(query))
+    except ExceptionGroup as group:
+        raise group.exceptions[0]
+    return results_task.result(), total_task.result()
 
 
 def get_search_read_cache(
@@ -155,6 +187,12 @@ async def search(
                 return cached.value
 
             offset = (page - 1) * page_size
+            # A malformed filter is the caller's mistake, known before any query
+            # runs. Refusing it here answers 400 without scheduling the search
+            # and count queries that would each fail on the same parse.
+            if query.metadata_filters:
+                with search_error_boundary():
+                    parse_metadata_filters(query.metadata_filters)
             exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
             with search_error_boundary():
                 with logfire.span(
@@ -166,9 +204,8 @@ async def search(
                     page_size=page_size,
                 ):
                     if exact_count_available:
-                        results, total = await asyncio.gather(
-                            search_service.search(query, limit=page_size, offset=offset),
-                            search_service.count(query),
+                        results, total = await _search_with_exact_count(
+                            search_service, query, limit=page_size, offset=offset
                         )
                     else:
                         results = await search_service.search(

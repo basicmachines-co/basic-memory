@@ -100,7 +100,6 @@ def test_semantic_reindex_subprocess_exits_after_full_and_incremental_runs(tmp_p
             {
                 "projects": {"probe": {"path": str(project), "mode": "local"}},
                 "default_project": "probe",
-                "semantic_search_enabled": True,
                 "semantic_embedding_provider": "fastembed",
                 "semantic_embedding_model": "BAAI/bge-small-en-v1.5",
                 "auto_update": False,

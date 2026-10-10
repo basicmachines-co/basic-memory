@@ -9,7 +9,11 @@ import pytest
 
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+
 from typing import Any
+
+# These tests drive the provider itself, so the shared test embedder must stay out.
+pytestmark = pytest.mark.real_embedder
 
 
 class _StubVector:
@@ -634,7 +638,6 @@ async def test_factory_loads_native_model_once_across_repo_constructions(
         projects={"test-project": ProjectEntry(path="/tmp/basic-memory-test")},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_model="stub-model",
         semantic_embedding_dimensions=4,

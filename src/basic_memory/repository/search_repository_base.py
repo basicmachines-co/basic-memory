@@ -94,6 +94,9 @@ class ChunkManifestRow:
     chunk_key: str
     chunk_text: str
     source_hash: str
+    source_type: str
+    source_row_id: int
+    chunk_index: int
     entity_fingerprint: str
     embedding_model: str
     vector_index: str
@@ -117,6 +120,9 @@ class ChunkManifestRow:
             chunk_key=str(row["chunk_key"]),
             chunk_text=str(row["chunk_text"]),
             source_hash=str(row["source_hash"]),
+            source_type=str(row["source_type"]),
+            source_row_id=int(row["source_row_id"]),
+            chunk_index=int(row["chunk_index"]),
             entity_fingerprint=str(row["entity_fingerprint"]),
             embedding_model=str(row["embedding_model"]),
             vector_index=str(row["vector_index"]),
@@ -1008,11 +1014,12 @@ class SearchRepositoryBase(ABC):
             result = await session.execute(
                 text(
                     "SELECT entity_id, chunk_key, chunk_text, source_hash, "
+                    "source_type, source_row_id, chunk_index, "
                     "entity_fingerprint, embedding_model, vector_index, "
                     "embedding_status, updated_at "
                     "FROM search_vector_chunks "
                     "WHERE project_id = :project_id AND entity_id = :entity_id "
-                    "ORDER BY chunk_key"
+                    "ORDER BY source_type, source_row_id, chunk_index"
                 ),
                 {"project_id": self.project_id, "entity_id": entity_id},
             )
@@ -1498,14 +1505,14 @@ class SearchRepositoryBase(ABC):
     def _assert_semantic_available(self) -> None:
         if not self._semantic_enabled:
             raise SemanticSearchDisabledError(
-                "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true."
+                "Semantic search is unavailable: the vector runtime failed to load at "
+                "startup, so search is keyword-only. See the startup log for the cause."
             )
         if self._embedding_provider is None:
             raise SemanticDependenciesMissingError(
                 "No embedding provider configured. "
                 "Install/update basic-memory to include semantic dependencies "
-                "(pip install -U basic-memory) "
-                "and set semantic_search_enabled=true."
+                "(pip install -U basic-memory)."
             )
 
     def _build_chunk_records(self, rows: Iterable[SemanticSourceRow]) -> list[VectorChunkRecord]:
@@ -1686,6 +1693,18 @@ class SearchRepositoryBase(ABC):
     ) -> dict[int, list[VectorChunkState]]:
         """Fetch all persisted chunk state needed for one prepare window."""
         return await semantic_vector_sync.fetch_prepare_window_existing_rows(
+            self,
+            session,
+            entity_ids,
+        )
+
+    async def _fetch_prepare_window_projector_owned_entity_ids(
+        self,
+        session: AsyncSession,
+        entity_ids: list[int],
+    ) -> set[int]:
+        """Fetch the window entities whose current revision the Wiki projector wrote."""
+        return await semantic_vector_sync.fetch_prepare_window_projector_owned_entity_ids(
             self,
             session,
             entity_ids,

@@ -40,6 +40,8 @@ _PROBLEMATIC_CHARS = frozenset("\"'()[]{}+!@#$%^&=|\\~`")
 # Characters that indicate quoting for spaces, dots, colons, and hyphens followed by
 # wildcards, which FTS5 mishandles.
 _SPACE_OR_SPECIAL_CHARS = frozenset(" .:;,<>?/-")
+# A word of a multi-word query holding any of these is quoted as its own phrase.
+_WORD_QUOTING_CHARS = _PROBLEMATIC_CHARS | _SPACE_OR_SPECIAL_CHARS
 _BOOLEAN_OPERATOR_PATTERN = r"(\bAND\b|\bOR\b|\bNOT\b)"
 
 # Every FTS statement returns these columns plus a score.
@@ -71,6 +73,30 @@ def needs_quoting(term: str) -> bool:
     return any(c in _NEEDS_QUOTING_CHARS for c in term)
 
 
+def _is_caller_quoted(term: str) -> bool:
+    """Whether the whole term is one phrase the caller wrapped in double quotes."""
+    return len(term) > 2 and term.startswith('"') and term.endswith('"') and term.count('"') == 2
+
+
+def _prepare_query_word(word: str, is_prefix: bool) -> str:
+    """Prepare one word of a multi-word query as an FTS5 term or phrase."""
+    # A caller's own trailing wildcard ("cache*") is the prefix marker; it is re-added
+    # once below, after any quoting, so it never becomes "cache**".
+    caller_wildcard = word.endswith("*") and not _is_caller_quoted(word)
+    if caller_wildcard:
+        word = word.rstrip("*")
+    # A file path matches exactly; a prefix wildcard would also match "x.md.bak".
+    is_file_path = "/" in word and word.endswith(".md")
+    star = "*" if (is_prefix or caller_wildcard) and not is_file_path else ""
+    if _is_caller_quoted(word):
+        return f"{word}{star}"
+    # A "*" left anywhere but the end ("*cache") is not FTS5 syntax; quote it as text.
+    if "*" in word or any(c in _WORD_QUOTING_CHARS for c in word):
+        escaped_word = word.replace('"', '""')
+        return f'"{escaped_word}"{star}'
+    return f"{word}{star}"
+
+
 def prepare_single_term(term: str, is_prefix: bool = True) -> str:
     """Prepare one search term with no Boolean operators.
 
@@ -80,6 +106,11 @@ def prepare_single_term(term: str, is_prefix: bool = True) -> str:
         return term
 
     term = term.strip()
+
+    # A term the caller already wrapped in double quotes is an explicit FTS5 phrase;
+    # quoting it again would search for the quote characters themselves.
+    if _is_caller_quoted(term):
+        return f"{term}*" if is_prefix else term
 
     # A proper wildcard pattern ("hello*", "test*world") is left alone.
     if "*" in term and all(c.isalnum() or c in "*_-" for c in term):
@@ -101,21 +132,20 @@ def prepare_single_term(term: str, is_prefix: bool = True) -> str:
     has_spaces_or_special = any(c in _SPACE_OR_SPECIAL_CHARS for c in term)
 
     if has_problematic or has_spaces_or_special:
-        if " " in term and not has_problematic:
-            words = term.split()
-            has_special_in_words = any(
-                any(c in word for c in _SPACE_OR_SPECIAL_CHARS if c != " ") for word in words
-            )
-            if not has_special_in_words:
-                # Multi-word queries of simple words ("emoji unicode") use Boolean AND
-                # so word order does not matter.
-                prepared_words = [f"{word}*" for word in words] if is_prefix else words
-                return " AND ".join(prepared_words)
-            # Any word with special characters quotes the entire phrase.
-            escaped_term = term.replace('"', '""')
-            if is_prefix and not ("/" in term and term.endswith(".md")):
-                return f'"{escaped_term}"*'
-            return f'"{escaped_term}"'  # pragma: no cover
+        if " " in term:
+            # Trigger: a multi-word query.
+            # Why: quoting the whole query makes it one exact phrase, which needs the
+            #   words adjacent and in order, so "IT-644 cacheability" found nothing even
+            #   though both words are in the note (#1657).
+            # Outcome: every word must match, in any order. A word with FTS5-significant
+            #   punctuation ("IT-644", "#344", "config.json") is quoted as its own phrase,
+            #   and a phrase the caller quoted ("a b") stays one unit.
+            # A word with no letters or digits ("&", "--", '""') has no tokens in the
+            # index, and as an empty phrase it would make the AND match nothing.
+            words = [
+                word for word in re.findall(r'"[^"]*"|\S+', term) if any(c.isalnum() for c in word)
+            ]
+            return " AND ".join(_prepare_query_word(word, is_prefix) for word in words)
 
         # Terms with problematic characters or file paths use exact phrase matching.
         escaped_term = term.replace('"', '""')
@@ -261,14 +291,25 @@ def compile_fts_filter(
                 if script_query.word_text is not None
                 else search_text.strip()
             )
-            params["text"] = prepare_search_term(word_text)
+            prepared_text = prepare_search_term(word_text)
             # content_stems is capped for Postgres index-row compatibility, while
             # SQLite stores the complete note body in its FTS5 content_snippet column.
-            match_conditions.append(
-                "(search_index.title MATCH :text OR "
-                "search_index.content_stems MATCH :text OR "
-                "search_index.content_snippet MATCH :text)"
-            )
+            # Trigger: the query excludes a term with NOT.
+            # Why: per-column MATCH predicates OR-ed together evaluate NOT inside each
+            #      column, so "coffee NOT pour" matched a note whose title has "coffee"
+            #      while its body has "pour".
+            # Outcome: one column-filtered MATCH applies the exclusion to the whole row;
+            #      other queries keep their established per-column matching.
+            if re.search(r"\bNOT\b", prepared_text):
+                params["text"] = f"{{title content_stems content_snippet}} : ({prepared_text})"
+                match_conditions.append("search_index MATCH :text")
+            else:
+                params["text"] = prepared_text
+                match_conditions.append(
+                    "(search_index.title MATCH :text OR "
+                    "search_index.content_stems MATCH :text OR "
+                    "search_index.content_snippet MATCH :text)"
+                )
 
     if query.title:
         params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)
@@ -318,6 +359,10 @@ def compile_fts_filter(
             # question ``{"owner": None}`` asks. ``= NULL`` is never true.
             if filt.op == "is_null":
                 conditions.append(f"{extract_expr} IS NULL")
+                continue
+
+            if filt.op == "is_not_null":
+                conditions.append(f"{extract_expr} IS NOT NULL")
                 continue
 
             if filt.op == "eq":

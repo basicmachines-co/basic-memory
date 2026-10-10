@@ -641,11 +641,9 @@ def head(
 @app.command()
 def grep(
     pattern: Annotated[str, typer.Argument(help="Text to search for")],
-    literal: Annotated[
+    semantic: Annotated[
         bool,
-        typer.Option(
-            "--literal", "-F", help="Literal full-text matching instead of semantic search"
-        ),
+        typer.Option("--semantic", "-s", help="Rank by meaning instead of matching keywords"),
     ] = False,
     context_lines: Annotated[
         Optional[int],
@@ -654,7 +652,7 @@ def grep(
             "--context-lines",
             min=0,
             max=10,
-            help="Compact literal line matches with surrounding context (requires -F)",
+            help="Compact line matches with surrounding context (not with --semantic)",
         ),
     ] = None,
     max_matches: Annotated[
@@ -672,13 +670,13 @@ def grep(
     local: LocalOption = False,
     cloud: CloudOption = False,
 ) -> None:
-    """Search note content, semantically by default (-F for literal matching).
+    """Search note content by keyword (--semantic to rank by meaning).
 
     Examples:
 
-    bm grep -F "retry" -C 3 --plain
-    bm grep "auth token rotation"
-    bm grep -F "BASIC_MEMORY_FORCE_LOCAL"
+    bm grep "retry" -C 3 --plain
+    bm grep --semantic "auth token rotation"
+    bm grep "BASIC_MEMORY_FORCE_LOCAL"
     bm grep "deploy checklist" --page-size 20 --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -693,7 +691,7 @@ def grep(
             result = run_with_cleanup(
                 mcp_grep(
                     pattern,
-                    literal=literal,
+                    semantic=semantic,
                     context_lines=context_lines,
                     max_matches=max_matches,
                     page=page,

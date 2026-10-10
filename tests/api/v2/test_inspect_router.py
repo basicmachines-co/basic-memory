@@ -15,6 +15,7 @@ from basic_memory.models import Project
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
+    SemanticSearchDisabledError,
 )
 from basic_memory.repository.semantic_chunking import (
     build_entity_fingerprint,
@@ -78,10 +79,10 @@ async def _seed_current_manifest(search_repository, session_maker, entity_id: in
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, :source_hash, "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, :source_hash, "
                 ":entity_fingerprint, :embedding_model, :vector_index, 'ready')"
             ),
             [
@@ -89,6 +90,9 @@ async def _seed_current_manifest(search_repository, session_maker, entity_id: in
                     "project_id": search_repository.project_id,
                     "entity_id": entity_id,
                     "chunk_key": record["chunk_key"],
+                    "source_type": record["source_type"],
+                    "source_row_id": record["source_row_id"],
+                    "chunk_index": record["chunk_index"],
                     "chunk_text": record["chunk_text"],
                     "source_hash": record["source_hash"],
                     "entity_fingerprint": fingerprint,
@@ -121,7 +125,10 @@ async def test_inspect_chunks_returns_valid_schema_for_seeded_corpus(
         search_service=search_service,
         file_service=file_service,
     )
-    chunk_count = await _seed_current_manifest(search_repository, session_maker, entity.id)
+    # Embed for real (the test embedder keeps it fast), so the manifest and the
+    # physical vectors agree the way they do after a normal write.
+    sync = await search_service.sync_entity_vectors_batch([entity.id])
+    chunk_count = sync.chunks_total
 
     response = await client.post(
         f"{v2_project_url}/inspect/chunks",
@@ -235,51 +242,6 @@ async def test_inspect_chunks_returns_404_for_unresolved_identifier(
 
 
 @pytest.mark.asyncio
-async def test_inspect_chunks_semantic_disabled_returns_rows_only(
-    client: AsyncClient,
-    v2_project_url: str,
-    test_project: Project,
-    app_config,
-    entity_repository,
-    search_service,
-    file_service,
-):
-    assert app_config.semantic_search_enabled is False
-    entity = await _create_indexed_entity(
-        test_project=test_project,
-        title="Rows Only Inspection",
-        file_name="rows-only-inspection.md",
-        entity_repository=entity_repository,
-        search_service=search_service,
-        file_service=file_service,
-    )
-    async with db.scoped_session(search_service.session_maker) as session:
-        await session.execute(text("DROP TABLE search_vector_chunks"))
-        await session.commit()
-
-    response = await client.post(
-        f"{v2_project_url}/inspect/chunks",
-        json={"identifier": entity.external_id},
-    )
-
-    assert response.status_code == 200, response.text
-    inspection = InspectChunksResponse.model_validate(response.json())
-    assert inspection.readiness.model_dump() == {
-        "total": 0,
-        "ready": 0,
-        "pending": 0,
-        "stale": 0,
-        "orphaned": 0,
-        "missing": 0,
-    }
-    assert inspection.rows
-    assert all(not row.chunks for row in inspection.rows)
-    assert inspection.detached == []
-    assert inspection.entity_fingerprint_indexed is None
-    assert inspection.stale is False
-
-
-@pytest.mark.asyncio
 async def test_inspect_query_returns_schema_for_seeded_fts_corpus(
     client: AsyncClient,
     v2_project_url: str,
@@ -358,6 +320,7 @@ async def test_inspect_query_batch_enriches_all_known_external_ids(monkeypatch):
                     reason="not_in_manifest",
                     stored_model=None,
                     stored_index=None,
+                    key=None,
                 ),
             ),
         ),
@@ -418,28 +381,16 @@ async def test_inspect_query_batch_enriches_all_known_external_ids(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_inspect_query_maps_semantic_disabled_to_400(
-    client: AsyncClient,
-    v2_project_url: str,
-):
-    response = await client.post(
-        f"{v2_project_url}/inspect/query",
-        json={"query": {"text": "inspection", "retrieval_mode": "vector"}},
-    )
-
-    assert response.status_code == 400
-    assert "Semantic search is disabled" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("error", "status_code"),
     [
         (RerankTransientError("reranker unavailable"), 503),
         (RerankProviderContractError("malformed reranker response"), 502),
+        # Semantic search becomes unavailable when sqlite-vec fails to load (#711).
+        (SemanticSearchDisabledError("Semantic search is unavailable"), 400),
     ],
 )
-async def test_inspect_query_maps_reranker_errors(
+async def test_inspect_query_maps_search_errors(
     client: AsyncClient,
     v2_project_url: str,
     app,

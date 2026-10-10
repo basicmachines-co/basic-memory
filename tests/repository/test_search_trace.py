@@ -138,6 +138,7 @@ def test_stage_builders_freeze_plain_values_and_exact_fusion_math():
                 reason="pending",
                 stored_model="embedding",
                 stored_index="index",
+                key=("entity", 3),
             ),
         ),
         effective_min_similarity=0.5,
@@ -248,12 +249,14 @@ def test_query_response_flattens_every_rejection_variant():
         adapter_match_count=7,
         hydrated_count=4,
         drops=(
-            HydrationDropped(2, "entity:2:0", 0.8, "not_in_manifest", None, None),
-            HydrationDropped(3, "entity:3:0", 0.7, "pending", "m", "i"),
-            HydrationDropped(4, "entity:4:0", 0.6, "model_mismatch", "old", "i"),
-            HydrationDropped(5, "entity:5:0", 0.5, "index_mismatch", "m", "old"),
-            HydrationDropped(10, "entity:10:0", 0.45, "readiness_changed", "m", "i"),
-            HydrationDropped(11, "malformed-key", 0.35, "not_in_manifest", None, None),
+            HydrationDropped(2, "entity:2:0", 0.8, "not_in_manifest", None, None, None),
+            HydrationDropped(3, "entity:3:0", 0.7, "pending", "m", "i", ("entity", 3)),
+            HydrationDropped(4, "entity:4:0", 0.6, "model_mismatch", "old", "i", ("entity", 4)),
+            HydrationDropped(5, "entity:5:0", 0.5, "index_mismatch", "m", "old", ("entity", 5)),
+            HydrationDropped(
+                10, "entity:10:0", 0.45, "readiness_changed", "m", "i", ("entity", 10)
+            ),
+            HydrationDropped(11, "malformed-key", 0.35, "not_in_manifest", None, None, None),
         ),
         threshold_rejections=(BelowThreshold(("entity", 6), 0.4, 0.5),),
         filter_rejections=(FilteredOut(("entity", 7)),),
@@ -291,7 +294,6 @@ def test_query_response_flattens_every_rejection_variant():
     surviving = {candidate.id: candidate for candidate in response.candidates}
     assert surviving[1].scores.vector_rank == 1
     assert surviving[1].external_id == "external-1"
-    assert surviving[2].external_id == "external-2"
     # A hydrated match rejected by the threshold keeps its owner from the chunk match,
     # so the response can still enrich it with a stable external id.
     assert surviving[6].external_id == "external-6"
@@ -304,13 +306,20 @@ def test_query_response_flattens_every_rejection_variant():
     # land after the collapse; the plan must show those losses, not jump from 5 to 1.
     row_filters = next(stage for stage in response.stages if stage.name == "row_filters")
     assert (row_filters.count_in, row_filters.count_out, row_filters.dropped) == (5, 2, 3)
-    malformed = next(candidate for candidate in response.candidates if candidate.id is None)
-    assert malformed.type is None
-    assert malformed.external_id == "external-11"
-    assert malformed.rejection_detail is not None
-    assert malformed.rejection_detail.chunk_key == "malformed-key"
-    assert malformed.matched_chunks == []
-    assert [chunk.chunk_key for chunk in malformed.dropped_chunks] == ["malformed-key"]
+    # Adapter hits the manifest no longer holds name no search row; each stays its own
+    # candidate, enriched from its owner entity.
+    unattributed = {
+        candidate.external_id: candidate
+        for candidate in response.candidates
+        if candidate.id is None
+    }
+    assert set(unattributed) == {"external-2", "external-11"}
+    stale = unattributed["external-11"]
+    assert stale.type is None
+    assert stale.rejection_detail is not None
+    assert stale.rejection_detail.chunk_key == "malformed-key"
+    assert stale.matched_chunks == []
+    assert [chunk.chunk_key for chunk in stale.dropped_chunks] == ["malformed-key"]
 
 
 def test_query_response_keeps_row_when_a_ready_chunk_survives_a_dropped_sibling():
@@ -326,6 +335,7 @@ def test_query_response_keeps_row_when_a_ready_chunk_survives_a_dropped_sibling(
                 "pending",
                 "m",
                 "i",
+                ("entity", 1),
             ),
         ),
         chunk_matches={
@@ -369,9 +379,9 @@ def test_query_response_uses_best_dropped_chunk_rejection_deterministically():
         adapter_match_count=3,
         hydrated_count=0,
         drops=(
-            HydrationDropped(1, "entity:1:2", 0.8, "pending", "m", "i"),
-            HydrationDropped(1, "entity:1:1", 0.9, "model_mismatch", "old", "i"),
-            HydrationDropped(1, "entity:1:0", 0.9, "index_mismatch", "m", "old"),
+            HydrationDropped(1, "entity:1:2", 0.8, "pending", "m", "i", ("entity", 1)),
+            HydrationDropped(1, "entity:1:1", 0.9, "model_mismatch", "old", "i", ("entity", 1)),
+            HydrationDropped(1, "entity:1:0", 0.9, "index_mismatch", "m", "old", ("entity", 1)),
         ),
     )
     trace = finalize_query_trace(
@@ -520,7 +530,6 @@ def _repository(
 ) -> tuple[BackendRepository, _TraceVectorIndex]:
     config = app_config.model_copy(
         update={
-            "semantic_search_enabled": True,
             "semantic_min_similarity": 0.0,
             "semantic_vector_k": 10,
         }
@@ -586,10 +595,10 @@ async def _seed_trace_corpus(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, 'hash', 'fingerprint', "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, 'hash', 'fingerprint', "
                 ":embedding_model, :vector_index, :embedding_status)"
             ),
             [
@@ -597,6 +606,9 @@ async def _seed_trace_corpus(
                     "project_id": repository.project_id,
                     "entity_id": entity_id,
                     "chunk_key": chunk_key,
+                    "source_type": "entity",
+                    "source_row_id": entity_id,
+                    "chunk_index": 0,
                     "chunk_text": chunk_text,
                     "embedding_model": embedding_model,
                     "vector_index": stored_index,
@@ -882,10 +894,10 @@ async def test_external_overfetch_trace_trims_to_the_candidate_window(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, 'hash', 'fingerprint', "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, 'hash', 'fingerprint', "
                 ":embedding_model, 'trace-test', 'ready')"
             ),
             [
@@ -893,6 +905,9 @@ async def test_external_overfetch_trace_trims_to_the_candidate_window(
                     "project_id": repository.project_id,
                     "entity_id": entity_id,
                     "chunk_key": f"entity:{entity_id}:0",
+                    "source_type": "entity",
+                    "source_row_id": entity_id,
+                    "chunk_index": 0,
                     "chunk_text": f"Note {entity_id} auth retrieval",
                     "embedding_model": configured_model,
                 }
@@ -908,10 +923,10 @@ async def test_external_overfetch_trace_trims_to_the_candidate_window(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, 999, 'entity:1:0', 'Stale twin', 'hash', 'fingerprint', "
+                ":project_id, 999, 'entity:1:0', 'entity', 1, 0, 'Stale twin', 'hash', 'fingerprint', "
                 ":embedding_model, 'trace-test', 'ready')"
             ),
             {"project_id": repository.project_id, "embedding_model": configured_model},
@@ -1003,10 +1018,10 @@ async def test_hybrid_trace_drops_vector_rows_cut_before_fusion(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
+                "project_id, entity_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":project_id, :entity_id, :chunk_key, :chunk_text, 'hash', 'fingerprint', "
+                ":project_id, :entity_id, :chunk_key, :source_type, :source_row_id, :chunk_index, :chunk_text, 'hash', 'fingerprint', "
                 ":embedding_model, 'trace-test', 'ready')"
             ),
             [
@@ -1014,6 +1029,9 @@ async def test_hybrid_trace_drops_vector_rows_cut_before_fusion(
                     "project_id": repository.project_id,
                     "entity_id": entity_id,
                     "chunk_key": f"entity:{entity_id}:0",
+                    "source_type": "entity",
+                    "source_row_id": entity_id,
+                    "chunk_index": 0,
                     "chunk_text": f"Note {entity_id} auth retrieval",
                     "embedding_model": configured_model,
                 }
@@ -1063,59 +1081,6 @@ async def test_hybrid_trace_drops_vector_rows_cut_before_fusion(
     assert collector.fusion is not None
     fused_keys = {entry.key for entry in collector.fusion.entries}
     assert traced_vector_rows <= fused_keys
-
-
-@pytest.mark.asyncio
-async def test_hydrated_chunk_with_malformed_key_is_an_explicit_drop(
-    session_maker,
-    test_project,
-    app_config,
-    engine_factory,
-):
-    """A ready chunk with an unparseable key must be named in the trace, not vanish."""
-    repository, vector_index = _repository(session_maker, test_project, app_config)
-    await _seed_trace_corpus(repository, vector_index)
-    configured_model = repository._embedding_model_key()
-    async with db.scoped_session(repository.session_maker) as session:
-        await session.execute(
-            text(
-                "INSERT INTO search_vector_chunks ("
-                "project_id, entity_id, chunk_key, chunk_text, source_hash, "
-                "entity_fingerprint, embedding_model, vector_index, embedding_status"
-                ") VALUES ("
-                ":project_id, 1, 'orphan-key-without-shape', 'Orphan text', 'hash', "
-                "'fingerprint', :embedding_model, 'trace-test', 'ready')"
-            ),
-            {"project_id": repository.project_id, "embedding_model": configured_model},
-        )
-    vector_index.matches = [
-        VectorMatch(VectorKey(1, "entity:1:0"), 0.95),
-        VectorMatch(VectorKey(1, "orphan-key-without-shape"), 0.9),
-    ]
-
-    collector = SearchTraceCollector()
-    results = await repository.search(
-        search_text="auth",
-        note_types=["keep"],
-        retrieval_mode=SearchRetrievalMode.VECTOR,
-        min_similarity=0.5,
-        limit=10,
-        trace=collector,
-    )
-
-    assert [(row.type, row.id) for row in results] == [("entity", 1)]
-    assert collector.vector is not None
-    malformed = [drop for drop in collector.vector.drops if drop.reason == "malformed_key"]
-    assert [(drop.chunk_key, drop.similarity) for drop in malformed] == [
-        ("orphan-key-without-shape", 0.9)
-    ]
-    assert all(
-        chunk_match.chunk_key != "orphan-key-without-shape"
-        for chunk_match in collector.vector.chunk_matches
-    )
-    # Malformed hits are drops, not output: in=2 adapter matches, out=1 served chunk.
-    assert collector.vector.adapter_match_count == 2
-    assert collector.vector.hydrated_count == 1
 
 
 @pytest.mark.asyncio
@@ -1186,7 +1151,7 @@ def test_negative_similarities_survive_without_zero_clamping():
         candidate_limit=10,
         adapter_match_count=3,
         hydrated_count=2,
-        drops=(HydrationDropped(11, "malformed-key", -0.2, "not_in_manifest", None, None),),
+        drops=(HydrationDropped(11, "malformed-key", -0.2, "not_in_manifest", None, None, None),),
         chunk_matches={
             ("entity", 1): [("entity:1:0", -0.5, 1), ("entity:1:1", -0.4, 1)],
         },
@@ -1234,10 +1199,10 @@ def test_parseable_drop_with_foreign_owner_stays_a_distinct_candidate():
         hydrated_count=1,
         drops=(
             # Live owner's sibling chunk drop merges with the live candidate as before.
-            HydrationDropped(5, "entity:5:1", 0.6, "pending", "m", "i"),
+            HydrationDropped(5, "entity:5:1", 0.6, "pending", "m", "i", ("entity", 5)),
             # Foreign owner: same parseable chunk key, different entity — a stale
             # adapter hit surviving a search-row ID reuse.
-            HydrationDropped(99, "entity:5:0", 0.55, "not_in_manifest", None, None),
+            HydrationDropped(99, "entity:5:0", 0.55, "not_in_manifest", None, None, None),
         ),
         chunk_matches={("entity", 5): [("entity:5:0", 0.9, 5)]},
     )
@@ -1274,7 +1239,7 @@ def test_foreign_owner_drop_stays_split_from_fts_returned_row():
         candidate_limit=10,
         adapter_match_count=1,
         hydrated_count=0,
-        drops=(HydrationDropped(99, "entity:5:0", 0.5, "not_in_manifest", None, None),),
+        drops=(HydrationDropped(99, "entity:5:0", 0.5, "not_in_manifest", None, None, None),),
     )
     fusion = build_fusion_stage(
         formula_version="max+0.3*min/v1",
@@ -1315,8 +1280,8 @@ def test_identically_malformed_keys_from_two_entities_stay_distinct_candidates()
         adapter_match_count=3,
         hydrated_count=1,
         drops=(
-            HydrationDropped(11, "malformed-key", 0.35, "not_in_manifest", None, None),
-            HydrationDropped(12, "malformed-key", 0.30, "not_in_manifest", None, None),
+            HydrationDropped(11, "malformed-key", 0.35, "not_in_manifest", None, None, None),
+            HydrationDropped(12, "malformed-key", 0.30, "not_in_manifest", None, None, None),
         ),
         chunk_matches={("entity", 1): [("entity:1:0", 0.9, 1)]},
     )

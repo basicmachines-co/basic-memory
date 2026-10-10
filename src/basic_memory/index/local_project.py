@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+import unicodedata
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -34,7 +35,12 @@ from basic_memory.index.project_indexing import (
     ProjectIndexScheduler,
 )
 from basic_memory.indexing.change_detector import ChangeDetector
-from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
+from basic_memory.indexing.embedding_index_planning import (
+    DeferredEmbeddingTargetSource,
+    EmbeddingBatchVectorSync,
+    EmbeddingIndexTarget,
+    RepositoryVectorSyncEntitySource,
+)
 from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchChecker,
     IndexFileBatchContentClassifier,
@@ -429,6 +435,40 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
         return indexed.checksum
 
 
+def path_spelled_exactly_on_disk(
+    base_path: Path,
+    relative_path: str,
+    entry_names_by_directory: dict[Path, frozenset[str]],
+) -> bool:
+    """Return whether every component of ``relative_path`` exists with this exact case.
+
+    On a case-insensitive filesystem (APFS, NTFS) ``stat()`` finds ``case/config.md``
+    when only ``case/Config.md`` exists, so a stat alone cannot tell a case-only rename
+    from a file that is still present. Directory listings return the stored spelling,
+    so each component is matched against its parent's listing. Names are compared in
+    NFC because APFS is also normalization-insensitive, and only case is in question.
+
+    ``entry_names_by_directory`` caches listings so a batch lists each directory once.
+    A cached listing can only prove presence: a miss is re-listed before it counts,
+    because a file created after the directory was listed is live, and confirming it
+    deleted would drop its entity and its stable external_id.
+    Listing errors propagate to the caller, which owns the absent-or-unknown decision.
+    """
+    directory = base_path
+    for name in Path(relative_path).parts:
+        wanted = unicodedata.normalize("NFC", name)
+        entry_names = entry_names_by_directory.get(directory)
+        if entry_names is None or wanted not in entry_names:
+            entry_names = frozenset(
+                unicodedata.normalize("NFC", entry) for entry in os.listdir(directory)
+            )
+            entry_names_by_directory[directory] = entry_names
+        if wanted not in entry_names:
+            return False
+        directory = directory / name
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
     """Probe the local filesystem before applying scan-planned index deletes."""
@@ -438,6 +478,7 @@ class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
     @override
     async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
         confirmed_paths: set[str] = set()
+        entry_names_by_directory: dict[Path, frozenset[str]] = {}
         for path in paths:
             # Trigger: the existence probe itself fails (permission/mount error).
             # Why: without a positive confirmation of absence, deleting would
@@ -449,7 +490,14 @@ class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
             # reconciles it once the probe works again.
             try:
                 (self.file_service.base_path / path).stat()
-                still_absent = False
+                # Trigger: stat found a file, possibly under a different case.
+                # Why: after a case-only rename the old spelling still stats on a
+                #   case-insensitive filesystem, which kept its ghost entity forever
+                #   (#1627).
+                # Outcome: the old spelling counts as absent and its row is deleted.
+                still_absent = not path_spelled_exactly_on_disk(
+                    self.file_service.base_path, path, entry_names_by_directory
+                )
             except (FileNotFoundError, NotADirectoryError):
                 still_absent = True
             except OSError as exc:
@@ -506,6 +554,7 @@ class LocalProjectIndexRuntime:
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
     completion_relation_runtime: RelationResolutionRuntime | None = None
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None
+    deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None
     index_completion_recorder: ProjectIndexCompletionRecorder | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
@@ -524,11 +573,32 @@ class LocalProjectIndexRuntimeProvider(Protocol):
 def local_project_embedding_vector_sync(
     dependencies: LocalIndexProjectDependencies,
 ) -> EmbeddingBatchVectorSync | None:
-    """Return the semantic vector sync backend when local config enables it."""
-    app_config = dependencies.entity_service.app_config
-    if app_config is None or not app_config.semantic_search_enabled:
-        return None
+    """Return the semantic vector sync backend for local indexing."""
     return dependencies.search_service
+
+
+class SemanticRuntimeProbe(Protocol):
+    """Capability that reports whether semantic embedding can run right now."""
+
+    async def semantic_effectively_enabled(self) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalDeferredEmbeddingTargetSource:
+    """List deferred embedding work only when this runtime can embed it."""
+
+    targets: DeferredEmbeddingTargetSource
+    semantic_runtime: SemanticRuntimeProbe
+
+    async def list_deferred_embedding_targets(self) -> tuple[EmbeddingIndexTarget, ...]:
+        # Trigger: the database carries deferral markers from an install that could
+        #   embed, but this Python/SQLite build fell back to keyword-only (#711).
+        # Why: resuming those entities would call into vector sync and raise, so a
+        #   no-change index pass would fail instead of degrading quietly.
+        # Outcome: no deferred targets; the markers wait for a runtime that can embed.
+        if not await self.semantic_runtime.semantic_effectively_enabled():
+            return ()
+        return await self.targets.list_deferred_embedding_targets()
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,6 +798,13 @@ class LocalProjectIndexRuntimeFactory:
                 entity_indexer=dependencies.search_service,
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
+            deferred_embedding_targets=LocalDeferredEmbeddingTargetSource(
+                targets=RepositoryVectorSyncEntitySource(
+                    session_maker=dependencies.session_maker,
+                    project_id=dependencies.project_id,
+                ),
+                semantic_runtime=dependencies.search_service,
+            ),
             index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
                 session_maker=dependencies.session_maker,
                 project_id=dependencies.project_id,
@@ -869,6 +946,7 @@ async def run_local_project_index(
             fanout_failure_recorder=runtime.fanout_failure_recorder,
             batch_size=runtime.batch_size,
             embedding_vector_sync=runtime.embedding_vector_sync,
+            deferred_embedding_targets=runtime.deferred_embedding_targets,
         )
     if runtime.completion_relation_runtime is not None:
         # Relation repair can mutate cached entity responses after the first

@@ -401,7 +401,9 @@ def test_a_team_workspace_really_does_refuse_the_personal_only_mirror(
     result = runner.invoke(cli_app, ["cloud", "bisync", "--name", PROJECT], env=WIDE_TERMINAL_ENV)
 
     assert result.exit_code == 1
-    assert "only supported on Personal workspaces" in flat(result.output)
+    assert "`bm cloud bisync` is deprecated and does not run on Team workspaces" in flat(
+        result.output
+    )
 
 
 # --- Convergence ---

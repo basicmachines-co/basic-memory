@@ -23,7 +23,6 @@ from basic_memory.repository.search_repository_base import (
 )
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
-    SemanticSearchDisabledError,
     SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
@@ -73,7 +72,6 @@ def _pending_job(entity_id: int, row_id: int, chunk_text: str) -> PendingEmbeddi
 
 def _make_repo(
     *,
-    semantic_enabled: bool = False,
     embedding_provider=None,
     semantic_postgres_prepare_concurrency: int = 4,
 ) -> PostgresSearchRepository:
@@ -84,7 +82,6 @@ def _make_repo(
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=semantic_enabled,
         semantic_postgres_prepare_concurrency=semantic_postgres_prepare_concurrency,
     )
     return PostgresSearchRepository(
@@ -154,7 +151,6 @@ class TestConstructorAutoProvider:
             projects={"test-project": "/tmp/test"},
             default_project="test-project",
             database_backend=DatabaseBackend.POSTGRES,
-            semantic_search_enabled=True,
         )
         stub = StubEmbeddingProvider()
         with patch(
@@ -174,17 +170,10 @@ class TestEnsureVectorTablesGuard:
     """Cover _ensure_vector_tables early-exit when disabled or already done."""
 
     @pytest.mark.asyncio
-    async def test_raises_when_semantic_disabled(self):
-        repo = _make_repo(semantic_enabled=False)
-        with pytest.raises(SemanticSearchDisabledError):
-            await repo._ensure_vector_tables()
-
-    @pytest.mark.asyncio
     async def test_raises_when_no_embedding_provider(self):
         # Start with semantic enabled + a stub, then remove the provider
         # to simulate the "extras not installed" state post-construction
         repo = _make_repo(
-            semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
         )
         repo._embedding_provider = None
@@ -195,7 +184,6 @@ class TestEnsureVectorTablesGuard:
     async def test_skips_when_already_initialized(self):
         """Should short-circuit when _vector_tables_initialized is True."""
         repo = _make_repo(
-            semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
         )
         repo._vector_tables_initialized = True
@@ -210,7 +198,6 @@ class TestEnsureVectorTablesSchemaBootstrapping:
     @pytest.mark.asyncio
     async def test_initialization_never_alters_chunk_table_schema(self, monkeypatch):
         repo = _make_repo(
-            semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
         )
         session = AsyncMock()
@@ -274,7 +261,6 @@ class TestRunVectorQueryEmpty:
     @pytest.mark.asyncio
     async def test_returns_empty_for_empty_embedding(self):
         repo = _make_repo(
-            semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
         )
         session = AsyncMock()
@@ -335,7 +321,6 @@ class TestDeleteEntityChunks:
 async def test_postgres_upsert_preserves_external_vector_ownership() -> None:
     """Postgres must reject an adapter switch before overwriting manifest ownership."""
     repo = _make_repo(
-        semantic_enabled=True,
         embedding_provider=StubEmbeddingProvider(),
     )
     repo._semantic_vector_index_name = "recording-b"
@@ -347,19 +332,24 @@ async def test_postgres_upsert_preserves_external_vector_ownership() -> None:
             entity_id=42,
             scheduled_records=[
                 {
-                    "chunk_key": "entity:42:0",
+                    "chunk_key": "entity:new-hash:0",
                     "chunk_text": "changed",
                     "source_hash": "new-hash",
+                    "source_type": "entity",
+                    "source_row_id": 42,
+                    "chunk_index": 0,
                 }
             ],
             existing_by_key={
-                "entity:42:0": VectorChunkState(
+                "entity:new-hash:0": VectorChunkState(
                     id=7,
-                    chunk_key="entity:42:0",
+                    chunk_key="entity:new-hash:0",
                     source_hash="old-hash",
                     entity_fingerprint="old-fingerprint",
                     embedding_model="stub:4:document",
                     has_embedding=True,
+                    source_row_id=1,
+                    chunk_index=0,
                     vector_index="recording-a",
                     embedding_status="ready",
                 )
@@ -377,7 +367,6 @@ class TestBatchPrepareWindow:
     @pytest.mark.asyncio
     async def test_sync_entity_vectors_batch_uses_shared_prepare_transactions(self, monkeypatch):
         repo = _make_repo(
-            semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
             semantic_postgres_prepare_concurrency=2,
         )
@@ -403,6 +392,9 @@ class TestBatchPrepareWindow:
                     "chunk_key": f"entity:{entity_id}:0",
                     "chunk_text": f"chunk {entity_id}",
                     "source_hash": f"hash-{entity_id}",
+                    "source_type": "entity",
+                    "source_row_id": entity_id,
+                    "chunk_index": 0,
                 }
             ]
 
@@ -437,6 +429,9 @@ class TestBatchPrepareWindow:
         )
         monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
         monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+        monkeypatch.setattr(
+            repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+        )
         monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
         monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
         monkeypatch.setattr(repo, "_prepare_entity_write_scope", _track_write_scope)
@@ -457,7 +452,6 @@ class TestBatchPrepareWindow:
 async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
     """Postgres batch sync should separate queue wait from prepare/embed/write."""
     repo = _make_repo(
-        semantic_enabled=True,
         embedding_provider=StubEmbeddingProvider(),
     )
     repo._semantic_embedding_sync_batch_size = 2
@@ -524,7 +518,6 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
 async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatch):
     """Oversized shard runs should be deferred until the last shard completes."""
     repo = _make_repo(
-        semantic_enabled=True,
         embedding_provider=StubEmbeddingProvider(),
     )
     repo._semantic_embedding_sync_batch_size = 8

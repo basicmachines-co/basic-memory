@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import override
 from uuid import UUID
@@ -25,6 +26,7 @@ from basic_memory.document_ingestion.raw_document import (
     RawDocumentWriteResult,
     RawPdfDocumentRuntime,
     build_raw_document_artifacts,
+    _run_note_link,
     build_raw_ingestion_run_markdown,
     canonical_db_checksum,
     extraction_options_checksum,
@@ -34,9 +36,13 @@ from basic_memory.document_ingestion.raw_document import (
 )
 from basic_memory.schemas.document import (
     DocumentExtractionStatus,
+    DocumentExtractionSummaryV1,
+    DocumentExtractionV1,
     DocumentIngestionStage,
     DocumentIngestionV1,
     DocumentMarkdownV1,
+    DocumentNoteFrontmatterV1,
+    document_markdown_checksum,
     parse_document_ingestion_run_markdown,
     parse_document_markdown,
 )
@@ -105,7 +111,7 @@ def test_build_raw_document_artifacts_is_typed_and_deterministic() -> None:
     assert first.document_file_path == "research/report.pdf.md"
     assert first.run_file_path == f"document-ingestion-runs/{first.run_id}.md"
     parsed = parse_document_markdown(first.document_markdown)
-    assert parsed.frontmatter.type == "document"
+    assert parsed.frontmatter.type == "extracted_text"
     assert parsed.frontmatter.source.storage_etag == "etag-1"
     assert parsed.frontmatter.extraction.status is DocumentExtractionStatus.complete
     assert parsed.frontmatter.extraction.profile == "pdf-inspector-v1"
@@ -144,6 +150,71 @@ def test_mapped_extraction_cannot_reuse_a_legacy_run() -> None:
         require_matching_raw_document(accepted_document(legacy), mapped)
 
 
+def mapped_extraction_output(page_count: int) -> PdfInspectorOutput:
+    """A text PDF whose page map has one range per page, as pdf-inspector emits."""
+    pages = [
+        f"<!-- Page {page} -->\n\nText of page {page}.\n\n" for page in range(1, page_count + 1)
+    ]
+    markdown = "".join(pages).rstrip("\n") + "\n"
+    ranges: list[DocumentPageRangeV1] = []
+    start = 0
+    for page, text in enumerate(pages, start=1):
+        end = len(markdown) if page == page_count else start + len(text)
+        ranges.append(DocumentPageRangeV1(page=page, start=start, end=end))
+        start = end
+    return PdfInspectorOutput(
+        engine_version="0.2.6",
+        pdf_type=PdfInspectorPdfType.text_based,
+        markdown=markdown,
+        page_count=page_count,
+        extracted_page_count=page_count,
+        page_map=DocumentPageMapV1(
+            body_checksum="sha256:" + hashlib.sha256(markdown.encode()).hexdigest(),
+            body_length=len(markdown),
+            pages=tuple(ranges),
+        ),
+        confidence=1.0,
+        processing_time_ms=12,
+        is_complex_layout=False,
+        has_encoding_issues=False,
+    )
+
+
+def mapped_artifacts(page_count: int = 2) -> RawDocumentArtifacts:
+    return build_raw_document_artifacts(
+        source_snapshot(),
+        mapped_extraction_output(page_count),
+        limits=PdfInspectorLimits(max_pages=500),
+        started_at=STARTED_AT,
+        extracted_at=EXTRACTED_AT,
+    )
+
+
+def frontmatter_bytes(markdown: str) -> int:
+    return len(markdown.split("\n---\n", 1)[0].encode("utf-8"))
+
+
+def test_large_extraction_keeps_the_page_map_on_the_run_note_only() -> None:
+    built = mapped_artifacts(page_count=424)
+    run_markdown = build_raw_ingestion_run_markdown(
+        built,
+        raw_checksum=document_markdown_checksum(built.document_markdown),
+        raw_created_at=STARTED_AT,
+    )
+
+    document = parse_document_markdown(built.document_markdown)
+    assert isinstance(document.frontmatter.extraction, DocumentExtractionSummaryV1)
+    assert document.frontmatter.extraction.page_count == 424
+    # Before the move, this sidecar carried about 23 KB of per-page offsets.
+    assert frontmatter_bytes(built.document_markdown) < 2_000
+    run = parse_document_ingestion_run_markdown(run_markdown)
+    assert run.frontmatter.extraction is not None
+    assert run.frontmatter.extraction.page_map is not None
+    assert len(run.frontmatter.extraction.page_map.pages) == 424
+    assert frontmatter_bytes(run_markdown) > 15_000
+    require_document_run_identity(document, run)
+
+
 def test_raw_run_note_references_the_accepted_document_checksum() -> None:
     built = artifacts()
     markdown = build_raw_ingestion_run_markdown(
@@ -159,6 +230,11 @@ def test_raw_run_note_references_the_accepted_document_checksum() -> None:
     assert run.frontmatter.output.raw.checksum == "sha256:" + "b" * 64
     assert run.frontmatter.output.raw.storage_version_id is None
     assert run.frontmatter.bm_parse_semantics is False
+    # The body is permanent wording that links the source file to its extracted
+    # text, not a status line that goes stale once materialization finishes (#1651).
+    assert "pending" not in run.body
+    assert f"[[{built.source.file_path}]]" in run.body
+    assert f"[[{built.document_file_path}]]" in run.body
 
 
 def test_extraction_options_checksum_changes_with_a_shaping_limit() -> None:
@@ -230,6 +306,62 @@ def test_require_document_run_identity_accepts_a_matching_pair() -> None:
     built = artifacts()
 
     require_document_run_identity(accepted_document(built), accepted_run(built))
+
+
+def test_require_document_run_identity_accepts_a_slim_sidecar_and_its_mapped_run() -> None:
+    built = mapped_artifacts()
+
+    require_document_run_identity(accepted_document(built), accepted_run(built))
+
+
+def test_run_note_rebuilt_from_an_accepted_slim_sidecar_matches_it() -> None:
+    """A writer finishing a run from an accepted sidecar pairs its summary with the map."""
+    built = mapped_artifacts()
+    document = accepted_document(built)
+    summary = document.frontmatter.extraction
+    assert isinstance(summary, DocumentExtractionSummaryV1)
+
+    rebuilt = summary.with_page_map(built.extraction.page_map)
+
+    assert rebuilt == built.extraction
+    run = accepted_run(replace(built, extraction=rebuilt))
+    require_document_run_identity(document, run)
+
+
+def test_require_document_run_identity_requires_the_mapped_profile_run_to_keep_its_map() -> None:
+    built = mapped_artifacts()
+    run = accepted_run(built)
+    assert run.frontmatter.extraction is not None
+    mapless = run.frontmatter.extraction.model_copy(update={"page_map": None})
+    run = run.model_copy(
+        update={"frontmatter": run.frontmatter.model_copy(update={"extraction": mapless})}
+    )
+
+    with pytest.raises(RuntimeError, match="missing its extraction page map"):
+        require_document_run_identity(accepted_document(built), run)
+
+
+def test_require_document_run_identity_compares_the_summary_fields() -> None:
+    built = mapped_artifacts()
+    run = accepted_run(built)
+    assert run.frontmatter.extraction is not None
+    changed = run.frontmatter.extraction.model_copy(update={"has_tables": True})
+    run = run.model_copy(
+        update={"frontmatter": run.frontmatter.model_copy(update={"extraction": changed})}
+    )
+
+    with pytest.raises(RuntimeError, match="does not match its ingestion run"):
+        require_document_run_identity(accepted_document(built), run)
+
+
+def test_sidecar_rejects_a_full_extraction_record_without_a_page_map() -> None:
+    document = accepted_document(artifacts())
+    full = DocumentExtractionV1.model_validate(document.frontmatter.extraction.model_dump())
+
+    with pytest.raises(ValueError, match="pass extraction.summary"):
+        DocumentNoteFrontmatterV1.model_validate(
+            {**document.frontmatter.model_dump(), "extraction": full}
+        )
 
 
 def test_require_document_run_identity_rejects_a_run_without_extraction() -> None:
@@ -374,3 +506,16 @@ async def test_raw_runtime_rejects_a_source_replaced_during_extraction() -> None
         )
 
     assert events == ["resolve", "read", "extract", "resolve"]
+
+
+@pytest.mark.parametrize("file_path", ["docs/a]]b.pdf", "docs/a|b.pdf", "docs/a\nb.pdf"])
+def test_run_note_never_wraps_a_link_breaking_path_in_a_wikilink(file_path: str) -> None:
+    """A path that would close or split [[...]] is named by description instead."""
+    link = _run_note_link(file_path, "the source file")
+
+    assert link == "the source file (path in frontmatter)"
+    assert file_path not in link
+
+
+def test_run_note_links_an_ordinary_path() -> None:
+    assert _run_note_link("docs/report.pdf", "the source file") == "[[docs/report.pdf]]"

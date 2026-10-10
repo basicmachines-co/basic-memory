@@ -42,6 +42,7 @@ from basic_memory.schemas.cloud import (
     format_workspace_selection_choices,
     workspace_matches_exact_identifier,
 )
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -62,11 +63,11 @@ def _resolve_setup_workspace(identifier: str) -> WorkspaceInfo:
         return matches[0]
 
     if not matches:
-        console.print(f"[red]No workspace matches '{identifier}'[/red]")
+        console.print(f"[red]No workspace matches '{literal(identifier)}'[/red]")
         console.print("\nAvailable workspaces:")
         console.print(format_workspace_choices(workspaces))
     else:
-        console.print(f"[red]'{identifier}' matches multiple workspaces[/red]")
+        console.print(f"[red]'{literal(identifier)}' matches multiple workspaces[/red]")
         console.print("\nDisambiguate with the workspace slug or tenant_id:")
         console.print(format_workspace_selection_choices(matches))
     raise typer.Exit(1)
@@ -93,16 +94,18 @@ def login():
 
             track(EVENT_CLOUD_LOGIN_SUCCESS)
             console.print("[green]Cloud authentication successful[/green]")
-            console.print(f"[dim]Cloud host ready: {host_url}[/dim]")
+            console.print(f"[dim]Cloud host ready: {literal(host_url)}[/dim]")
 
         except SubscriptionRequiredError as e:
             track(EVENT_CLOUD_LOGIN_SUB_REQUIRED)
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
             console.print(
                 f"OSS discount code: [bold]{OSS_DISCOUNT_CODE}[/bold] (20% off for 3 months)\n"
             )
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             console.print(
                 "[dim]Once you have an active subscription, run [bold]bm cloud login[/bold] again.[/dim]"
             )
@@ -120,7 +123,7 @@ def login():
         #   in CloudAPIError, so this single handler covers them all.
         except CloudAPIError as e:
             console.print("\n[yellow]Authenticated, but couldn't verify cloud access.[/yellow]\n")
-            console.print(f"[dim]{e}[/dim]\n")
+            console.print(f"[dim]{literal(e)}[/dim]\n")
             console.print(
                 "Your workspace may still be provisioning. Wait a moment, then check with "
                 "[bold]bm cloud status[/bold] or retry [bold]bm cloud login[/bold].\n"
@@ -150,7 +153,7 @@ def logout():
     #      `bm cloud workspace set-default` or per-project --workspace.
     if config.default_workspace is not None:
         config.default_workspace = None
-        config_manager.save_config(config)
+        config_manager.save_config(config, persist_env_keys={"default_workspace"})
 
     console.print("[dim]API key (if configured) remains available for cloud project routing.[/dim]")
 
@@ -164,7 +167,7 @@ def status() -> None:
     tokens = auth.load_tokens()
 
     console.print("[bold blue]Cloud Status[/bold blue]")
-    console.print(f"  Host: {config.cloud_host}")
+    console.print(f"  Host: {literal(config.cloud_host)}")
     console.print(
         f"  API Key: {'[green]configured[/green]' if config.cloud_api_key else '[yellow]not set[/yellow]'}"
     )
@@ -240,7 +243,7 @@ def setup(
             target = _resolve_setup_workspace(workspace)
             workspace_id: str | None = target.tenant_id
             remote_name = remote_name_for_workspace(target.slug, is_default=target.is_default)
-            console.print(f"[dim]Workspace: {target.name} ({target.slug})[/dim]")
+            console.print(f"[dim]Workspace: {literal(target.name)} ({literal(target.slug)})[/dim]")
         else:
             workspace_id = None  # default tenant
             remote_name = remote_name_for_workspace(None, is_default=True)
@@ -252,7 +255,9 @@ def setup(
         # minting so an abort wastes no credentials.
         # Outcome: stop unless the user explicitly opts in with --force.
         if rclone_remote_exists(remote_name) and not force:
-            console.print(f"[red]rclone remote '{remote_name}' is already configured.[/red]")
+            console.print(
+                f"[red]rclone remote '{literal(remote_name)}' is already configured.[/red]"
+            )
             console.print(
                 "Re-running setup mints new credentials and overwrites it. "
                 "Pass --force to reconfigure."
@@ -262,7 +267,7 @@ def setup(
         # Step 2: Get tenant info (scoped to the target workspace when given)
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
         tenant_info = run_with_cleanup(get_mount_info(workspace_id=workspace_id))
-        console.print(f"[green]Found tenant: {tenant_info.tenant_id}[/green]")
+        console.print(f"[green]Found tenant: {literal(tenant_info.tenant_id)}[/green]")
 
         # Step 3: Generate credentials for that tenant's bucket
         console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
@@ -291,12 +296,12 @@ def setup(
         )
 
     except (RcloneInstallError, BisyncError, CloudAPIError) as e:
-        console.print(f"\n[red]Setup failed: {e}[/red]")
+        console.print(f"\n[red]Setup failed: {literal(e)}[/red]")
         raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as e:
-        console.print(f"\n[red]Unexpected error during setup: {e}[/red]")
+        console.print(f"\n[red]Unexpected error during setup: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -306,7 +311,7 @@ def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disab
     config_manager = ConfigManager()
     config = config_manager.load_config()
     config.cloud_promo_opt_out = not enabled
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={"cloud_promo_opt_out"})
 
     if enabled:
         console.print("[green]Cloud promo messages enabled[/green]")
@@ -339,7 +344,7 @@ def api_key_save(
     config_manager = ConfigManager()
     config = config_manager.load_config()
     config.cloud_api_key = api_key
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={"cloud_api_key"})
 
     console.print("[green]API key saved[/green]")
     console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")
@@ -362,7 +367,7 @@ def api_key_create(
         _, _, host_url = get_cloud_config()
         host_url = host_url.rstrip("/")
 
-        console.print(f"[dim]Creating API key '{name}'...[/dim]")
+        console.print(f"[dim]Creating API key '{literal(name)}'...[/dim]")
         response = await make_api_request(
             method="POST",
             url=f"{host_url}/api/keys",
@@ -379,17 +384,17 @@ def api_key_create(
         config_manager = ConfigManager()
         config = config_manager.load_config()
         config.cloud_api_key = api_key
-        config_manager.save_config(config)
+        config_manager.save_config(config, persist_env_keys={"cloud_api_key"})
 
-        console.print(f"[green]API key '{name}' created and saved[/green]")
+        console.print(f"[green]API key '{literal(name)}' created and saved[/green]")
         console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")
         console.print("[dim]Set a project to cloud mode: bm project set-cloud <name>[/dim]")
 
     try:
         run_with_cleanup(_create_key())
     except CloudAPIError as e:
-        console.print(f"[red]Error creating API key: {e}[/red]")
+        console.print(f"[red]Error creating API key: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]Unexpected error: {e}[/red]")
+        console.print(f"[red]Unexpected error: {literal(e)}[/red]")
         raise typer.Exit(1)

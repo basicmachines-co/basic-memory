@@ -1,6 +1,7 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Any, TYPE_CHECKING, Annotated, Literal, Optional
+import json
+from typing import Any, TYPE_CHECKING, Annotated, Literal, NoReturn, Optional
 
 import frontmatter
 import logfire
@@ -32,7 +33,7 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
-from basic_memory.schemas.v2.entity import EntityResponseV2
+from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
 from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
@@ -233,6 +234,93 @@ The identifier `{identifier}` resolved to a note outside the selected project `{
 Retry with `project_id="{target_project_id}"`, or use `list_memory_projects()` to confirm the intended project before editing."""
 
 
+class EditRefused(ToolError):
+    """A failed edit, already formatted for the caller.
+
+    The outer handler in edit_note re-raises it unchanged instead of wrapping it again.
+    """
+
+
+def _raise_edit_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a failed edit as a tool error, keeping the guidance for the caller.
+
+    A returned "Edit Failed" string reads as success to MCP clients; raising makes
+    the result an error (isError) while the message still carries the same help.
+    """
+    raise EditRefused(json.dumps(payload) if output_format == "json" else text)
+
+
+def _write_was_refused(error: Exception) -> bool:
+    """Whether the API answered the write with a 4xx, so nothing was written.
+
+    The HTTP helpers raise ToolError from the HTTPStatusError when a response arrived,
+    and from the TransportError when none did.
+    """
+    cause = error.__cause__
+    return isinstance(cause, HTTPStatusError) and 400 <= cause.response.status_code < 500
+
+
+def _unknown_outcome_guidance(identifier: str, project_external_id: str) -> str:
+    """Tell the caller to check the note before retrying a write that may have landed.
+
+    The suggested read names the project by external_id: a project name can match a
+    same-named project in another workspace, where the append would look absent.
+    """
+    return (
+        "The edit may have been applied. Read the note before retrying; repeating an "
+        "append or prepend that already landed adds the content twice: "
+        f'read_note(identifier="{identifier}", project_id="{project_external_id}")'
+    )
+
+
+def _format_unknown_outcome_response(
+    error_message: str, operation: str, identifier: str, project_external_id: str
+) -> str:
+    """Format a failure that happened after the write was sent, with no refusal from the API."""
+    return f"""# Edit Outcome Unknown
+
+The {operation} on note '{identifier}' was sent, but no confirmation came back: {error_message}
+
+{_unknown_outcome_guidance(identifier, project_external_id)}"""
+
+
+def _revision_conflict_detail(error: Exception) -> dict[str, Any] | None:
+    """Return the structured body of a refused checksum precondition, else None.
+
+    The API answers a stale base checksum with a 409 whose detail is
+    {"message": ..., "db_checksum": ...} (#1445). Other 409s, such as an ambiguous
+    identifier, carry a plain string detail and keep their ordinary handling.
+    """
+    cause = error.__cause__
+    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 409:
+        return None
+    data = _extract_response_data(cause.response)
+    detail = data.get("detail") if isinstance(data, dict) else None
+    if isinstance(detail, dict) and "db_checksum" in detail:
+        return detail
+    return None
+
+
+def _format_revision_conflict_response(
+    identifier: str, current_checksum: str | None, project_external_id: str
+) -> str:
+    """Explain a refused checksum-guarded edit and the ways forward."""
+    if current_checksum is None:
+        return f"""# Edit Failed - Note Revision Conflict
+
+The note '{identifier}' no longer exists, so nothing was edited. Look the note up again
+before retrying, or drop expected_checksum to create it with append or prepend."""
+    return f"""# Edit Failed - Note Revision Conflict
+
+The note '{identifier}' changed since you read it, so nothing was edited.
+Current checksum: `{current_checksum}`
+
+Re-read the note to see what changed (or fetch just its checksum with
+`read_note(identifier="{identifier}", project_id="{project_external_id}", include_content=False)`),
+then retry with expected_checksum="{current_checksum}". Drop expected_checksum to edit
+the current revision unconditionally."""
+
+
 def _format_error_response(
     error_message: str,
     operation: str,
@@ -365,7 +453,8 @@ Error editing note '{identifier}': {error_message}
         "match exactly and appear once; a heading without leading `#` is treated as `##`. A "
         "missing or duplicate heading, or missing find_text, fails without writing. "
         "`identifier` must resolve exactly; there is no fuzzy matching. Pass `metadata` to "
-        "merge frontmatter fields in the same call."
+        "merge frontmatter fields in the same call. Pass `expected_checksum` to edit only "
+        "if the note is still the revision you read."
     ),
     tags={"notes"},
     annotations={
@@ -411,6 +500,7 @@ async def edit_note(
     expected_replacements: Optional[int] = None,
     replace_subsections: Optional[bool] = None,
     metadata: Annotated[Optional[dict[str, Any]], BeforeValidator(coerce_dict)] = None,
+    expected_checksum: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict[str, Any]:
@@ -463,6 +553,13 @@ async def edit_note(
             combined with any operation in the same call. `title` and `permalink` are
             ignored since those have their own dedicated handling; `type` is applied like
             any other frontmatter field. Key deletion is not supported.
+        expected_checksum: Optional revision precondition: the full `checksum` that
+            read_note, write_note, or edit_note returned in JSON mode (the accepted
+            revision's checksum; text output shows only its first 8 characters). When the
+            note has changed since, the edit is refused with a revision conflict that
+            names the current checksum, and nothing is written. A refused precondition
+            never auto-creates the note. To refresh a stale checksum without reading the
+            whole note, call read_note(identifier=..., include_content=False).
         output_format: "text" returns a markdown summary of the edit and the note's
             resulting observations and relations. "json" returns machine-readable edit
             metadata.
@@ -511,12 +608,19 @@ async def edit_note(
         # Update status across document (expecting exactly 2 occurrences)
         edit_note(identifier="status-report", operation="find_replace", content="In Progress", project="reports", find_text="Not Started", expected_replacements=2)
 
+        # Edit only if nobody changed the note since you read it
+        edit_note(identifier="docs/plan", operation="append", content="\\n- Next step", project="work",
+                  expected_checksum="<checksum from read_note or a previous JSON result>")
+
         # Update frontmatter fields without touching the body (any operation works;
         # append with empty content is a no-op on the body itself)
         edit_note(identifier="tickets/2026-06-18-printer-offline", operation="append", content="", project="support",
                    metadata={"status": "resolved", "closed_at": "2026-06-18T10:42:00Z"})
 
     Raises:
+        ToolError: If the edit fails or is refused (for example, the note was modified
+            concurrently). The message carries the troubleshooting guidance, or the
+            structured result in JSON mode.
         HTTPError: If project doesn't exist or is inaccessible
         ValueError: If operation is invalid or required parameters are missing
         SecurityError: If identifier attempts path traversal
@@ -567,8 +671,9 @@ async def edit_note(
                 context=context,
             )
             if detected:
-                if output_format == "json":
-                    return {
+                _raise_edit_failure(
+                    output_format,
+                    {
                         "title": None,
                         "permalink": None,
                         "file_path": None,
@@ -577,10 +682,11 @@ async def edit_note(
                         "fileCreated": False,
                         "error": "AMBIGUOUS_IDENTIFIER",
                         "project": detected,
-                    }
-                return _format_ambiguous_workspace_identifier_response(
-                    identifier=identifier,
-                    detected_project=detected,
+                    },
+                    _format_ambiguous_workspace_identifier_response(
+                        identifier=identifier,
+                        detected_project=detected,
+                    ),
                 )
 
     with logfire.span(
@@ -596,6 +702,7 @@ async def edit_note(
         expected_replacements=effective_replacements,
         replace_subsections=effective_replace_subsections,
         has_metadata=bool(metadata),
+        has_expected_checksum=expected_checksum is not None,
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -630,13 +737,19 @@ async def edit_note(
                         + ", ".join(null_keys)
                     )
 
+            # Set once the create or PATCH request leaves this process; the handler below
+            # needs it to tell a refusal from a write whose outcome is unknown.
+            write_sent = False
+            # The note the edit targets; a revision conflict re-reads it by id (#1719).
+            target_entity_id: str | None = None
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            # Use typed KnowledgeClient for API calls; the failure handler below also
+            # uses it to name the note in a revision conflict.
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
             # Use the PATCH endpoint to edit the entity
             try:
-                # Import here to avoid circular import
-                from basic_memory.mcp.clients import KnowledgeClient
-
-                # Use typed KnowledgeClient for API calls
-                knowledge_client = KnowledgeClient(client, active_project.external_id)
                 unresolved_project_route: UnresolvedProjectRouteError | None = None
                 try:
                     _, entity_identifier, _ = await resolve_project_and_path(
@@ -677,8 +790,9 @@ async def edit_note(
                         # Why: patching through the active project's endpoint would leak
                         #   an internal entity ID in a misleading 404 and cannot succeed.
                         # Outcome: stop before mutation and provide the owning project ID.
-                        if output_format == "json":
-                            return {
+                        _raise_edit_failure(
+                            output_format,
+                            {
                                 "title": None,
                                 "permalink": None,
                                 "file_path": None,
@@ -688,13 +802,19 @@ async def edit_note(
                                 "error": "CROSS_PROJECT_ENTITY",
                                 "project": active_project.name,
                                 "targetProjectId": resolved_entity.project_external_id,
-                            }
-                        return _format_cross_project_entity_response(
-                            identifier=identifier,
-                            active_project=active_project.name,
-                            target_project_id=resolved_entity.project_external_id,
+                            },
+                            _format_cross_project_entity_response(
+                                identifier=identifier,
+                                active_project=active_project.name,
+                                target_project_id=resolved_entity.project_external_id,
+                            ),
                         )
                     entity_id = resolved_entity.external_id
+                    target_entity_id = entity_id
+                except EditRefused:
+                    # The cross-project refusal above must not be read as a missing note:
+                    # its text says "Not Found", which would route it to auto-create.
+                    raise
                 except Exception as resolve_error:
                     error_msg = str(resolve_error).lower()
                     is_not_found = "entity not found" in error_msg or "not found" in error_msg
@@ -703,8 +823,13 @@ async def edit_note(
                     # Why: files written directly to disk are invisible to identifier
                     #      resolution until indexed; editing them should just work (#581)
                     # Outcome: the single file is indexed and resolution retried once
+                    # A guarded edit skips recovery: the caller read a revision that
+                    #   no longer resolves, so the note was deleted. Its file can
+                    #   outlive the delete until cleanup runs, and indexing it here
+                    #   would resurrect the note with the caller's own checksum,
+                    #   which the precondition would then accept.
                     recovered_entity_id: str | None = None
-                    if is_not_found:
+                    if is_not_found and expected_checksum is None:
                         recovered_entity_id = await _resolve_after_disk_recovery(
                             knowledge_client, entity_identifier
                         )
@@ -713,6 +838,29 @@ async def edit_note(
                         entity_id = recovered_entity_id
                     elif is_not_found and unresolved_project_route is not None:
                         raise unresolved_project_route
+                    elif is_not_found and expected_checksum is not None:
+                        # Trigger: the caller conditioned the edit on a revision it read,
+                        #   but the note no longer resolves.
+                        # Why: auto-creating would write a note the caller never saw,
+                        #   which is exactly what the precondition exists to prevent.
+                        # Outcome: the same revision conflict the API reports for a
+                        #   deleted note, with no current checksum.
+                        _raise_edit_failure(
+                            output_format,
+                            {
+                                "title": None,
+                                "permalink": None,
+                                "file_path": None,
+                                "checksum": None,
+                                "operation": operation,
+                                "fileCreated": False,
+                                "error": "NOTE_REVISION_CONFLICT",
+                                "currentChecksum": None,
+                            },
+                            _format_revision_conflict_response(
+                                identifier, None, active_project.external_id
+                            ),
+                        )
                     elif is_not_found and operation in ("append", "prepend"):
                         # Trigger: entity does not exist yet (on disk or in the index)
                         # Why: append/prepend can meaningfully create a new note from the
@@ -729,8 +877,9 @@ async def edit_note(
                                 directory=directory,
                                 project=active_project.name,
                             )
-                            if output_format == "json":
-                                return {
+                            _raise_edit_failure(
+                                output_format,
+                                {
                                     "title": title,
                                     "permalink": None,
                                     "file_path": None,
@@ -738,8 +887,10 @@ async def edit_note(
                                     "operation": operation,
                                     "fileCreated": False,
                                     "error": "SECURITY_VALIDATION_ERROR",
-                                }
-                            return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
+                                },
+                                f"# Error\n\nDirectory path '{directory}' is not allowed - "
+                                "paths must stay within project boundaries",
+                            )
 
                         entity = Entity(
                             title=title,
@@ -767,6 +918,7 @@ async def edit_note(
                             directory=directory,
                             operation=operation,
                         )
+                        write_sent = True
                         result = await knowledge_client.create_entity(entity.model_dump())
                         file_created = True
                     else:
@@ -794,7 +946,10 @@ async def edit_note(
                         edit_data["metadata"] = metadata
 
                     # Call the PATCH endpoint
-                    result = await knowledge_client.patch_entity(entity_id, edit_data)
+                    write_sent = True
+                    result = await knowledge_client.patch_entity(
+                        entity_id, edit_data, base_checksum=expected_checksum
+                    )
 
                 # --- Format response ---
                 # result is always set: either by create_entity (auto-create) or patch_entity (edit)
@@ -885,11 +1040,77 @@ async def edit_note(
                 summary_result = "\n".join(summary)
                 return add_project_metadata(summary_result, active_project.name)
 
+            except EditRefused:
+                raise
             except Exception as e:
                 logger.error(f"Error editing note: {e}")
+                # Trigger: the write was sent and the API did not answer it with a refusal
+                #   (no response arrived, or a 5xx).
+                # Why: the server may have committed it, so "refused, retry" would invite
+                #   a retry that applies an append or prepend twice.
+                # Outcome: still an error, but one that says to read the note first.
+                if write_sent and not _write_was_refused(e):
+                    _raise_edit_failure(
+                        output_format,
+                        {
+                            "title": None,
+                            "permalink": None,
+                            "file_path": None,
+                            "checksum": None,
+                            "operation": operation,
+                            "fileCreated": False,
+                            "error": "EDIT_OUTCOME_UNKNOWN",
+                            "detail": str(e),
+                            "message": _unknown_outcome_guidance(
+                                identifier, active_project.external_id
+                            ),
+                        },
+                        _format_unknown_outcome_response(
+                            str(e), operation, identifier, active_project.external_id
+                        ),
+                    )
+                # Trigger: the API refused expected_checksum because the accepted
+                #   revision moved (or the note was deleted) since the caller read it.
+                # Why: the caller needs the current checksum to rebase, not the generic
+                #   troubleshooting text.
+                # Outcome: a revision-conflict error naming the current checksum.
+                conflict = _revision_conflict_detail(e) if expected_checksum is not None else None
+                if conflict is not None:
+                    current_checksum = conflict.get("db_checksum")
+                    # Same shape as write_note's conflict (#1719): the note is named while
+                    # it still exists, as it reads now, since the winning write may have
+                    # retitled or moved it after this edit resolved it. A deleted note
+                    # (no current checksum) has no identity.
+                    named_note: EntityResolveResponse | None = None
+                    if current_checksum is not None and target_entity_id is not None:
+                        try:
+                            named_note = await knowledge_client.resolve_entity_response(
+                                target_entity_id, strict=True
+                            )
+                        except ToolError:
+                            # Deleted after the conflict: the refusal still stands and
+                            # carries its checksum; there is just nothing left to name.
+                            named_note = None
+                    _raise_edit_failure(
+                        output_format,
+                        {
+                            "title": named_note.title if named_note else None,
+                            "permalink": named_note.permalink if named_note else None,
+                            "file_path": named_note.file_path if named_note else None,
+                            "checksum": None,
+                            "operation": operation,
+                            "fileCreated": False,
+                            "error": "NOTE_REVISION_CONFLICT",
+                            "currentChecksum": current_checksum,
+                        },
+                        _format_revision_conflict_response(
+                            identifier, current_checksum, active_project.external_id
+                        ),
+                    )
                 if isinstance(e, UnresolvedProjectRouteError):
-                    if output_format == "json":
-                        return {
+                    _raise_edit_failure(
+                        output_format,
+                        {
                             "title": None,
                             "permalink": None,
                             "file_path": None,
@@ -899,13 +1120,17 @@ async def edit_note(
                             "error": "UNRESOLVED_PROJECT_ROUTE",
                             "project": active_project.name,
                             "projectRoute": e.project_prefix,
-                        }
-                    return _format_unresolved_project_route_response(
-                        error=e,
-                        active_project=active_project.name,
+                        },
+                        _format_unresolved_project_route_response(
+                            error=e,
+                            active_project=active_project.name,
+                        ),
                     )
-                if output_format == "json":
-                    return {
+                # A refused edit (for example a 409 when the note was modified
+                # concurrently) must not read as success, or the caller never retries it.
+                _raise_edit_failure(
+                    output_format,
+                    {
                         "title": None,
                         "permalink": None,
                         "file_path": None,
@@ -913,12 +1138,13 @@ async def edit_note(
                         "operation": operation,
                         "fileCreated": False,
                         "error": str(e),
-                    }
-                return _format_error_response(
-                    str(e),
-                    operation,
-                    identifier,
-                    find_text,
-                    effective_replacements,
-                    active_project.name,
+                    },
+                    _format_error_response(
+                        str(e),
+                        operation,
+                        identifier,
+                        find_text,
+                        effective_replacements,
+                        active_project.name,
+                    ),
                 )

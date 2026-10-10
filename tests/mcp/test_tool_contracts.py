@@ -57,6 +57,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "expected_replacements",
         "replace_subsections",
         "metadata",
+        "expected_checksum",
         "output_format",
     ],
     "fetch": ["id"],
@@ -73,7 +74,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     ],
     "grep": [
         "pattern",
-        "literal",
+        "semantic",
         "page",
         "page_size",
         "project",
@@ -116,6 +117,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "include_frontmatter",
         "start_line",
         "end_line",
+        "include_content",
     ],
     "recent_activity": [
         "type",

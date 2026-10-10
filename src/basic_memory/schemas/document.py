@@ -117,8 +117,13 @@ class DocumentSourceV1(_DocumentContractModel):
         return _validate_project_relative_path(value)
 
 
-class DocumentExtractionV1(_DocumentContractModel):
-    """Parser-neutral extraction diagnostics stored on the document note."""
+class _DocumentExtractionDiagnosticsV1(_DocumentContractModel):
+    """Extraction fields shared by the sidecar summary and the full run record.
+
+    Field order is serialization order, and accepted notes are compared byte for
+    byte. Both concrete shapes below therefore list their remaining fields in the
+    order the original single model used, so stored notes reassemble unchanged.
+    """
 
     engine: NonEmptyText
     engine_version: NonEmptyText
@@ -133,11 +138,6 @@ class DocumentExtractionV1(_DocumentContractModel):
     requires_ocr: StrictBool
     ocr_page_count: int = Field(ge=0, strict=True)
     pages_needing_ocr: tuple[StrictInt, ...] = ()
-    page_map: DocumentPageMapV1 | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0, strict=True)
-    has_encoding_issues: StrictBool = False
-    has_tables: StrictBool = False
-    has_columns: StrictBool = False
 
     @field_validator("extracted_at")
     @classmethod
@@ -145,9 +145,7 @@ class DocumentExtractionV1(_DocumentContractModel):
         return _require_aware_datetime(value, field_name="extracted_at")
 
     @model_validator(mode="after")
-    def validate_page_diagnostics(self) -> "DocumentExtractionV1":
-        if self.page_map is not None and len(self.page_map.pages) != self.page_count:
-            raise ValueError("page map must contain every physical page")
+    def validate_page_diagnostics(self) -> "_DocumentExtractionDiagnosticsV1":
         if self.extracted_page_count > self.page_count:
             raise ValueError("extracted_page_count cannot exceed page_count")
         if self.ocr_page_count != len(self.pages_needing_ocr):
@@ -164,6 +162,54 @@ class DocumentExtractionV1(_DocumentContractModel):
             if self.requires_ocr or self.extracted_page_count != self.page_count:
                 raise ValueError("complete extraction must cover every page without OCR gaps")
         return self
+
+
+class DocumentExtractionSummaryV1(_DocumentExtractionDiagnosticsV1):
+    """Extraction summary written on new extracted-text sidecar notes.
+
+    It deliberately has no ``page_map``. The map holds one entry per page, so a
+    long PDF would carry tens of kilobytes of offsets in every sidecar's
+    frontmatter. The ingestion-run note keeps the full :class:`DocumentExtractionV1`
+    and is the only home of the map for new extractions.
+    """
+
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0, strict=True)
+    has_encoding_issues: StrictBool = False
+    has_tables: StrictBool = False
+    has_columns: StrictBool = False
+
+    def with_page_map(self, page_map: DocumentPageMapV1 | None) -> "DocumentExtractionV1":
+        """Rebuild the full run record from a sidecar summary and its run's page map.
+
+        A writer that finishes a run note from an already accepted sidecar needs
+        the full record. The summary keeps the accepted values (``extracted_at``
+        included) and the map comes from the same deterministic extraction.
+        """
+        return DocumentExtractionV1.model_validate({**self.model_dump(), "page_map": page_map})
+
+
+class DocumentExtractionV1(_DocumentExtractionDiagnosticsV1):
+    """Full extraction record, including the page map, stored on the run note.
+
+    Sidecars written before the map moved to the run note also carry this shape;
+    see ``DocumentNoteFrontmatterV1.extraction``.
+    """
+
+    page_map: DocumentPageMapV1 | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0, strict=True)
+    has_encoding_issues: StrictBool = False
+    has_tables: StrictBool = False
+    has_columns: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_page_map_coverage(self) -> "DocumentExtractionV1":
+        if self.page_map is not None and len(self.page_map.pages) != self.page_count:
+            raise ValueError("page map must contain every physical page")
+        return self
+
+    def summary(self) -> DocumentExtractionSummaryV1:
+        """Return the sidecar's slim view: every field except the page map."""
+        return DocumentExtractionSummaryV1.model_validate(self.model_dump(exclude={"page_map"}))
 
 
 class DocumentIngestionV1(_DocumentContractModel):
@@ -223,12 +269,23 @@ class DocumentCitationSourceV1(_DocumentContractModel):
     locator: DocumentPageLocatorV1
 
 
+type DocumentNoteType = Literal["extracted_text", "document"]
+"""Allowed ``type`` values of an extracted-text sidecar note.
+
+New sidecars are ``extracted_text``. Sidecars written before the rename say
+``document``; they stay valid and keep that value, because their accepted bytes
+and checksums were computed with it and a rewrite would look like a human edit.
+"""
+
+EXTRACTED_TEXT_NOTE_TYPE: DocumentNoteType = "extracted_text"
+
+
 class DocumentNoteFrontmatterV1(_DocumentContractModel):
-    """Authoritative nested frontmatter for a ``type: document`` note."""
+    """Authoritative nested frontmatter for an extracted-text sidecar note."""
 
     schema_version: Literal["1"] = "1"
     title: NonEmptyText
-    type: Literal["document"] = "document"
+    type: DocumentNoteType = EXTRACTED_TEXT_NOTE_TYPE
     schema_ref: Literal["schema/document-extraction"] = Field(
         default="schema/document-extraction",
         validation_alias=AliasChoices("schema", "schema_ref"),
@@ -241,7 +298,15 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
     source: DocumentSourceV1
     # None keeps legacy uncited document serialization and checksums unchanged.
     sources: tuple[DocumentCitationSourceV1, ...] | None = None
-    extraction: DocumentExtractionV1
+    # New sidecars store the summary; the page map lives on the run note.
+    # Sidecars written earlier carry the full record with its page map and must
+    # still parse to the same model so they reassemble byte for byte. Trying the
+    # summary first sends any stored mapping without page_map to the summary, and
+    # extra="forbid" sends one with a page_map to the full record.
+    extraction: Annotated[
+        DocumentExtractionSummaryV1 | DocumentExtractionV1,
+        Field(union_mode="left_to_right"),
+    ]
     ingestion: DocumentIngestionV1
     document: DocumentMetadataV1 = Field(default_factory=DocumentMetadataV1)
     bm_parse_semantics: StrictBool
@@ -251,6 +316,21 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
     def require_unique_tags(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(value) != len(set(value)):
             raise ValueError("tags must be unique")
+        return value
+
+    @field_validator("extraction")
+    @classmethod
+    def require_full_record_only_with_page_map(
+        cls, value: DocumentExtractionSummaryV1 | DocumentExtractionV1
+    ) -> DocumentExtractionSummaryV1 | DocumentExtractionV1:
+        # Trigger: a writer passed the full run record without a page map.
+        # Why: the full shape is only valid on a sidecar as the legacy form that
+        #      still carries its map; a map-less one is just the summary.
+        # Outcome: fail fast so writers pass extraction.summary() explicitly.
+        if isinstance(value, DocumentExtractionV1) and value.page_map is None:
+            raise ValueError(
+                "extracted-text notes store DocumentExtractionSummaryV1; pass extraction.summary()"
+            )
         return value
 
     @field_validator("created", "modified")
@@ -792,6 +872,9 @@ def enrich_document_markdown(
     return DocumentMarkdownV1(
         frontmatter=DocumentNoteFrontmatterV1(
             title=agent_output.title,
+            # The enriched note keeps the raw note's type, legacy "document" included,
+            # so a note never changes type mid-lifecycle relative to its base_checksum.
+            type=raw_frontmatter.type,
             tags=tags,
             permalink=raw_frontmatter.permalink,
             created=raw_frontmatter.created,
@@ -809,7 +892,7 @@ def enrich_document_markdown(
 
 def _document_citation_source(
     source: DocumentSourceV1,
-    extraction: DocumentExtractionV1,
+    extraction: DocumentExtractionSummaryV1 | DocumentExtractionV1,
     locator: DocumentPageLocatorV1,
 ) -> DocumentCitationSourceV1:
     """Build a standard PDF fragment from trusted provenance, not an agent URL."""
@@ -903,7 +986,7 @@ def _validate_sha256_checksum(value: str) -> str:
 def _require_deterministic_run_id(
     *,
     source: DocumentSourceV1,
-    extraction: DocumentExtractionV1,
+    extraction: DocumentExtractionSummaryV1 | DocumentExtractionV1,
     run_id: UUID,
     pipeline_version: str,
     prompt_version: str | None,

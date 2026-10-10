@@ -18,7 +18,7 @@ from watchfiles import awatch
 from watchfiles.main import Change, FileChange
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ConfigManager, WATCH_STATUS_JSON
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.index.local_watch import (
@@ -34,7 +34,7 @@ from basic_memory.index.local_watch import (
 from basic_memory.index.storage_events import StorageEventIndexRuntime
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, shell_command
 
 
 class WatchEvent(BaseModel):
@@ -114,10 +114,7 @@ class WatchService:
         self._ignore_patterns_cache: dict[Path, set[str]] = {}
         self._sorted_watch_filter_roots: tuple[Path, ...] | None = None
         self._event_index_runtime_factory = (
-            event_index_runtime_factory
-            or LocalWatchEventIndexRuntimeFactory(
-                index_embeddings=app_config.semantic_search_enabled,
-            )
+            event_index_runtime_factory or LocalWatchEventIndexRuntimeFactory()
         )
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
@@ -317,6 +314,15 @@ class WatchService:
 
         start_time = time.time()
         project_root = local_project_root(project)
+        warn_unreadable_new_directories(
+            project,
+            changes,
+            # Current config, not the startup snapshot: `bm project set-cloud` can change
+            # the mode while this watch cycle still runs (same reason as
+            # _project_is_configured above).
+            local_index_available=ConfigManager().config.get_project_mode(project.name)
+            == ProjectMode.LOCAL,
+        )
         request = LocalWatchEventIndexRequest.from_project_changes(
             project=project,
             changes=changes,
@@ -352,3 +358,49 @@ class WatchService:
             f"duration_ms={duration_ms}"
         )
         await self.write_status()
+
+
+def warn_unreadable_new_directories(
+    project: Project, changes: set[FileChange], *, local_index_available: bool
+) -> None:
+    """Log a warning for each newly created directory in a batch that cannot be read.
+
+    Trigger: a directory reported as added cannot be listed (for example, created
+    by another user with permissions the watcher's user lacks).
+    Why: on Linux the watcher adds a watch on a new directory when it appears, and
+    when that fails the notify library discards the error. Files written into the
+    directory then produce no events and are never indexed, with nothing logged.
+    Outcome: a warning naming the directory. For a local project it also names the
+    command that indexes it once its permissions are fixed; a cloud project's local
+    copy is watched too, but the local reindex refuses cloud projects.
+    """
+    # A name starting with "-" would be read as an option; "--" ends option parsing.
+    name_args = ("--", project.name) if project.name.startswith("-") else (project.name,)
+    remedy = (
+        f"Once its permissions are fixed, run "
+        f"`{shell_command('bm', 'project', 'index', *name_args)}`."
+        if local_index_available
+        else "Fix its permissions so the watcher can read it."
+    )
+    for change, path in changes:
+        if change != Change.added:
+            continue
+        directory = Path(path)
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            with os.scandir(directory):
+                pass
+        except OSError as exc:
+            # Loguru formats the message with str.format when arguments are passed, so the
+            # path and project name go in as arguments: a directory named "{foo}" embedded
+            # in the message itself would raise KeyError and drop the whole batch.
+            logger.warning(
+                "New directory cannot be read, so the file watcher cannot watch it and "
+                "files written into it will not be indexed: {} ({}). {}",
+                directory,
+                exc.strerror,
+                remedy,
+                project=project.name,
+                path=str(directory),
+            )

@@ -14,6 +14,7 @@ from basic_memory.config import ConfigManager, get_project_config
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
+from basic_memory.cli.markup import literal
 
 if TYPE_CHECKING:
     from basic_memory.markdown import MarkdownProcessor
@@ -74,7 +75,9 @@ def import_projects(
 
         # Process the file
         base_path = config.home / base_folder if base_folder else config.home
-        console.print(f"\nImporting projects from {projects_json}...writing to {base_path}")
+        console.print(
+            f"\nImporting projects from {literal(projects_json)}...writing to {literal(base_path)}"
+        )
 
         # Run the import
         with projects_json.open("r", encoding="utf-8") as file:

@@ -13,6 +13,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.utils import shell_command
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -84,7 +85,7 @@ async def run_project_index(
             )
             # Background mode returns {"message": "..."}, foreground returns project-index counts.
             if "message" in data:
-                console.print(f"[green]{data['message']}[/green]")
+                console.print(f"[green]{literal(data['message'])}[/green]")
             else:
                 total_files = data.get("total_files", 0)
                 enqueued_files = data.get("enqueued_files", 0)
@@ -95,7 +96,7 @@ async def run_project_index(
                     f"(batches: {enqueued_batches}, deleted orphans: {deleted_files})"
                 )
     except (ToolError, ValueError) as e:
-        console.print(f"[red]Index failed: {e}[/red]")
+        console.print(f"[red]Index failed: {literal(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -119,7 +120,7 @@ async def report_project_readiness(project: str) -> None:
         # Trigger: readiness could not be read (project vanished, routing error).
         # Why: this is a reporting courtesy after work that already succeeded.
         # Outcome: say so and leave the caller's exit status alone.
-        console.print(f"[yellow]Could not read index status: {e}[/yellow]")
+        console.print(f"[yellow]Could not read index status: {literal(e)}[/yellow]")
         return
     # This path only runs after a local index pass, so the local command is the
     # one that can advance it.
@@ -130,17 +131,6 @@ async def report_project_readiness(project: str) -> None:
         )
     )
     console.print(f"[dim]{escape(project_item.name)}: {summary}[/dim]")
-
-
-async def index_project_and_report_readiness(project: str) -> None:
-    """Index a project, then say what state that left it in.
-
-    One coroutine so the caller opens the database once for both steps:
-    `run_with_cleanup` shuts the engine down on exit, so a second call would pay
-    the reconnect and the migration check over again.
-    """
-    await run_project_index(project, force_full=True, run_in_background=False)
-    await report_project_readiness(project)
 
 
 async def get_project_info(project: str):
@@ -167,5 +157,5 @@ async def get_project_info(project: str):
                 "[/yellow]"
             )
         else:
-            console.print(f"[red]Project info failed: {e}[/red]")
+            console.print(f"[red]Project info failed: {literal(e)}[/red]")
         raise typer.Exit(1)

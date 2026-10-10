@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
+from itertools import dropwhile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,7 +31,12 @@ from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_metadata,
 )
-from basic_memory.markdown.path_links import is_path_target, resolve_project_path
+from basic_memory.markdown.path_links import (
+    climbs_out_of_project,
+    is_path_target,
+    resolve_project_path,
+)
+from basic_memory.markdown.sections import document_lines, setext_heading_underlined_at
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -104,6 +111,8 @@ class PreparedEntityWrite:
 
     @property
     def relations(self) -> list[AcceptedRelationWrite]:
+        # A path link that climbs past the project root names no project file and
+        # never will, so it is dropped rather than kept as an unresolved relation.
         return [
             AcceptedRelationWrite(
                 relation_type=relation.type,
@@ -111,6 +120,7 @@ class PreparedEntityWrite:
                 context=relation.context,
             )
             for relation in self.entity_markdown.relations
+            if not climbs_out_of_project(relation.target, self.entity_fields.file_path)
         ]
 
     @property
@@ -594,6 +604,10 @@ def replace_section_content(
     return "\n".join([*lines[: section_line_index + 1], new_content, *lines[end_index:]])
 
 
+# A Markdown list item line: a bullet (-, *, +) or an ordered marker (1. or 1)).
+_LIST_ITEM_LINE = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
+
+
 def insert_relative_to_section(
     current_content: str,
     section_header: str,
@@ -627,20 +641,80 @@ def insert_relative_to_section(
             insert_lines = ["", *insert_lines]
         return "\n".join([*before, *insert_lines, "", *lines[index:]])
     after = lines[index + 1 :]
+    spacer = len(after) - len(list(dropwhile(lambda line: not line.strip(), after)))
+    first_content = after[spacer] if spacer < len(after) else None
+    # Trigger: a list item is inserted and the section opens with a list, either
+    #   right under the heading or after the conventional blank line.
+    # Why: a blank line between the inserted item and the list splits it in two
+    #   (#1720).
+    # Outcome: the item joins the list tightly, below any heading spacer.
+    if (
+        first_content is not None
+        and _LIST_ITEM_LINE.match(insert_lines[-1])
+        and _LIST_ITEM_LINE.match(first_content)
+    ):
+        return "\n".join([*lines[: index + 1], *after[:spacer], *insert_lines, *after[spacer:]])
+    # Anything else keeps a blank line, so an inserted paragraph never runs into
+    # the section's first paragraph.
     if after and after[0].strip():
         insert_lines.append("")
     return "\n".join([*lines[: index + 1], *insert_lines, *after])
+
+
+def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
+    """Return whether joining the texts on one newline would create a setext heading.
+
+    A setext underline turns the paragraph text directly above it into an H1 or H2, and a
+    blank line is the only thing that stops it. So appending `---` (meant as a thematic
+    break) right after a paragraph silently rewrites that paragraph into a heading, and
+    the section parser then sees a heading nobody wrote (#1585). Every other join stays a
+    single newline: a blank line between list items would turn a tight list into a loose
+    one, and ATX headings, list items and quotes can already interrupt a paragraph.
+
+    ``body_before`` is the Markdown body text that ends at the join, with no frontmatter;
+    callers decide that, because only they know whether their text is a whole note or a
+    fragment inside a body.
+    """
+    # Whether a join creates a setext heading depends on block context no line pattern
+    # captures: `2. item` after a paragraph is lazy continuation, a line inside an open
+    # fence or HTML block is not a paragraph, and `> ---` or an indented `---` can
+    # underline a paragraph inside a quote or list item. So markdown-it parses the
+    # joined body and decides; the edited note is parsed in full right after anyway.
+    before = body_before.removesuffix("\n")
+    underline_line = len(document_lines(before + "\n"))
+    return setext_heading_underlined_at(before + "\n" + text_after, underline_line)
+
+
+def _markdown_body(document: str) -> str:
+    """Return a whole note's Markdown body: the text EntityParser parses after frontmatter."""
+    return remove_frontmatter(document, strip=False) if has_frontmatter(document) else document
+
+
+def _edit_join_separator(text_before: str, text_after: str, *, body_before: str) -> str:
+    """Newlines that join an edit's text to its neighbor without changing either one."""
+    line_break = "\n" if text_before and not text_before.endswith("\n") else ""
+    # Trigger: a paragraph line would sit directly above a setext underline.
+    # Why: a single newline would promote that paragraph to a heading.
+    # Outcome: a blank line keeps the paragraph a paragraph and the underline a break.
+    if _joins_into_setext_heading(body_before, text_after):
+        return line_break + "\n"
+    return line_break
 
 
 def _prepend_after_frontmatter(current_content: str, content: str) -> str:
     if has_frontmatter(current_content):
         frontmatter_data = parse_frontmatter(current_content)
         body_content = remove_frontmatter(current_content)
-        new_body = content + ("\n" if content and not content.endswith("\n") else "")
-        new_body += body_content
+        # The prepended content opens the existing body, so it is a body fragment: any
+        # `---` block inside it is Markdown, not frontmatter.
+        separator = _edit_join_separator(content, body_content, body_before=content)
+        new_body = content + separator + body_content
         yaml_frontmatter = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
         return f"---\n{yaml_frontmatter}---\n\n{new_body.strip()}"
-    return content + ("\n" if content and not content.endswith("\n") else "") + current_content
+    # Without existing frontmatter the prepended content opens the note itself, so a
+    # frontmatter block at its start becomes the note's frontmatter.
+    separator = _edit_join_separator(content, current_content, body_before=_markdown_body(content))
+    return content + separator + current_content
 
 
 def apply_edit_operation(
@@ -653,11 +727,10 @@ def apply_edit_operation(
     replace_subsections: bool = True,
 ) -> str:
     if operation == "append":
-        return (
-            current_content
-            + ("\n" if current_content and not current_content.endswith("\n") else "")
-            + content
+        separator = _edit_join_separator(
+            current_content, content, body_before=_markdown_body(current_content)
         )
+        return current_content + separator + content
     if operation == "prepend":
         return _prepend_after_frontmatter(current_content, content)
     if operation == "find_replace":
@@ -930,6 +1003,7 @@ async def prepare_move_entity_content(
                 context=relation.context,
             )
             for relation in entity_markdown.relations
+            if not climbs_out_of_project(relation.target, file_path.as_posix())
         ),
     )
 

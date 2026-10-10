@@ -654,9 +654,9 @@ orphans behind has made the graph worse.
 With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
 
 ```bash
-bm grep -F "features [[" --page-size 200 --project <work> --json   # every chapter's cast, one call
+bm grep "features [[" --page-size 200 --project <work> --json   # every chapter's cast, one call
 bm find --meta 'note_type=theme' --fields prevalence --page-size 200  # thematic weight
-bm grep -F "doubloon" --page-size 100 --project <work>                # every mention of a symbol
+bm grep "doubloon" --page-size 100 --project <work>                # every mention of a symbol
 ```
 
 "Which characters share the most chapters" is the first line plus a local parse of each
@@ -667,10 +667,11 @@ row per indexed observation, so it neither enumerates the cast nor walks the web
 `build-context` on a *single* note is the right tool for a different question, below.
 `build-context` takes its URL as a positional argument — there is no `--url` option.
 
-`grep` defaults to semantic ranking and a page of 10, which answers "what is this about?" but
-quietly truncates "where does this appear?" — a symbol in 40 chapters comes back as 10. For
-symbol tracing, pass `-F` for literal matching and raise `--page-size`; the meaning shifts you
-are hunting are usually in the later occurrences, which the default would have dropped.
+`grep` matches keywords and returns a page of 10, which quietly truncates "where does this
+appear?" — a symbol in 40 chapters comes back as 10. For symbol tracing, raise
+`--page-size`; the meaning shifts you are hunting are usually in the later occurrences, which
+the default page would have dropped. `--semantic` ranks by meaning instead, which answers
+"what is this about?" rather than "where does this word appear?".
 
 Two more facts about `grep` rows. Matching is case-insensitive and note-level: a hit is a
 note, not a line, and there is no `-n` or context. And each row's `content` is capped at

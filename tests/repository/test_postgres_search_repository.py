@@ -28,7 +28,6 @@ from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
     _strip_nul_from_row,
 )
-from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from typing import override
@@ -548,7 +547,6 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -623,7 +621,6 @@ async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
 
     def fresh_repository() -> PostgresSearchRepository:
@@ -663,7 +660,6 @@ async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_fac
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     # Public holds storage for a different provider (8 dimensions).
     await PostgresSearchRepository(
@@ -743,7 +739,6 @@ async def test_concurrent_initializations_of_a_fresh_database_all_succeed(
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     database_name = f"vector_init_race_{uuid4().hex[:10]}"
     admin_engine = create_async_engine(engine.url, isolation_level="AUTOCOMMIT")
@@ -796,7 +791,6 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -864,7 +858,6 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -975,7 +968,6 @@ async def test_postgres_litellm_role_change_reembeds_existing_chunks(session_mak
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -1070,7 +1062,6 @@ async def test_postgres_vector_sync_shards_oversized_entity_and_resumes(
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -1158,7 +1149,6 @@ async def test_postgres_vector_mode_rejects_non_text_query(session_maker, test_p
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo = PostgresSearchRepository(
         session_maker,
@@ -1172,30 +1162,6 @@ async def test_postgres_vector_mode_rejects_non_text_query(session_maker, test_p
             title="Authentication Decisions",
             retrieval_mode=SearchRetrievalMode.VECTOR,
             search_item_types=[SearchItemType.ENTITY],
-        )
-
-
-@pytest.mark.asyncio
-async def test_postgres_vector_mode_fails_when_semantic_disabled(session_maker, test_project):
-    """Vector mode should fail fast when semantic search is disabled."""
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"test-project": "/tmp/basic-memory-test"},
-        default_project="test-project",
-        database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=False,
-    )
-    repo = PostgresSearchRepository(
-        session_maker,
-        project_id=test_project.id,
-        app_config=app_config,
-        embedding_provider=StubEmbeddingProvider(),
-    )
-
-    with pytest.raises(SemanticSearchDisabledError):
-        await repo.search(
-            search_text="auth session",
-            retrieval_mode=SearchRetrievalMode.VECTOR,
         )
 
 
@@ -1226,7 +1192,6 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo_4d = PostgresSearchRepository(
         session_maker,
@@ -1258,7 +1223,6 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         projects={"test-project": "/tmp/basic-memory-test"},
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
-        semantic_search_enabled=True,
     )
     repo_8d = PostgresSearchRepository(
         session_maker,

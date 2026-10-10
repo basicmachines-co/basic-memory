@@ -36,7 +36,12 @@ async def test_write_outcomes_preserve_identity_and_content(
     original = path.read_bytes()
 
     exists = await client.post(endpoint, json={"note": {**note, "content": "Refused"}})
-    assert exists.json() == {"kind": "already_exists", "file_path": "notes/Typed Write.md"}
+    assert exists.json() == {
+        "kind": "already_exists",
+        "file_path": "notes/Typed Write.md",
+        "external_id": entity_id,
+        "permalink": created.json()["entity"]["permalink"],
+    }
     assert path.read_bytes() == original
 
     updated = await client.post(
@@ -108,6 +113,56 @@ async def test_write_preserves_runtime_operation_overrides(
     assert response.status_code == 429
     assert response.json() == {"detail": "Runtime write limit"}
     override.assert_awaited_once()
+
+
+async def test_already_exists_from_a_create_race_names_only_the_path(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A create that loses the path to a concurrent writer cannot name the winner."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    lost_race = AsyncMock(side_effect=NoteContentMutationServiceError(409, "Note exists"))
+    monkeypatch.setattr(NoteContentMutationService, "create_note", lost_race)
+
+    response = await client.post(
+        endpoint, json={"note": {"title": "Raced", "directory": "notes", "content": "x"}}
+    )
+
+    assert response.json() == {
+        "kind": "already_exists",
+        "file_path": "notes/Raced.md",
+        "external_id": None,
+        "permalink": None,
+    }
+
+
+async def test_already_exists_from_a_create_race_names_the_winner(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A create that loses the path names the note that won it (#1634)."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    original_create = NoteContentMutationService.create_note
+
+    async def win_then_refuse(self: NoteContentMutationService, **kwargs: Any) -> Any:
+        # The concurrent writer lands first; this create then finds the path taken.
+        await original_create(self, **kwargs)
+        raise NoteContentMutationServiceError(409, "Note exists")
+
+    monkeypatch.setattr(NoteContentMutationService, "create_note", win_then_refuse)
+
+    response = await client.post(
+        endpoint, json={"note": {"title": "Raced", "directory": "notes", "content": "x"}}
+    )
+
+    body = response.json()
+    assert body["kind"] == "already_exists"
+    assert body["file_path"] == "notes/Raced.md"
+    assert body["external_id"] is not None
+    assert body["permalink"] is not None
+    assert body["permalink"].endswith("notes/raced")
 
 
 @pytest.mark.parametrize("overwrite", [False, True])
@@ -203,6 +258,9 @@ async def test_expected_checksum_replaces_only_the_revision_the_caller_read(
         "kind": "revision_conflict",
         "file_path": "notes/Conditional.md",
         "db_checksum": revision_b,
+        # The note at the path is named, so callers need not derive it (#1719).
+        "title": "Conditional",
+        "permalink": updated.json()["entity"]["permalink"],
     }
     assert path.read_bytes() == after_b
 
@@ -224,6 +282,8 @@ async def test_expected_checksum_never_creates_a_missing_note(
         "kind": "revision_conflict",
         "file_path": "notes/Deleted Since.md",
         "db_checksum": None,
+        "title": None,
+        "permalink": None,
     }
     assert not (Path(test_project.path) / "notes/Deleted Since.md").exists()
 
@@ -291,11 +351,67 @@ async def test_expected_checksum_refuses_a_note_moved_after_the_path_lookup(
         "kind": "revision_conflict",
         "file_path": "notes/Moving Target.md",
         "db_checksum": entity["db_checksum"],
+        "title": "Moving Target",
+        "permalink": entity["permalink"],
     }
     current = (await client.get(entity_url)).json()
     assert current["file_path"] == "archive/Moving Target.md"
     assert "Keep me" in current["content"]
     assert "Stale replacement" not in current["content"]
+
+
+async def test_revision_conflict_names_the_note_as_the_winning_write_left_it(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A conflict reports the note's identity after the race, not the stale lookup (#1719)."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    note = {"title": "Old Title", "directory": "notes", "content": "# Old Title\n\nBody"}
+    created = await client.post(endpoint, json={"note": note})
+    entity = created.json()["entity"]
+    entity_url = (
+        f"/v2/projects/{test_project.external_id}/knowledge/entities/{entity['external_id']}"
+    )
+    original_update = NoteContentMutationService.update_note
+    retitled = False
+
+    async def retitle_before_update(self: NoteContentMutationService, **kwargs: Any):
+        # Another writer retitles the note (through its H1) after write_note looked
+        # up the path but before the guarded replacement takes the note lock.
+        nonlocal retitled
+        if not retitled:
+            retitled = True
+            edited = await client.patch(
+                entity_url,
+                json={
+                    "operation": "find_replace",
+                    "find_text": "# Old Title",
+                    "content": "# New Title",
+                },
+            )
+            assert edited.status_code == 202, edited.text
+        return await original_update(self, **kwargs)
+
+    monkeypatch.setattr(NoteContentMutationService, "update_note", retitle_before_update)
+    response = await client.post(
+        endpoint,
+        json={
+            "note": {**note, "content": "# Old Title\n\nStale replacement"},
+            "overwrite": True,
+            "expected_checksum": entity["db_checksum"],
+        },
+    )
+
+    current = (await client.get(entity_url)).json()
+    assert current["title"] == "New Title"
+    assert response.json() == {
+        "kind": "revision_conflict",
+        "file_path": "notes/Old Title.md",
+        "db_checksum": current["db_checksum"],
+        "title": "New Title",
+        "permalink": current["permalink"],
+    }
 
 
 @pytest.mark.parametrize("conditional", [True, False], ids=["conditional", "unconditional"])
@@ -327,6 +443,8 @@ async def test_a_note_deleted_under_the_update_lock_is_a_revision_conflict_when_
             "kind": "revision_conflict",
             "file_path": "notes/Vanishing.md",
             "db_checksum": None,
+            "title": None,
+            "permalink": None,
         }
     else:
         # Without a pinned revision the missing content stays Core's backfill refusal.
@@ -355,9 +473,7 @@ async def _publication_state(
                 .order_by(RelationSearchRefresh.id)
             )
         )
-        rows = await EntityRepository(project_id=project.id).get_by_file_paths(
-            session, [file_path]
-        )
+        rows = await EntityRepository(project_id=project.id).get_by_file_paths(session, [file_path])
     return markers, entity.checksum, rows[0][1]
 
 
@@ -392,17 +508,13 @@ async def test_accepted_generation_is_pending_before_publication_starts(
     _, session_maker = engine_factory
     observed: list[tuple[list[int | None], str | None, int | None]] = []
 
-    async def fail_before_publishing(
-        self: NoteContentMutationService, publication: Any
-    ) -> None:
+    async def fail_before_publishing(self: NoteContentMutationService, publication: Any) -> None:
         markers, _, gate_checksum = await _publication_state(
             session_maker, test_project, "notes/Unpublished.md"
         )
         async with db.scoped_session(session_maker) as session:
             db_version = await session.scalar(
-                select(NoteContent.db_version).where(
-                    NoteContent.entity_id == publication.entity_id
-                )
+                select(NoteContent.db_version).where(NoteContent.entity_id == publication.entity_id)
             )
         observed.append((markers, gate_checksum, db_version))
         raise OSError("graph publication unavailable")

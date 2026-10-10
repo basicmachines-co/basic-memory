@@ -3,6 +3,8 @@
 import inspect
 
 import pytest
+
+from basic_memory.config import DatabaseBackend, ProjectMode
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -548,17 +550,18 @@ class TestSearchErrorFormatting:
         assert "The current project is not accessible" in result
         assert "Check available projects" in result
 
-    def test_format_search_error_semantic_disabled(self):
-        """Test formatting for semantic-search-disabled errors."""
+    def test_format_search_error_semantic_unavailable(self):
+        """Test formatting for errors when the vector runtime failed to load."""
         result = _format_search_error_response(
             "test-project",
-            "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true.",
+            "Semantic search is unavailable: the vector runtime failed to load at startup, "
+            "so search is keyword-only. See the startup log for the cause.",
             "semantic query",
             "vector",
         )
 
-        assert "# Search Failed - Semantic Search Disabled" in result
-        assert "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true" in result
+        assert "# Search Failed - Semantic Search Unavailable" in result
+        assert "startup log" in result
         assert 'search_type="text"' in result
 
     def test_format_search_error_semantic_dependencies_missing(self):
@@ -1036,11 +1039,13 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    # Stub get_container to return a config with semantic_search_enabled=True
     @dataclass
     class StubConfig:
-        semantic_search_enabled: bool = True
         default_search_type: str | None = None
+        database_backend: DatabaseBackend = DatabaseBackend.SQLITE
+
+        def get_project_mode(self, project_name: str) -> ProjectMode:
+            return ProjectMode.LOCAL
 
     @dataclass
     class StubContainer:
@@ -1057,70 +1062,8 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
         query="test query",
     )
 
-    # Default mode should be hybrid when semantic search is enabled
+    # Default mode is hybrid
     assert captured_payload["retrieval_mode"] == "hybrid"
-    assert captured_payload["text"] == "test query"
-
-
-@pytest.mark.asyncio
-async def test_search_notes_defaults_to_fts_when_semantic_disabled(monkeypatch):
-    """When search_type is omitted, semantic-disabled configs should default to FTS."""
-    import importlib
-    from dataclasses import dataclass
-
-    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
-
-    class StubProject:
-        name = "test-project"
-        external_id = "test-external-id"
-
-    @asynccontextmanager
-    async def fake_get_project_client(*args, **kwargs):
-        yield (object(), StubProject())
-
-    async def fake_resolve_project_and_path(
-        client, identifier, project=None, context=None, headers=None
-    ):
-        return StubProject(), identifier, False
-
-    captured_payload: dict[str, Any] = {}
-
-    class MockSearchClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def search(self, payload, page, page_size):
-            captured_payload.update(payload)
-            return SearchResponse(results=[], current_page=page, page_size=page_size)
-
-    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
-    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
-    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
-
-    # Stub get_container to return a config with semantic_search_enabled=False
-    @dataclass
-    class StubConfig:
-        semantic_search_enabled: bool = False
-        default_search_type: str | None = None
-
-    @dataclass
-    class StubContainer:
-        config: StubConfig | None = None
-
-        def __post_init__(self):
-            if self.config is None:
-                self.config = StubConfig()
-
-    monkeypatch.setattr(search_mod, "get_container", lambda: StubContainer())
-
-    await search_mod.search_notes(
-        project="test-project",
-        query="test query",
-    )
-
-    # Default mode should be FTS when semantic search is disabled
-    assert captured_payload["retrieval_mode"] == "fts"
     assert captured_payload["text"] == "test query"
 
 
@@ -1162,8 +1105,11 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
 
     @dataclass
     class StubConfig:
-        semantic_search_enabled: bool = True
         default_search_type: str | None = None
+        database_backend: DatabaseBackend = DatabaseBackend.SQLITE
+
+        def get_project_mode(self, project_name: str) -> ProjectMode:
+            return ProjectMode.LOCAL
 
     @dataclass
     class StubContainer:
@@ -1233,7 +1179,13 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
             (),
             {
                 "config": type(
-                    "Cfg", (), {"semantic_search_enabled": True, "default_search_type": None}
+                    "Cfg",
+                    (),
+                    {
+                        "default_search_type": None,
+                        "database_backend": DatabaseBackend.SQLITE,
+                        "get_project_mode": lambda self, name: ProjectMode.LOCAL,
+                    },
                 )()
             },
         )(),
@@ -1246,70 +1198,6 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
 
     # Should upgrade using ConfigManager fallback
     assert captured_payload["retrieval_mode"] == "hybrid"
-    assert captured_payload["text"] == "test query"
-
-
-@pytest.mark.asyncio
-async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_semantic_disabled(
-    monkeypatch,
-):
-    """CLI fallback config should default omitted search_type to FTS when semantic is disabled."""
-    import importlib
-
-    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
-
-    class StubProject:
-        name = "test-project"
-        external_id = "test-external-id"
-
-    @asynccontextmanager
-    async def fake_get_project_client(*args, **kwargs):
-        yield (object(), StubProject())
-
-    async def fake_resolve_project_and_path(
-        client, identifier, project=None, context=None, headers=None
-    ):
-        return StubProject(), identifier, False
-
-    captured_payload: dict[str, Any] = {}
-
-    class MockSearchClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def search(self, payload, page, page_size):
-            captured_payload.update(payload)
-            return SearchResponse(results=[], current_page=page, page_size=page_size)
-
-    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
-    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
-    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
-
-    def raise_runtime_error():
-        raise RuntimeError("MCP container not initialized")
-
-    monkeypatch.setattr(search_mod, "get_container", raise_runtime_error)
-    monkeypatch.setattr(
-        search_mod,
-        "ConfigManager",
-        lambda: type(
-            "StubConfigManager",
-            (),
-            {
-                "config": type(
-                    "Cfg", (), {"semantic_search_enabled": False, "default_search_type": None}
-                )()
-            },
-        )(),
-    )
-
-    await search_mod.search_notes(
-        project="test-project",
-        query="test query",
-    )
-
-    assert captured_payload["retrieval_mode"] == "fts"
     assert captured_payload["text"] == "test query"
 
 
@@ -2083,16 +1971,15 @@ def test_default_search_type_uses_config_value():
 
     mock_config = MagicMock()
     mock_config.default_search_type = "vector"
-    mock_config.semantic_search_enabled = True
     mock_container = MagicMock()
     mock_container.config = mock_config
 
     with patch.object(search_module, "get_container", return_value=mock_container):
-        assert search_module._default_search_type() == "vector"
+        assert search_module._default_search_type(["main"]) == "vector"
 
 
-def test_default_search_type_falls_back_to_hybrid_when_semantic_enabled():
-    """When default_search_type is None and semantic is enabled, default to hybrid."""
+def test_default_search_type_falls_back_to_hybrid():
+    """When default_search_type is None, default to hybrid."""
     import sys
     from unittest.mock import MagicMock, patch
 
@@ -2100,16 +1987,19 @@ def test_default_search_type_falls_back_to_hybrid_when_semantic_enabled():
 
     mock_config = MagicMock()
     mock_config.default_search_type = None
-    mock_config.semantic_search_enabled = True
     mock_container = MagicMock()
     mock_container.config = mock_config
 
-    with patch.object(search_module, "get_container", return_value=mock_container):
-        assert search_module._default_search_type() == "hybrid"
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        patch.object(search_module, "semantic_runtime_available", return_value=True),
+    ):
+        assert search_module._default_search_type(["main"]) == "hybrid"
 
 
-def test_default_search_type_falls_back_to_text_when_semantic_disabled():
-    """When default_search_type is None and semantic is disabled, default to text."""
+def test_default_search_type_is_text_when_the_vector_runtime_cannot_load():
+    """A host that cannot load sqlite-vec runs keyword-only (#711), so plain searches
+    default to text instead of failing as semantic-unavailable."""
     import sys
     from unittest.mock import MagicMock, patch
 
@@ -2117,12 +2007,59 @@ def test_default_search_type_falls_back_to_text_when_semantic_disabled():
 
     mock_config = MagicMock()
     mock_config.default_search_type = None
-    mock_config.semantic_search_enabled = False
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        # Injected: this host can load sqlite-vec, so the fallback is simulated.
+        patch.object(search_module, "semantic_runtime_available", return_value=False),
+    ):
+        assert search_module._default_search_type(["main"]) == "text"
+
+
+def test_default_search_type_is_hybrid_for_cloud_projects_on_a_keyword_only_host():
+    """Cloud-routed projects search on Cloud's Postgres, so a local host that cannot
+    load sqlite-vec must not downgrade them to text."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_config.get_project_mode.return_value = ProjectMode.CLOUD
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        # Injected: the local host cannot load sqlite-vec.
+        patch.object(search_module, "semantic_runtime_available", return_value=False),
+    ):
+        assert search_module._default_search_type(["cloud-notes"]) == "hybrid"
+
+
+def test_boolean_queries_default_to_text_search():
+    """Hybrid's vector half ignores NOT/AND, so default Boolean queries run as full-text."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
     mock_container = MagicMock()
     mock_container.config = mock_config
 
     with patch.object(search_module, "get_container", return_value=mock_container):
-        assert search_module._default_search_type() == "text"
+        for query in ["coffee NOT pour", "pour AND clarity", "(tea OR coffee) NOT decaf"]:
+            assert search_module._search_type_for(None, query, ["main"]) == "text", query
+        # Lowercase words and operator-like substrings are ordinary text.
+        for query in ["coffee not pour", "ORACLE notes", "ANDROID", None]:
+            assert search_module._search_type_for(None, query, ["main"]) == "hybrid", query
+        # An explicit choice always wins.
+        assert search_module._search_type_for("hybrid", "coffee NOT pour", ["main"]) == "hybrid"
 
 
 # --- Tests for note_types/entity_types/categories comma-split fix (#930, Codex review) ---

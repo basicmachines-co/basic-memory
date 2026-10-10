@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import Field, BaseModel
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from basic_memory.utils import generate_permalink
 
@@ -83,7 +83,9 @@ class EmbeddingStatus(BaseModel):
     """Embedding/vector index status for a project."""
 
     # Config
-    semantic_search_enabled: bool
+    # False on a SQLite host that cannot load sqlite-vec, where search runs
+    # keyword-only (#711) and the counts below stay empty by design.
+    vector_runtime_available: bool = True
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimensions: Optional[int] = None
@@ -101,6 +103,28 @@ class EmbeddingStatus(BaseModel):
     # Derived
     reindex_recommended: bool = False
     reindex_reason: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_legacy_semantic_field(cls, data: Any) -> Any:
+        """Servers released before the flag was removed send only semantic_search_enabled."""
+        if (
+            isinstance(data, dict)
+            and "vector_runtime_available" not in data
+            and "semantic_search_enabled" in data
+        ):
+            return {**data, "vector_runtime_available": data["semantic_search_enabled"]}
+        return data
+
+    @computed_field
+    @property
+    def semantic_search_enabled(self) -> bool:
+        """Deprecated mirror of vector_runtime_available.
+
+        CLIs released before the flag was removed require this field when they read
+        project info from an upgraded server; keep emitting it until they age out.
+        """
+        return self.vector_runtime_available
 
 
 class ProjectInfoResponse(BaseModel):

@@ -56,8 +56,18 @@ detection. Cloud prompt adoption and viewer routing are separate integration wor
 
 ## Extraction page map
 
-New pdf-inspector extractions retain `extraction.page_map` on both the document
-and ingestion-run note. Each entry has a one-based physical `page` and half-open
+New pdf-inspector extractions store `extraction.page_map` on the ingestion-run
+note (`document-ingestion-runs/<run_id>.md`) only. The extracted-text sidecar
+(`type: extracted_text`) keeps a summary of the extraction without the map,
+because the map has one entry per page and would make a long PDF's sidecar
+frontmatter tens of kilobytes. Read the map from the run note named by the
+sidecar's `ingestion.run_id`. Sidecars written before this change (with
+`type: document`) still carry a copy, which equals the run note's map.
+
+Citation assembly does not need the map. It checks a locator's page against
+the sidecar's `extraction.page_count` and builds the link from `source.file_path`.
+
+Each entry has a one-based physical `page` and half-open
 `start`/`end` offsets measured in Unicode code points, as in Python string slices.
 The ranges partition the normalized raw Markdown body, including page markers;
 inter-page separators belong to the preceding page. OCR-only pages retain a
@@ -68,8 +78,8 @@ The map carries `body_length` and a SHA-256 checksum of that body's UTF-8 bytes.
 `DocumentPageMapV1.resolve_span(body, start=..., end=...)` verifies the exact body
 before returning the physical pages intersecting a nonempty span. It rejects
 rewritten text and invalid bounds. After enrichment the map still describes the
-raw extraction revision, never the new agent-written body. Retrieve that raw
-revision before resolving a span; the source PDF checksum identifies a different
+raw extraction revision, never the new agent-written body. The run note's
+`output.raw` names that revision. Retrieve it before resolving a span; the source PDF checksum identifies a different
 artifact and cannot substitute for the body checksum.
 
 Older extractions omit the optional map and retain their serialized shape. The

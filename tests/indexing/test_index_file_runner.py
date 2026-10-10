@@ -84,6 +84,7 @@ class FakeRepositoryEntity:
     title = "Repository Note"
     permalink = "notes/repository-note"
     checksum = "storage-native-etag"
+    content_type = "text/markdown"
 
 
 class FakeNoteContentSession:
@@ -215,6 +216,7 @@ async def test_repository_current_materialized_note_source_loads_entity(
     result = await source.load_current_materialized_note_entity("notes/a.md")
 
     assert result == CurrentMaterializedNoteEntity(
+        content_type="text/markdown",
         entity_id=42,
         external_id="note-42",
         title="Repository Note",
@@ -268,6 +270,7 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
     )
     materialized_source = FakeMaterializedNoteSource(
         CurrentMaterializedNoteEntity(
+            content_type="text/markdown",
             entity_id=42,
             external_id="note-42",
             title="Created through MCP",
@@ -299,6 +302,7 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         live_update_source="mcp",
         db_version=1,
+        content_type="text/markdown",
     )
     assert metadata_source.paths == ["notes/a.md"]
     assert materialized_source.paths == ["notes/a.md"]

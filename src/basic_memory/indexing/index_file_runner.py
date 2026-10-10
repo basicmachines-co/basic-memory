@@ -142,6 +142,7 @@ class RepositoryCurrentMaterializedNoteSource:
             permalink=entity.permalink,
             storage_checksum=entity.checksum,
             content_checksum=content_checksum,
+            content_type=entity.content_type,
             file_path=file_path,
         )
 

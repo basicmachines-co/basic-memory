@@ -25,6 +25,7 @@ from basic_memory.index.local_project import (
     LocalProjectIndexScan,
     RepositoryLocalProjectIndexedFileStatSource,
     local_project_index_file_paths,
+    path_spelled_exactly_on_disk,
     run_local_project_index,
     run_local_project_index_for_project,
 )
@@ -740,6 +741,96 @@ async def test_local_project_index_delete_path_verifier_confirms_only_probed_abs
     assert confirmed == frozenset({"absent.md"})
 
 
+def test_path_spelled_exactly_on_disk_matches_case_of_every_component(tmp_path: Path) -> None:
+    """Only the stored spelling counts as present, on any filesystem.
+
+    On a case-insensitive filesystem the lowercase spellings below still stat; on a
+    case-sensitive one they do not exist at all. Both must report absent.
+    """
+    (tmp_path / "Case").mkdir()
+    (tmp_path / "Case" / "Config.md").write_bytes(b"# Config\n")
+    entry_names_by_directory: dict[Path, frozenset[str]] = {}
+
+    assert path_spelled_exactly_on_disk(tmp_path, "Case/Config.md", entry_names_by_directory)
+    assert not path_spelled_exactly_on_disk(tmp_path, "Case/config.md", entry_names_by_directory)
+    assert not path_spelled_exactly_on_disk(tmp_path, "case/Config.md", entry_names_by_directory)
+    # One listing per directory, shared across the batch.
+    assert set(entry_names_by_directory) == {tmp_path, tmp_path / "Case"}
+
+
+def test_path_spelled_exactly_on_disk_relists_a_cached_miss(tmp_path: Path) -> None:
+    """A file created after its directory was listed is present, not confirmed deleted."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "first.md").write_bytes(b"# First\n")
+    entry_names_by_directory: dict[Path, frozenset[str]] = {}
+    assert path_spelled_exactly_on_disk(tmp_path, "notes/first.md", entry_names_by_directory)
+
+    # Created after the batch cached the listing of notes/.
+    (tmp_path / "notes" / "second.md").write_bytes(b"# Second\n")
+
+    assert path_spelled_exactly_on_disk(tmp_path, "notes/second.md", entry_names_by_directory)
+
+
+def test_path_spelled_exactly_on_disk_ignores_unicode_normalization(tmp_path: Path) -> None:
+    """NFC and NFD spellings of one name are the same file; only case matters here."""
+    nfd_name = "Cafe\u0301.md"
+    (tmp_path / nfd_name).write_bytes(b"# Cafe\n")
+
+    assert path_spelled_exactly_on_disk(tmp_path, "Caf\u00e9.md", {})
+
+
+async def test_local_project_index_delete_path_verifier_confirms_case_only_mismatch(
+    tmp_path: Path,
+) -> None:
+    """A path that differs from the file on disk only in case is confirmed absent (#1627)."""
+    (tmp_path / "case").mkdir()
+    (tmp_path / "case" / "Config.md").write_bytes(b"# Config\n")
+
+    verifier = LocalProjectIndexDeletePathVerifier(file_service=FileService(tmp_path))
+    confirmed = await verifier.confirm_deleted_paths(("case/config.md", "case/Config.md"))
+
+    assert confirmed == frozenset({"case/config.md"})
+
+
+async def test_local_project_index_removes_entity_whose_path_differs_only_in_case(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+) -> None:
+    """An index pass deletes the old spelling after a case-only rename (#1627).
+
+    The new content defeats checksum move detection, so the scan plans a create for
+    `Config.md` and a delete for `config.md`. Before the fix, a case-insensitive
+    filesystem made the delete verifier see `config.md` as present, and the old
+    entity survived every later pass.
+    """
+    del config_manager
+
+    (project_config.home / "case").mkdir()
+    old_path = project_config.home / "case" / "config.md"
+    old_path.write_bytes(b"# config\n\nOriginal body.\n")
+    first = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+    assert first.enqueued_files == 1
+
+    old_path.unlink()
+    (project_config.home / "case" / "Config.md").write_bytes(b"# Config\n\nRenamed body.\n")
+
+    second = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+    )
+
+    assert second.deleted_files == 1
+    async with db.scoped_session(session_maker) as session:
+        indexed_paths = await entity_repository.get_all_file_paths(session)
+    assert [path for path in indexed_paths if path.startswith("case/")] == ["case/Config.md"]
+
+
 @dataclass(slots=True)
 class RecreatingObservedFileSource:
     """Recreate a file after the scan snapshot, simulating a concurrent accepted write."""
@@ -1197,12 +1288,14 @@ async def test_local_project_index_batch_enqueuer_runs_shared_batch_contract() -
                 reason="file indexed: notes/a.md",
                 entity_id=1,
                 entity_checksum="checksum-a",
+                content_type="text/markdown",
             ),
             IndexFileJobResult(
                 status=IndexFileJobStatus.processed,
                 reason="file indexed: assets/file.pdf",
                 entity_id=2,
                 entity_checksum="checksum-pdf",
+                content_type="application/pdf",
             ),
         ),
         vector_targets=(EmbeddingIndexTarget(entity_id=1, entity_checksum="checksum-a"),),
@@ -2522,6 +2615,7 @@ class RecordingMarkdownFileIndexer:
     async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.indexed_paths.append(file_path)
         return FileIndexResult.from_fields(
+            content_type="text/markdown",
             indexed_bytes=0,
             file_path=file_path,
             entity_id=99,
@@ -2620,6 +2714,9 @@ class RuntimeFactorySearchIndex:
             entities_synced=len(entity_ids),
             entities_failed=0,
         )
+
+    async def semantic_effectively_enabled(self) -> bool:
+        return True
 
 
 class RuntimeFactoryRelationRepository:

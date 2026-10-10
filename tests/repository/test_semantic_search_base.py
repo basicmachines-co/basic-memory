@@ -211,6 +211,8 @@ async def test_vector_match_hydration_batches_large_adapter_results() -> None:
                 "entity_id": value,
                 "chunk_key": params[f"chunk_key_{index}"],
                 "chunk_text": f"chunk {value}",
+                "source_type": "entity",
+                "source_row_id": value,
             }
             for index in range((len(params) - 3) // 2)
             if (value := params[f"entity_id_{index}"]) is not None
@@ -244,8 +246,20 @@ async def test_external_vector_query_overfetches_past_stale_adapter_hits(
     adapter: Any = SimpleNamespace(search=AsyncMock(side_effect=[matches(2), matches(4)]))
     semantic = _semantic_search(index_name="milvus", adapter=adapter)
     live_rows = [
-        HydratedChunk(entity_id=2, chunk_key="entity:2:0", chunk_text="two", similarity=0.9),
-        HydratedChunk(entity_id=3, chunk_key="entity:3:0", chunk_text="three", similarity=0.8),
+        HydratedChunk(
+            entity_id=2,
+            chunk_key="entity:2:0",
+            source_key=("entity", 2),
+            chunk_text="two",
+            similarity=0.9,
+        ),
+        HydratedChunk(
+            entity_id=3,
+            chunk_key="entity:3:0",
+            source_key=("entity", 3),
+            chunk_text="three",
+            similarity=0.8,
+        ),
     ]
     hydrate = AsyncMock(side_effect=[[], live_rows])
     monkeypatch.setattr(semantic, "_hydrate_vector_matches", hydrate)
@@ -1321,6 +1335,9 @@ async def test_prepare_window_uses_entity_local_timing_after_shared_reads(monkey
     monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
     monkeypatch.setattr(repo, "_prepare_entity_write_scope", _yielding_write_scope)
+    monkeypatch.setattr(
+        repo, "_fetch_prepare_window_projector_owned_entity_ids", AsyncMock(return_value=set())
+    )
     monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
     monkeypatch.setattr(repo, "_delete_entity_chunks", AsyncMock(return_value=[]))
     monkeypatch.setattr(

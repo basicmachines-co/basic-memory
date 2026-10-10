@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -39,7 +40,7 @@ def backup_rclone_config() -> Optional[Path]:
 
     backup_path = config_path.with_suffix(f".conf.backup-{os.getpid()}")
     shutil.copy2(config_path, backup_path)
-    console.print(f"[dim]Created backup: {backup_path}[/dim]")
+    console.print(f"[dim]Created backup: {literal(backup_path)}[/dim]")
     return backup_path
 
 
@@ -61,7 +62,7 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     with open(config_path, "w") as f:
         config.write(f)
 
-    console.print(f"[dim]Updated rclone config: {config_path}[/dim]")
+    console.print(f"[dim]Updated rclone config: {literal(config_path)}[/dim]")
 
 
 # The default remote serves the account's default tenant (back-compat with SPEC-20,
@@ -146,5 +147,5 @@ def configure_rclone_remote(
     # Save updated config
     save_rclone_config(config)
 
-    console.print(f"[green]Configured rclone remote: {remote_name}[/green]")
+    console.print(f"[green]Configured rclone remote: {literal(remote_name)}[/green]")
     return remote_name

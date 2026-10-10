@@ -20,6 +20,7 @@ from basic_memory.mcp.async_client import (
     get_cloud_control_plane_client,
     resolve_configured_workspace,
 )
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -84,37 +85,41 @@ def upload(
         try:
             project_already_exists = await project_exists(project, workspace=resolved_workspace)
         except CloudUtilsError as e:
-            console.print(f"[red]Failed to check cloud project '{project}': {e}[/red]")
+            console.print(
+                f"[red]Failed to check cloud project '{literal(project)}': {literal(e)}[/red]"
+            )
             raise typer.Exit(1)
 
         # Check if project exists
         if not project_already_exists:
             if create_project:
-                console.print(f"[blue]Creating cloud project '{project}'...[/blue]")
+                console.print(f"[blue]Creating cloud project '{literal(project)}'...[/blue]")
                 try:
                     await create_cloud_project(project, workspace=resolved_workspace)
-                    console.print(f"[green]Created project '{project}'[/green]")
+                    console.print(f"[green]Created project '{literal(project)}'[/green]")
                 except Exception as e:
-                    console.print(f"[red]Failed to create project: {e}[/red]")
+                    console.print(f"[red]Failed to create project: {literal(e)}[/red]")
                     raise typer.Exit(1)
             else:
                 console.print(
-                    f"[red]Project '{project}' does not exist.[/red]\n"
+                    f"[red]Project '{literal(project)}' does not exist.[/red]\n"
                     f"[yellow]Options:[/yellow]\n"
-                    f"  1. Create it first: {shell_command('bm', 'project', 'add', project, '--cloud')}\n"
+                    f"  1. Create it first: {literal(shell_command('bm', 'project', 'add', project, '--cloud'))}\n"
                     f"  2. Use --create-project flag to create automatically"
                 )
                 raise typer.Exit(1)
 
         # Perform upload (or dry run)
         if resolved_workspace:
-            console.print(f"[dim]Using workspace: {resolved_workspace}[/dim]")
+            console.print(f"[dim]Using workspace: {literal(resolved_workspace)}[/dim]")
         if dry_run:
             console.print(
-                f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]"
+                f"[yellow]DRY RUN: Showing what would be uploaded to '{literal(project)}'[/yellow]"
             )
         else:
-            console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
+            console.print(
+                f"[blue]Uploading {literal(path)} to project '{literal(project)}'...[/blue]"
+            )
 
         success = await upload_path(
             path,
@@ -134,18 +139,18 @@ def upload(
         if dry_run:
             console.print("[yellow]DRY RUN complete - no files were uploaded[/yellow]")
         else:
-            console.print(f"[green]Successfully uploaded to '{project}'[/green]")
+            console.print(f"[green]Successfully uploaded to '{literal(project)}'[/green]")
 
         # Index project if requested (skip on dry run).
         # Trigger: upload adds new files the watcher has not observed locally.
         # Why: force_full ensures those freshly uploaded files are indexed immediately.
         # Outcome: upload keeps its eager reindex while sync/bisync stay incremental.
         if index and not dry_run:
-            console.print(f"[blue]Indexing project '{project}'...[/blue]")
+            console.print(f"[blue]Indexing project '{literal(project)}'...[/blue]")
             try:
                 await index_project(project)
             except Exception as e:
-                console.print(f"[yellow]Warning: indexing failed: {e}[/yellow]")
+                console.print(f"[yellow]Warning: indexing failed: {literal(e)}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")
 
     run_with_cleanup(_upload())

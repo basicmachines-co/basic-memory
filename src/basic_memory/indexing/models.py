@@ -243,6 +243,9 @@ class FileIndexResult:
     # generation won before derived relations could be published. The next
     # coalesced write owns convergence; callers must not enqueue stale followups.
     content_superseded: bool = False
+    # The entity's stored MIME type. Indexers always set it through from_fields;
+    # None only appears on results built directly by older callers.
+    content_type: str | None = None
 
     @classmethod
     def from_fields(
@@ -257,6 +260,7 @@ class FileIndexResult:
         content_checksum: RuntimeNoteContentChecksum | None,
         operation: FileIndexOperation,
         indexed_bytes: int,
+        content_type: str,
         content_superseded: bool = False,
     ) -> FileIndexResult:
         """Validate entity fields loaded for a completed file-index result.
@@ -288,6 +292,7 @@ class FileIndexResult:
             operation=operation,
             indexed_bytes=indexed_bytes,
             content_superseded=content_superseded,
+            content_type=content_type,
         )
 
 
@@ -359,6 +364,10 @@ class IndexFileJobResult:
     # Only a processed, non-superseded file reports bytes; current, missing,
     # failed, and superseded outcomes report 0.
     indexed_bytes: int = 0
+    # The indexed entity's stored MIME type, set on processed and current results
+    # that name an entity. Consumers decide follow-up work (document extraction)
+    # from this stored type rather than re-deriving it from the file extension.
+    content_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,6 +486,7 @@ def index_file_job_result_from_indexed_file(
         permalink=indexed_file.permalink,
         entity_checksum=indexed_file.checksum,
         content_checksum=indexed_file.content_checksum,
+        content_type=indexed_file.content_type,
         operation=operation,
         actor_user_profile_id=(
             live_update_plan.actor_user_profile_id if live_update_plan is not None else None
@@ -600,6 +610,8 @@ class CurrentMaterializedNoteEntity:
     storage_checksum: RuntimeFileChecksum | None
     # note_content.file_checksum: sha256 of the markdown the index holds.
     content_checksum: RuntimeNoteContentChecksum | None
+    # entity.content_type: the stored MIME type of the indexed object.
+    content_type: str
 
     @classmethod
     def from_fields(
@@ -611,6 +623,7 @@ class CurrentMaterializedNoteEntity:
         permalink: object,
         storage_checksum: object,
         content_checksum: object,
+        content_type: str,
         file_path: str,
     ) -> CurrentMaterializedNoteEntity:
         """Validate entity fields loaded for a current materialized note.
@@ -638,6 +651,7 @@ class CurrentMaterializedNoteEntity:
             ),
             storage_checksum=str(storage_checksum) if storage_checksum is not None else None,
             content_checksum=str(content_checksum) if content_checksum is not None else None,
+            content_type=content_type,
         )
 
 
@@ -721,6 +735,7 @@ def plan_current_materialized_note_result(
             permalink=entity.permalink,
             entity_checksum=entity.storage_checksum,
             content_checksum=entity.content_checksum,
+            content_type=entity.content_type,
             operation=live_update_operation,
             actor_user_profile_id=provenance.actor_user_profile_id,
             actor_kind=provenance.actor_kind,
@@ -854,6 +869,7 @@ def build_index_file_batch_job_result(
                     reason=f"file indexed: {file_path}",
                     entity_id=indexed.entity_id,
                     entity_checksum=indexed.checksum,
+                    content_type=indexed.content_type,
                     indexed_bytes=indexed.indexed_bytes,
                 )
             )

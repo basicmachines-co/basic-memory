@@ -7,6 +7,7 @@ from pathlib import Path
 
 import basic_memory
 import pytest
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.mcp.tools.basic_memory_diagnostics import (
     _redact_config,
     _redact_url,
@@ -544,3 +545,81 @@ def test_diagnostics_redacts_database_url_query_password(tmp_path):
     assert "query-supersecret" not in result
     assert "sslmode=require" in result
     assert "sslpassword=%2A%2A%2A" in result
+
+
+# ---------------------------------------------------------------------------
+# Environment overrides (#1595)
+# ---------------------------------------------------------------------------
+
+
+def _environment_section(report: str) -> tuple[dict[str, str], str]:
+    """Return the parsed override JSON and the raw text of the env section."""
+    section = report.split("## Environment Overrides", 1)[1]
+    env_json = section.split("```json\n", 1)[1].split("\n```", 1)[0]
+    return json.loads(env_json), section
+
+
+def test_diagnostics_reports_env_overrides_by_field_name(monkeypatch, tmp_path):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"default_search_type": "hybrid"}))
+    monkeypatch.setenv("BASIC_MEMORY_DEFAULT_SEARCH_TYPE", "vector")
+
+    overrides, _ = _environment_section(basic_memory_diagnostics())
+
+    assert overrides["default_search_type"] == "vector"
+
+
+def test_diagnostics_matches_config_manager_env_precedence(monkeypatch, tmp_path):
+    """The section reports what ConfigManager applies, keyed by current field."""
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({"semantic_min_similarity": 0.3}))
+    # pydantic-settings matches env names case-insensitively, with or without
+    # a file value for the field.
+    monkeypatch.setenv("basic_memory_semantic_min_similarity", "0.49")
+    monkeypatch.setenv("basic_memory_default_search_type", "vector")
+    # Legacy sync env names still drive their renamed field when the file
+    # does not spell the new name.
+    monkeypatch.setenv("BASIC_MEMORY_SYNC_DELAY", "2500")
+
+    overrides, section = _environment_section(basic_memory_diagnostics())
+
+    assert overrides["semantic_min_similarity"] == "0.49"
+    assert overrides["default_search_type"] == "vector"
+    assert overrides["index_delay"] == "2500"
+    names_only = section.split("```", 2)[2]
+    assert "semantic_min_similarity" not in names_only
+    assert "BASIC_MEMORY_SYNC_DELAY" not in names_only
+
+
+def test_diagnostics_reports_pydantic_winner_for_duplicate_spellings(monkeypatch):
+    """With two spellings set, the report shows the value the config actually uses."""
+    monkeypatch.setenv("BASIC_MEMORY_DEFAULT_SEARCH_TYPE", "text")
+    monkeypatch.setenv("basic_memory_default_search_type", "vector")
+
+    overrides, _ = _environment_section(basic_memory_diagnostics())
+
+    assert overrides["default_search_type"] == BasicMemoryConfig().default_search_type
+
+
+def test_diagnostics_redacts_secret_env_overrides(monkeypatch):
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_API_KEY", "bmc_env_secret")
+    monkeypatch.setenv("BASIC_MEMORY_REDIS_URL", "redis://user:hunter2@cache.example.com:6379/0")
+
+    report = basic_memory_diagnostics()
+    overrides, _ = _environment_section(report)
+
+    assert overrides["cloud_api_key"] == "<redacted>"
+    assert overrides["redis_url"] == "redis://***@cache.example.com:6379/0"
+    assert "bmc_env_secret" not in report
+    assert "hunter2" not in report
+
+
+def test_diagnostics_lists_non_field_env_vars_by_name_only(monkeypatch):
+    monkeypatch.setenv("BASIC_MEMORY_NOT_A_CONFIG_FIELD", "do-not-print")
+
+    report = basic_memory_diagnostics()
+    overrides, section = _environment_section(report)
+
+    assert "not_a_config_field" not in overrides
+    assert "BASIC_MEMORY_NOT_A_CONFIG_FIELD" in section
+    assert "do-not-print" not in report

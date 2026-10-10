@@ -138,11 +138,12 @@ def metadata_filter_content_type_condition(params: dict[str, Any]) -> str:
     """Build the SQL restricting a metadata-filtered query to Markdown notes.
 
     Frontmatter is a Markdown-only construct, but every indexed file (PDF, image,
-    binary) gets its own ENTITY row whose ``entity_metadata`` carries no keys at all.
-    A positive predicate can never match one, so this constraint was invisible until
-    ``{"key": None}`` arrived: ``IS NULL`` is satisfied by the *absence* of a key,
-    which is exactly the state every regular file is in, and the whole non-note half
-    of a project counted into an exact total.
+    binary) gets its own ENTITY row. Its ``entity_metadata`` holds only the
+    indexer's ``content_type`` and ``format``, never frontmatter. Without this
+    clause ``{"key": None}`` would match every regular file (``IS NULL`` is
+    satisfied by the *absence* of a key), and a filter on ``format`` would treat
+    file rows as notes, so the whole non-note half of a project would leak into
+    metadata results.
 
     Applied to any metadata filter, not just the null one, so the frontmatter-only
     contract is a property of the clause rather than of which operator happened to

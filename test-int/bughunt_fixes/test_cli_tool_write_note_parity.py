@@ -14,6 +14,8 @@ in-process ASGI API -> real SQLite/Postgres DB and filesystem. No mocks.
 import asyncio
 import json
 
+import pytest
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
@@ -101,20 +103,22 @@ def test_mcp_write_note_conflict_emits_error(app, app_config, test_project, conf
         assert first.get("action") == "created"
         assert "error" not in first
 
-        second = await mcp_write_note(
-            title="Conflict Note",
-            content="# Conflict Note\n\nSecond body (should be blocked).\n",
-            directory="conflict",
-            project=test_project.name,
-            output_format="json",
-        )
-        return second
+        with pytest.raises(ToolError) as exc_info:
+            await mcp_write_note(
+                title="Conflict Note",
+                content="# Conflict Note\n\nSecond body (should be blocked).\n",
+                directory="conflict",
+                project=test_project.name,
+                output_format="json",
+            )
+        return json.loads(str(exc_info.value))
 
     second = asyncio.run(_go())
     assert isinstance(second, dict)
     assert second.get("error") == "NOTE_ALREADY_EXISTS"
     assert second.get("action") == "conflict"
-    assert second.get("file_path") is None
+    # The refusal names the note that owns the path (#1634).
+    assert second.get("file_path") == "conflict/Conflict Note.md"
 
 
 def test_cli_write_note_conflict_should_exit_nonzero(app, app_config, test_project, config_manager):

@@ -7,16 +7,18 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import delete, update
 
 from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.file_utils import parse_frontmatter
 from basic_memory.ignore_utils import get_bmignore_path
+from basic_memory.indexing import accepted_note_mutation_runner
 from basic_memory.index.local_project import (
     LocalProjectIndexRuntimeFactory,
     run_local_project_index_for_project,
 )
-from basic_memory.models import Entity as EntityModel, Project
+from basic_memory.models import Entity as EntityModel, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -932,6 +934,238 @@ async def test_update_entity_with_base_checksum_after_delete_returns_409_gone(
 
 
 @pytest.mark.asyncio
+async def test_edit_entity_with_base_checksum_after_delete_returns_409_gone(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+):
+    """A guarded PATCH that loses a race with delete reports the gone-note conflict.
+
+    The MCP tool resolves the note before it patches. A delete landing between
+    the two must give the same structured conflict as a delete that landed
+    before resolution, not a plain 404 the tool cannot classify.
+    """
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Note", "directory": "test", "content": "To be deleted"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    synced_checksum = note_content.db_checksum
+
+    response = await client.delete(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    )
+    assert response.status_code == 202
+
+    edit_data = {"operation": "append", "content": "Late append"}
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=edit_data,
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: synced_checksum},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+
+    # Unguarded, the same PATCH keeps its ordinary not-found answer.
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=edit_data,
+    )
+    assert response.status_code == 404
+
+
+def _lose_the_compare_and_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the next accepted write lose its db_version compare-and-set for real.
+
+    A concurrent winner is simulated by advancing the row inside the loser's
+    transaction just before its conditional UPDATE runs, so the repository's
+    real rowcount check refuses the write.
+    """
+    accept_write = NoteContentRepository.accept_write
+
+    async def advance_then_accept(self, session, write):
+        await session.execute(
+            update(NoteContent)
+            .where(NoteContent.entity_id == write.entity_id)
+            .values(db_version=NoteContent.db_version + 1, db_checksum="winner-checksum")
+            .execution_options(synchronize_session=False)
+        )
+        monkeypatch.setattr(NoteContentRepository, "accept_write", accept_write)
+        return await accept_write(self, session, write)
+
+    monkeypatch.setattr(NoteContentRepository, "accept_write", advance_then_accept)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["patch", "put"])
+async def test_guarded_write_that_loses_the_compare_and_set_reports_the_winner(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+):
+    """A guarded write that passes the precheck but loses the CAS is a stale revision.
+
+    The lost compare-and-set proves another write landed after the caller's read,
+    so the caller gets the structured conflict with the winner's checksum to
+    rebase on, not the plain concurrent-write 409 (#1552).
+    """
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Write", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+
+    _lose_the_compare_and_set(monkeypatch)
+    url = f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    headers = {NOTE_CONTENT_BASE_CHECKSUM_HEADER: note_content.db_checksum}
+    if method == "patch":
+        response = await client.patch(
+            url, json={"operation": "append", "content": "Loser"}, headers=headers
+        )
+    else:
+        response = await client.put(
+            url,
+            json={"title": "Raced Write", "directory": "test", "content": "Loser"},
+            headers=headers,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": "winner-checksum",
+    }
+
+
+def _vanish_note_content_before_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delete the NoteContent row after the entity load, before the content load.
+
+    On Postgres a delete can commit between the runner's entity read and its
+    NoteContent read. Removing the row inside the writer's transaction at that
+    point reproduces what the second read sees.
+    """
+    lock = accepted_note_mutation_runner.lock_accepted_note_content_for_entity_mutation
+
+    async def vanish_then_lock(session, *, project_id, entity_id):
+        await session.execute(delete(NoteContent).where(NoteContent.entity_id == entity_id))
+        return await lock(session, project_id=project_id, entity_id=entity_id)
+
+    monkeypatch.setattr(
+        accepted_note_mutation_runner,
+        "lock_accepted_note_content_for_entity_mutation",
+        vanish_then_lock,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["patch", "put"])
+async def test_guarded_write_whose_note_content_vanishes_reports_the_note_gone(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+):
+    """Missing state at any loader stage is the gone-note conflict for a guarded write."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Vanishing Content", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+
+    _vanish_note_content_before_lock(monkeypatch)
+    url = f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    headers = {NOTE_CONTENT_BASE_CHECKSUM_HEADER: note_content.db_checksum}
+    if method == "patch":
+        response = await client.patch(
+            url, json={"operation": "append", "content": "Late"}, headers=headers
+        )
+    else:
+        response = await client.put(
+            url,
+            json={"title": "Vanishing Content", "directory": "test", "content": "Late"},
+            headers=headers,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unguarded_edit_whose_note_content_vanishes_keeps_the_plain_409(
+    client: AsyncClient,
+    v2_project_url,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without a base checksum the backfill-gap refusal is unchanged."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Vanishing Unguarded", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    _vanish_note_content_before_lock(monkeypatch)
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={"operation": "append", "content": "Late"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Note content is not available for this note yet. Retry after backfill."
+    )
+
+
+@pytest.mark.asyncio
+async def test_unguarded_edit_that_loses_the_compare_and_set_keeps_the_plain_409(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without a base checksum there is no revision to report; the 409 stays plain."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Edit", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    _lose_the_compare_and_set(monkeypatch)
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={"operation": "append", "content": "Loser"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "The note was modified concurrently. Reload the latest content and retry."
+    )
+
+
+@pytest.mark.asyncio
 async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
     client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
@@ -975,8 +1209,7 @@ async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
 async def test_create_with_fast_param_does_not_schedule_reindex_task(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
-    """Legacy fast=true should not resurrect the removed reindex note-write path."""
-    app_config.semantic_search_enabled = False
+    """Legacy fast=true schedules only the normal vector sync, not the removed reindex path."""
     start_count = len(vector_sync_scheduler_spy)
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -988,15 +1221,14 @@ async def test_create_with_fast_param_does_not_schedule_reindex_task(
         params={"fast": True},
     )
     assert response.status_code == 202
-    assert len(vector_sync_scheduler_spy) == start_count
+    assert len(vector_sync_scheduler_spy) == start_count + 1
 
 
 @pytest.mark.asyncio
-async def test_create_schedules_vector_sync_when_semantic_enabled(
+async def test_create_schedules_vector_sync(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
-    """Create should schedule vector sync when semantic mode is enabled."""
-    app_config.semantic_search_enabled = True
+    """Create should schedule vector sync."""
     start_count = len(vector_sync_scheduler_spy)
 
     response = await client.post(
@@ -1017,16 +1249,14 @@ async def test_create_schedules_vector_sync_when_semantic_enabled(
 
 
 @pytest.mark.asyncio
-async def test_create_schedules_relation_resolution_regardless_of_semantic(
+async def test_create_schedules_relation_resolution(
     client: AsyncClient, v2_project_url, relation_resolution_scheduler_spy, app_config
 ):
-    """Create should schedule forward-reference resolution even when semantic is off.
+    """Create should schedule forward-reference resolution.
 
     Regression for #1015: creating a note must back-resolve inbound forward
-    references that name it, matching the watcher's relation repair. Unlike
-    vector sync, this is not gated on semantic search.
+    references that name it, matching the watcher's relation repair.
     """
-    app_config.semantic_search_enabled = False
     start_count = len(relation_resolution_scheduler_spy)
 
     response = await client.post(
@@ -1042,31 +1272,9 @@ async def test_create_schedules_relation_resolution_regardless_of_semantic(
 
     # Relation resolution is scheduled by the eager router follow-up AND again by
     # the materializer once the deferred index lands (so a pass runs after the new
-    # rows exist); the scheduler coalesces/re-arms them. The #1015 regression is
-    # that it runs at all when semantic search is off.
+    # rows exist); the scheduler coalesces/re-arms them.
     assert len(relation_resolution_scheduler_spy) >= start_count + 1
     assert relation_resolution_scheduler_spy[-1]["project_id"] is not None
-
-
-@pytest.mark.asyncio
-async def test_create_skips_vector_sync_when_semantic_disabled(
-    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
-):
-    """Create should not schedule vector sync when semantic mode is disabled."""
-    app_config.semantic_search_enabled = False
-    start_count = len(vector_sync_scheduler_spy)
-
-    response = await client.post(
-        f"{v2_project_url}/knowledge/entities",
-        json={
-            "title": "NonFastNoSemanticEntity",
-            "directory": "test",
-            "content": "Content for non-fast without semantic scheduling",
-        },
-        params={"fast": False},
-    )
-    assert response.status_code == 202
-    assert len(vector_sync_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio
@@ -1854,7 +2062,6 @@ async def test_index_file_syncs_vectors_when_semantic_enabled(
     the service-level vector batch (like test_search_service.py::test_reindex_vectors
     stubs the repository batch) to exercise the wiring without the embedding stack.
     """
-    app_config.semantic_search_enabled = True
 
     synced_batches: list[list[int]] = []
 
@@ -1884,43 +2091,6 @@ async def test_index_file_syncs_vectors_when_semantic_enabled(
     entity = EntityResponseV2.model_validate(response.json())
 
     assert synced_batches == [[entity.id]]
-
-
-@pytest.mark.asyncio
-async def test_index_file_skips_vector_sync_when_semantic_disabled(
-    client: AsyncClient,
-    v2_project_url,
-    test_project: Project,
-    app_config,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """index-file does not touch the vector pipeline when semantic search is disabled."""
-    assert app_config.semantic_search_enabled is False
-
-    synced_batches: list[list[int]] = []
-
-    async def stub_sync_entity_vectors_batch(
-        self, entity_ids: list[int], progress_callback=None
-    ) -> VectorSyncBatchResult:
-        synced_batches.append(list(entity_ids))
-        return VectorSyncBatchResult(
-            entities_total=len(entity_ids),
-            entities_synced=len(entity_ids),
-            entities_failed=0,
-        )
-
-    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
-
-    note_path = Path(test_project.path) / "incoming" / "plain-note.md"
-    note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text("# Plain Note\n\nNo vectors needed.\n", encoding="utf-8")
-
-    response = await client.post(
-        f"{v2_project_url}/knowledge/index-file",
-        json={"file_path": "incoming/plain-note.md"},
-    )
-    assert response.status_code == 200
-    assert synced_batches == []
 
 
 @pytest.mark.asyncio
@@ -2484,6 +2654,13 @@ async def test_get_entity_lines_slice_forms(
     )
     assert clamped.content == "z"
     assert (clamped.content_start_line, clamped.content_end_line) == (13, 13)
+
+    # A range that starts past the last line is an error, not an inverted range (#1634).
+    past_end = await client.get(url, params={"lines": "500-510"})
+    assert past_end.status_code == 404
+    assert past_end.json()["detail"] == (
+        "start_line 500 is past the end of the document (13 lines)"
+    )
 
 
 @pytest.mark.asyncio

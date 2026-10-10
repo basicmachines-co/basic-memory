@@ -1,8 +1,54 @@
 # CHANGELOG
 
-## v0.24.0 (2026-09-29)
+## v0.24.0 (2026-10-08)
 
 ### Breaking Changes
+
+- **#1683**: A refused `write_note` is an MCP tool error (`isError`), as a failed
+  `delete_note` or `move_note` is (#1641). This covers an existing note without
+  `overwrite`, a revision conflict on `expected_checksum`, a note that moved, and a
+  directory outside the project. Nothing is written in any of these cases. They used to
+  come back as ordinary results, so a client checking `isError` counted a refused write as
+  written. In JSON mode the error message is the same payload as before (`action:
+  "conflict"`, `error: "NOTE_ALREADY_EXISTS"` and so on). `bm tool write-note` is
+  unchanged: error on stderr, payload on stdout, exit status 1.
+
+- **#1688**: A failed or refused `edit_note` is an MCP tool error (`isError`), as a
+  refused `write_note` is (#1683). A refused write, such as the "modified concurrently"
+  conflict when two clients append to one note, came back as an ordinary result whose
+  text said "Edit Failed", so a client checking `isError` counted the append as written
+  and never retried it. A refusal comes only from a write that rolled back, so a refused
+  append is never in the note. In JSON mode the error message is the same payload as
+  before. `bm tool edit-note` prints the error and exits with status 1. This reinstates
+  #1662, which was reverted when its concurrency test found appends reported as refused
+  that had landed; #1688 fixed that cause first. Thanks to @sammywachtel.
+
+- **#1696**: Semantic search is always on, and the `semantic_search_enabled` setting is
+  removed. FastEmbed and sqlite-vec are core dependencies, so the setting only mattered
+  for installs that turned it off by hand; those installs now download the embedding model
+  and build vectors. Old `config.json` files and `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED`
+  are ignored rather than rejected. `bm reindex --embeddings` no longer refuses.
+  `EmbeddingStatus` gains `vector_runtime_available`; `semantic_search_enabled` is still
+  emitted as a deprecated alias of it, so older CLIs keep reading upgraded servers, and a
+  status from an older server is still accepted. Where sqlite-vec cannot
+  load (python.org Python on macOS), search still falls back to keyword-only, and a
+  vector or hybrid query says semantic search is unavailable and points at the log.
+
+- **#1697**: `basic-memory mcp --transport streamable-http|sse` binds to `127.0.0.1` by
+  default instead of `0.0.0.0`, so the unauthenticated HTTP server is no longer reachable
+  from the network unless you ask for it. A non-loopback `--host` prints a warning. On a
+  loopback bind, both HTTP transports also reject requests whose `Host` or `Origin`
+  header is foreign (DNS rebinding), honoring FastMCP's `FASTMCP_HTTP_ALLOWED_HOSTS` /
+  `_ORIGINS`. A non-loopback bind gets that check only when those allowlists are set. The
+  Docker image already passes `--host 0.0.0.0` and keeps working as before (#1578).
+
+- **#1704**: `bm import document` resolves a relative path against the project root, not
+  the current directory, matching `bm ls` and `bm cat`. A command that relied on the old
+  behavior now fails with "File not found" and the resolved path.
+
+- **#1702**: `build_context(compact=True)` no longer loads observations, and compact JSON
+  no longer has an `observations` key (text-mode compact already hid them). Primary
+  results, relations and related results are unchanged (#1571).
 
 - **#1600**: `bm project remove` on a cloud-routed project always deletes the project's
   cloud files; there is no longer a way to keep them. It warns that the files can be
@@ -38,13 +84,39 @@
   only `workspace` and `shared` visibility, so `private` had created a team-visible
   project while reporting success.
 
+- **#1596**: `bm cloud sync`, `bm cloud bisync` and `bm cloud bisync-reset` are
+  deprecated and will be removed in a future release. `bm cloud pull` / `bm cloud push`
+  are the supported sync workflow on Personal and Team workspaces. The mirror commands
+  are marked deprecated in `--help`, print a notice with the pull/push command on every
+  run, still work on Personal workspaces, and on Team workspaces exit with that notice
+  instead of a "Personal only" error. `bm project list` no longer shows Team projects
+  with a local sync path as `cloud-only`: `sync_supported` is now true for every
+  workspace, and `list_memory_projects` reports the same. Help examples no longer pass
+  `--workspace Personal`.
+
 ### Features
+
+- **#1552**: `edit_note` can edit only the revision you read. Pass `expected_checksum`
+  (the full `checksum` from a JSON `read_note`, `write_note` or `edit_note` result) and
+  the edit applies only while the note is still that revision. Otherwise nothing is
+  written and the tool error is a revision conflict carrying the current checksum (JSON
+  `error: "NOTE_REVISION_CONFLICT"`, `currentChecksum`, with the note's title, permalink
+  and file path while it still exists, the same shape as `write_note`'s, #1719). A guarded
+  `append` or `prepend`
+  on a missing note is a conflict, not an auto-create. The v2 `PATCH` entity route
+  accepts the same `x-bm-cloud-note-base-checksum` header the `PUT` route does.
+
+- **#1552**: `read_note(include_content=False)` returns only a note's title, permalink,
+  file path, full checksum and `updated_at`, without the body. Use it to refresh a stale
+  `expected_checksum` without reading the whole note.
 
 - **#1642**: `write_note` can overwrite only the revision you read. Pass
   `expected_checksum` with `overwrite=True` (CLI: `--overwrite --expected-checksum`)
   and the note is replaced only while it is still that revision. Otherwise nothing
   changes and the result is a revision conflict carrying the current checksum (JSON
-  `error: "NOTE_REVISION_CONFLICT"`). A checksum for a path no note owns is also a
+  `error: "NOTE_REVISION_CONFLICT"` and `currentChecksum`, with `checksum` null because
+  nothing was written, and the note at the path named by its stored title and permalink,
+  #1719). A checksum for a path no note owns is also a
   conflict, so a note deleted since you read it is not recreated. Without
   `expected_checksum`, `overwrite=True` still replaces unconditionally.
 
@@ -176,9 +248,9 @@
   **This ships an Alembic migration** adding the `note_section` table.
 
 - **#1501**: `read_note` accepts `start_line` / `end_line` and returns numbered lines
-  with the next range to read, and `grep(literal=True, context_lines=N)` returns merged
+  with the next range to read, and `grep(context_lines=N)` returns merged
   match windows instead of whole notes, with `max_matches` bounding the lines per note.
-  The CLI equivalents are `bm grep -F "retry" -C 3` and `bm tool read-note NAME
+  The CLI equivalents are `bm grep "retry" -C 3` and `bm tool read-note NAME
   --start-line 120 --end-line 180`.
 
 - **#686**: `search_notes(compact=True)` and `build_context(compact=True)` return
@@ -285,6 +357,212 @@
   accepts `metadata`, matching the core MCP tools. Thanks to @lastguru-net (#1474).
 
 ### Bug Fixes
+
+- **#1726**: `bm reindex --embeddings` now finishes oversized notes before it reports
+  success. Vector sync embeds at most 256 chunks of one note per pass and defers the
+  rest, and the explicit reindex ran a single pass, then printed "Embeddings complete"
+  and forced its progress bar to 100% with those chunks still missing from semantic
+  search. A `--full` rerun cleared vectors and repeated the same first shard. The
+  reindex now re-runs deferred notes until none remain, clearing vectors only once for
+  `--full`. If a pass stops making progress, it reports how many notes still have
+  pending chunks, says how to continue, and exits non-zero. Reported by @beru-ant-king;
+  @lastguru-net independently reached the same fix in #1730.
+- **#1720**: CLI output prints project names, paths, and error messages as typed.
+  Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
+  `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`
+  crashed the command with `MarkupError`. The deprecated `bm cloud sync`, `bisync` and
+  `bisync-reset` now print only their own deprecation notice, without Click's extra
+  "DeprecationWarning: The command ... is deprecated." line.
+
+- **#1718**: `write_note`'s "Similar existing notes" advisory no longer suggests notes
+  on unrelated topics. It used search's relevance floor (0.55), which the nearest
+  neighbor of almost any note clears on the default model. On the default model it now
+  lists only notes scoring 0.70 or higher: rewrites of an existing note scored 0.77 to
+  0.93, and unrelated neighbors at most 0.67. Other embedding models keep
+  `semantic_min_similarity`, since their scores sit on a different scale. Hybrid
+  search's handling of gibberish queries is unchanged; the measurements showed no
+  threshold that separates it from real matches.
+- **#1716**: A note's `created_at` no longer resets on every edit, move or reindex.
+  Without a frontmatter `created`, the parser falls back to the file's ctime, which each
+  atomic rewrite or rename moves, and reindexing an existing note copied that time into
+  the row. Now an existing row keeps its creation time, and only a declared frontmatter
+  `created` changes it. A brand-new file still takes its file time.
+
+- **#1717**: `build_context` text output names the source of relations the primary note
+  does not own. An incoming `relates_to` used to be listed bare under its target, so it
+  read as a self-link; it now reads `- [[Brewing Notes]] relates_to [[Bean Origins]]`.
+  Relations the note owns keep the bare form, and JSON output is unchanged.
+
+- **#1720**: `edit_note` `insert_after_section` no longer puts a blank line between an
+  inserted list item and the section's list, which split one list in two. The item joins
+  the list directly, below any blank line under the heading. A paragraph inserted above
+  a paragraph still gets the blank line that keeps them apart.
+
+- **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
+  variables that override `config.json`, redacted the same way as the file dump. It
+  used to print only the file, which can disagree with what the server is using. Other
+  `BASIC_MEMORY_*` variables are listed by name only. Env names now match config fields
+  in any letter case, as pydantic-settings reads them: a lowercase
+  `basic_memory_log_level` used to lose to the file value, or, when the file lacked the
+  key, take effect and then get written into `config.json`.
+
+- **#1593**: The CLI's list of commands that skip startup initialization no longer
+  names `sync` and `watch`, which are not commands. A test now keeps the list to
+  registered commands. Thanks to @FBISiri.
+
+- **#1651**: A document import's ingestion-run note no longer says "exact storage
+  materialization is pending", which read as a live status long after processing
+  finished. New run notes say what they record and link the original file and its
+  extracted-text note. Existing run notes keep their old text.
+
+- **#1653**: The `write_note` documentation now says what `overwrite=True` does to
+  frontmatter: the body is replaced, keys the write sets replace the old values, and
+  keys only the existing note has are kept. Existing frontmatter that cannot be parsed
+  is discarded. Behavior is unchanged.
+
+- `bm tool edit-note --help` lists all six edit operations and documents `--section` for
+  `replace_section`, `insert_before_section` and `insert_after_section`. Thanks to
+  @xhkzdepartedream (#1708).
+
+- **#1604**: `bm cloud push` and `bm cloud pull` on Team workspaces are much faster.
+  The project is listed with one `Depth: infinity` PROPFIND instead of one request per
+  directory, and eight files transfer at once. File bodies stream to and from disk, so
+  memory does not grow with file size. This needs a cloud service that answers
+  recursive listings; against an older one, or a project too large for one listing,
+  the command stops with a message naming the cause.
+
+- **#1654**: A Markdown file kept in step by a one-way sync tool (rclone sync, a backup
+  script) is no longer re-indexed and rewritten forever. Indexing writes a `permalink`
+  (and `title` and `type` with `ensure_frontmatter_on_sync`) into a file that arrived
+  without them. The sync tool then copied its original back, which read as a change.
+  The entity now also records the checksum the file arrived with (a new
+  `entity.sync_checksum` column, added by a migration), and a file matching either
+  checksum counts as already indexed. Frontmatter is still written. #1655 applies the
+  same check to single-file indexing, using the checksum storage reports.
+
+- **#1667**: Moving a directory moves its notes the same way `move_note` does. The
+  directory move used the old storage-first path, which moved the file and the entity
+  row but left the note's accepted content at its old path and revision. Each note now
+  moves as an accepted note move. Regular files still move their bytes, and per-file
+  failures are reported as before (#1670).
+
+- **#1641**: A failed `delete_note` or `move_note` is reported as an MCP tool error. A
+  refusal, for example from a read-only API key, came back as an ordinary result whose
+  text said "Delete Failed" or "Move Failed", so clients read it as success.
+  `delete_note` still returns `False` for a note that does not exist.
+
+- **#1683**: `read_content` never returns another file for a path that does not exist.
+  It resolved through the fuzzy fallback, which matched any note sharing a word with the
+  path (`disk/nope.txt` returned a note in `disk/`). It now resolves only exact paths,
+  permalinks, titles and ids, and a miss is "Resource not found".
+
+- **#1683**: `NOT` excludes a term found anywhere in the note. `coffee NOT pour` returned
+  a note whose title has "coffee" and whose body has "pour": SQLite evaluated `NOT` in each
+  column separately, and the vector half of hybrid search ignores Boolean operators. A
+  search that uses `AND`, `OR` or `NOT` without an explicit `search_type` now runs as
+  full-text.
+
+- **#1683**: `read_note` with JSON output (and `cat`) returns `checksum`, the revision
+  `write_note`'s `expected_checksum` compares, so an agent can overwrite only the
+  revision it read.
+
+- **#1685**: `grep` matches keywords by default, so a pattern found in no note returns
+  no results. It ranked by meaning whenever semantic search was on, and nearest-neighbour
+  ranking always returns something: `grep("Ethio.ia")` listed unrelated notes. Pass
+  `semantic=True` (`bm grep --semantic`) to rank by meaning. This replaces the `literal`
+  parameter and the `-F` flag, and `context_lines` (`-C`) no longer needs either.
+
+- **#1681**: On Postgres, saving a note twice in quick succession no longer answers 500.
+  Two refreshes of the same note's search rows could deadlock or collide on
+  `search_index_pkey`, and the loser failed the save even though search rows are derived
+  state. A refresh that loses that race now logs a warning and leaves the winner's rows
+  for the next refresh. The save's search row is written after its accept commits rather
+  than inside it, so a failed refresh can no longer roll back the note. Thanks to
+
+- **#1686**: The file watcher logs a warning when a new directory cannot be read. On
+  Linux, notify drops the error when it cannot watch a new directory, so files written
+  into it were never indexed and nothing said why. The warning names the directory and
+  says to run `bm project index <name>` once its permissions are fixed. Thanks to
+  @sammywachtel.
+
+- **#1676**: `search_notes` accepts the metadata filter shapes agents actually write.
+  Bare operator names (`gte`, `in`) work as aliases for `$gte` and `$in`, one field can
+  take several operators (`{"$gte": a, "$lte": b}`), and `$contains` (array contains) and
+  `$exists` are new. An unknown operator's error now lists the valid ones. A rejected
+  filter no longer leaves its count query running after the request returns: search and
+  count run in one task group, so a failure cancels the other (#1675).
+
+- **#1657**: A full-text query that mixes a punctuated word with other words finds notes
+  that contain all of them. `IT-644 cacheability` returned nothing: one punctuated word
+  made SQLite quote the whole query as a single exact phrase, which only matches when the
+  words are adjacent. Now only the punctuated word is quoted, and every word must match in
+  any order: `"IT-644"* AND cacheability*`. Thanks to @dougvann.
+
+- **#1701**: Environment overrides are no longer written into `config.json`. Any config
+  save (a project add, a migration, first run) wrote the merged settings, so a one-off
+  `BASIC_MEMORY_*` variable became permanent. A save now keeps the file's own value for
+  every env-overridden setting. Commands that name a setting still save it: `bm config
+  set/unset`, `bm cloud api-key save`, `bm cloud workspace set-default`, `bm cloud
+  logout`, `bm cloud promo` and `bm project default` (#1631, #1598).
+
+- **#1699**: A case-only rename (`config.md` to `Config.md`) on a case-insensitive
+  filesystem no longer leaves a permanent ghost note. The index pass's delete check now
+  matches the exact spelling against the directory listing, so the next pass removes the
+  stale entry (#1627).
+
+- **#1700**: In a local project, a note too large to embed in one pass finishes embedding
+  on later index passes without a manual `bm reindex`; #1691 already stopped unchanged
+  observations from being re-embedded (#1605). The hosted runtime does not resume these
+  notes yet.
+
+- **#1698**: Appending `---` or `===` after a paragraph with `edit_note` no longer turns the
+  paragraph into a heading. When an append or prepend would form a setext heading over
+  existing text, a blank line separates them; every other join, including list items and
+  observations, is unchanged (#1585).
+
+- **#1705**: Note-tool fixes from the live run (#1634):
+  - A line read that starts past the end of a note is an error ("start_line 500 is past
+    the end of the document (17 lines)") instead of "Lines 500-17".
+  - A link that climbs out of the project is no longer stored as an unresolved relation.
+  - A `write_note` conflict after a move names the note that actually owns the path; the
+    `already_exists` outcome gains `external_id` and `permalink`.
+  - `recent_activity` describes its scope accurately, and an empty result from any tool
+    returns an explicit `[]` text block.
+
+- **#1704**: CLI polish from the live run (#1635). `bm project add` and `bm project index`
+  show embedding progress. `bm config set default_project` rejects an unknown project
+  and accepts display names. `bm project index --help` shows user-facing text, the
+  `.bmignore` path in help points at the real config directory, and a refused OKF export
+  no longer prints a misleading summary.
+
+- **#1663**: An unhandled API error no longer stalls the server for seconds while it is
+  logged, and logs no longer contain the values of local variables from tracebacks.
+  Loguru's `diagnose` mode called `repr()` on every frame's locals, and each ASGI frame
+  holds the whole request scope. The file, stdout and Logfire sinks still log the full
+  traceback without those values. Test mode keeps them. Thanks to @sammywachtel (#1679).
+
+- **#1643**: Project status is served over `GET /v2/projects/{id}/status`. It was a
+  POST, so a read-only API key got "This API key is read-only" on any empty search,
+  because the empty-result guidance checks project status. `POST` remains as a hidden,
+  deprecated alias for older clients. When workspace discovery fails in every
+  workspace, the error gives each workspace's reason, such as a reached spending limit.
+
+- **#1645**: An empty search no longer says a project "has never been indexed" when it
+  has indexed notes. Readiness required a completed full index pass, which a project
+  indexed note by note (every project created in Basic Memory Cloud) never records. A
+  project with files and no indexed notes still gets the "index first" guidance.
+
+- **#1656**: On Postgres, vector storage is created when the database is initialized,
+  never while serving. Each embedding job ran `CREATE INDEX IF NOT EXISTS` on first use,
+  which locks the table, so concurrent chunk and embedding writes queued behind it and
+  timed out. Initializing an already-initialized database reads the catalog and takes no
+  locks.
+
+- **#1659**: On Postgres, two processes initializing the same new database no longer
+  race on `CREATE EXTENSION vector` and fail with a unique violation. Vector storage DDL
+  takes a transaction advisory lock and rechecks the catalog inside it. Extension
+  availability is checked directly, so a real error is no longer reported as "pgvector
+  extension is unavailable".
 
 - **#1586**: `write_note` and `edit_note` report the note's real checksum instead of
   `checksum: unknown`. The typed client parsed a response model without checksum
@@ -589,7 +867,44 @@
   crash-loops (#1374). A file deleted between the existence probe and the checksum read
   is treated as absent instead of failing materialization (#1383).
 
+- **#1714**: Wiki projector pages are no longer embedded. A page counts as
+  projector-owned while its current accepted revision came from the projector
+  (`note_content.last_source`), not by file name. Vector sync deletes such a page's
+  vectors, embeds nothing, and reports it as skipped. Full-text rows and relations
+  are unchanged, so generated `index.md` links still feed the graph. A hand-written
+  `index.md` is embedded as before, and a generated page someone edits is embedded on
+  its next sync. In Cloud, the embedding jobs queued for projector writes become cheap
+  deletes.
+
 ### Internal
+
+- **#1672**: Indexing and embedding results report the work they did. `FileIndexResult`,
+  `IndexedEntity` and `SyncedMarkdownFile` carry `indexed_bytes`, the stored bytes read
+  and parsed (zero for a file that was already current). Embedding results carry
+  `chunks_embedded`, the chunks actually sent to the embedder, and
+  `sync_entity_vectors` returns a `VectorSyncBatchResult`. How indexing and embedding
+  run is unchanged.
+
+- **#1660, #1671, #1673**: A note's storage echo is recognized instead of re-indexed.
+  Materialization records the written object's storage checksum, storage and content
+  checksums are compared only with their own kind, and an object whose content matches
+  the note's accepted content counts as current even before its storage checksum is
+  recorded. Index-file results carry the content checksum, so a live update for an
+  accepted write matches its existing activity. Locally both checksums are the same
+  sha256, so this only changes behavior where storage reports its own checksum (S3).
+
+- **#1661**: The accept transaction writes the pending relation-publication marker, so
+  an accepted note is never visible without it, and a successful publication leaves
+  exactly one unit of refresh work. A PUT that renames a note carries the previous path
+  into materialization, as an explicit move does. The accepted-note runner tests run
+  against a real database (#1668).
+
+- **#1658**: Alembic revisions after `z9a0b1c2d3e4` are named by sequential schema
+  version (`0040`, `0041`, ...). `migrations.schema_version()` reports a revision's
+  number and `migrations.next_revision_id()` assigns the next one.
+
+- **#1669**: CI balances the Postgres test shards by recorded durations and runs the
+  Windows jobs only on `main`.
 
 - **#1613**: Note object metadata keeps an origin for `agent` and `mcp_client` actors,
   not only MCP clients, so cloud can attribute API-key writes to the key's name.

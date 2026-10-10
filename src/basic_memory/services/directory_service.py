@@ -29,6 +29,17 @@ def _required_file_updated_at(node: DirectoryNode) -> datetime:
     return node.updated_at
 
 
+def _stored_file_format(entity: Entity) -> str | None:
+    """Return the format the indexer stored for a non-Markdown file entity.
+
+    Markdown notes are skipped because their metadata is user frontmatter, where a
+    ``format`` key means whatever the author meant, not the file's format.
+    """
+    if entity.is_markdown or entity.entity_metadata is None:
+        return None
+    return entity.entity_metadata.get("format")
+
+
 def _file_identity_key(node: DirectoryNode) -> tuple[str, str, str]:
     """Order files deterministically by display title, path, then stable identity."""
     return (
@@ -110,6 +121,7 @@ class DirectoryService:
                 entity_id=file.id,
                 note_type=file.note_type,
                 content_type=file.content_type,
+                format=_stored_file_format(file),
                 updated_at=file.updated_at,
             )
 
@@ -351,6 +363,7 @@ class DirectoryService:
                 entity_id=file.id,
                 note_type=file.note_type,
                 content_type=file.content_type,
+                format=_stored_file_format(file),
                 updated_at=file.updated_at,
             )
 

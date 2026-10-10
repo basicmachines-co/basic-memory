@@ -107,10 +107,9 @@ async def write_note(
                     runtime_note_content_payload_as_dict(accepted.payload)
                 )
                 # Runtime-injected schedulers preserve local and Cloud publication behavior.
-                if app_config.semantic_search_enabled:
-                    vector_sync_scheduler.schedule_entity_vector_sync(
-                        entity_id=entity.id, project_id=project_id
-                    )
+                vector_sync_scheduler.schedule_entity_vector_sync(
+                    entity_id=entity.id, project_id=project_id
+                )
                 relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
                 match outcome:
                     case Created():
@@ -119,14 +118,24 @@ async def write_note(
                         return NoteUpdated(entity=entity)
                     case _:
                         assert_never(outcome)
-            case AlreadyExists(file_path=file_path):
-                return NoteAlreadyExists(file_path=file_path)
+            case AlreadyExists(file_path=file_path, note=existing):
+                # existing is None only when no note can be named at the path.
+                return NoteAlreadyExists(
+                    file_path=file_path,
+                    external_id=existing.external_id if existing else None,
+                    permalink=existing.permalink if existing else None,
+                )
             case TargetMoved(note=note):
                 return NoteTargetMoved(**asdict(note))
             case Locked(message=message):
                 return NoteLocked(message=message)
-            case RevisionConflict(file_path=file_path, current_db_checksum=current):
-                return NoteRevisionConflict(file_path=file_path, db_checksum=current)
+            case RevisionConflict(file_path=file_path, current_db_checksum=current, note=note):
+                return NoteRevisionConflict(
+                    file_path=file_path,
+                    db_checksum=current,
+                    title=note.title if note else None,
+                    permalink=note.permalink if note else None,
+                )
             case Rejected(rejection=rejection):
                 error = note_content_mutation_error_from_rejection(rejection)
                 raise HTTPException(status_code=error.status_code, detail=error.detail)

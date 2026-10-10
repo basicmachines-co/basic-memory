@@ -91,18 +91,20 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
                 },
             )
         )
-        second = _parse(
-            await client.call_tool(
-                "write_note",
-                {
-                    "project": test_project.name,
-                    "title": "Collision Note",
-                    "directory": "collision",
-                    "content": "# Collision Note\n\nSecond body loses.",
-                    "output_format": "json",
-                },
-            )
+        # A refused write is a tool error whose message is the JSON conflict payload.
+        second_result = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Collision Note",
+                "directory": "collision",
+                "content": "# Collision Note\n\nSecond body loses.",
+                "output_format": "json",
+            },
+            raise_on_error=False,
         )
+        assert second_result.is_error
+        second = _parse(second_result)
 
         # First write creates the note; the colliding second write is blocked as
         # a conflict (overwrite disabled by default).
@@ -231,18 +233,21 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
     async with Client(mcp_server) as client:
 
         async def write_one(index: int):
-            return _parse(
-                await client.call_tool(
-                    "write_note",
-                    {
-                        "project": test_project.name,
-                        "title": "Race Note",
-                        "directory": "race",
-                        "content": f"# Race Note\n\nWriter {index} attempted this note.",
-                        "output_format": "json",
-                    },
-                )
+            # Losers of the race get a tool error carrying the JSON conflict payload.
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": "Race Note",
+                    "directory": "race",
+                    "content": f"# Race Note\n\nWriter {index} attempted this note.",
+                    "output_format": "json",
+                },
+                raise_on_error=False,
             )
+            payload = _parse(result)
+            assert result.is_error == (payload["action"] == "conflict"), payload
+            return payload
 
         payloads = await asyncio.gather(*(write_one(i) for i in range(write_count)))
 
@@ -582,3 +587,76 @@ async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> No
             assert f"Volume body {index}." in payload["content"], (
                 f"note {index} content missing under load: {payload}"
             )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_edit_append_reports_every_refusal(mcp_server, app, test_project) -> None:
+    """Every append reported as written is in the note, and every refused one is not.
+
+    Two clients append to one note at once. On SQLite the db_version compare-and-set
+    refuses an append that loses the race ("modified concurrently"); on Postgres the
+    row lock usually serializes them and nothing is refused. Either way, a caller that
+    trusts ``is_error`` must be able to account for every line: an append refused but
+    returned as an ordinary result would be counted as written and never retried, and
+    an append written but returned as an error would be retried and written twice.
+
+    Each append also writes and indexes the file inside the request in the test
+    runtime, which costs about a second per append on Postgres. 15 appends per writer
+    keeps the test well inside the suite timeout there and still races on SQLite.
+    """
+    appends_per_writer = 15
+
+    async with Client(mcp_server) as setup:
+        note = _parse(
+            await setup.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": "Shared Page",
+                    "directory": "shared",
+                    "content": "start",
+                    "output_format": "json",
+                },
+            )
+        )
+
+    outcomes: list[tuple[str, bool]] = []
+
+    async def writer(tag: str) -> None:
+        async with Client(mcp_server) as client:
+            for index in range(appends_per_writer):
+                result = await client.call_tool(
+                    "edit_note",
+                    {
+                        "project": test_project.name,
+                        "identifier": note["permalink"],
+                        "operation": "append",
+                        "content": f"\n{tag}-{index}\n",
+                        "output_format": "json",
+                    },
+                    raise_on_error=False,
+                )
+                outcomes.append((f"{tag}-{index}", result.is_error))
+
+    await asyncio.gather(writer("A"), writer("B"))
+
+    async with Client(mcp_server) as reader:
+        body = _parse(
+            await reader.call_tool(
+                "read_note",
+                {
+                    "project": test_project.name,
+                    "identifier": note["permalink"],
+                    "output_format": "json",
+                },
+            )
+        )["content"]
+
+    kept = {line for line in body.splitlines() if line.startswith(("A-", "B-"))}
+    reported_written = {tag for tag, is_error in outcomes if not is_error}
+    refused = {tag for tag, is_error in outcomes if is_error}
+
+    assert len(outcomes) == 2 * appends_per_writer
+    missing = sorted(reported_written - kept)
+    assert missing == [], f"appends reported as written but absent from the note: {missing}"
+    assert kept.isdisjoint(refused), f"refused appends present in the note: {kept & refused}"

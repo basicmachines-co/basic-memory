@@ -16,7 +16,7 @@ from basic_memory.models import Entity
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository import SearchRepository
-from basic_memory.repository.search_reader import FUSION_FORMULA_VERSION, parse_chunk_key
+from basic_memory.repository.search_reader import FUSION_FORMULA_VERSION
 from basic_memory.repository.search_repository_base import ChunkManifestRow
 from basic_memory.repository.search_trace import (
     FinalResultEntry,
@@ -413,8 +413,8 @@ async def inspect_entity_chunks(
     inspected_chunks: list[InspectedChunk] = []
     chunks_by_search_row: dict[tuple[str, int], list[InspectedChunk]] = {}
     for stored_row in stored_rows:
-        row_key = parse_chunk_key(stored_row.chunk_key)
-        ordinal = int(stored_row.chunk_key.split(":")[2])
+        row_key = (stored_row.source_type, stored_row.source_row_id)
+        ordinal = stored_row.chunk_index
         inspected_chunk = InspectedChunk(
             stored_row=stored_row,
             ordinal=ordinal,

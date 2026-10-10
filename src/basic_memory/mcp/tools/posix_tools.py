@@ -44,9 +44,8 @@ from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.markdown.line_scanning import scan_literal_lines
-from basic_memory.markdown.sections import document_lines
+from basic_memory.markdown.sections import document_lines, line_range_past_end
 from basic_memory.mcp.async_client import is_factory_mode
-from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
@@ -314,6 +313,9 @@ async def cat(
     lines = document_lines(payload["content"])
     total_lines = len(lines)
     first = start_line or 1
+    past_end = line_range_past_end(first, total_lines)
+    if past_end is not None:
+        raise ValueError(f"cat: {past_end}")
     last = min(end_line, total_lines) if end_line is not None else total_lines
     payload["content"] = "\n".join(lines[first - 1 : last])
     payload["start_line"] = first
@@ -322,27 +324,25 @@ async def cat(
     return qualify_note_paths(payload, route)
 
 
-def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
-    """Pick grep's retrieval mode: literal full-text on request, semantic when available."""
-    if literal:
-        return SearchRetrievalMode.FTS
-    try:
-        config = get_container().config
-    except RuntimeError:
-        # CLI paths call tools before the MCP container exists (search.py precedent).
-        config = ConfigManager().config
-    return SearchRetrievalMode.HYBRID if config.semantic_search_enabled else SearchRetrievalMode.FTS
+def _grep_retrieval_mode(semantic: bool) -> SearchRetrievalMode:
+    """Pick grep's retrieval mode: keyword full-text by default, hybrid on request.
+
+    Keyword matching is the default because nearest-neighbour ranking always returns
+    something, so a grep for a term that appears nowhere would list unrelated notes
+    instead of nothing (#1685).
+    """
+    return SearchRetrievalMode.HYBRID if semantic else SearchRetrievalMode.FTS
 
 
 @mcp.tool(
     title="Grep",
     description=(
-        "Search note content in one project and return ranked matching notes. Not a regex: "
-        "by default `pattern` is matched with hybrid semantic plus full-text search when "
-        "semantic search is enabled, otherwise full-text only. `literal=True` forces "
-        "full-text matching; add `context_lines` to get case-insensitive matching lines "
-        "with surrounding context and line numbers. Requires 'project' when several "
-        "projects are addressable."
+        "Search note content in one project and return matching notes. Not a regex: "
+        "`pattern` is matched as full-text keywords by default, and a pattern found in no "
+        "note returns no results. `semantic=True` ranks by meaning instead (hybrid "
+        "semantic plus full-text, when semantic search is enabled). Add `context_lines` "
+        "to get case-insensitive matching lines with surrounding context and line "
+        "numbers. Requires 'project' when several projects are addressable."
     ),
     tags={POSIX_TOOLS_TAG, "search"},
     annotations={
@@ -354,7 +354,7 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 )
 async def grep(
     pattern: str,
-    literal: bool = False,
+    semantic: bool = False,
     page: int = 1,
     page_size: int = 10,
     project: Optional[str] = None,
@@ -363,16 +363,16 @@ async def grep(
     context_lines: int | None = None,
     max_matches: int = 10,
 ) -> dict[str, Any]:
-    """Search note content, semantically by default.
+    """Search note content by full-text keywords, or by meaning with semantic=True.
 
     Args:
         pattern: Text to search for.
-        literal: Use full-text keyword matching instead of the default semantic/hybrid
-            retrieval. Required for context_lines.
+        semantic: Rank by meaning with hybrid semantic plus full-text retrieval instead
+            of the default keyword matching. Cannot be combined with context_lines.
         page: Page number (1-indexed).
         page_size: Results per page (maximum 100 in line-scanning mode).
         context_lines: Return compact literal match windows with 0-10 surrounding lines
-            (requires literal=True). Case-insensitive substrings, coordinates including
+            (not with semantic=True). Case-insensitive substrings, coordinates including
             frontmatter, overlapping windows merged. Scans current content of this
             indexed candidate page; pagination/totals count candidates, not exact matches.
         max_matches: Maximum matching lines to show per candidate in line mode (1-100,
@@ -393,8 +393,8 @@ async def grep(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
     if context_lines is not None:
-        if not literal:
-            raise ValueError("grep: context_lines requires literal=True")
+        if semantic:
+            raise ValueError("grep: context_lines cannot be combined with semantic=True")
         if not 0 <= context_lines <= 10:
             raise ValueError("grep: context_lines must be between 0 and 10")
         if "\n" in pattern or "\r" in pattern:
@@ -415,7 +415,7 @@ async def grep(
 
     query = SearchQuery(
         text=pattern,
-        retrieval_mode=_grep_retrieval_mode(literal),
+        retrieval_mode=_grep_retrieval_mode(semantic),
         entity_types=[SearchItemType.ENTITY],
     )
     async with get_project_client(route.project, context=context, project_id=route.project_id) as (
@@ -635,8 +635,8 @@ async def find_listing(
 
 # --- find metadata predicates ---
 # find's `meta` strings translate onto the search API's metadata_filters dict —
-# the exact grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte, $in,
-# array-contains-all, $between), nothing more. Word ops need whitespace around
+# a subset of the grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte,
+# $in, array-contains-all, $between), nothing more. Word ops need whitespace around
 # them and symbol ops exclude the key character class, so exactly one regex can
 # match any given predicate. Two-char symbols sit first in the alternation so
 # ">=" never parses as ">" plus a value starting with "=".
@@ -1000,7 +1000,7 @@ async def find(
         page_size: Nodes per page.
         meta: Frontmatter metadata predicates, repeatable; every predicate must
             hold. One predicate per string, one predicate per key, at least one
-            predicate (omit `meta` for the directory listing):
+            predicate; omit `meta` entirely for the directory listing. Forms:
               "status=active"              equality
               "confidence>0.6"             comparison: > >= < <=
               "priority in high,critical"  any of the listed values

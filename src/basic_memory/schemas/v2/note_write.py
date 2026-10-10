@@ -37,6 +37,10 @@ class NoteUpdated(BaseModel):
 class NoteAlreadyExists(BaseModel):
     kind: Literal["already_exists"] = "already_exists"
     file_path: str
+    # The note that owns file_path. Optional so older servers and clients that send
+    # only file_path still validate; None when no note can be named at the path.
+    external_id: str | None = None
+    permalink: str | None = None
 
 
 class NoteTargetMoved(BaseModel):
@@ -57,6 +61,10 @@ class NoteRevisionConflict(BaseModel):
     file_path: str
     # None when no note owns the path any more.
     db_checksum: str | None
+    # The note at the path. Optional so older servers that send only file_path and
+    # db_checksum still validate; None when no note owns the path any more.
+    title: str | None = None
+    permalink: str | None = None
 
 
 type WriteNoteResponse = Annotated[

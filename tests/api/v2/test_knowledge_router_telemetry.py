@@ -120,7 +120,6 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
-        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
     )
 
     assert result.content == response_content
@@ -168,7 +167,6 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
-        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )
 
@@ -209,7 +207,6 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
         vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
-        app_config=cast(Any, SimpleNamespace(semantic_search_enabled=False)),
         entity_id=entity.external_id,
     )
 

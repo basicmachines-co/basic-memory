@@ -199,6 +199,8 @@ class LocalIndexSearchService(
         entity_ids: list[int],
     ) -> VectorSyncBatchResult: ...
 
+    async def semantic_effectively_enabled(self) -> bool: ...
+
 
 class LocalIndexEntityService(Protocol):
     """Entity service capabilities needed by local index maintenance adapters."""
@@ -394,6 +396,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
             indexed_bytes=synced.indexed_bytes,
+            content_type=synced.entity.content_type,
             content_superseded=content_superseded,
         )
 
@@ -466,6 +469,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_checksum=None,
             operation=operation,
             indexed_bytes=indexed.indexed_bytes,
+            content_type=entity.content_type,
         )
 
     async def publish_relation_generation(
