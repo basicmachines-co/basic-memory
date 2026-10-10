@@ -3,7 +3,7 @@
 import asyncio
 import ast
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
@@ -726,6 +726,8 @@ class SearchService:
         self,
         entity_ids: list[int],
         progress_callback=None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
     ) -> VectorSyncBatchResult:
         """Refresh vector chunks for a batch of entities."""
         if not entity_ids:
@@ -759,6 +761,9 @@ class SearchService:
             await asyncio.gather(
                 *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
             )
+            if completion_callback is not None:
+                for entity_id in opted_out_ids:
+                    completion_callback(entity_id)
 
         eligible_entity_ids = [
             entity_id
@@ -766,13 +771,28 @@ class SearchService:
             if entity_id in entities_by_id and entity_id not in opted_out_ids
         ]
 
-        cleanup_task = (
-            self.repository.sync_entity_vectors_batch(unknown_ids) if unknown_ids else None
-        )
-        eligible_task = self.repository.sync_entity_vectors_batch(
-            eligible_entity_ids,
-            progress_callback=progress_callback,
-        )
+        # Preserve the old call shape when no completion observer is requested.
+        if completion_callback is None:
+            cleanup_task = (
+                self.repository.sync_entity_vectors_batch(unknown_ids) if unknown_ids else None
+            )
+            eligible_task = self.repository.sync_entity_vectors_batch(
+                eligible_entity_ids,
+                progress_callback=progress_callback,
+            )
+        else:
+            cleanup_task = (
+                self.repository.sync_entity_vectors_batch(
+                    unknown_ids, completion_callback=completion_callback
+                )
+                if unknown_ids
+                else None
+            )
+            eligible_task = self.repository.sync_entity_vectors_batch(
+                eligible_entity_ids,
+                progress_callback=progress_callback,
+                completion_callback=completion_callback,
+            )
         repository_results = [
             result
             for result in await asyncio.gather(
@@ -833,7 +853,11 @@ class SearchService:
         return batch_result
 
     async def reindex_vectors(
-        self, progress_callback=None, force_full: bool = False
+        self,
+        progress_callback=None,
+        force_full: bool = False,
+        *,
+        started_callback: Callable[[int], None] | None = None,
     ) -> dict[str, Any]:
         """Rebuild vector embeddings for all entities.
 
@@ -846,6 +870,8 @@ class SearchService:
                 and failed entities do not advance completion.
             force_full: When True, clear this project's derived vectors first so every
                 eligible entity re-embeds from scratch.
+            started_callback: Optional callable(total) invoked after selecting entities,
+                before cleanup or embedding work starts.
 
         Returns:
             dict with project-wide counts, including unfinished deferred entities,
@@ -854,6 +880,8 @@ class SearchService:
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
         entity_ids = [entity.id for entity in entities]
+        if started_callback is not None:
+            started_callback(len(entity_ids))
 
         # A host that cannot load sqlite-vec runs keyword-only (#711); its vector
         # tables cannot even be opened, so the whole rebuild is a no-op there.
@@ -888,13 +916,28 @@ class SearchService:
         }
         pending_entity_ids = entity_ids
         previous_pending_chunks: int | None = None
-        completed_entities = 0
+        completed_entity_ids: set[int] = set()
+
+        def report_completion(entity_id: int) -> None:
+            if entity_id in completed_entity_ids:
+                return
+            completed_entity_ids.add(entity_id)
+            if progress_callback is not None:
+                progress_callback(entity_id, len(completed_entity_ids), len(entity_ids))
+
         while True:
-            # Repository callbacks include deferred entities and use pass-local totals.
-            # Only the settled result can advance project-wide completion truthfully.
-            batch_result = await self.sync_entity_vectors_batch(
-                pending_entity_ids, progress_callback=None
-            )
+            # Pass-local progress includes unfinished entities. Observe successful
+            # completions instead, retaining the original project denominator.
+            if progress_callback is None:
+                batch_result = await self.sync_entity_vectors_batch(
+                    pending_entity_ids, progress_callback=None
+                )
+            else:
+                batch_result = await self.sync_entity_vectors_batch(
+                    pending_entity_ids,
+                    progress_callback=None,
+                    completion_callback=report_completion,
+                )
             deferred_entity_ids = set(batch_result.deferred_entity_ids)
             failed_entity_ids = set(batch_result.failed_entity_ids)
             synced_entity_ids = set(batch_result.synced_entity_ids)
@@ -923,9 +966,9 @@ class SearchService:
                 if entity_id in failed_entity_ids:
                     logger.warning(f"Failed to embed entity {entity_id}")
                 elif entity_id not in deferred_entity_ids:
-                    completed_entities += 1
-                    if progress_callback is not None:
-                        progress_callback(entity_id, completed_entities, len(entity_ids))
+                    # Some executors report outcomes only when the pass settles.
+                    # Deduplication also covers live callbacks and intentional skips.
+                    report_completion(entity_id)
 
             if not deferred_entity_ids:
                 break

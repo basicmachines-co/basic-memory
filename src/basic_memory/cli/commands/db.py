@@ -490,6 +490,10 @@ async def _reindex(
                 ) as progress:
                     task = progress.add_task("  Embedding entities...", total=None)
 
+                    def on_started(total: int) -> None:
+                        # Publish the known denominator before the first embedding request.
+                        progress.update(task, total=total, completed=0, refresh=True)
+
                     def on_progress(entity_id, index, total):
                         embedding_progress = EmbeddingProgress(
                             entity_id=entity_id,
@@ -502,11 +506,13 @@ async def _reindex(
                             task,
                             total=embedding_progress.total,
                             completed=embedding_progress.completed,
+                            refresh=True,
                         )
 
                     stats = await search_service.reindex_vectors(
                         progress_callback=on_progress,
                         force_full=full,
+                        started_callback=on_started,
                     )
                     progress.update(
                         task,

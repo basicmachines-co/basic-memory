@@ -721,3 +721,91 @@ def test_finalize_completed_entity_syncs_defers_incomplete_entities(
     )
 
     assert deferred_entity_ids == {1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observe_pass_progress", [False, True])
+async def test_completion_callback_excludes_deferred_and_failed_entities(
+    monkeypatch: pytest.MonkeyPatch, observe_pass_progress: bool
+) -> None:
+    skipped = _prepared_entity(1)
+    skipped.entity_skipped = True
+    repository = _batch_repository(
+        monkeypatch,
+        [
+            skipped,
+            _prepared_entity(2, entity_complete=False),
+            RuntimeError("prepare failed"),
+            _prepared_entity(4, embedding_jobs=[_pending_job(4)]),
+        ],
+        batch_size=1,
+    )
+    monkeypatch.setattr(
+        repository, "_flush_embedding_jobs", AsyncMock(side_effect=RuntimeError("flush failed"))
+    )
+    completed: list[int] = []
+    pass_progress: list[tuple[int, int, int]] = []
+    result = await semantic_vector_sync.sync_entity_vectors_internal(
+        repository,
+        [1, 2, 3, 4],
+        progress_callback=(lambda *event: pass_progress.append(event))
+        if observe_pass_progress
+        else None,
+        continue_on_error=True,
+        completion_callback=completed.append,
+    )
+    assert completed == [1]
+    assert result.synced_entity_ids == (1,)
+    assert result.entities_skipped == 1
+    assert result.deferred_entity_ids == (2,)
+    assert result.failed_entity_ids == (3, 4)
+    assert pass_progress == (
+        [(1, 1, 4), (2, 2, 4), (3, 3, 4), (4, 4, 4)] if observe_pass_progress else []
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch_size", [1, 2])
+async def test_completion_observer_failure_propagates_after_successful_flush(
+    monkeypatch: pytest.MonkeyPatch, batch_size: int
+) -> None:
+    """Presentation failures are not failed embeddings, for either flush boundary."""
+    repository = _TestRepository()
+    repository._semantic_embedding_sync_batch_size = batch_size
+    repository._semantic_vector_index_name = "sqlite-vec"
+    provider = SimpleNamespace(embed_documents=AsyncMock(return_value=[[0.1]]))
+    monkeypatch.setattr(repository, "_embedding_provider", provider)
+    monkeypatch.setattr(repository, "_embedding_model_key", Mock(return_value="test-model"))
+    monkeypatch.setattr(repository, "_log_vector_sync_runtime_settings", Mock())
+    monkeypatch.setattr(repository, "_log_vector_sync_complete", Mock())
+    monkeypatch.setattr(
+        repository,
+        "_prepare_entity_vector_jobs_window",
+        AsyncMock(return_value=[_prepared_entity(1, embedding_jobs=[_pending_job(1)])]),
+    )
+    persist = AsyncMock(
+        return_value=semantic_vector_sync.EmbeddingPersistenceResult(
+            persisted_row_ids=frozenset({10})
+        )
+    )
+    monkeypatch.setattr(repository, "_persist_embeddings", persist)
+    warning = Mock()
+    monkeypatch.setattr(semantic_vector_sync.logger, "warning", warning)
+    observer_failure = ValueError("presentation observer failed")
+
+    def on_completion(entity_id: int) -> None:
+        assert entity_id == 1
+        provider.embed_documents.assert_awaited_once()
+        persist.assert_awaited_once()
+        raise observer_failure
+
+    with pytest.raises(ValueError, match="presentation observer failed") as exc:
+        await semantic_vector_sync.sync_entity_vectors_internal(
+            repository,
+            [1],
+            progress_callback=None,
+            continue_on_error=True,
+            completion_callback=on_completion,
+        )
+    assert exc.value is observer_failure
+    warning.assert_not_called()

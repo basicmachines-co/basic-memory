@@ -1,5 +1,6 @@
 """Tests for search service."""
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 import pytest
@@ -1664,11 +1665,18 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
         created_entity_ids.append(entity.id)
         await search_service.index_entity(entity, content=f"Content for entity {i}")
 
-    async def _stub_sync_entity_vectors_batch(entity_ids: list[int], progress_callback=None):
+    async def _stub_sync_entity_vectors_batch(
+        entity_ids: list[int],
+        progress_callback=None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
+    ):
         assert entity_ids == created_entity_ids
-        if progress_callback:
-            for i, entity_id in enumerate(entity_ids):
+        for i, entity_id in enumerate(entity_ids):
+            if progress_callback is not None:
                 progress_callback(entity_id, i + 1, len(entity_ids))
+            if completion_callback is not None:
+                completion_callback(entity_id)
         return VectorSyncBatchResult(
             entities_total=len(entity_ids),
             entities_synced=len(entity_ids),

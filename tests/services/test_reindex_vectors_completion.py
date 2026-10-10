@@ -1,6 +1,7 @@
 """Project reindex must finish bounded vector shards without claiming partial success."""
 
 import asyncio
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -101,10 +102,18 @@ async def test_reindex_drains_real_repository_shards(
     sync_batch = service.sync_entity_vectors_batch
 
     async def recording_sync(
-        entity_ids: list[int], progress_callback=None
+        entity_ids: list[int],
+        progress_callback=None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
     ) -> VectorSyncBatchResult:
         batches.append(entity_ids.copy())
-        return await sync_batch(entity_ids, progress_callback)
+        result = await sync_batch(
+            entity_ids, progress_callback, completion_callback=completion_callback
+        )
+        # Live progress must arrive before this batch returns to the drain loop.
+        assert set(result.synced_entity_ids).issubset(event[0] for event in progress)
+        return result
 
     monkeypatch.setattr(service, "sync_entity_vectors_batch", recording_sync)
     clear = AsyncMock(wraps=repository.delete_project_vector_rows)
@@ -112,9 +121,13 @@ async def test_reindex_drains_real_repository_shards(
     monkeypatch.setattr(repository, "delete_project_vector_rows", clear)
     monkeypatch.setattr(repository, "reconcile_vector_index", reconcile)
     progress: list[tuple[int, int, int]] = []
+    started: list[int] = []
     stats = await service.reindex_vectors(
-        progress_callback=lambda *event: progress.append(event), force_full=force_full
+        progress_callback=lambda *event: progress.append(event),
+        force_full=force_full,
+        started_callback=started.append,
     )
+    assert started == [2]
 
     assert stats["total_entities"] == stats["embedded"] == 2
     assert stats["errors"] == stats["deferred"] == stats["skipped"] == 0
@@ -226,8 +239,11 @@ async def test_reindex_mixed_outcomes_and_later_error(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("observe_completion", [False, True])
 async def test_batch_preserves_outcomes_across_cleanup_and_opt_out(
-    search_service: SearchService, monkeypatch: pytest.MonkeyPatch
+    search_service: SearchService,
+    monkeypatch: pytest.MonkeyPatch,
+    observe_completion: bool,
 ) -> None:
     """Unknown IDs clean up normally; opted-out IDs never enter deferred retries."""
     monkeypatch.setattr(
@@ -246,7 +262,22 @@ async def test_batch_preserves_outcomes_across_cleanup_and_opt_out(
     clear = AsyncMock()
     monkeypatch.setattr(search_service, "_clear_entity_vectors", clear)
 
-    async def sync(entity_ids: list[int], progress_callback=None) -> VectorSyncBatchResult:
+    completed: list[int] = []
+
+    def on_completion(entity_id: int) -> None:
+        clear.assert_awaited_once_with(2)
+        completed.append(entity_id)
+
+    async def sync(
+        entity_ids: list[int],
+        progress_callback=None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
+    ) -> VectorSyncBatchResult:
+        if completion_callback is not None:
+            # The opted-out entity must finish before repository work starts.
+            assert completed[0] == 2
+            completion_callback(1 if entity_ids == [1] else 5)
         if entity_ids == [1]:
             return VectorSyncBatchResult(
                 entities_total=1,
@@ -269,7 +300,10 @@ async def test_batch_preserves_outcomes_across_cleanup_and_opt_out(
         )
 
     monkeypatch.setattr(search_service.repository, "sync_entity_vectors_batch", sync)
-    result = await search_service.sync_entity_vectors_batch([1, 2, 3, 4, 5])
+    result = await search_service.sync_entity_vectors_batch(
+        [1, 2, 3, 4, 5], completion_callback=on_completion if observe_completion else None
+    )
+    assert sorted(completed) == ([1, 2, 5] if observe_completion else [])
     assert result.entities_total == 5
     assert result.entities_synced == 2
     assert result.synced_entity_ids == (1, 5)
@@ -394,3 +428,80 @@ async def test_reindex_rejects_inconsistent_entity_outcomes(
     )
     with pytest.raises(ValueError, match="counts and entity outcomes"):
         await search_service.reindex_vectors()
+
+
+@pytest.mark.asyncio
+async def test_reindex_deduplicates_live_and_settled_progress(
+    search_service: SearchService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure_reindex(search_service, monkeypatch, [1, 2, 3, 4])
+    progress: list[tuple[int, int, int]] = []
+    batches: list[list[int]] = []
+
+    async def sync(
+        entity_ids: list[int],
+        progress_callback=None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
+    ) -> VectorSyncBatchResult:
+        assert progress_callback is None
+        assert completion_callback is not None
+        batches.append(entity_ids.copy())
+        if len(batches) == 1:
+            completion_callback(1)
+            completion_callback(1)
+            assert progress == [(1, 1, 4)]
+            return VectorSyncBatchResult(
+                entities_total=4,
+                entities_synced=1,
+                synced_entity_ids=(1,),
+                entities_failed=1,
+                failed_entity_ids=(2,),
+                entities_deferred=1,
+                deferred_entity_ids=(3,),
+                entities_skipped=1,
+                chunks_total=600,
+            )
+        assert entity_ids == [3]
+        assert progress == [(1, 1, 4), (4, 2, 4)]
+        completion_callback(3)
+        assert progress[-1] == (3, 3, 4)
+        return VectorSyncBatchResult(
+            entities_total=1, entities_synced=1, synced_entity_ids=(3,), entities_failed=0
+        )
+
+    monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync)
+    stats = await search_service.reindex_vectors(lambda *event: progress.append(event))
+    assert batches == [[1, 2, 3, 4], [3]]
+    assert progress == [(1, 1, 4), (4, 2, 4), (3, 3, 4)]
+    assert stats["embedded"] == 2
+    assert stats["skipped"] == stats["errors"] == 1
+    assert stats["deferred"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entity_ids", [[], [1, 2]])
+async def test_reindex_reports_total_before_full_reset(
+    search_service: SearchService, monkeypatch: pytest.MonkeyPatch, entity_ids: list[int]
+) -> None:
+    configure_reindex(search_service, monkeypatch, entity_ids)
+    started: list[int] = []
+
+    async def clear() -> None:
+        assert started == [len(entity_ids)]
+
+    monkeypatch.setattr(search_service, "_clear_project_vectors_for_full_reindex", clear)
+    monkeypatch.setattr(
+        search_service,
+        "sync_entity_vectors_batch",
+        AsyncMock(
+            return_value=VectorSyncBatchResult(
+                entities_total=len(entity_ids),
+                entities_synced=len(entity_ids),
+                synced_entity_ids=tuple(entity_ids),
+                entities_failed=0,
+            )
+        ),
+    )
+    await search_service.reindex_vectors(force_full=True, started_callback=started.append)
+    assert started == [len(entity_ids)]

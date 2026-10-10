@@ -206,6 +206,8 @@ class SearchRepository(Protocol):
         self,
         entity_ids: list[int],
         progress_callback: Optional[Callable[[int, int, int], Any]] = None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
     ) -> VectorSyncBatchResult:
         """Sync semantic vector chunks for a batch of entities."""
         ...

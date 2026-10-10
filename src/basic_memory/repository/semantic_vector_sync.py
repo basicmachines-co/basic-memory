@@ -305,6 +305,8 @@ async def sync_entity_vectors_internal(
     entity_ids: list[int],
     progress_callback: Callable[[int, int, int], Any] | None,
     continue_on_error: bool,
+    *,
+    completion_callback: Callable[[int], None] | None = None,
 ) -> VectorSyncBatchResult:
     """Run shared vector sync orchestration for one or many entities."""
     repository._assert_semantic_available()
@@ -355,6 +357,15 @@ async def sync_entity_vectors_internal(
         run, whether it synced, skipped, deferred, or failed.
         """
         nonlocal completed_entities
+        # The existing callback counts every pass outcome. Project reindex needs
+        # a separate signal for finished entities without counting deferred shards.
+        if (
+            completion_callback is not None
+            and entity_id in synced_entity_ids
+            and entity_id not in deferred_entity_ids
+            and entity_id not in failed_entity_ids
+        ):
+            completion_callback(entity_id)
         if progress_callback is None:
             return
         completed_entities += 1
@@ -463,14 +474,6 @@ async def sync_entity_vectors_internal(
                         )
                         batch_counters.embed_seconds_total += embed_seconds
                         batch_counters.write_seconds_total += write_seconds
-                        batch_counters.queue_wait_seconds_total += (
-                            repository._finalize_completed_entity_syncs(
-                                entity_runtime=entity_runtime,
-                                synced_entity_ids=synced_entity_ids,
-                                deferred_entity_ids=deferred_entity_ids,
-                                progress_callback=emit_progress,
-                            )
-                        )
                     except Exception as exc:
                         if not continue_on_error:
                             raise
@@ -492,6 +495,16 @@ async def sync_entity_vectors_internal(
                         )
                         for failed_entity_id in affected_entity_ids:
                             emit_progress(failed_entity_id)
+                    else:
+                        # Observer failures must propagate, not become embedding failures.
+                        batch_counters.queue_wait_seconds_total += (
+                            repository._finalize_completed_entity_syncs(
+                                entity_runtime=entity_runtime,
+                                synced_entity_ids=synced_entity_ids,
+                                deferred_entity_ids=deferred_entity_ids,
+                                progress_callback=emit_progress,
+                            )
+                        )
 
         if pending_jobs:
             flush_jobs = list(pending_jobs)
@@ -504,14 +517,6 @@ async def sync_entity_vectors_internal(
                 )
                 batch_counters.embed_seconds_total += embed_seconds
                 batch_counters.write_seconds_total += write_seconds
-                batch_counters.queue_wait_seconds_total += (
-                    repository._finalize_completed_entity_syncs(
-                        entity_runtime=entity_runtime,
-                        synced_entity_ids=synced_entity_ids,
-                        deferred_entity_ids=deferred_entity_ids,
-                        progress_callback=emit_progress,
-                    )
-                )
             except Exception as exc:
                 if not continue_on_error:
                     raise
@@ -533,6 +538,15 @@ async def sync_entity_vectors_internal(
                 )
                 for failed_entity_id in affected_entity_ids:
                     emit_progress(failed_entity_id)
+            else:
+                batch_counters.queue_wait_seconds_total += (
+                    repository._finalize_completed_entity_syncs(
+                        entity_runtime=entity_runtime,
+                        synced_entity_ids=synced_entity_ids,
+                        deferred_entity_ids=deferred_entity_ids,
+                        progress_callback=emit_progress,
+                    )
+                )
 
         # Trigger: this should never happen after all flushes succeed.
         # Why: remaining jobs mean runtime tracking drifted from queued jobs.

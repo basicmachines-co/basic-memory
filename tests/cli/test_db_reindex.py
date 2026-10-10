@@ -2,11 +2,14 @@
 
 import asyncio
 from collections.abc import Mapping
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from rich.console import Console
+from rich.progress import Progress
 from sqlalchemy import text
 from typer.testing import CliRunner
 
@@ -93,7 +96,9 @@ def _configure_embedding_runtime(
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+        async def reindex_vectors(
+            self, *, progress_callback=None, force_full: bool = False, started_callback=None
+        ):
             return dict(stats)
 
     class SilentProgress:
@@ -359,11 +364,14 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
             self.file_service = file_service
             self.session_maker = session_maker
 
-        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+        async def reindex_vectors(
+            self, *, progress_callback=None, force_full: bool = False, started_callback=None
+        ):
             vector_reindex_calls.append(
                 {
                     "progress_callback": progress_callback,
                     "force_full": force_full,
+                    "started_callback": started_callback,
                 }
             )
             return _vector_stats(total_entities=2, embedded=2, skipped=0, errors=0)
@@ -434,6 +442,7 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
     assert len(vector_reindex_calls) == 1
     assert vector_reindex_calls[0]["force_full"] is True
     assert callable(vector_reindex_calls[0]["progress_callback"])
+    assert callable(vector_reindex_calls[0]["started_callback"])
     assert any("full rebuild" in line for line in printed_lines)
 
 
@@ -455,7 +464,9 @@ async def test_reindex_embeddings_only_warns_when_project_has_no_indexed_entitie
         def __init__(self, search_repository, entity_repository, file_service, *, session_maker):
             pass
 
-        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+        async def reindex_vectors(
+            self, *, progress_callback=None, force_full: bool = False, started_callback=None
+        ):
             return _vector_stats(total_entities=0, embedded=0, skipped=0, errors=0)
 
     class SilentProgress:
@@ -738,7 +749,9 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+        async def reindex_vectors(
+            self, *, progress_callback=None, force_full: bool = False, started_callback=None
+        ):
             vector_reindex_calls.append({"force_full": force_full})
             return _vector_stats(total_entities=1, embedded=1, skipped=0, errors=0)
 
@@ -1029,3 +1042,41 @@ def test_reindex_unavailable_vectors_reports_skips_without_crashing(
     assert "0 entities embedded, 2 skipped, 0 errors, 0 deferred" in output
     assert "index=unavailable" in output
     assert "Reindex complete!" in output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("full", [False, True])
+async def test_reindex_renders_percentages_before_vector_reindex_returns(
+    monkeypatch: pytest.MonkeyPatch, session_maker, full: bool
+) -> None:
+    """Render real Rich frames while the service is still doing embedding work."""
+    stats = _vector_stats(total_entities=2, embedded=2, skipped=0, errors=0)
+    app_config, _, _ = _configure_embedding_runtime(monkeypatch, session_maker, stats)
+    monkeypatch.setenv("TERM", "xterm")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=100)
+    monkeypatch.setattr(db_cmd, "console", console)
+    # No timer can rescue missing callback refreshes in this test.
+    monkeypatch.setattr(
+        db_cmd, "Progress", lambda *args, **kwargs: Progress(*args, auto_refresh=False, **kwargs)
+    )
+
+    async def reindex_vectors(*, progress_callback, force_full, started_callback):
+        assert force_full is full
+        started_callback(2)
+        assert "  0%" in output.getvalue()
+        assert "100%" not in output.getvalue()
+        output.seek(0)
+        output.truncate()
+        progress_callback(10, 1, 2)
+        assert " 50%" in output.getvalue()
+        assert "100%" not in output.getvalue()
+        progress_callback(20, 2, 2)
+        return stats
+
+    monkeypatch.setattr(
+        "basic_memory.services.search_service.SearchService",
+        lambda *args, **kwargs: SimpleNamespace(reindex_vectors=reindex_vectors),
+    )
+    await db_cmd._reindex(app_config, search=False, embeddings=True, full=full, project="foo")
+    assert "100%" in output.getvalue()

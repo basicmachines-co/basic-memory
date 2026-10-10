@@ -1587,12 +1587,15 @@ class SearchRepositoryBase(ABC):
         self,
         entity_ids: list[int],
         progress_callback: Optional[Callable[[int, int, int], Any]] = None,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
     ) -> VectorSyncBatchResult:
         """Sync semantic chunk rows + embeddings for a batch of entities."""
         return await self._sync_entity_vectors_internal(
             entity_ids,
             progress_callback=progress_callback,
             continue_on_error=True,
+            completion_callback=completion_callback,
         )
 
     async def _sync_entity_vectors_internal(
@@ -1600,6 +1603,8 @@ class SearchRepositoryBase(ABC):
         entity_ids: list[int],
         progress_callback: Optional[Callable[[int, int, int], Any]],
         continue_on_error: bool,
+        *,
+        completion_callback: Callable[[int], None] | None = None,
     ) -> VectorSyncBatchResult:
         """Run shared vector sync orchestration for one or many entities.
 
@@ -1616,12 +1621,18 @@ class SearchRepositoryBase(ABC):
         doubles that have none.
         """
         try:
-            result = await semantic_vector_sync.sync_entity_vectors_internal(
-                self,
-                entity_ids,
-                progress_callback,
-                continue_on_error,
-            )
+            if completion_callback is None:
+                result = await semantic_vector_sync.sync_entity_vectors_internal(
+                    self, entity_ids, progress_callback, continue_on_error
+                )
+            else:
+                result = await semantic_vector_sync.sync_entity_vectors_internal(
+                    self,
+                    entity_ids,
+                    progress_callback,
+                    continue_on_error,
+                    completion_callback=completion_callback,
+                )
         except BaseException:
             # Trigger: the pass raised instead of returning terminal states. The
             #   per-entity scheduler calls this with continue_on_error=False, so
