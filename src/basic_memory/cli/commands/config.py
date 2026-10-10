@@ -23,6 +23,7 @@ from rich.table import Table
 from basic_memory.cli.app import app
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.redaction import SECRET_FIELDS, URL_FIELDS, redact_url
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -151,7 +152,7 @@ def _resolve_settings() -> list[ConfigSetting]:
 def _require_known_key(key: str) -> None:
     """Exit with guidance unless `key` is a configurable scalar setting."""
     if key not in CONFIGURABLE_FIELDS:
-        console.print(f"[red]Error: '{key}' is not a recognized setting.[/red]")
+        console.print(f"[red]Error: '{literal(key)}' is not a recognized setting.[/red]")
         console.print("[dim]Run 'bm config list' to see all available settings.[/dim]")
         raise typer.Exit(1)
 
@@ -187,12 +188,12 @@ def config_get(
     _require_known_key(key)
 
     config = ConfigManager().config
-    console.print(f"{key} = {_render_value(key, getattr(config, key))}")
+    console.print(f"{literal(key)} = {literal(_render_value(key, getattr(config, key)))}")
 
     env_var = _env_var_name(key)
     if env_var in os.environ:
         env_value = _redact_for_display(key, os.environ[env_var])
-        console.print(f"[yellow]Overridden by ${env_var} = {env_value}[/yellow]")
+        console.print(f"[yellow]Overridden by ${literal(env_var)} = {literal(env_value)}[/yellow]")
 
 
 @config_app.command("set")
@@ -221,8 +222,10 @@ def config_set(
     if key == "default_project":
         project_key, _ = config_manager.get_project(value)
         if project_key is None:
-            console.print(f"[red]Error: '{value}' is not a configured project.[/red]")
-            console.print(f"[dim]Known projects: {', '.join(sorted(config.projects))}[/dim]")
+            console.print(f"[red]Error: '{literal(value)}' is not a configured project.[/red]")
+            console.print(
+                f"[dim]Known projects: {literal(', '.join(sorted(config.projects)))}[/dim]"
+            )
             raise typer.Exit(1)
         value = project_key
 
@@ -233,8 +236,8 @@ def config_set(
     try:
         validated = BasicMemoryConfig.model_validate(candidate)
     except ValidationError as e:
-        console.print(f"[red]Error: invalid value for '{key}':[/red]")
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[red]Error: invalid value for '{literal(key)}':[/red]")
+        console.print(f"[red]{literal(e)}[/red]")
         raise typer.Exit(1)
 
     setattr(config, key, getattr(validated, key))
@@ -242,12 +245,14 @@ def config_set(
     # env-overridden setting keeps its on-disk value (#1631).
     config_manager.save_config(config, persist_env_keys={key})
 
-    console.print(f"[green]{key} = {_render_value(key, getattr(config, key))}[/green]")
+    console.print(
+        f"[green]{literal(key)} = {literal(_render_value(key, getattr(config, key)))}[/green]"
+    )
 
     env_var = _env_var_name(key)
     if env_var in os.environ:
         console.print(
-            f"[yellow]Note: ${env_var} is set and will override this file value "
+            f"[yellow]Note: ${literal(env_var)} is set and will override this file value "
             "until the environment variable is unset.[/yellow]"
         )
 
@@ -266,4 +271,6 @@ def config_unset(
     setattr(config, key, default_value)
     config_manager.save_config(config, persist_env_keys={key})
 
-    console.print(f"[green]{key} reverted to default: {_render_value(key, default_value)}[/green]")
+    console.print(
+        f"[green]{literal(key)} reverted to default: {literal(_render_value(key, default_value))}[/green]"
+    )

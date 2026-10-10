@@ -15,6 +15,7 @@ import httpx
 from rich.console import Console
 
 from basic_memory.config import ConfigManager
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -87,11 +88,11 @@ class CLIAuth:
                     return response.json()
                 else:
                     console.print(
-                        f"[red]Device authorization failed: {response.status_code} - {response.text}[/red]"
+                        f"[red]Device authorization failed: {response.status_code} - {literal(response.text)}[/red]"
                     )
                     return None
         except Exception as e:
-            console.print(f"[red]Device authorization error: {e}[/red]")
+            console.print(f"[red]Device authorization error: {literal(e)}[/red]")
             return None
 
     def display_user_instructions(self, device_response: dict[str, Any]) -> None:
@@ -102,12 +103,12 @@ class CLIAuth:
 
         console.print("\n[bold blue]Authentication Required[/bold blue]")
         console.print("\nTo authenticate, please visit:")
-        console.print(f"[bold cyan]{verification_uri}[/bold cyan]")
-        console.print(f"\nAnd enter this code: [bold yellow]{user_code}[/bold yellow]")
+        console.print(f"[bold cyan]{literal(verification_uri)}[/bold cyan]")
+        console.print(f"\nAnd enter this code: [bold yellow]{literal(user_code)}[/bold yellow]")
 
         if verification_uri_complete:
             console.print("\nOr for one-click access, visit:")
-            console.print(f"[bold green]{verification_uri_complete}[/bold green]")
+            console.print(f"[bold green]{literal(verification_uri_complete)}[/bold green]")
 
             # Try to open browser automatically
             try:
@@ -161,11 +162,11 @@ class CLIAuth:
                         console.print("[red]Device code has expired. Please try again.[/red]")
                         return None
                     else:
-                        console.print(f"[red]Token polling error: {error}[/red]")
+                        console.print(f"[red]Token polling error: {literal(error)}[/red]")
                         return None
 
             except Exception as e:
-                console.print(f"[red]Token polling request error: {e}[/red]")
+                console.print(f"[red]Token polling request error: {literal(e)}[/red]")
 
             # Wait before next poll
             await self._async_sleep(current_interval)
@@ -194,7 +195,7 @@ class CLIAuth:
         # Secure the token file
         os.chmod(self.token_file, 0o600)
 
-        console.print(f"[green]Tokens saved to {self.token_file}[/green]")
+        console.print(f"[green]Tokens saved to {literal(self.token_file)}[/green]")
 
     def load_tokens(self) -> dict[str, Any] | None:
         """Load tokens from .bm-auth.json file."""
@@ -231,11 +232,11 @@ class CLIAuth:
                     return response.json()
                 else:
                     console.print(
-                        f"[red]Token refresh failed: {response.status_code} - {response.text}[/red]"
+                        f"[red]Token refresh failed: {response.status_code} - {literal(response.text)}[/red]"
                     )
                     return None
         except Exception as e:
-            console.print(f"[red]Token refresh error: {e}[/red]")
+            console.print(f"[red]Token refresh error: {literal(e)}[/red]")
             return None
 
     async def get_valid_token(self) -> str | None:

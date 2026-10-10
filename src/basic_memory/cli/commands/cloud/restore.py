@@ -16,6 +16,7 @@ from basic_memory.cli.commands.cloud.api_client import (
 )
 from basic_memory.cli.commands.cloud.schemas import BucketSnapshotBrowseResponse
 from basic_memory.config import ConfigManager
+from basic_memory.cli.markup import literal
 
 console = Console()
 
@@ -61,8 +62,10 @@ def restore(
 
             if not force:
                 # Show what will be restored
-                console.print(f"[blue]Preparing to restore from snapshot {snapshot_id}[/blue]")
-                console.print(f"  Path: {normalized_path}")
+                console.print(
+                    f"[blue]Preparing to restore from snapshot {literal(snapshot_id)}[/blue]"
+                )
+                console.print(f"  Path: {literal(normalized_path)}")
 
                 # Try to browse the snapshot to show what files will be affected
                 try:
@@ -80,25 +83,25 @@ def restore(
                         if len(browse_response.files) <= 10:
                             console.print("\n  Files to restore:")
                             for file_info in browse_response.files:
-                                console.print(f"    - {file_info.key}")
+                                console.print(f"    - {literal(file_info.key)}")
                         else:
                             console.print(
                                 f"\n  {len(browse_response.files)} files will be restored"
                             )
                             console.print("  First 5 files:")
                             for file_info in browse_response.files[:5]:
-                                console.print(f"    - {file_info.key}")
+                                console.print(f"    - {literal(file_info.key)}")
                             console.print(f"    ... and {len(browse_response.files) - 5} more")
                     else:
                         console.print(
-                            f"\n[yellow]No files found matching '{normalized_path}' "
+                            f"\n[yellow]No files found matching '{literal(normalized_path)}' "
                             f"in snapshot[/yellow]"
                         )
                         raise typer.Exit(0)
 
                 except CloudAPIError as browse_error:
                     if browse_error.status_code == 404:
-                        console.print(f"[red]Snapshot not found: {snapshot_id}[/red]")
+                        console.print(f"[red]Snapshot not found: {literal(snapshot_id)}[/red]")
                         raise typer.Exit(1)
                     # If browse fails for other reasons, proceed with confirmation anyway
                     pass
@@ -111,7 +114,7 @@ def restore(
                     console.print("[yellow]Restore cancelled[/yellow]")
                     raise typer.Exit(0)
 
-            console.print(f"[blue]Restoring from snapshot {snapshot_id}...[/blue]")
+            console.print(f"[blue]Restoring from snapshot {literal(snapshot_id)}...[/blue]")
 
             response = await make_api_request(
                 method="POST",
@@ -127,33 +130,37 @@ def restore(
                 console.print(f"[green]Successfully restored {len(restored_files)} file(s)[/green]")
                 if len(restored_files) <= 10:
                     for file_path in restored_files:
-                        console.print(f"  - {file_path}")
+                        console.print(f"  - {literal(file_path)}")
                 else:
                     console.print("  First 5 restored files:")
                     for file_path in restored_files[:5]:
-                        console.print(f"  - {file_path}")
+                        console.print(f"  - {literal(file_path)}")
                     console.print(f"  ... and {len(restored_files) - 5} more")
-                console.print(f"\n[dim]Snapshot ID: {returned_snapshot_id}[/dim]")
+                console.print(f"\n[dim]Snapshot ID: {literal(returned_snapshot_id)}[/dim]")
             else:
                 console.print("[yellow]No files were restored[/yellow]")
-                console.print(f"[dim]No files matching '{normalized_path}' found in snapshot[/dim]")
+                console.print(
+                    f"[dim]No files matching '{literal(normalized_path)}' found in snapshot[/dim]"
+                )
 
         except typer.Exit:
             # Re-raise typer.Exit without modification - it's used for clean exits
             raise
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
-            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
-            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(f"[yellow]{literal(e.args[0])}[/yellow]\n")
+            console.print(
+                f"Subscribe at: [blue underline]{literal(e.subscribe_url)}[/blue underline]\n"
+            )
             raise typer.Exit(1)
         except CloudAPIError as e:
             if e.status_code == 404:
-                console.print(f"[red]Snapshot not found: {snapshot_id}[/red]")
+                console.print(f"[red]Snapshot not found: {literal(snapshot_id)}[/red]")
             else:
-                console.print(f"[red]Failed to restore: {e}[/red]")
+                console.print(f"[red]Failed to restore: {literal(e)}[/red]")
             raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]Unexpected error: {e}[/red]")
+            console.print(f"[red]Unexpected error: {literal(e)}[/red]")
             raise typer.Exit(1)
 
     asyncio.run(_restore())

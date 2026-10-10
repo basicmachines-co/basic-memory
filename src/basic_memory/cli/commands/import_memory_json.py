@@ -14,6 +14,7 @@ from basic_memory.config import ConfigManager, get_project_config
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
+from basic_memory.cli.markup import literal
 
 if TYPE_CHECKING:
     from basic_memory.markdown import MarkdownProcessor
@@ -73,7 +74,7 @@ def memory_json(
 
         # Process the file
         base_path = config.home if not destination_folder else config.home / destination_folder
-        console.print(f"\nImporting from {json_path}...writing to {base_path}")
+        console.print(f"\nImporting from {literal(json_path)}...writing to {literal(base_path)}")
 
         # Run the import for json log format
         file_data = []

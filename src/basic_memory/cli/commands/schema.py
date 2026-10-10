@@ -20,6 +20,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
+from basic_memory.cli.markup import literal
 
 # MCP tool functions are imported inside each command: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
@@ -90,7 +91,9 @@ def _render_infer_table(data: dict[str, Any]) -> None:
     suggested_required = data.get("suggested_required", [])
     suggested_optional = data.get("suggested_optional", [])
 
-    console.print(f"\n[bold]Analyzing {notes_analyzed} notes with type: {note_type}...[/bold]\n")
+    console.print(
+        f"\n[bold]Analyzing {notes_analyzed} notes with type: {literal(note_type)}...[/bold]\n"
+    )
 
     table = Table(title="Field Frequencies")
     table.add_column("Field", style="cyan")
@@ -135,29 +138,29 @@ def _render_diff_output(data: dict[str, Any]) -> None:
     has_drift = new_fields or dropped_fields or cardinality_changes
 
     if not has_drift:
-        console.print(f"[green]No drift detected for {note_type} schema.[/green]")
+        console.print(f"[green]No drift detected for {literal(note_type)} schema.[/green]")
         return
 
-    console.print(f"\n[bold]Schema drift detected for {note_type}:[/bold]\n")
+    console.print(f"\n[bold]Schema drift detected for {literal(note_type)}:[/bold]\n")
 
     if new_fields:
         console.print("[green]+ New fields (common in notes, not in schema):[/green]")
         for f in new_fields:
             console.print(
-                f"  + {f['name']}: {f.get('percentage', 0):.0%} of notes ({f.get('source', '')})"
+                f"  + {literal(f['name'])}: {f.get('percentage', 0):.0%} of notes ({literal(f.get('source', ''))})"
             )
 
     if dropped_fields:
         console.print("[red]- Dropped fields (in schema, rare in notes):[/red]")
         for f in dropped_fields:
             console.print(
-                f"  - {f['name']}: {f.get('percentage', 0):.0%} of notes ({f.get('source', '')})"
+                f"  - {literal(f['name'])}: {f.get('percentage', 0):.0%} of notes ({literal(f.get('source', ''))})"
             )
 
     if cardinality_changes:
         console.print("[yellow]~ Cardinality changes:[/yellow]")
         for change in cardinality_changes:
-            console.print(f"  ~ {change}")
+            console.print(f"  ~ {literal(change)}")
 
 
 # --- Commands ---
@@ -220,7 +223,7 @@ def validate(
             if json_output:
                 print(json.dumps(result, indent=2, default=str))
             else:
-                console.print(f"[yellow]{result['error']}[/yellow]")
+                console.print(f"[yellow]{literal(result['error'])}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
@@ -234,7 +237,7 @@ def validate(
         if strict and result.get("error_count", 0) > 0:
             raise typer.Exit(1)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
         if not isinstance(e, typer.Exit):
@@ -298,7 +301,7 @@ def infer(
             if json_output:
                 print(json.dumps(result, indent=2, default=str))
             else:
-                console.print(f"[yellow]{result['error']}[/yellow]")
+                console.print(f"[yellow]{literal(result['error'])}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
@@ -309,7 +312,7 @@ def infer(
             if json_output:
                 print(json.dumps(result, indent=2, default=str))
             else:
-                console.print(f"[yellow]No notes found with type: {note_type}[/yellow]")
+                console.print(f"[yellow]No notes found with type: {literal(note_type)}[/yellow]")
             return
 
         if json_output:
@@ -320,10 +323,10 @@ def infer(
         if save:
             console.print(
                 f"\n[yellow]--save not yet implemented. "
-                f"Copy the schema above into schema/{note_type}.md[/yellow]"
+                f"Copy the schema above into schema/{literal(note_type)}.md[/yellow]"
             )
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
         if not isinstance(e, typer.Exit):
@@ -380,7 +383,7 @@ def diff(
             if json_output:
                 print(json.dumps(result, indent=2, default=str))
             else:
-                console.print(f"[yellow]{result['error']}[/yellow]")
+                console.print(f"[yellow]{literal(result['error'])}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
@@ -391,7 +394,7 @@ def diff(
         else:
             _render_diff_output(result)
     except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(1)
     except Exception as e:
         if not isinstance(e, typer.Exit):

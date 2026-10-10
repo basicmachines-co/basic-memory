@@ -97,6 +97,17 @@ def test_config_get_unknown_key(runner, write_config):
     assert "not a recognized setting" in result.output
 
 
+@pytest.mark.parametrize("key", ["proj [x]", "a[/b]c"])
+def test_config_get_unknown_key_prints_bracketed_key_verbatim(runner, write_config, key):
+    """A bracketed key is echoed as typed, not read as Rich markup (#1720)."""
+    write_config(_base_config())
+
+    result = runner.invoke(app, ["config", "get", key])
+
+    assert result.exit_code == 1
+    assert f"'{key}' is not a recognized setting" in " ".join(result.output.split())
+
+
 def test_config_get_renders_enum_value_not_repr(runner, write_config):
     """Enum-typed settings (e.g. database_backend) must show their value, not `Class.MEMBER`."""
     write_config(_base_config())

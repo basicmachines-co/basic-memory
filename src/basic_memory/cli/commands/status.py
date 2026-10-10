@@ -21,6 +21,7 @@ from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.schemas.project_readiness import ProjectIndexPhase
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.utils import shell_command
+from basic_memory.cli.markup import literal
 
 # Create rich console
 console = Console()
@@ -222,7 +223,7 @@ def status(
         if json_output:
             print(json.dumps({"error": str(e)}, indent=2))
         else:
-            console.print(f"[red]Error: {e}[/red]")
+            console.print(f"[red]Error: {literal(e)}[/red]")
         raise typer.Exit(code=1)
     except typer.Exit:
         raise

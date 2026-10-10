@@ -14,6 +14,7 @@ from basic_memory.config import ConfigManager, get_project_config
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
+from basic_memory.cli.markup import literal
 
 if TYPE_CHECKING:
     from basic_memory.markdown import MarkdownProcessor
@@ -75,7 +76,9 @@ def import_claude(
 
         # Process the file
         base_path = config.home / folder
-        console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
+        console.print(
+            f"\nImporting chats from {literal(conversations_json)}...writing to {literal(base_path)}"
+        )
 
         # Run the import
         with conversations_json.open("r", encoding="utf-8") as file:
