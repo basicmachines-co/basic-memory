@@ -1305,6 +1305,66 @@ async def test_edit_note_metadata_null_values_rejected_before_auto_create(
 
 
 @pytest.mark.asyncio
+async def test_edit_note_conflict_names_the_note_as_the_winning_write_left_it(
+    mcp_server, app, test_project, monkeypatch
+):
+    """A conflict reports the note's identity after the race, not the stale lookup (#1719)."""
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Old Edit Title",
+                "directory": "test",
+                "content": "# Old Edit Title\n\nBody.",
+                "output_format": "json",
+            },
+        )
+        revision_a = json.loads(created.content[0].text)["checksum"]
+
+        original_patch = KnowledgeClient.patch_entity
+        retitled = False
+
+        async def retitle_before_patch(self, entity_id, patch_data, *, base_checksum=None):
+            # Another writer retitles the note (through its H1) after edit_note
+            # resolved it but before the guarded PATCH lands.
+            nonlocal retitled
+            if not retitled:
+                retitled = True
+                await original_patch(
+                    self,
+                    entity_id,
+                    {
+                        "operation": "find_replace",
+                        "find_text": "# Old Edit Title",
+                        "content": "# New Edit Title",
+                    },
+                )
+            return await original_patch(self, entity_id, patch_data, base_checksum=base_checksum)
+
+        monkeypatch.setattr(KnowledgeClient, "patch_entity", retitle_before_patch)
+        result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/old-edit-title",
+                "operation": "append",
+                "content": "\nStale edit.",
+                "expected_checksum": revision_a,
+                "output_format": "json",
+            },
+            raise_on_error=False,
+        )
+
+        assert result.is_error is True
+        payload = json.loads(result.content[0].text)
+        assert payload["error"] == "NOTE_REVISION_CONFLICT"
+        assert payload["currentChecksum"] not in (None, revision_a)
+        assert payload["title"] == "New Edit Title"
+        assert payload["file_path"] == "test/Old Edit Title.md"
+
+
+@pytest.mark.asyncio
 async def test_edit_note_expected_checksum_edits_only_the_revision_read(
     mcp_server, app, test_project
 ):

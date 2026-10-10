@@ -360,6 +360,60 @@ async def test_expected_checksum_refuses_a_note_moved_after_the_path_lookup(
     assert "Stale replacement" not in current["content"]
 
 
+async def test_revision_conflict_names_the_note_as_the_winning_write_left_it(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A conflict reports the note's identity after the race, not the stale lookup (#1719)."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    note = {"title": "Old Title", "directory": "notes", "content": "# Old Title\n\nBody"}
+    created = await client.post(endpoint, json={"note": note})
+    entity = created.json()["entity"]
+    entity_url = (
+        f"/v2/projects/{test_project.external_id}/knowledge/entities/{entity['external_id']}"
+    )
+    original_update = NoteContentMutationService.update_note
+    retitled = False
+
+    async def retitle_before_update(self: NoteContentMutationService, **kwargs: Any):
+        # Another writer retitles the note (through its H1) after write_note looked
+        # up the path but before the guarded replacement takes the note lock.
+        nonlocal retitled
+        if not retitled:
+            retitled = True
+            edited = await client.patch(
+                entity_url,
+                json={
+                    "operation": "find_replace",
+                    "find_text": "# Old Title",
+                    "content": "# New Title",
+                },
+            )
+            assert edited.status_code == 202, edited.text
+        return await original_update(self, **kwargs)
+
+    monkeypatch.setattr(NoteContentMutationService, "update_note", retitle_before_update)
+    response = await client.post(
+        endpoint,
+        json={
+            "note": {**note, "content": "# Old Title\n\nStale replacement"},
+            "overwrite": True,
+            "expected_checksum": entity["db_checksum"],
+        },
+    )
+
+    current = (await client.get(entity_url)).json()
+    assert current["title"] == "New Title"
+    assert response.json() == {
+        "kind": "revision_conflict",
+        "file_path": "notes/Old Title.md",
+        "db_checksum": current["db_checksum"],
+        "title": "New Title",
+        "permalink": current["permalink"],
+    }
+
+
 @pytest.mark.parametrize("conditional", [True, False], ids=["conditional", "unconditional"])
 async def test_a_note_deleted_under_the_update_lock_is_a_revision_conflict_when_pinned(
     client: AsyncClient,
