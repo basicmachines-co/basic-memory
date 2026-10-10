@@ -119,11 +119,12 @@ def validate_openclaw_manifest(skills_root: Path) -> None:
     unexpected = sorted(listed - expected)
     duplicates = sorted({entry for entry in entries if entries.count(entry) > 1})
     unknown_exclusions = sorted(OPENCLAW_EXCLUDED_SKILLS.keys() - skill_names)
-    if missing or unexpected or duplicates or unknown_exclusions:
+    unexplained = sorted(name for name, why in OPENCLAW_EXCLUDED_SKILLS.items() if not why.strip())
+    if missing or unexpected or duplicates or unknown_exclusions or unexplained:
         raise SystemExit(
             f"{manifest_path}: skills array out of sync with {skills_root}; "
             f"missing={missing} unexpected={unexpected} duplicates={duplicates} "
-            f"unknown_exclusions={unknown_exclusions}. List the skill in the manifest, "
+            f"unknown_exclusions={unknown_exclusions} unexplained={unexplained}. List the skill in the manifest, "
             "or add it to OPENCLAW_EXCLUDED_SKILLS in scripts/validate_skills.py "
             "with the reason it stays out."
         )
