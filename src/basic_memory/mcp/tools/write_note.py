@@ -558,15 +558,28 @@ async def write_note(
                 case NoteLocked(message=message):
                     raise ToolError(message)
                 case NoteRevisionConflict(db_checksum=current_checksum) as conflict:
+                    # Same shape as edit_note's conflict (#1719): nothing was written,
+                    # so checksum is null; currentChecksum is the revision to retry
+                    # against; identity names the note at the path, or is null once
+                    # no note owns it.
+                    conflict_permalink = conflict.permalink
+                    conflict_workspace = current_workspace_permalink_context()
+                    if conflict_permalink and conflict_workspace is not None:
+                        conflict_permalink = build_qualified_permalink_reference(
+                            active_project.permalink,
+                            conflict_permalink,
+                            workspace_permalink=conflict_workspace.workspace_slug,
+                        )
                     _raise_write_refusal(
                         output_format,
                         {
-                            "title": title,
-                            "permalink": entity.permalink,
+                            "title": conflict.title,
+                            "permalink": conflict_permalink,
                             "file_path": conflict.file_path if current_checksum else None,
-                            "checksum": current_checksum,
+                            "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_REVISION_CONFLICT",
+                            "currentChecksum": current_checksum,
                         },
                         _format_revision_conflict(
                             title, conflict.file_path, current_checksum, active_project.name

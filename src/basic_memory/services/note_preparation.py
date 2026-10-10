@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -602,6 +603,10 @@ def replace_section_content(
     return "\n".join([*lines[: section_line_index + 1], new_content, *lines[end_index:]])
 
 
+# A Markdown list item line: a bullet (-, *, +) or an ordered marker (1. or 1)).
+_LIST_ITEM_LINE = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
+
+
 def insert_relative_to_section(
     current_content: str,
     section_header: str,
@@ -635,7 +640,14 @@ def insert_relative_to_section(
             insert_lines = ["", *insert_lines]
         return "\n".join([*before, *insert_lines, "", *lines[index:]])
     after = lines[index + 1 :]
-    if after and after[0].strip():
+    # Trigger: the inserted block lands directly above the section's first line.
+    # Why: a blank line keeps an inserted paragraph from running into the next one,
+    #   but between two list items it splits the list in two (#1720).
+    # Outcome: list item next to list item joins tightly; anything else keeps the gap.
+    joins_a_list = bool(
+        _LIST_ITEM_LINE.match(insert_lines[-1]) and after and _LIST_ITEM_LINE.match(after[0])
+    )
+    if after and after[0].strip() and not joins_a_list:
         insert_lines.append("")
     return "\n".join([*lines[: index + 1], *insert_lines, *after])
 

@@ -100,7 +100,9 @@
   (the full `checksum` from a JSON `read_note`, `write_note` or `edit_note` result) and
   the edit applies only while the note is still that revision. Otherwise nothing is
   written and the tool error is a revision conflict carrying the current checksum (JSON
-  `error: "NOTE_REVISION_CONFLICT"`, `currentChecksum`). A guarded `append` or `prepend`
+  `error: "NOTE_REVISION_CONFLICT"`, `currentChecksum`, with the note's title, permalink
+  and file path while it still exists, the same shape as `write_note`'s, #1719). A guarded
+  `append` or `prepend`
   on a missing note is a conflict, not an auto-create. The v2 `PATCH` entity route
   accepts the same `x-bm-cloud-note-base-checksum` header the `PUT` route does.
 
@@ -112,7 +114,9 @@
   `expected_checksum` with `overwrite=True` (CLI: `--overwrite --expected-checksum`)
   and the note is replaced only while it is still that revision. Otherwise nothing
   changes and the result is a revision conflict carrying the current checksum (JSON
-  `error: "NOTE_REVISION_CONFLICT"`). A checksum for a path no note owns is also a
+  `error: "NOTE_REVISION_CONFLICT"` and `currentChecksum`, with `checksum` null because
+  nothing was written, and the note at the path named by its stored title and permalink,
+  #1719). A checksum for a path no note owns is also a
   conflict, so a note deleted since you read it is not recreated. Without
   `expected_checksum`, `overwrite=True` still replaces unconditionally.
 
@@ -360,6 +364,21 @@
   crashed the command with `MarkupError`. The deprecated `bm cloud sync`, `bisync` and
   `bisync-reset` now print only their own deprecation notice, without Click's extra
   "DeprecationWarning: The command ... is deprecated." line.
+
+- **#1716**: A note's `created_at` no longer resets on every edit, move or reindex.
+  Without a frontmatter `created`, the parser falls back to the file's ctime, which each
+  atomic rewrite or rename moves, and reindexing an existing note copied that time into
+  the row. Now an existing row keeps its creation time, and only a declared frontmatter
+  `created` changes it. A brand-new file still takes its file time.
+
+- **#1717**: `build_context` text output names the source of relations the primary note
+  does not own. An incoming `relates_to` used to be listed bare under its target, so it
+  read as a self-link; it now reads `- [[Brewing Notes]] relates_to [[Bean Origins]]`.
+  Relations the note owns keep the bare form, and JSON output is unchanged.
+
+- **#1720**: `edit_note` `insert_after_section` no longer puts a blank line between an
+  inserted list item and the section's first list item, which split one list in two. A
+  paragraph inserted above a paragraph still gets the blank line that keeps them apart.
 
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
   variables that override `config.json`, redacted the same way as the file dump. It

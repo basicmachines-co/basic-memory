@@ -694,7 +694,13 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
         stale_json = _json_content(stale_json_result)
         assert stale_json["action"] == "conflict"
         assert stale_json["error"] == "NOTE_REVISION_CONFLICT"
-        assert stale_json["checksum"] == revision_b
+        # Same shape as edit_note's conflict (#1719): nothing written, the current
+        # revision under currentChecksum, and the note at the path named.
+        assert stale_json["checksum"] is None
+        assert stale_json["currentChecksum"] == revision_b
+        assert stale_json["title"] == updated["title"]
+        assert stale_json["permalink"] == updated["permalink"]
+        assert stale_json["file_path"] == updated["file_path"]
 
         stale_text = await client.call_tool(
             "write_note",

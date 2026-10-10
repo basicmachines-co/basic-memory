@@ -1871,6 +1871,36 @@ async def test_edit_entity_insert_after_section(
     assert file_content.index("## Section 1") < file_content.index(
         "Inserted after section 1 heading"
     )
+    # A paragraph inserted above a paragraph keeps a blank line, so they stay apart.
+    assert "Inserted after section 1 heading\n\nSection 1 content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_keeps_a_list_tight(
+    entity_service: EntityService, file_service: FileService
+):
+    """A list item inserted above a list item does not split the list (#1720)."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert Into List",
+            directory="docs",
+            note_type="note",
+            content="# Origins\n\n## Observations\n- [origin] Ethiopia\n- [origin] Colombia\n",
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=_permalink(entity),
+        operation="insert_after_section",
+        content="- [origin] Kenya",
+        section="## Observations",
+    )
+
+    file_content, _ = await file_service.read_file(file_service.get_entity_path(updated))
+    assert (
+        "## Observations\n- [origin] Kenya\n- [origin] Ethiopia\n- [origin] Colombia"
+        in file_content
+    )
 
 
 @pytest.mark.asyncio

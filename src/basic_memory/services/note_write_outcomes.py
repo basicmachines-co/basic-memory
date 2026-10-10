@@ -52,11 +52,12 @@ class Locked:
 class RevisionConflict:
     """The note at the path is no longer the revision the caller expected to replace.
 
-    ``current_db_checksum`` is None when no note owns the path any more.
+    ``current_db_checksum`` and ``note`` are None when no note owns the path any more.
     """
 
     file_path: str
     current_db_checksum: str | None
+    note: NoteLocation | None = None
 
 
 @dataclass(frozen=True, slots=True)

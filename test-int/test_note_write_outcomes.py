@@ -258,6 +258,9 @@ async def test_expected_checksum_replaces_only_the_revision_the_caller_read(
         "kind": "revision_conflict",
         "file_path": "notes/Conditional.md",
         "db_checksum": revision_b,
+        # The note at the path is named, so callers need not derive it (#1719).
+        "title": "Conditional",
+        "permalink": updated.json()["entity"]["permalink"],
     }
     assert path.read_bytes() == after_b
 
@@ -279,6 +282,8 @@ async def test_expected_checksum_never_creates_a_missing_note(
         "kind": "revision_conflict",
         "file_path": "notes/Deleted Since.md",
         "db_checksum": None,
+        "title": None,
+        "permalink": None,
     }
     assert not (Path(test_project.path) / "notes/Deleted Since.md").exists()
 
@@ -346,6 +351,8 @@ async def test_expected_checksum_refuses_a_note_moved_after_the_path_lookup(
         "kind": "revision_conflict",
         "file_path": "notes/Moving Target.md",
         "db_checksum": entity["db_checksum"],
+        "title": "Moving Target",
+        "permalink": entity["permalink"],
     }
     current = (await client.get(entity_url)).json()
     assert current["file_path"] == "archive/Moving Target.md"
@@ -382,6 +389,8 @@ async def test_a_note_deleted_under_the_update_lock_is_a_revision_conflict_when_
             "kind": "revision_conflict",
             "file_path": "notes/Vanishing.md",
             "db_checksum": None,
+            "title": None,
+            "permalink": None,
         }
     else:
         # Without a pinned revision the missing content stays Core's backfill refusal.
