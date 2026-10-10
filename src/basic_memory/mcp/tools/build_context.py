@@ -91,11 +91,23 @@ def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str
     if relation_items:
         lines.append("")
         lines.append("### Relations")
+        primary_external_id = primary.external_id if isinstance(primary, EntitySummary) else None
         for rel in relation_items:
             # Unresolved forward references have no resolved entity yet; fall back
             # to the literal target text instead of rendering [[None]] (#955)
             target = rel.to_entity or rel.to_name
-            lines.append(f"- {rel.relation_type} [[{target}]]")
+            # Trigger: the relation is incoming, or belongs to a neighbor at depth > 1.
+            # Why: listed bare under this note, `relates_to [[This Note]]` reads as a
+            #   self-link (#1717).
+            # Outcome: relations this note owns stay bare; others name their source.
+            is_outgoing = (
+                primary_external_id is not None
+                and rel.from_entity_external_id == primary_external_id
+            )
+            if is_outgoing or rel.from_entity is None:
+                lines.append(f"- {rel.relation_type} [[{target}]]")
+            else:
+                lines.append(f"- [[{rel.from_entity}]] {rel.relation_type} [[{target}]]")
 
     # --- Related entities (non-relation related results) ---
     related_entities: list[EntitySummary | ObservationSummary] = [

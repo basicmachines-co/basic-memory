@@ -522,7 +522,13 @@ class NoteContentMutationService:
                     "message": str() as message,
                     "db_checksum": (str() | None) as current,
                 } if expected_checksum is not None and message == STALE_BASE_CHECKSUM_MESSAGE:
-                    return RevisionConflict(data.file_path, current_db_checksum=current)
+                    # A note deleted under the update lock has no current revision,
+                    # so it is not named either.
+                    return RevisionConflict(
+                        data.file_path,
+                        current_db_checksum=current,
+                        note=target if current is not None else None,
+                    )
                 case _:
                     raise
 

@@ -1354,6 +1354,12 @@ async def test_edit_note_expected_checksum_edits_only_the_revision_read(
         payload = json.loads(stale_json.content[0].text)
         assert payload["error"] == "NOTE_REVISION_CONFLICT"
         assert payload["currentChecksum"] == revision_b
+        # Same shape as write_note's conflict (#1719): the note is named, nothing written.
+        updated_json = json.loads(updated.content[0].text)
+        assert payload["checksum"] is None
+        assert payload["title"] == updated_json["title"]
+        assert payload["permalink"] == updated_json["permalink"]
+        assert payload["file_path"] == updated_json["file_path"]
 
         stale_text = await client.call_tool(
             "edit_note",
@@ -1401,6 +1407,7 @@ async def test_edit_note_expected_checksum_never_auto_creates(mcp_server, app, t
         payload = json.loads(result.content[0].text)
         assert payload["error"] == "NOTE_REVISION_CONFLICT"
         assert payload["currentChecksum"] is None
+        assert payload["title"] is None
 
         missing = await client.call_tool(
             "read_note",

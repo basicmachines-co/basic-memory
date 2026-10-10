@@ -55,7 +55,8 @@ that replacement. Locked notes refuse replacement without changing their content
 Pass `expected_checksum` with `overwrite=True` (CLI: `--expected-checksum`) to
 make the replacement conditional on the revision you read. If the note changed
 since, or no note owns the path any more, nothing is written and the tool
-returns `NOTE_REVISION_CONFLICT` with the current checksum. Without it,
+returns `NOTE_REVISION_CONFLICT` with the current checksum in `currentChecksum`,
+the same shape as edit_note's conflict. Without it,
 `overwrite=True` replaces the note unconditionally.
 
 ## PARAMETERS
