@@ -60,6 +60,10 @@ JUSTIFIED_SITES: dict[tuple[str, str], str] = {
         "sets from the project's mode; a cloud project's watched copy gets a permissions "
         "hint instead"
     ),
+    ("cli/commands/db.py", "_reindex"): (
+        "the continue hint names only projects this local reindex just embedded; "
+        "_reindex exits before embedding when the named project is a cloud project"
+    ),
 }
 
 
