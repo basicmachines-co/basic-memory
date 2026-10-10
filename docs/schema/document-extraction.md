@@ -2,7 +2,7 @@
 title: Document Extraction
 type: schema
 permalink: schema/document-extraction
-entity: document
+entity: extracted_text
 version: 1
 schema:
   extracted_from?: Entity, optional provenance relation on an enriched document
@@ -11,7 +11,7 @@ settings:
   frontmatter:
     schema_version(enum): ["1"]
     title: string
-    type(enum): [document]
+    type(enum): [extracted_text, document]
     schema(enum): [schema/document-extraction]
     bm_parse_semantics: boolean
     source(object):
@@ -32,14 +32,31 @@ settings:
 
 # Document Extraction
 
-This is the public, opt-in schema note referenced by generated document notes.
-Copy it into a Basic Memory project's `schema/document-extraction.md` path to
-make the schema discoverable there. Core does not install it automatically.
+This is the public, opt-in schema note referenced by generated extracted-text
+notes. Copy it into a Basic Memory project's `schema/document-extraction.md` path
+to make the schema discoverable there. Core does not install it automatically.
 
-A document is a derived Markdown note; its original PDF remains a separate file
-entity. The source identity and checksum identify the bytes used for extraction.
+An extracted-text note is a derived Markdown sidecar (for example
+`report.pdf.md`); its original PDF remains a separate file entity. The source identity and checksum identify the bytes used for extraction.
 Extractor version, options, and pipeline inputs determine ingestion-run identity.
 The trusted ingestion service owns these fields and the derived note path.
+
+## Note type
+
+New sidecars use `type: extracted_text`. Sidecars written before that rename use
+`type: document` and remain valid. Core reads both values and never rewrites one
+into the other: accepted sidecar bytes and checksums were computed with the
+stored value. An enriched note keeps its raw note's type. Every sidecar names
+this schema explicitly with `schema: schema/document-extraction`, so schema
+resolution does not depend on the type value.
+
+## Extraction summary
+
+The sidecar's `extraction` group is a summary: engine, version, profile, options
+hash, status, page and OCR counts, and the pages that need OCR. New sidecars do
+not carry the per-page `page_map`; it lives on the ingestion-run note
+(`document-ingestion-runs/<run_id>.md`). Sidecars written earlier still carry a
+copy of the map, which stays valid and must equal the run note's map.
 
 ## Validation boundary
 
