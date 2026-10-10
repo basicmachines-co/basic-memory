@@ -600,10 +600,11 @@ The advisory is deliberately a question, not a decision. On the default
 note score in the same similarity band (roughly 0.78–0.94 on a 200-note vault
 with no true duplicates), so no threshold separates them and no scores are
 shown. Ranking is reliable — the note an agent probably meant is almost always
-first — which is why the list is short and ordered. The probe does use its own
-floor, 0.70, above search's `semantic_min_similarity`: notes on unrelated topics
-scored at most 0.67 against their nearest neighbor, so below 0.70 the list was only
-noise (#1718). Only creates ask the index;
+first — which is why the list is short and ordered. On the default model the probe
+uses its own floor, 0.70, above search's `semantic_min_similarity`: notes on
+unrelated topics scored at most 0.67 against their nearest neighbor, so below 0.70
+the list was only noise (#1718). Other models keep `semantic_min_similarity`,
+because their scores sit on a different scale. Only creates ask the index;
 an overwrite already names its target. The probe is always attempted rather
 than gated on local state, because a local MCP can route a write to a cloud
 project whose server can run semantic search while the local install cannot; a

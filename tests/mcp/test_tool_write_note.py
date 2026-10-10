@@ -20,8 +20,10 @@ from basic_memory.mcp.tools.write_note import (
     _collapse_similar_notes,
     _compose_similarity_probe,
     _compose_workspace_project_route,
+    similar_notes_min_similarity,
 )
 from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.schemas.v2.note_write import NoteCreated
@@ -1726,6 +1728,30 @@ def test_similarity_probe_leads_with_title_and_drops_frontmatter():
 def test_similarity_probe_is_bounded_to_the_index_chunk_size():
     probe = _compose_similarity_probe("Long", "word " * 1000)
     assert len(probe) <= SIMILAR_NOTES_PROBE_CHARS
+
+
+def test_similar_notes_floor_applies_on_the_measured_default_model():
+    assert similar_notes_min_similarity(BasicMemoryConfig()) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
+def test_similar_notes_floor_keeps_a_stricter_search_floor():
+    config = BasicMemoryConfig(semantic_min_similarity=0.8)
+    assert similar_notes_min_similarity(config) == 0.8
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {
+            "semantic_embedding_provider": "openai",
+            "semantic_embedding_model": "text-embedding-3-small",
+        },
+        {"semantic_embedding_model": "paraphrase-multilingual-MiniLM-L12-v2"},
+    ],
+)
+def test_similar_notes_floor_defers_to_the_server_for_other_models(overrides):
+    """Scores are model-specific, so an unmeasured model keeps semantic_min_similarity."""
+    assert similar_notes_min_similarity(BasicMemoryConfig(**overrides)) is None
 
 
 def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():

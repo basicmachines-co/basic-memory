@@ -363,9 +363,11 @@
 
 - **#1718**: `write_note`'s "Similar existing notes" advisory no longer suggests notes
   on unrelated topics. It used search's relevance floor (0.55), which the nearest
-  neighbor of almost any note clears on the default model. It now lists only notes
-  scoring 0.70 or higher: rewrites of an existing note scored 0.77 to 0.93, and
-  unrelated neighbors at most 0.67. Hybrid search's handling of gibberish queries is
+  neighbor of almost any note clears on the default model. On the default model it now
+  lists only notes scoring 0.70 or higher: rewrites of an existing note scored 0.77 to
+  0.93, and unrelated neighbors at most 0.67. Other embedding models keep
+  `semantic_min_similarity`, since their scores sit on a different scale. Hybrid
+  search's handling of gibberish queries is
   unchanged; the measurements showed no threshold that separates it from real matches.
 
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment

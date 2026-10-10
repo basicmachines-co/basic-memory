@@ -21,7 +21,7 @@ from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
@@ -69,6 +69,7 @@ SIMILAR_NOTES_PROBE_CHARS = 900
 # it (0.78-0.87 on the Moby Dick vault, #1259), while the nearest neighbor of a note on an
 # unrelated topic topped out at 0.67. Below this floor the list was only noise; near the
 # top, a duplicate and a closely related note still share one band, so ranking decides.
+# The number holds for that model only; see similar_notes_min_similarity.
 SIMILAR_NOTES_MIN_SIMILARITY = 0.70
 
 
@@ -87,7 +88,27 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
 
 
-def similar_notes_query(title: str, content: str) -> SearchQuery:
+def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
+    """Return the advisory's similarity floor, or None to use the server's own.
+
+    Cosine scores are model-specific: on OpenAI's text-embedding-3-small correct
+    paraphrases cluster near 0.37, so the floor measured on the default model would hide
+    real duplicates there. Other models keep semantic_min_similarity, which users tune
+    for their model. This reads the local config, which describes the local server;
+    the cloud runs the default model, so a cloud-routed write gets the same floor.
+    """
+    defaults = BasicMemoryConfig.model_fields
+    measured_model = (
+        config.semantic_embedding_provider == defaults["semantic_embedding_provider"].default
+        and config.semantic_embedding_model == defaults["semantic_embedding_model"].default
+    )
+    if not measured_model:
+        return None
+    # A user who raised the search floor above the advisory's keeps the stricter one.
+    return max(config.semantic_min_similarity, SIMILAR_NOTES_MIN_SIMILARITY)
+
+
+def similar_notes_query(title: str, content: str, *, min_similarity: float | None) -> SearchQuery:
     """Build the search that asks which existing notes might be the one just written.
 
     Vector-only retrieval keeps the probe out of the FTS query parser, which would read
@@ -97,7 +118,7 @@ def similar_notes_query(title: str, content: str) -> SearchQuery:
         text=_compose_similarity_probe(title, content),
         retrieval_mode=SearchRetrievalMode.VECTOR,
         entity_types=[SearchItemType.ENTITY],
-        min_similarity=SIMILAR_NOTES_MIN_SIMILARITY,
+        min_similarity=min_similarity,
     )
 
 
@@ -137,9 +158,10 @@ async def _find_similar_notes(
     content: str,
     exclude_file_path: str,
     exclude_permalink: str | None,
+    min_similarity: float | None,
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
-    query = similar_notes_query(title, content)
+    query = similar_notes_query(title, content, min_similarity=min_similarity)
     # One extra row leaves room for the new note's own hit before collapsing.
     response = await search_client.search(
         query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
@@ -608,6 +630,7 @@ async def write_note(
                         content=content,
                         exclude_file_path=result.file_path,
                         exclude_permalink=result.permalink,
+                        min_similarity=similar_notes_min_similarity(ConfigManager().config),
                     )
                 except ToolError as probe_error:
                     # ToolError is what the search client raises when the API refuses or
