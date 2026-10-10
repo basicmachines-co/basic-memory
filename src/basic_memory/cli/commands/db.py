@@ -418,6 +418,7 @@ async def _reindex(
 
         embedding_entities_total = 0
         embedding_errors_total = 0
+        incomplete_projects: list[str] = []
         for proj in projects:
             console.print(f"\n[bold]Project: [cyan]{literal(proj.name)}[/cyan][/bold]")
 
@@ -509,15 +510,27 @@ async def _reindex(
                         progress_callback=on_progress,
                         force_full=full,
                     )
-                    progress.update(task, completed=stats["total_entities"])
+                    # Entities still owed chunks are not finished, so the bar stops
+                    # short of 100% instead of claiming work it did not do (#1726).
+                    progress.update(
+                        task,
+                        total=stats["total_entities"],
+                        completed=stats["total_entities"] - stats["deferred"],
+                    )
 
+                embedding_status = (
+                    "[yellow]incomplete[/yellow] Embeddings incomplete"
+                    if stats["deferred"]
+                    else "[green]done[/green] Embeddings complete"
+                )
                 console.print(
-                    "  [green]done[/green] Embeddings complete "
+                    f"  {embedding_status} "
                     f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
                     f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
                     f"{stats['embedded']} entities embedded, "
                     f"{stats['skipped']} skipped, "
-                    f"{stats['errors']} errors"
+                    f"{stats['errors']} errors, "
+                    f"{stats['deferred']} with pending chunks"
                 )
                 if stats["sample_errors"]:
                     console.print(
@@ -526,6 +539,8 @@ async def _reindex(
                     )
                 embedding_entities_total += stats["total_entities"]
                 embedding_errors_total += stats["errors"]
+                if stats["deferred"]:
+                    incomplete_projects.append(proj.name)
                 if stats["total_entities"] == 0 and not search:
                     # Trigger: embeddings-only mode found no database entities.
                     # Why: this mode rebuilds derived vectors; it does not discover files.
@@ -542,6 +557,23 @@ async def _reindex(
         # Outcome: the command preserves useful output but no longer reports false success.
         if embedding_entities_total > 0 and embedding_errors_total == embedding_entities_total:
             console.print("\n[red]Reindex failed: all vector embedding attempts failed.[/red]")
+            raise typer.Exit(code=1)
+
+        # Trigger: an embedding drain stopped while entities still had pending chunks.
+        # Why: deferred work is neither embedded nor failed; reporting success would
+        # hide missing vectors from semantic search (#1726).
+        # Outcome: name the projects, point at the incremental run that continues
+        # from the stored chunks, and exit non-zero so scripts notice.
+        if incomplete_projects:
+            console.print(
+                "\n[yellow]Reindex incomplete: some entities still have pending chunks.[/yellow]"
+            )
+            for name in incomplete_projects:
+                console.print(
+                    "  Continue with "
+                    f"[green]bm reindex --embeddings --project {literal(name)}[/green] "
+                    "(without --full, which would start over)."
+                )
             raise typer.Exit(code=1)
 
         console.print("\n[green]Reindex complete![/green]")

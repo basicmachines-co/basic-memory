@@ -648,10 +648,16 @@ The reindex command shows progress with embedded/skipped/error counts:
 ```
 Project: main
   Building vector embeddings...
-  ✓ Embeddings complete: 142 entities embedded, 0 skipped, 0 errors
+  ✓ Embeddings complete: 142 entities embedded, 0 skipped, 0 errors, 0 with pending chunks
 
 Reindex complete!
 ```
+
+A note with more than 256 chunks is embedded in shards of 256. The reindex keeps
+running passes until every shard is embedded. If a pass makes no progress, the
+command reports `Embeddings incomplete` with the number of notes that still have
+pending chunks and exits non-zero. Rerun `bm reindex --embeddings` without `--full`
+to continue from the chunks already stored; `--full` clears them and starts over.
 
 ## How It Works
 

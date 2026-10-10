@@ -797,6 +797,16 @@ class SearchService:
                 for result in repository_results
                 for failed_entity_id in result.failed_entity_ids
             ),
+            deferred_entity_ids=tuple(
+                deferred_entity_id
+                for result in repository_results
+                for deferred_entity_id in result.deferred_entity_ids
+            ),
+            synced_entity_ids=tuple(
+                synced_entity_id
+                for result in repository_results
+                for synced_entity_id in result.synced_entity_ids
+            ),
             sample_errors=tuple(
                 dict.fromkeys(
                     error for result in repository_results for error in result.sample_errors
@@ -836,7 +846,10 @@ class SearchService:
                 eligible entity re-embeds from scratch.
 
         Returns:
-            dict with counts, sampled errors, and the active vector index/model identity
+            dict with counts, sampled errors, and the active vector index/model identity.
+            ``deferred`` counts entities that still have pending chunks because the
+            drain stopped making progress; a non-zero value means the rebuild is
+            incomplete and a later incremental run continues it.
         """
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
@@ -851,6 +864,7 @@ class SearchService:
                 "embedded": 0,
                 "skipped": len(entity_ids),
                 "errors": 0,
+                "deferred": 0,
                 "sample_errors": (),
                 "vector_index": None,
                 "embedding_model": None,
@@ -866,18 +880,56 @@ class SearchService:
             entity_ids,
             progress_callback=progress_callback,
         )
+        embedded = batch_result.entities_synced
+        skipped = batch_result.entities_skipped
+        errors = batch_result.entities_failed
+        failed_entity_ids = list(batch_result.failed_entity_ids)
+        sample_errors = list(batch_result.sample_errors)
+        deferred_entity_ids = list(batch_result.deferred_entity_ids)
+
+        # --- Drain deferred shards ---
+        # Trigger: an entity had more pending chunks than one shard, so the pass
+        # embedded a bounded slice and deferred the rest.
+        # Why: an explicit rebuild promises complete coverage, and the bounded shard
+        # only exists so one entity cannot monopolize a single pass (#1726).
+        # Outcome: deferred entities re-run as incremental passes (force_full already
+        # cleared once above) until none remain or a pass stops making progress.
+        # Each continuation measures pending chunks at prepare time; requiring that
+        # count to strictly shrink guarantees the loop terminates. Entities still
+        # deferred when it stops are reported, never counted as embedded.
+        previous_pending_chunks: int | None = None
+        while deferred_entity_ids:
+            continuation = await self.sync_entity_vectors_batch(deferred_entity_ids)
+            embedded += continuation.entities_synced
+            skipped += continuation.entities_skipped
+            errors += continuation.entities_failed
+            failed_entity_ids.extend(continuation.failed_entity_ids)
+            sample_errors.extend(continuation.sample_errors)
+            deferred_entity_ids = list(continuation.deferred_entity_ids)
+
+            pending_chunks = continuation.chunks_total - continuation.chunks_skipped
+            if previous_pending_chunks is not None and pending_chunks >= previous_pending_chunks:
+                logger.warning(
+                    "Stopped draining deferred embeddings: no progress",
+                    deferred_entities=len(deferred_entity_ids),
+                    pending_chunks=pending_chunks,
+                )
+                break
+            previous_pending_chunks = pending_chunks
+
         await self.repository.reconcile_vector_index()
         stats = {
             "total_entities": batch_result.entities_total,
-            "embedded": batch_result.entities_synced,
-            "skipped": batch_result.entities_skipped,
-            "errors": batch_result.entities_failed,
-            "sample_errors": batch_result.sample_errors,
+            "embedded": embedded,
+            "skipped": skipped,
+            "errors": errors,
+            "deferred": len(deferred_entity_ids),
+            "sample_errors": tuple(dict.fromkeys(sample_errors))[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT],
             "vector_index": batch_result.vector_index,
             "embedding_model": batch_result.embedding_model,
         }
 
-        for failed_entity_id in batch_result.failed_entity_ids:
+        for failed_entity_id in failed_entity_ids:
             logger.warning(f"Failed to embed entity {failed_entity_id}")
 
         return stats
