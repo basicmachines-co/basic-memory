@@ -2,10 +2,10 @@
 
 import asyncio
 import hashlib
-import mimetypes
+
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 import aiofiles
@@ -17,6 +17,7 @@ from basic_memory import file_utils
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.config import BasicMemoryConfig
+from basic_memory.file_types import file_content_type
 from basic_memory.file_utils import FileError, FileMetadata, ParseError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
@@ -607,18 +608,9 @@ class FileService:
         Returns:
             MIME type of the file
         """
-        # Convert string to Path if needed
-        path_obj = self.base_path / path if isinstance(path, str) else path
-        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        # get file timestamps
-        mime_type, _ = mimetypes.guess_type(full_path.name)
-
-        # .canvas files are json
-        if full_path.suffix == ".canvas":
-            mime_type = "application/json"
-
-        content_type = mime_type or "text/plain"
-        return content_type
+        # Supported types come from a fixed table, not the host's MIME database,
+        # so the same file gets the same type locally and in Cloud.
+        return file_content_type(PurePath(path).name)
 
     def is_markdown(self, path: FilePath) -> bool:
         """Check if a file is a markdown file.

@@ -1288,12 +1288,14 @@ async def test_local_project_index_batch_enqueuer_runs_shared_batch_contract() -
                 reason="file indexed: notes/a.md",
                 entity_id=1,
                 entity_checksum="checksum-a",
+                content_type="text/markdown",
             ),
             IndexFileJobResult(
                 status=IndexFileJobStatus.processed,
                 reason="file indexed: assets/file.pdf",
                 entity_id=2,
                 entity_checksum="checksum-pdf",
+                content_type="application/pdf",
             ),
         ),
         vector_targets=(EmbeddingIndexTarget(entity_id=1, entity_checksum="checksum-a"),),
@@ -2613,6 +2615,7 @@ class RecordingMarkdownFileIndexer:
     async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.indexed_paths.append(file_path)
         return FileIndexResult.from_fields(
+            content_type="text/markdown",
             indexed_bytes=0,
             file_path=file_path,
             entity_id=99,

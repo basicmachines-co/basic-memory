@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import override
 from uuid import UUID
@@ -311,6 +312,20 @@ def test_require_document_run_identity_accepts_a_slim_sidecar_and_its_mapped_run
     built = mapped_artifacts()
 
     require_document_run_identity(accepted_document(built), accepted_run(built))
+
+
+def test_run_note_rebuilt_from_an_accepted_slim_sidecar_matches_it() -> None:
+    """A writer finishing a run from an accepted sidecar pairs its summary with the map."""
+    built = mapped_artifacts()
+    document = accepted_document(built)
+    summary = document.frontmatter.extraction
+    assert isinstance(summary, DocumentExtractionSummaryV1)
+
+    rebuilt = summary.with_page_map(built.extraction.page_map)
+
+    assert rebuilt == built.extraction
+    run = accepted_run(replace(built, extraction=rebuilt))
+    require_document_run_identity(document, run)
 
 
 def test_require_document_run_identity_requires_the_mapped_profile_run_to_keep_its_map() -> None:
