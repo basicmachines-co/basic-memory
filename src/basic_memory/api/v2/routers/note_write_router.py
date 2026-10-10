@@ -129,8 +129,13 @@ async def write_note(
                 return NoteTargetMoved(**asdict(note))
             case Locked(message=message):
                 return NoteLocked(message=message)
-            case RevisionConflict(file_path=file_path, current_db_checksum=current):
-                return NoteRevisionConflict(file_path=file_path, db_checksum=current)
+            case RevisionConflict(file_path=file_path, current_db_checksum=current, note=note):
+                return NoteRevisionConflict(
+                    file_path=file_path,
+                    db_checksum=current,
+                    title=note.title if note else None,
+                    permalink=note.permalink if note else None,
+                )
             case Rejected(rejection=rejection):
                 error = note_content_mutation_error_from_rejection(rejection)
                 raise HTTPException(status_code=error.status_code, detail=error.detail)

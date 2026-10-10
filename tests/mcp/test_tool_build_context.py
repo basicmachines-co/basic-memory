@@ -313,6 +313,7 @@ def test_format_entity_block_renders_unresolved_relations_by_name():
         permalink="man3/write-note-3/see-also/edit-note-3",
         relation_type="see_also",
         from_entity="write-note(3)",
+        from_entity_external_id="entity-1",
         to_entity=None,
         to_name="edit-note(3)",
         created_at=now,
@@ -323,6 +324,7 @@ def test_format_entity_block_renders_unresolved_relations_by_name():
         permalink="man3/write-note-3/see-also/bm-note-5",
         relation_type="see_also",
         from_entity="write-note(3)",
+        from_entity_external_id="entity-1",
         to_entity="bm-note(5)",
         to_name="bm-note(5)",
         created_at=now,
@@ -334,6 +336,36 @@ def test_format_entity_block_renders_unresolved_relations_by_name():
     assert "- see_also [[edit-note(3)]]" in block
     assert "- see_also [[bm-note(5)]]" in block
     assert "[[None]]" not in block
+
+
+@pytest.mark.asyncio
+async def test_build_context_text_names_the_source_of_incoming_relations(client, test_project):
+    """An incoming relation names its source instead of reading as a self-link (#1717)."""
+    await write_note(
+        project=test_project.name,
+        title="Bean Origins",
+        directory="coffee",
+        content="# Bean Origins\n\n- informs [[Brewing Notes]]\n",
+    )
+    await write_note(
+        project=test_project.name,
+        title="Brewing Notes",
+        directory="coffee",
+        content="# Brewing Notes\n\n- relates_to [[Bean Origins]]\n",
+    )
+
+    result = await build_context(
+        project=test_project.name,
+        url="memory://coffee/bean-origins",
+        output_format="text",
+    )
+
+    assert isinstance(result, str)
+    # Owned by the primary note: unchanged, bare form.
+    assert "- informs [[Brewing Notes]]" in result
+    # Incoming: the source is named, so it no longer reads as Bean Origins -> itself.
+    assert "- [[Brewing Notes]] relates_to [[Bean Origins]]" in result
+    assert "\n- relates_to [[Bean Origins]]" not in result
 
 
 @pytest.mark.asyncio

@@ -33,7 +33,7 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
-from basic_memory.schemas.v2.entity import EntityResponseV2
+from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
 from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
@@ -740,13 +740,16 @@ async def edit_note(
             # Set once the create or PATCH request leaves this process; the handler below
             # needs it to tell a refusal from a write whose outcome is unknown.
             write_sent = False
+            # The note the edit targets; a revision conflict re-reads it by id (#1719).
+            target_entity_id: str | None = None
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            # Use typed KnowledgeClient for API calls; the failure handler below also
+            # uses it to name the note in a revision conflict.
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
             # Use the PATCH endpoint to edit the entity
             try:
-                # Import here to avoid circular import
-                from basic_memory.mcp.clients import KnowledgeClient
-
-                # Use typed KnowledgeClient for API calls
-                knowledge_client = KnowledgeClient(client, active_project.external_id)
                 unresolved_project_route: UnresolvedProjectRouteError | None = None
                 try:
                     _, entity_identifier, _ = await resolve_project_and_path(
@@ -807,6 +810,7 @@ async def edit_note(
                             ),
                         )
                     entity_id = resolved_entity.external_id
+                    target_entity_id = entity_id
                 except EditRefused:
                     # The cross-project refusal above must not be read as a missing note:
                     # its text says "Not Found", which would route it to auto-create.
@@ -1073,12 +1077,26 @@ async def edit_note(
                 conflict = _revision_conflict_detail(e) if expected_checksum is not None else None
                 if conflict is not None:
                     current_checksum = conflict.get("db_checksum")
+                    # Same shape as write_note's conflict (#1719): the note is named while
+                    # it still exists, as it reads now, since the winning write may have
+                    # retitled or moved it after this edit resolved it. A deleted note
+                    # (no current checksum) has no identity.
+                    named_note: EntityResolveResponse | None = None
+                    if current_checksum is not None and target_entity_id is not None:
+                        try:
+                            named_note = await knowledge_client.resolve_entity_response(
+                                target_entity_id, strict=True
+                            )
+                        except ToolError:
+                            # Deleted after the conflict: the refusal still stands and
+                            # carries its checksum; there is just nothing left to name.
+                            named_note = None
                     _raise_edit_failure(
                         output_format,
                         {
-                            "title": None,
-                            "permalink": None,
-                            "file_path": None,
+                            "title": named_note.title if named_note else None,
+                            "permalink": named_note.permalink if named_note else None,
+                            "file_path": named_note.file_path if named_note else None,
                             "checksum": None,
                             "operation": operation,
                             "fileCreated": False,

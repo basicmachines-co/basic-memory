@@ -767,7 +767,12 @@ class EntityService(BaseService[EntityModel]):
         entity.permalink = markdown.frontmatter.permalink
         entity.file_path = file_path.as_posix()
         entity.content_type = "text/markdown"
-        entity.created_at = markdown.created
+        # Trigger: an existing row is re-read from Markdown (edit, move, reindex).
+        # Why: without a declared `created`, markdown.created is the file's ctime, which
+        # every atomic rewrite or rename moves (#1716).
+        # Outcome: only the author's frontmatter `created` changes the creation time.
+        if markdown.frontmatter.metadata.get("created") is not None:
+            entity.created_at = markdown.created
         entity.updated_at = markdown.modified
 
         normalized_metadata = normalize_frontmatter_metadata(markdown.frontmatter.metadata or {})

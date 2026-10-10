@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
+from itertools import dropwhile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -602,6 +604,10 @@ def replace_section_content(
     return "\n".join([*lines[: section_line_index + 1], new_content, *lines[end_index:]])
 
 
+# A Markdown list item line: a bullet (-, *, +) or an ordered marker (1. or 1)).
+_LIST_ITEM_LINE = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
+
+
 def insert_relative_to_section(
     current_content: str,
     section_header: str,
@@ -635,6 +641,21 @@ def insert_relative_to_section(
             insert_lines = ["", *insert_lines]
         return "\n".join([*before, *insert_lines, "", *lines[index:]])
     after = lines[index + 1 :]
+    spacer = len(after) - len(list(dropwhile(lambda line: not line.strip(), after)))
+    first_content = after[spacer] if spacer < len(after) else None
+    # Trigger: a list item is inserted and the section opens with a list, either
+    #   right under the heading or after the conventional blank line.
+    # Why: a blank line between the inserted item and the list splits it in two
+    #   (#1720).
+    # Outcome: the item joins the list tightly, below any heading spacer.
+    if (
+        first_content is not None
+        and _LIST_ITEM_LINE.match(insert_lines[-1])
+        and _LIST_ITEM_LINE.match(first_content)
+    ):
+        return "\n".join([*lines[: index + 1], *after[:spacer], *insert_lines, *after[spacer:]])
+    # Anything else keeps a blank line, so an inserted paragraph never runs into
+    # the section's first paragraph.
     if after and after[0].strip():
         insert_lines.append("")
     return "\n".join([*lines[: index + 1], *insert_lines, *after])

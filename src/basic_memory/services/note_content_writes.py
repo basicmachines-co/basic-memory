@@ -522,7 +522,27 @@ class NoteContentMutationService:
                     "message": str() as message,
                     "db_checksum": (str() | None) as current,
                 } if expected_checksum is not None and message == STALE_BASE_CHECKSUM_MESSAGE:
-                    return RevisionConflict(data.file_path, current_db_checksum=current)
+                    # The pre-lock lookup can predate the winning write, which may have
+                    # retitled the note, so name it as it reads now (#1719). A note
+                    # deleted under the update lock has no current revision and no name.
+                    current_note: NoteLocation | None = None
+                    if target is not None and current is not None:
+                        async with self.session_maker() as session:
+                            winner = await entity_repository.get_by_external_id(
+                                session, target.external_id, load_relations=False
+                            )
+                        if winner is not None:
+                            current_note = NoteLocation(
+                                str(winner.external_id),
+                                winner.title,
+                                winner.file_path,
+                                winner.permalink,
+                            )
+                    return RevisionConflict(
+                        data.file_path,
+                        current_db_checksum=current,
+                        note=current_note,
+                    )
                 case _:
                     raise
 
