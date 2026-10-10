@@ -51,6 +51,7 @@ from basic_memory.runtime.note_content import (
 from basic_memory.runtime.note_materialization import RuntimeFileMetadataSource
 from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
+from basic_memory.runtime.vector_sync import EntityVectorSync
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -676,6 +677,10 @@ class LocalNoteContentMaterializationProvider:
     # target (#1351). Optional so providers wired without it (cloud, focused
     # tests) keep working; cloud relies on its orphan sweeper instead.
     relation_cleanup_refresher: ProjectIndexMovedEntitySearchRefresher | None = None
+    # Embeds the note once its materialized file is indexed (#1732). Optional so
+    # providers wired without semantic work (cloud, focused tests) keep working;
+    # cloud embeds from its materialize_note_file job instead.
+    entity_vector_sync: EntityVectorSync | None = None
 
     async def materialize_write_change(
         self,
@@ -812,7 +817,7 @@ class LocalNoteContentMaterializationProvider:
                     self.relation_resolution_scheduler.schedule_relation_resolution(
                         project_id=accepted.materialization.project_id,
                     )
-                return replace(
+                indexed = replace(
                     accepted,
                     payload=await load_indexed_note_content_response_payload(
                         session_maker=self.session_maker,
@@ -822,7 +827,32 @@ class LocalNoteContentMaterializationProvider:
                         or "note-content-materialization",
                     ),
                 )
+                await self._sync_indexed_note_vectors(accepted.materialization.entity_id)
+                return indexed
             return accepted
+
+    async def _sync_indexed_note_vectors(self, entity_id: int) -> None:
+        """Embed a note from the search rows its materialized file just produced.
+
+        Trigger: the accepted note's file was written and indexed.
+        Why: the accept path only publishes the note body as a temporary search row;
+            observations and relations exist only after this index. A request-time
+            embed raced this job, embedded the body alone, and nothing re-embedded
+            the rest (#1732). This worker runs one note's jobs in order, so each
+            accepted write embeds exactly once, after its own index. Cloud does the
+            same from its materialize_note_file job.
+        Outcome: vectors match the indexed note. The outer invalidation scope
+            retires reads cached while vectors were stale.
+        """
+        if self.entity_vector_sync is None:
+            return
+        try:
+            await self.entity_vector_sync.sync_entity_vectors(entity_id)
+        except Exception:
+            # Vectors are derived state: the accepted note and its file are already
+            # published, and the next write or a reindex re-embeds the note. Keep
+            # the write's materialization result instead of failing it here.
+            logger.exception("Vector sync after materialization failed", entity_id=entity_id)
 
     async def materialize_delete_change(
         self,

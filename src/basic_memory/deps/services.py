@@ -549,7 +549,9 @@ async def get_note_content_materialization_provider(
 
     test_mode keeps materialization inline so tests can assert file/search state
     synchronously; production defers the file write + index off the accept path
-    for cloud parity (see LocalNoteContentMaterializationProvider).
+    for cloud parity (see LocalNoteContentMaterializationProvider). The provider
+    embeds each note after indexing its file, so routes never schedule vector sync
+    for accepted note writes (#1732).
     """
     return LocalNoteContentMaterializationProvider(
         session_maker=session_maker,
@@ -560,6 +562,7 @@ async def get_note_content_materialization_provider(
         test_mode=app_config.is_test_env,
         materialization_workers=app_config.materialization_workers,
         relation_resolution_scheduler=relation_resolution_scheduler,
+        entity_vector_sync=search_service,
         relation_cleanup_refresher=RepositoryProjectIndexMovedEntitySearchRefresher(
             session_maker=session_maker,
             entity_repository=entity_repository,

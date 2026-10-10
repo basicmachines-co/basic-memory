@@ -132,30 +132,30 @@ EntityReadCacheDep = Annotated[
 
 def _schedule_post_write_followups(
     *,
-    vector_sync_scheduler,
     relation_resolution_scheduler,
-    entity_id: int,
     project_id: int,
 ) -> None:
     """Schedule out-of-band follow-ups after an accepted note mutation.
 
-    Vector sync only runs when semantic search is enabled. Relation resolution
-    always runs so a newly written note back-resolves inbound forward references
-    that name it — parity with the watcher's relation repair, which the inline
-    write path does not otherwise trigger (#1015). Both are no-ops in test mode.
+    Relation resolution always runs so a newly written note back-resolves inbound
+    forward references that name it — parity with the watcher's relation repair,
+    which the inline write path does not otherwise trigger (#1015). It is a no-op
+    in test mode.
+
+    Vector sync is not scheduled here. The materialization job embeds the note
+    after it indexes the written file (local provider and cloud's
+    materialize_note_file job alike). A request-time embed raced that job and
+    could publish vectors for the body-only search row the accept path writes
+    (#1732).
 
     CLOUD/LOCAL PARITY (do not break): every follow-up here is a core *router
     scheduler* that the runtime overrides via dependency injection — local runs
-    it in-process (debounced), cloud overrides each to enqueue a queue job. Cloud
-    must override BOTH get_entity_vector_sync_scheduler AND
-    get_relation_resolution_scheduler; if a new follow-up scheduler is added
-    here, cloud needs a matching override or it will run the local in-process
-    work on the cloud API server. See basic_memory_cloud api/deps/cloud_overrides.
+    it in-process (debounced), cloud overrides it to enqueue a queue job. Cloud
+    must override get_relation_resolution_scheduler; if a new follow-up scheduler
+    is added here, cloud needs a matching override or it will run the local
+    in-process work on the cloud API server. See basic_memory_cloud
+    api/deps/cloud_overrides.
     """
-    vector_sync_scheduler.schedule_entity_vector_sync(
-        entity_id=entity_id,
-        project_id=project_id,
-    )
     relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
 
 
@@ -919,7 +919,6 @@ async def create_entity(
     data: Entity,
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
 ) -> EntityResponseV2:
     """Create a new entity.
@@ -953,9 +952,7 @@ async def create_entity(
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_post_write_followups(
-            vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            entity_id=result.id,
             project_id=project_id,
         )
 
@@ -982,7 +979,6 @@ async def update_entity_by_id(
     ],
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     base_checksum: Annotated[
@@ -1032,9 +1028,7 @@ async def update_entity_by_id(
         response.status_code = status.HTTP_202_ACCEPTED
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_post_write_followups(
-            vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            entity_id=result.id,
             project_id=project_id,
         )
 
@@ -1057,7 +1051,6 @@ async def edit_entity_by_id(
     ],
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     base_checksum: Annotated[
@@ -1111,9 +1104,7 @@ async def edit_entity_by_id(
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_post_write_followups(
-            vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            entity_id=result.id,
             project_id=project_id,
         )
 
@@ -1193,7 +1184,6 @@ async def move_entity(
     ],
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
@@ -1234,9 +1224,7 @@ async def move_entity(
         accepted = await note_content_materialization_provider.materialize_write_change(accepted)
         result = entity_response_from_note_content_payload(accepted.payload)
         _schedule_post_write_followups(
-            vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            entity_id=result.id,
             project_id=project_id,
         )
 
@@ -1288,8 +1276,18 @@ async def move_directory(
 
         def schedule_followups(entity_id: int) -> None:
             _schedule_post_write_followups(
-                vector_sync_scheduler=vector_sync_scheduler,
                 relation_resolution_scheduler=relation_resolution_scheduler,
+                project_id=project_id,
+            )
+
+        # Trigger: a regular file (image, PDF) moved directly, with no accepted
+        #   note change and so no materialization job to embed it.
+        # Why: its search rows carry the new permalink, which is part of the chunk
+        #   text, so its vectors must be refreshed. Cloud no-ops this scheduler
+        #   because the storage event for the moved object queues that work.
+        # Outcome: one background vector sync per moved regular file.
+        def schedule_regular_file_vector_sync(entity_id: int) -> None:
+            vector_sync_scheduler.schedule_entity_vector_sync(
                 entity_id=entity_id,
                 project_id=project_id,
             )
@@ -1304,6 +1302,7 @@ async def move_directory(
             search_service=search_service,
             read_cache=read_cache,
             schedule_followups=schedule_followups,
+            schedule_regular_file_vector_sync=schedule_regular_file_vector_sync,
         )
         logger.info(
             f"API v2 response: move_directory "
