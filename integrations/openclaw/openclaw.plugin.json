@@ -20,7 +20,15 @@
     ]
   },
   "skills": [
+    "skills/memory-capture",
+    "skills/memory-ci-capture",
+    "skills/memory-capture",
+    "skills/memory-ci-capture",
     "skills/memory-comark",
+    "skills/memory-continue",
+    "skills/memory-curate",
+    "skills/memory-continue",
+    "skills/memory-curate",
     "skills/memory-defrag",
     "skills/memory-ingest",
     "skills/memory-lifecycle",

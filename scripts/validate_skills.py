@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 
@@ -87,11 +88,33 @@ def validate_skills(skills_root: Path) -> None:
     print(f"validated {len(skill_dirs)} skills in {skills_root}")
 
 
+def validate_openclaw_manifest(skills_root: Path) -> None:
+    """Require the OpenClaw manifest to list every memory-* skill.
+
+    OpenClaw's fetch-skills copies every memory-* directory into the npm package,
+    but OpenClaw only exposes the skills its manifest enumerates. A skill missing
+    from the manifest ships in the package yet stays invisible to users.
+    """
+    manifest_path = skills_root.parent / "integrations" / "openclaw" / "openclaw.plugin.json"
+    listed = set(json.loads(manifest_path.read_text())["skills"])
+    expected = {f"skills/{path.name}" for path in skills_root.glob("memory-*") if path.is_dir()}
+
+    missing = sorted(expected - listed)
+    stale = sorted(listed - expected)
+    if missing or stale:
+        raise SystemExit(
+            f"{manifest_path}: skills array out of sync with {skills_root}; "
+            f"missing={missing} stale={stale}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("skills_root", nargs="?", default="skills")
     args = parser.parse_args()
-    validate_skills((Path.cwd() / args.skills_root).resolve())
+    skills_root = (Path.cwd() / args.skills_root).resolve()
+    validate_skills(skills_root)
+    validate_openclaw_manifest(skills_root)
 
 
 if __name__ == "__main__":
