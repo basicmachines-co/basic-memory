@@ -15,12 +15,15 @@ from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
+    SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
     _compose_similarity_probe,
     _compose_workspace_project_route,
+    similar_notes_min_similarity,
 )
 from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.schemas.v2.note_write import NoteCreated
@@ -1727,6 +1730,46 @@ def test_similarity_probe_is_bounded_to_the_index_chunk_size():
     assert len(probe) <= SIMILAR_NOTES_PROBE_CHARS
 
 
+def test_similar_notes_floor_applies_on_the_measured_default_model():
+    assert similar_notes_min_similarity(BasicMemoryConfig()) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
+def test_similar_notes_floor_ignores_provider_spelling():
+    config = BasicMemoryConfig(semantic_embedding_provider=" FastEmbed ")
+    assert similar_notes_min_similarity(config) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
+def test_similar_notes_floor_defers_for_a_model_set_by_environment(monkeypatch):
+    """An env-configured model is not the measured default just because both read env."""
+    monkeypatch.setenv(
+        "BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    assert similar_notes_min_similarity(BasicMemoryConfig()) is None
+
+
+def test_similar_notes_floor_keeps_a_stricter_search_floor():
+    config = BasicMemoryConfig(semantic_min_similarity=0.8)
+    assert similar_notes_min_similarity(config) == 0.8
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {
+            "semantic_embedding_provider": "openai",
+            "semantic_embedding_model": "text-embedding-3-small",
+        },
+        {"semantic_embedding_model": "paraphrase-multilingual-MiniLM-L12-v2"},
+        # Prefixes change the text that is embedded, so the measurement does not cover them.
+        {"semantic_embedding_document_prefix": "passage: "},
+        {"semantic_embedding_query_prefix": "query: "},
+    ],
+)
+def test_similar_notes_floor_defers_to_the_server_for_other_models(overrides):
+    """Scores are model-specific, so an unmeasured model keeps semantic_min_similarity."""
+    assert similar_notes_min_similarity(BasicMemoryConfig(**overrides)) is None
+
+
 def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
     rows = [
         # The freshly written note, already indexed: matched by file_path ...
@@ -1831,6 +1874,8 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert call["payload"]["retrieval_mode"] == "vector"
     assert call["payload"]["entity_types"] == ["entity"]
     assert call["payload"]["text"].startswith("BU Mapping Analysis\n\n# BU Mapping Analysis")
+    # The advisory asks a stricter question than search relevance (#1718).
+    assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY
     assert call["page"] == 1
     assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
 

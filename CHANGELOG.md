@@ -365,6 +365,14 @@
   `bisync-reset` now print only their own deprecation notice, without Click's extra
   "DeprecationWarning: The command ... is deprecated." line.
 
+- **#1718**: `write_note`'s "Similar existing notes" advisory no longer suggests notes
+  on unrelated topics. It used search's relevance floor (0.55), which the nearest
+  neighbor of almost any note clears on the default model. On the default model it now
+  lists only notes scoring 0.70 or higher: rewrites of an existing note scored 0.77 to
+  0.93, and unrelated neighbors at most 0.67. Other embedding models keep
+  `semantic_min_similarity`, since their scores sit on a different scale. Hybrid
+  search's handling of gibberish queries is unchanged; the measurements showed no
+  threshold that separates it from real matches.
 - **#1716**: A note's `created_at` no longer resets on every edit, move or reindex.
   Without a frontmatter `created`, the parser falls back to the file's ctime, which each
   atomic rewrite or rename moves, and reindexing an existing note copied that time into

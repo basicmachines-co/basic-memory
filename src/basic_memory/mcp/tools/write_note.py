@@ -21,12 +21,15 @@ from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
     NoteCreated,
@@ -63,6 +66,14 @@ SIMILAR_NOTES_LIMIT = 3
 # The vector index embeds a note's title and opening content as its first chunk, so the
 # probe copies that shape and length to land in the same neighborhood as the note itself.
 SIMILAR_NOTES_PROBE_CHARS = 900
+# The advisory asks "might this be the same note?", a stricter question than search's
+# "is this relevant at all?" (semantic_min_similarity, 0.55). Measured on the default
+# bge-small-en-v1.5 model (#1718): rewrites of an existing note scored 0.77-0.93 against
+# it (0.78-0.87 on the Moby Dick vault, #1259), while the nearest neighbor of a note on an
+# unrelated topic topped out at 0.67. Below this floor the list was only noise; near the
+# top, a duplicate and a closely related note still share one band, so ranking decides.
+# The number holds for that model only; see similar_notes_min_similarity.
+SIMILAR_NOTES_MIN_SIMILARITY = 0.70
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -78,6 +89,47 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     """Build the text used to look for existing notes near a freshly written one."""
     body = remove_frontmatter(content)
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
+    """Return the advisory's similarity floor, or None to use the server's own.
+
+    Cosine scores are model-specific: on OpenAI's text-embedding-3-small correct
+    paraphrases cluster near 0.37, so the floor measured on the default model would hide
+    real duplicates there. Only the exact embedding setup it was measured on gets the
+    floor; anything else keeps semantic_min_similarity, which users tune for their model.
+    The setup is read from this process's config, which describes the server a local
+    write reaches; a write routed elsewhere with a different local setup falls back to
+    that server's floor, the behavior before the advisory floor existed.
+    """
+    # Only FastEmbed can be the measured setup; checking it first also keeps the
+    # identity resolution away from provider configs it would reject.
+    if config.semantic_embedding_provider.strip().lower() != "fastembed":
+        return None
+    # The persisted embedding identity is what decides whether stored vectors are
+    # reusable, so it is the definition of "the same embeddings": it covers the model,
+    # dimensions, and document/query prefixes. model_construct() yields the field
+    # defaults without reading BASIC_MEMORY_* overrides, which would otherwise make an
+    # env-configured model compare equal to itself.
+    measured = configured_embedding_provider_identity(BasicMemoryConfig.model_construct())
+    if configured_embedding_provider_identity(config) != measured:
+        return None
+    # A user who raised the search floor above the advisory's keeps the stricter one.
+    return max(config.semantic_min_similarity, SIMILAR_NOTES_MIN_SIMILARITY)
+
+
+def similar_notes_query(title: str, content: str, *, min_similarity: float | None) -> SearchQuery:
+    """Build the search that asks which existing notes might be the one just written.
+
+    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
+    parentheses and boolean words in ordinary prose as operators.
+    """
+    return SearchQuery(
+        text=_compose_similarity_probe(title, content),
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        entity_types=[SearchItemType.ENTITY],
+        min_similarity=min_similarity,
+    )
 
 
 def _collapse_similar_notes(
@@ -116,17 +168,10 @@ async def _find_similar_notes(
     content: str,
     exclude_file_path: str,
     exclude_permalink: str | None,
+    min_similarity: float | None,
 ) -> list[SimilarNote]:
-    """Ask the vector index which existing notes sit closest to the note just written.
-
-    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
-    parentheses and boolean words in ordinary prose as operators.
-    """
-    query = SearchQuery(
-        text=_compose_similarity_probe(title, content),
-        retrieval_mode=SearchRetrievalMode.VECTOR,
-        entity_types=[SearchItemType.ENTITY],
-    )
+    """Ask the vector index which existing notes sit closest to the note just written."""
+    query = similar_notes_query(title, content, min_similarity=min_similarity)
     # One extra row leaves room for the new note's own hit before collapsing.
     response = await search_client.search(
         query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
@@ -608,6 +653,7 @@ async def write_note(
                         content=content,
                         exclude_file_path=result.file_path,
                         exclude_permalink=result.permalink,
+                        min_similarity=similar_notes_min_similarity(ConfigManager().config),
                     )
                 except ToolError as probe_error:
                     # ToolError is what the search client raises when the API refuses or
