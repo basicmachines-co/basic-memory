@@ -797,6 +797,14 @@ class SearchService:
                 for result in repository_results
                 for failed_entity_id in result.failed_entity_ids
             ),
+            deferred_entity_ids=tuple(
+                entity_id
+                for result in repository_results
+                for entity_id in result.deferred_entity_ids
+            ),
+            synced_entity_ids=tuple(
+                entity_id for result in repository_results for entity_id in result.synced_entity_ids
+            ),
             sample_errors=tuple(
                 dict.fromkeys(
                     error for result in repository_results for error in result.sample_errors
@@ -829,14 +837,19 @@ class SearchService:
     ) -> dict[str, Any]:
         """Rebuild vector embeddings for all entities.
 
+        Drain deferred shards while pending chunk work decreases. Non-converging
+        work remains explicit in the returned deferred count.
+
         Args:
             progress_callback: Optional callable(entity_id, completed, total) for progress
-                reporting when an entity reaches a terminal state in this run.
+                reporting when an entity syncs or is intentionally skipped. Deferred
+                and failed entities do not advance completion.
             force_full: When True, clear this project's derived vectors first so every
                 eligible entity re-embeds from scratch.
 
         Returns:
-            dict with counts, sampled errors, and the active vector index/model identity
+            dict with project-wide counts, including unfinished deferred entities,
+            sampled errors, and the active vector index/model identity
         """
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
@@ -851,6 +864,7 @@ class SearchService:
                 "embedded": 0,
                 "skipped": len(entity_ids),
                 "errors": 0,
+                "deferred": 0,
                 "sample_errors": (),
                 "vector_index": None,
                 "embedding_model": None,
@@ -862,24 +876,79 @@ class SearchService:
         if force_full:
             await self._clear_project_vectors_for_full_reindex()
 
-        batch_result = await self.sync_entity_vectors_batch(
-            entity_ids,
-            progress_callback=progress_callback,
-        )
-        await self.repository.reconcile_vector_index()
         stats = {
-            "total_entities": batch_result.entities_total,
-            "embedded": batch_result.entities_synced,
-            "skipped": batch_result.entities_skipped,
-            "errors": batch_result.entities_failed,
-            "sample_errors": batch_result.sample_errors,
-            "vector_index": batch_result.vector_index,
-            "embedding_model": batch_result.embedding_model,
+            "total_entities": len(entity_ids),
+            "embedded": 0,
+            "skipped": 0,
+            "errors": 0,
+            "deferred": 0,
+            "sample_errors": (),
+            "vector_index": "",
+            "embedding_model": "",
         }
+        pending_entity_ids = entity_ids
+        previous_pending_chunks: int | None = None
+        completed_entities = 0
+        while True:
+            # Repository callbacks include deferred entities and use pass-local totals.
+            # Only the settled result can advance project-wide completion truthfully.
+            batch_result = await self.sync_entity_vectors_batch(
+                pending_entity_ids, progress_callback=None
+            )
+            deferred_entity_ids = set(batch_result.deferred_entity_ids)
+            failed_entity_ids = set(batch_result.failed_entity_ids)
+            synced_entity_ids = set(batch_result.synced_entity_ids)
+            if (
+                len(deferred_entity_ids) != batch_result.entities_deferred
+                or len(failed_entity_ids) != batch_result.entities_failed
+                or len(synced_entity_ids) != batch_result.entities_synced
+                or not (deferred_entity_ids | failed_entity_ids | synced_entity_ids).issubset(
+                    pending_entity_ids
+                )
+                or deferred_entity_ids & (failed_entity_ids | synced_entity_ids)
+                or failed_entity_ids & synced_entity_ids
+            ):
+                raise ValueError("Vector sync counts and entity outcomes must agree")
 
-        for failed_entity_id in batch_result.failed_entity_ids:
-            logger.warning(f"Failed to embed entity {failed_entity_id}")
+            stats["embedded"] += batch_result.entities_synced
+            stats["skipped"] += batch_result.entities_skipped
+            stats["errors"] += batch_result.entities_failed
+            stats["deferred"] = len(deferred_entity_ids)
+            stats["sample_errors"] = tuple(
+                dict.fromkeys((*stats["sample_errors"], *batch_result.sample_errors))
+            )[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT]
+            stats["vector_index"] = batch_result.vector_index
+            stats["embedding_model"] = batch_result.embedding_model
+            for entity_id in pending_entity_ids:
+                if entity_id in failed_entity_ids:
+                    logger.warning(f"Failed to embed entity {entity_id}")
+                elif entity_id not in deferred_entity_ids:
+                    completed_entities += 1
+                    if progress_callback is not None:
+                        progress_callback(entity_id, completed_entities, len(entity_ids))
 
+            if not deferred_entity_ids:
+                break
+
+            # Prepare counts every current chunk and skips reusable persisted
+            # embeddings. Require remaining work to decrease across the shrinking
+            # target sets, not merely jobs to be scheduled. No pass cap limits large notes.
+            pending_chunks = batch_result.chunks_total - batch_result.chunks_skipped
+            if pending_chunks <= 0 or (
+                previous_pending_chunks is not None and pending_chunks >= previous_pending_chunks
+            ):
+                message = "Vector reindex stopped: deferred chunk work is not converging"
+                logger.warning(message)
+                stats["sample_errors"] = tuple(dict.fromkeys((*stats["sample_errors"], message)))[
+                    :VECTOR_SYNC_SAMPLE_ERROR_LIMIT
+                ]
+                break
+            previous_pending_chunks = pending_chunks
+            pending_entity_ids = [
+                entity_id for entity_id in pending_entity_ids if entity_id in deferred_entity_ids
+            ]
+
+        await self.repository.reconcile_vector_index()
         return stats
 
     async def _clear_project_vectors_for_full_reindex(self) -> None:

@@ -418,6 +418,7 @@ async def _reindex(
 
         embedding_entities_total = 0
         embedding_errors_total = 0
+        embedding_deferred_total = 0
         for proj in projects:
             console.print(f"\n[bold]Project: [cyan]{literal(proj.name)}[/cyan][/bold]")
 
@@ -495,10 +496,8 @@ async def _reindex(
                             completed=index,
                             total=total,
                         )
-                        # Trigger: repository progress now reports terminal entity completion.
-                        # Why: operators need to see finished embedding work rather than
-                        # entities merely entering prepare.
-                        # Outcome: the CLI bar advances steadily with real completed work.
+                        # The service reports project-wide completion, excluding
+                        # failed entities and entities with shards still deferred.
                         progress.update(
                             task,
                             total=embedding_progress.total,
@@ -509,15 +508,26 @@ async def _reindex(
                         progress_callback=on_progress,
                         force_full=full,
                     )
-                    progress.update(task, completed=stats["total_entities"])
+                    progress.update(
+                        task,
+                        total=stats["total_entities"],
+                        completed=stats["total_entities"] - stats["errors"] - stats["deferred"],
+                    )
 
+                incomplete = stats["errors"] > 0 or stats["deferred"] > 0
+                embedding_summary = (
+                    "[yellow]Embeddings incomplete[/yellow]"
+                    if incomplete
+                    else "[green]done[/green] Embeddings complete"
+                )
                 console.print(
-                    "  [green]done[/green] Embeddings complete "
-                    f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
-                    f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
+                    f"  {embedding_summary} "
+                    f"([cyan]index={escape(stats['vector_index'] or 'unavailable')}[/cyan], "
+                    f"[cyan]model={escape(stats['embedding_model'] or 'unavailable')}[/cyan]): "
                     f"{stats['embedded']} entities embedded, "
                     f"{stats['skipped']} skipped, "
-                    f"{stats['errors']} errors"
+                    f"{stats['errors']} errors, "
+                    f"{stats['deferred']} deferred"
                 )
                 if stats["sample_errors"]:
                     console.print(
@@ -526,6 +536,7 @@ async def _reindex(
                     )
                 embedding_entities_total += stats["total_entities"]
                 embedding_errors_total += stats["errors"]
+                embedding_deferred_total += stats["deferred"]
                 if stats["total_entities"] == 0 and not search:
                     # Trigger: embeddings-only mode found no database entities.
                     # Why: this mode rebuilds derived vectors; it does not discover files.
@@ -537,11 +548,17 @@ async def _reindex(
                         "or start the MCP server and retry after its initial index completes."
                     )
 
-        # Trigger: every entity attempted across the selected projects failed to embed.
-        # Why: requested search work and other project summaries must still finish first.
-        # Outcome: the command preserves useful output but no longer reports false success.
+        # Finish the other projects before reporting incomplete embedding work.
+        # Neither a partial failure nor deferred shards are a successful reindex.
         if embedding_entities_total > 0 and embedding_errors_total == embedding_entities_total:
             console.print("\n[red]Reindex failed: all vector embedding attempts failed.[/red]")
+            raise typer.Exit(code=1)
+        if embedding_errors_total or embedding_deferred_total:
+            console.print(
+                "\n[red]Reindex incomplete: "
+                f"{embedding_errors_total} embedding errors, "
+                f"{embedding_deferred_total} entities deferred.[/red]"
+            )
             raise typer.Exit(code=1)
 
         console.print("\n[green]Reindex complete![/green]")

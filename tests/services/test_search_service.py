@@ -1672,6 +1672,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
         return VectorSyncBatchResult(
             entities_total=len(entity_ids),
             entities_synced=len(entity_ids),
+            synced_entity_ids=tuple(entity_ids),
             entities_failed=0,
             failed_entity_ids=(),
             embedding_jobs_total=9,
@@ -1753,6 +1754,7 @@ async def test_reindex_vectors_no_callback(
         return VectorSyncBatchResult(
             entities_total=len(entity_ids),
             entities_synced=len(entity_ids),
+            synced_entity_ids=tuple(entity_ids),
             entities_failed=0,
             failed_entity_ids=(),
             embedding_jobs_total=3,

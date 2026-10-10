@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import text
@@ -25,6 +25,7 @@ def _vector_stats(
     embedded: int,
     skipped: int,
     errors: int,
+    deferred: int = 0,
     sample_errors: tuple[str, ...] = (),
 ) -> dict[str, object]:
     return {
@@ -32,6 +33,7 @@ def _vector_stats(
         "embedded": embedded,
         "skipped": skipped,
         "errors": errors,
+        "deferred": deferred,
         "sample_errors": sample_errors,
         "vector_index": "milvus",
         "embedding_model": "FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5",
@@ -818,7 +820,7 @@ def test_reindex_total_embedding_failure_surfaces_error_and_exits_one(
     project_index.assert_awaited_once()
     output = "\n".join(printed_lines)
     assert (
-        "Embeddings complete ([cyan]index=milvus[/cyan], "
+        "Embeddings incomplete[/yellow] ([cyan]index=milvus[/cyan], "
         "[cyan]model=FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5[/cyan]): "
         "0 entities embedded, 0 skipped, 3 errors"
     ) in output
@@ -829,7 +831,7 @@ def test_reindex_total_embedding_failure_surfaces_error_and_exits_one(
     assert "Reindex complete!" not in output
 
 
-def test_reindex_partial_embedding_failure_surfaces_error_and_exits_zero(
+def test_reindex_partial_embedding_failure_surfaces_error_and_exits_one(
     monkeypatch,
     session_maker,
 ):
@@ -848,11 +850,14 @@ def test_reindex_partial_embedding_failure_surfaces_error_and_exits_zero(
 
     result = runner.invoke(app, ["reindex", "--embeddings"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     output = "\n".join(printed_lines)
     assert "2 entities embedded, 0 skipped, 1 errors" in output
     assert "Representative error:[/yellow] Milvus is unavailable" in output
-    assert "Reindex complete!" in output
+    assert "Embeddings incomplete" in output
+    assert "Reindex incomplete:" in output
+    assert "Embeddings complete" not in output
+    assert "Reindex complete!" not in output
 
 
 def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
@@ -948,3 +953,79 @@ async def test_reindex_matches_the_project_by_permalink(monkeypatch, session_mak
     project_index.assert_awaited_once()
     [indexed_call] = project_index.await_args_list
     assert indexed_call.args[0] is stored
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["reindex", "--embeddings"], ["reindex"], ["project", "index", "foo"]],
+)
+@pytest.mark.parametrize("errors,deferred", [(0, 2), (1, 1)])
+def test_reindex_incomplete_embeddings_never_report_full_progress(
+    monkeypatch, session_maker, args: list[str], errors: int, deferred: int
+) -> None:
+    stats = _vector_stats(total_entities=3, embedded=1, skipped=0, errors=errors, deferred=deferred)
+    _, _, printed_lines = _configure_embedding_runtime(monkeypatch, session_maker, stats)
+    progress_factory = MagicMock()
+    progress = progress_factory.return_value.__enter__.return_value
+    monkeypatch.setattr(db_cmd, "Progress", progress_factory)
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 1, result.output
+    output = "\n".join(printed_lines)
+    assert "Embeddings incomplete" in output
+    assert f"{errors} errors, {deferred} deferred" in output
+    assert "Reindex incomplete:" in output
+    assert "Embeddings complete" not in output
+    assert "Reindex complete!" not in output
+    progress.update.assert_called_once_with(progress.add_task.return_value, total=3, completed=1)
+
+
+def test_reindex_finishes_other_projects_before_reporting_incomplete(
+    monkeypatch, session_maker
+) -> None:
+    incomplete = _vector_stats(total_entities=2, embedded=1, skipped=0, errors=0, deferred=1)
+    complete = _vector_stats(total_entities=1, embedded=1, skipped=0, errors=0)
+    _, project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch, session_maker, incomplete
+    )
+    projects = [
+        SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo"),
+        SimpleNamespace(id=2, name="bar", permalink="bar", path="/tmp/bar"),
+    ]
+    monkeypatch.setattr(
+        "basic_memory.repository.ProjectRepository",
+        lambda: SimpleNamespace(get_active_projects=AsyncMock(return_value=projects)),
+    )
+    reindex_vectors = AsyncMock(side_effect=[incomplete, complete])
+    monkeypatch.setattr(
+        "basic_memory.services.search_service.SearchService",
+        lambda *args, **kwargs: SimpleNamespace(reindex_vectors=reindex_vectors),
+    )
+
+    result = runner.invoke(app, ["reindex"])
+
+    assert result.exit_code == 1, result.output
+    assert project_index.await_count == 2
+    assert reindex_vectors.await_count == 2
+    output = "\n".join(printed_lines)
+    assert output.count("Embeddings incomplete") == 1
+    assert output.count("Embeddings complete") == 1
+    assert "Reindex incomplete: 0 embedding errors, 1 entities deferred." in output
+    assert "Reindex complete!" not in output
+
+
+def test_reindex_unavailable_vectors_reports_skips_without_crashing(
+    monkeypatch, session_maker
+) -> None:
+    stats = _vector_stats(total_entities=2, embedded=0, skipped=2, errors=0)
+    stats.update(vector_index=None, embedding_model=None)
+    _, _, printed_lines = _configure_embedding_runtime(monkeypatch, session_maker, stats)
+
+    result = runner.invoke(app, ["reindex", "--embeddings"])
+
+    assert result.exit_code == 0, result.output
+    output = "\n".join(printed_lines)
+    assert "0 entities embedded, 2 skipped, 0 errors, 0 deferred" in output
+    assert "index=unavailable" in output
+    assert "Reindex complete!" in output
