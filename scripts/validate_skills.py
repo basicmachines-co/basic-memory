@@ -96,15 +96,17 @@ def validate_openclaw_manifest(skills_root: Path) -> None:
     from the manifest ships in the package yet stays invisible to users.
     """
     manifest_path = skills_root.parent / "integrations" / "openclaw" / "openclaw.plugin.json"
-    listed = set(json.loads(manifest_path.read_text())["skills"])
+    entries: list[str] = json.loads(manifest_path.read_text())["skills"]
+    listed = set(entries)
     expected = {f"skills/{path.name}" for path in skills_root.glob("memory-*") if path.is_dir()}
 
     missing = sorted(expected - listed)
     stale = sorted(listed - expected)
-    if missing or stale:
+    duplicates = sorted({entry for entry in entries if entries.count(entry) > 1})
+    if missing or stale or duplicates:
         raise SystemExit(
             f"{manifest_path}: skills array out of sync with {skills_root}; "
-            f"missing={missing} stale={stale}"
+            f"missing={missing} stale={stale} duplicates={duplicates}"
         )
 
 
