@@ -52,12 +52,14 @@ If they decline, stop. Say that the mission stays incomplete and they can run `/
 
 ### 5. Save the Memory Master note
 
+First choose a project in Basic Memory Cloud. Call `list_memory_projects` and pick a project whose source is exactly `cloud`: the default one if it qualifies, otherwise ask the user which to use. Don't use a project listed as `local` or `local+cloud`. A local Basic Memory server writes those on this machine, so the cloud never sees the note and the mission stays incomplete, even though the write succeeds. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud or connect their cloud account, then try again.
+
 With approval, call `write_note` once:
 
 - `title`: `Memory Master`
 - `directory`: `memory-quest`
 - `note_type`: `memory_master`
-- `project`: the user's default project unless they name another
+- `project_id`: the chosen cloud project's `external_id`
 - `metadata`: `{"memory_quest_code": "<the code exactly as the user gave it>", "memory_quest_guidance": "active"}`
 - `content`: the template below, unchanged except where it says to fill in
 
