@@ -30,6 +30,9 @@ class DirectoryNode(BaseModel):
     entity_id: Optional[int] = None  # Internal numeric ID
     note_type: Optional[str] = None
     content_type: Optional[str] = None
+    # Short format name ("pdf", "png", ...) stored in a non-Markdown file entity's
+    # metadata at index time. None for notes, directories, and unrecognized types.
+    format: Optional[str] = None
     updated_at: Optional[datetime] = None
 
     @property

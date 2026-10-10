@@ -84,6 +84,7 @@ def test_file_index_result_is_a_frozen_success_value():
 
 def test_file_index_result_from_fields_validates_required_entity_text():
     result = FileIndexResult.from_fields(
+        content_type="text/markdown",
         indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
@@ -96,6 +97,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
     )
 
     assert result == FileIndexResult(
+        content_type="text/markdown",
         indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
@@ -109,6 +111,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md is missing title"):
         FileIndexResult.from_fields(
+            content_type="text/markdown",
             indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
@@ -123,6 +126,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
 
 def test_file_index_result_from_fields_validates_optional_permalink_text():
     result = FileIndexResult.from_fields(
+        content_type="text/markdown",
         indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
@@ -138,6 +142,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has invalid permalink"):
         FileIndexResult.from_fields(
+            content_type="text/markdown",
             indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
@@ -151,6 +156,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has blank permalink"):
         FileIndexResult.from_fields(
+            content_type="text/markdown",
             indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
@@ -735,6 +741,7 @@ def test_project_index_outcomes_from_file_job_results_update_batch_counters():
 def test_current_materialized_note_entity_from_fields_requires_indexed_permalink():
     with pytest.raises(RuntimeError, match="Current entity for notes/a.md is missing permalink"):
         CurrentMaterializedNoteEntity.from_fields(
+            content_type="text/markdown",
             entity_id=42,
             external_id="note-42",
             title="A Note",
@@ -747,6 +754,7 @@ def test_current_materialized_note_entity_from_fields_requires_indexed_permalink
 
 def test_current_materialized_note_entity_from_fields_validates_identity_text():
     entity = CurrentMaterializedNoteEntity.from_fields(
+        content_type="text/markdown",
         entity_id=42,
         external_id=" note-42 ",
         title=" A Note ",
@@ -757,6 +765,7 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
     )
 
     assert entity == CurrentMaterializedNoteEntity(
+        content_type="text/markdown",
         entity_id=42,
         external_id="note-42",
         title="A Note",
@@ -766,6 +775,7 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
     )
 
     not_yet_indexed = CurrentMaterializedNoteEntity.from_fields(
+        content_type="text/markdown",
         entity_id=42,
         external_id="note-42",
         title="A Note",
@@ -780,6 +790,7 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
 
     with pytest.raises(RuntimeError, match="Current entity for notes/a.md is missing title"):
         CurrentMaterializedNoteEntity.from_fields(
+            content_type="text/markdown",
             entity_id=42,
             external_id="note-42",
             title="  ",
@@ -805,6 +816,7 @@ MCP_NOTE_OBJECT_METADATA = {
 
 def materialized_entity(*, storage_checksum: str, content_checksum: str | None):
     return CurrentMaterializedNoteEntity(
+        content_type="text/markdown",
         entity_id=42,
         external_id="note-42",
         title="A Note",
@@ -840,6 +852,7 @@ def test_plan_current_materialized_note_result_trusts_provenance_of_the_indexed_
             actor_name="Claude Code",
             live_update_source="mcp",
             db_version=1,
+            content_type="text/markdown",
         ),
     )
 

@@ -257,7 +257,8 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
     assert repaired.permalink is None
     assert repaired.note_type == "file"
     assert repaired.title == ".md"
-    assert repaired.entity_metadata == {}
+    # Stale frontmatter keys are gone; only stored file-format metadata remains.
+    assert repaired.entity_metadata == {"content_type": RUNTIME_RESOURCE_CONTENT_TYPE}
     assert note_content is None
     assert observations == []
     assert sections == []

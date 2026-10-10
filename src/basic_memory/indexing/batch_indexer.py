@@ -23,6 +23,7 @@ from basic_memory.file_utils import (
 )
 from basic_memory.markdown.path_links import climbs_out_of_project
 from basic_memory.markdown.schemas import FrontmatterState, EntityMarkdown
+from basic_memory.file_types import file_entity_metadata
 from basic_memory.indexing.models import (
     IndexEntitySearchWriter,
     IndexedEntity,
@@ -576,6 +577,8 @@ class BatchIndexer:
         if existing is None:
             # Non-Markdown resources cannot persist a semantic address back to source bytes.
             # Their stable API identity is external_id; file_path locates the stored resource.
+            # Format metadata is written by the metadata update below, which runs for
+            # new and existing rows alike.
             entity = Entity(
                 note_type="file",
                 file_path=file.path,
@@ -756,13 +759,14 @@ class BatchIndexer:
             )
             # MIME alone is the downstream note discriminator. A malformed
             # Markdown basename must therefore be normalized both for new rows
-            # and for poison rows created by older indexers.
+            # and for poison rows created by older indexers. Replacing the whole
+            # metadata also drops any frontmatter keys a poison row still holds.
             metadata_updates.update(
                 content_type=content_type,
                 permalink=None,
                 note_type="file",
                 title=Path(file.path).name,
-                entity_metadata={},
+                entity_metadata=dict(file_entity_metadata(content_type)),
             )
             updated = await self.entity_repository.update(
                 session,

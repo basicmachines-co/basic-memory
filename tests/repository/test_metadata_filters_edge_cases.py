@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import pytest
 
 from basic_memory import db
+from basic_memory.file_types import file_entity_metadata
 from basic_memory.models import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchItemType
@@ -114,11 +115,10 @@ async def test_metadata_filters_never_match_a_non_markdown_file(search_repositor
     """REGRESSION: a PDF or an image is not an unowned note.
 
     Frontmatter is a Markdown-only construct, but every indexed file gets an
-    ENTITY row, and a regular file's entity_metadata carries no keys at all —
-    so `IS NULL` matched every PDF, image and binary in the project and counted
-    them into an exact total. Positive predicates hid the hole because nothing
-    a regular file carries could satisfy one; the content-type constraint makes
-    the frontmatter-only contract hold for either shape of predicate.
+    ENTITY row. A regular file's entity_metadata holds only the indexer's
+    content_type and format, so `IS NULL` on a frontmatter key matched every PDF,
+    image and binary in the project, and a positive filter on `format` would
+    match file rows. The content-type constraint keeps metadata filters on notes.
     """
     unowned_note = await _index_entity_with_metadata(
         search_repository,
@@ -130,7 +130,7 @@ async def test_metadata_filters_never_match_a_non_markdown_file(search_repositor
         search_repository,
         session_maker,
         "Scanned Contract",
-        None,
+        dict(file_entity_metadata("application/pdf")),
         content_type="application/pdf",
         extension="pdf",
     )
@@ -140,6 +140,9 @@ async def test_metadata_filters_never_match_a_non_markdown_file(search_repositor
     assert {r.id for r in results} == {unowned_note.id}
     # The total is what paginates, so it has to exclude the PDF too.
     assert await search_repository.count(metadata_filters={"owner": None}) == 1
+    # Stored file-format metadata is not frontmatter and never matches a filter.
+    assert await search_repository.search(metadata_filters={"format": "pdf"}) == []
+    assert await search_repository.count(metadata_filters={"format": "pdf"}) == 0
 
 
 @pytest.mark.asyncio

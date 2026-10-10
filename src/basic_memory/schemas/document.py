@@ -178,6 +178,15 @@ class DocumentExtractionSummaryV1(_DocumentExtractionDiagnosticsV1):
     has_tables: StrictBool = False
     has_columns: StrictBool = False
 
+    def with_page_map(self, page_map: DocumentPageMapV1 | None) -> "DocumentExtractionV1":
+        """Rebuild the full run record from a sidecar summary and its run's page map.
+
+        A writer that finishes a run note from an already accepted sidecar needs
+        the full record. The summary keeps the accepted values (``extracted_at``
+        included) and the map comes from the same deterministic extraction.
+        """
+        return DocumentExtractionV1.model_validate({**self.model_dump(), "page_map": page_map})
+
 
 class DocumentExtractionV1(_DocumentExtractionDiagnosticsV1):
     """Full extraction record, including the page map, stored on the run note.
