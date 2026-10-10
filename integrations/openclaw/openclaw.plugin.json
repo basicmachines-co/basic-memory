@@ -20,6 +20,7 @@
     ]
   },
   "skills": [
+    "skills/memory-comark",
     "skills/memory-defrag",
     "skills/memory-ingest",
     "skills/memory-lifecycle",
