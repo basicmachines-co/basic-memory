@@ -367,8 +367,8 @@
   lists only notes scoring 0.70 or higher: rewrites of an existing note scored 0.77 to
   0.93, and unrelated neighbors at most 0.67. Other embedding models keep
   `semantic_min_similarity`, since their scores sit on a different scale. Hybrid
-  search's handling of gibberish queries is
-  unchanged; the measurements showed no threshold that separates it from real matches.
+  search's handling of gibberish queries is unchanged; the measurements showed no
+  threshold that separates it from real matches.
 
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
   variables that override `config.json`, redacted the same way as the file dump. It
