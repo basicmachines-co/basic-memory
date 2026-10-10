@@ -45,6 +45,10 @@ async def vector_coverage(search_service: SearchService, entity_id: int) -> dict
 async def test_api_edit_embeds_once_after_materialization(
     client, test_project, search_service, monkeypatch, materialization_delayed
 ):
+    # A host that cannot load the vector runtime runs keyword-only (#711) and
+    # embeds nothing, so there is no vector coverage to compare.
+    if not await search_service.repository.semantic_effectively_enabled():
+        pytest.skip("Semantic search is unavailable; this host runs keyword-only.")
     base = f"/v2/projects/{test_project.external_id}/knowledge"
     target = await client.post(
         base + "/write",
@@ -121,6 +125,9 @@ async def test_api_edit_embeds_once_after_materialization(
 
     coverage = await vector_coverage(search_service, entity_id)
     assert coverage["source_types"] == {"entity": 1, "observation": 2, "relation": 1}
-    assert coverage["expected"] == coverage["manifest"] == coverage["physical"]
+    assert coverage["expected"] == coverage["manifest"]
+    # None means this backend's vector storage is not inspectable (an external index).
+    if coverage["physical"] is not None:
+        assert coverage["physical"] == coverage["manifest"]
     assert coverage["pending"] == 0
     assert synced_entity_ids == [entity_id]

@@ -1248,6 +1248,9 @@ async def test_create_embeds_after_materialization_not_at_request_time(
     created_entity = EntityResponseV2.model_validate(response.json())
 
     assert len(vector_sync_scheduler_spy) == start_count
+    # A keyword-only host (#711) embeds nothing, so only the scheduling half applies.
+    if not await search_service.repository.semantic_effectively_enabled():
+        return
     manifest = await search_service.repository.get_entity_chunk_manifest(created_entity.id)
     assert {row.source_type for row in manifest} >= {"entity", "observation"}
     assert all(row.embedding_status == "ready" for row in manifest)
