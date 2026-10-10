@@ -1734,6 +1734,19 @@ def test_similar_notes_floor_applies_on_the_measured_default_model():
     assert similar_notes_min_similarity(BasicMemoryConfig()) == SIMILAR_NOTES_MIN_SIMILARITY
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"semantic_embedding_model": "BAAI/bge-small-en-v1.5"},
+        {"semantic_embedding_provider": " FastEmbed "},
+    ],
+)
+def test_similar_notes_floor_recognizes_spellings_of_the_default_model(overrides):
+    """The canonical FastEmbed name and provider case variants load the same weights."""
+    config = BasicMemoryConfig(**overrides)
+    assert similar_notes_min_similarity(config) == SIMILAR_NOTES_MIN_SIMILARITY
+
+
 def test_similar_notes_floor_keeps_a_stricter_search_floor():
     config = BasicMemoryConfig(semantic_min_similarity=0.8)
     assert similar_notes_min_similarity(config) == 0.8
