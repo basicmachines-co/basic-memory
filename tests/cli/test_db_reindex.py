@@ -25,6 +25,7 @@ def _vector_stats(
     embedded: int,
     skipped: int,
     errors: int,
+    deferred: int = 0,
     sample_errors: tuple[str, ...] = (),
 ) -> dict[str, object]:
     return {
@@ -32,6 +33,7 @@ def _vector_stats(
         "embedded": embedded,
         "skipped": skipped,
         "errors": errors,
+        "deferred": deferred,
         "sample_errors": sample_errors,
         "vector_index": "milvus",
         "embedding_model": "FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5",
@@ -877,6 +879,51 @@ def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
     ) in output
     assert "Representative error:" not in output
     assert "Reindex complete!" in output
+
+
+def test_reindex_with_deferred_embeddings_reports_incomplete_and_exits_one(
+    monkeypatch,
+    session_maker,
+):
+    """Entities still owed chunks are reported, not claimed as complete (#1726)."""
+    stats = _vector_stats(total_entities=5, embedded=3, skipped=0, errors=0, deferred=2)
+    _app_config, _project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+    progress_updates: list[dict[str, object]] = []
+
+    class RecordingProgress:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> bool:
+            return False
+
+        def add_task(self, *args, **kwargs) -> int:
+            return 1
+
+        def update(self, task, **kwargs) -> None:
+            progress_updates.append(kwargs)
+
+    monkeypatch.setattr(db_cmd, "Progress", RecordingProgress)
+
+    result = runner.invoke(app, ["reindex", "--embeddings"])
+
+    assert result.exit_code == 1
+    # The bar stops at the entities that actually finished.
+    assert progress_updates[-1] == {"total": 5, "completed": 3}
+    output = "\n".join(printed_lines)
+    assert "Embeddings incomplete" in output
+    assert "Embeddings complete" not in output
+    assert "3 entities embedded, 0 skipped, 0 errors, 2 with pending chunks" in output
+    assert "Reindex incomplete: some entities still have pending chunks." in output
+    assert "bm reindex --embeddings --project foo" in output
+    assert "Reindex complete!" not in output
 
 
 # --- `bm project add` indexing (#1635) ---

@@ -358,6 +358,14 @@
 
 ### Bug Fixes
 
+- **#1726**: `bm reindex --embeddings` now finishes oversized notes before it reports
+  success. Vector sync embeds at most 256 chunks of one note per pass and defers the
+  rest, and the explicit reindex ran a single pass, then printed "Embeddings complete"
+  and forced its progress bar to 100% with those chunks still missing from semantic
+  search. A `--full` rerun cleared vectors and repeated the same first shard. The
+  reindex now re-runs deferred notes until none remain, clearing vectors only once for
+  `--full`. If a pass stops making progress, it reports how many notes still have
+  pending chunks, says how to continue, and exits non-zero. Reported by @beru-ant-king.
 - **#1720**: CLI output prints project names, paths, and error messages as typed.
   Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
   `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`
