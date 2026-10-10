@@ -12,11 +12,10 @@ import shlex
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import typer
 from rich.console import Console
-from typer._click.core import Context
 from typer.core import TyperCommand
 
 from basic_memory.cli.app import cloud_app
@@ -62,6 +61,11 @@ from basic_memory.schemas.cloud import (
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
 from basic_memory.cli.markup import literal
+
+if TYPE_CHECKING:
+    # Typer 0.26 vendors Click as `typer._click`; older Typer releases allowed by
+    # our `typer>=0.9.0` pin do not have that module, so never import it at runtime.
+    from typer._click.core import Context
 
 console = Console()
 
@@ -121,7 +125,7 @@ class MirrorCommand(TyperCommand):
     """
 
     @override
-    def invoke(self, ctx: Context) -> object:
+    def invoke(self, ctx: "Context") -> object:
         # Typer builds every command from a decorated function.
         assert self.callback is not None
         return ctx.invoke(self.callback, **ctx.params)
