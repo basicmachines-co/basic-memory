@@ -98,10 +98,6 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
             assert accepted.materialization is not None
             return accepted
 
-    class FakeVectorSyncScheduler:
-        def schedule_entity_vector_sync(self, *args, **kwargs):
-            return None
-
     class FakeRelationResolutionScheduler:
         def schedule_relation_resolution(self, *args, **kwargs):
             return None
@@ -118,7 +114,6 @@ async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
         ),
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
-        vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
     )
 
@@ -143,10 +138,6 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
             assert accepted.materialization is not None
             return accepted
 
-    class FakeVectorSyncScheduler:
-        def schedule_entity_vector_sync(self, *args, **kwargs):
-            return None
-
     class FakeRelationResolutionScheduler:
         def schedule_relation_resolution(self, *args, **kwargs):
             return None
@@ -165,7 +156,6 @@ async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
         project_external_id="project-123",
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
-        vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         entity_id=entity.external_id,
     )
@@ -191,10 +181,6 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
             assert accepted.materialization is not None
             return accepted
 
-    class FakeVectorSyncScheduler:
-        def schedule_entity_vector_sync(self, *args, **kwargs):
-            return None
-
     class FakeRelationResolutionScheduler:
         def schedule_relation_resolution(self, *args, **kwargs):
             return None
@@ -205,7 +191,6 @@ async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
         project_external_id="project-123",
         note_content_mutation_service=cast(Any, FakeNoteContentMutationService()),
         note_content_materialization_provider=cast(Any, FakeNoteContentMaterializationProvider()),
-        vector_sync_scheduler=FakeVectorSyncScheduler(),
         relation_resolution_scheduler=FakeRelationResolutionScheduler(),
         entity_id=entity.external_id,
     )

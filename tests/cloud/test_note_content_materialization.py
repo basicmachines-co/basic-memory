@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
@@ -47,6 +48,7 @@ from basic_memory.runtime.note_content import (
     RuntimePendingNoteMaterialization,
     runtime_note_content_payload_as_dict,
 )
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services.file_service import FileService
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000007"
@@ -529,6 +531,86 @@ async def test_local_materialization_schedules_relation_resolution_after_index(
         PROJECT_EXTERNAL_ID,
         PROJECT_EXTERNAL_ID,
     ]
+
+
+class RecordingVectorSync:
+    """Records each embed together with the indexer calls that preceded it."""
+
+    def __init__(self, indexer: RecordingFileIndexer, *, error: Exception | None = None) -> None:
+        self.indexer = indexer
+        self.error = error
+        self.calls: list[tuple[int, int]] = []
+
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
+        self.calls.append((entity_id, len(self.indexer.calls)))
+        if self.error is not None:
+            raise self.error
+        return VectorSyncBatchResult(entities_total=1, entities_synced=1, entities_failed=0)
+
+
+def written_materialization(monkeypatch: pytest.MonkeyPatch, indexed_payload) -> None:
+    """Make materialization report a written file and an indexed payload."""
+
+    async def fake_run_note_materialization(
+        request: RuntimeNoteMaterializationJobRequest,
+        **_: Any,
+    ) -> RuntimeNoteMaterializationResult:
+        return RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.written,
+            reason="written",
+        )
+
+    async def fake_load_indexed(**_: Any):
+        return indexed_payload
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "run_note_materialization",
+        fake_run_note_materialization,
+    )
+    monkeypatch.setattr(
+        note_content_materialization,
+        "load_indexed_note_content_response_payload",
+        fake_load_indexed,
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_materialization_embeds_once_after_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The note embeds from the rows its materialized file produced (#1732)."""
+    accepted = accepted_materialization_change()
+    indexed_payload = replace(cast(RuntimeAcceptedNoteResponse, accepted.payload), title="Indexed")
+    written_materialization(monkeypatch, indexed_payload)
+    indexer = RecordingFileIndexer()
+    vector_sync = RecordingVectorSync(indexer)
+    provider = replace(local_materialization_provider(indexer), entity_vector_sync=vector_sync)
+
+    result = await provider.materialize_write_change(accepted)
+
+    # One embed, for the accepted entity, after its single index call.
+    assert vector_sync.calls == [(42, 1)]
+    assert result.payload == indexed_payload
+
+
+@pytest.mark.asyncio
+async def test_local_materialization_keeps_indexed_result_when_embed_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed embed is logged; the written and indexed note is still reported."""
+    accepted = accepted_materialization_change()
+    indexed_payload = replace(cast(RuntimeAcceptedNoteResponse, accepted.payload), title="Indexed")
+    written_materialization(monkeypatch, indexed_payload)
+    indexer = RecordingFileIndexer()
+    vector_sync = RecordingVectorSync(indexer, error=RuntimeError("provider down"))
+    provider = replace(local_materialization_provider(indexer), entity_vector_sync=vector_sync)
+
+    result = await provider.materialize_write_change(accepted)
+
+    assert vector_sync.calls == [(42, 1)]
+    assert result.payload == indexed_payload
 
 
 @pytest.mark.asyncio

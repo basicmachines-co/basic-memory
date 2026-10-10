@@ -367,6 +367,15 @@
   `--full`. If a pass stops making progress, it reports how many notes still have
   pending chunks, says how to continue, and exits non-zero. Reported by @beru-ant-king;
   @lastguru-net independently reached the same fix in #1730.
+- **#1732**: An API edit no longer leaves a note's observations and relations without
+  vectors. The accept path publishes only the note body as a temporary search row,
+  and the observation and relation rows appear when the file is written and indexed
+  in the background. The route also scheduled its own embed, which often ran first,
+  embedded the body alone, and left nothing to embed the rest. A background index
+  pass did not repair it, because the file looked unchanged. Now the materialization
+  job embeds the note once, right after it indexes the written file, as cloud's
+  materialize job already did. Routes no longer schedule vector sync for note writes,
+  edits or moves. Reported by @beru-ant-king with a reproducer.
 - **#1720**: CLI output prints project names, paths, and error messages as typed.
   Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
   `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`

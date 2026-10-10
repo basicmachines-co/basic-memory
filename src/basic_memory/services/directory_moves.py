@@ -52,6 +52,7 @@ async def move_directory(
     search_service: SearchService,
     read_cache: ReadCache | None,
     schedule_followups: MovedEntityFollowups,
+    schedule_regular_file_vector_sync: MovedEntityFollowups,
 ) -> DirectoryMoveResult:
     """Move every entity under ``source_directory`` to ``destination_directory``.
 
@@ -108,6 +109,8 @@ async def move_directory(
             except (ValueError, EntityNotFoundError) as error:
                 errors.append(DirectoryMoveError(path=entity.file_path, error=str(error)))
                 continue
+            # A moved note is embedded by its materialization; a regular file has none.
+            schedule_regular_file_vector_sync(entity.id)
 
         schedule_followups(entity.id)
         moved_files.append(moved_path)

@@ -1209,7 +1209,7 @@ async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
 async def test_create_with_fast_param_does_not_schedule_reindex_task(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
-    """Legacy fast=true schedules only the normal vector sync, not the removed reindex path."""
+    """Legacy fast=true schedules no request-time vector work, and no removed reindex path."""
     start_count = len(vector_sync_scheduler_spy)
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -1221,31 +1221,36 @@ async def test_create_with_fast_param_does_not_schedule_reindex_task(
         params={"fast": True},
     )
     assert response.status_code == 202
-    assert len(vector_sync_scheduler_spy) == start_count + 1
+    assert len(vector_sync_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio
-async def test_create_schedules_vector_sync(
-    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
+async def test_create_embeds_after_materialization_not_at_request_time(
+    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, search_service, app_config
 ):
-    """Create should schedule vector sync."""
+    """Create embeds through its materialization, never through a request-time schedule.
+
+    Regression for #1732: the request-time embed raced materialization and could embed
+    the body-only search row. Test mode materializes inline, so the vectors are
+    already published when the response returns.
+    """
     start_count = len(vector_sync_scheduler_spy)
 
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
         json={
-            "title": "NonFastSemanticEntity",
+            "title": "MaterializedSemanticEntity",
             "directory": "test",
-            "content": "Content for non-fast semantic scheduling",
+            "content": "Body text\n\n- [fact] An observation to embed\n",
         },
-        params={"fast": False},
     )
     assert response.status_code == 202
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    assert len(vector_sync_scheduler_spy) == start_count + 1
-    scheduled = vector_sync_scheduler_spy[-1]
-    assert scheduled["entity_id"] == created_entity.id
+    assert len(vector_sync_scheduler_spy) == start_count
+    manifest = await search_service.repository.get_entity_chunk_manifest(created_entity.id)
+    assert {row.source_type for row in manifest} >= {"entity", "observation"}
+    assert all(row.embedding_status == "ready" for row in manifest)
 
 
 @pytest.mark.asyncio

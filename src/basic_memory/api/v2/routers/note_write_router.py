@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Path
 from basic_memory.deps import (
     AppConfigDep,
     EntityRepositoryV2ExternalDep,
-    EntityVectorSyncSchedulerDep,
     NoteContentMaterializationProviderDep,
     NoteContentMutationServiceDep,
     ProjectExternalIdPathDep,
@@ -58,7 +57,6 @@ async def write_note(
     session_maker: SessionMakerDep,
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     app_config: AppConfigDep,
 ) -> WriteNoteResponse:
@@ -106,10 +104,8 @@ async def write_note(
                 entity = EntityResponseV2.model_validate(
                     runtime_note_content_payload_as_dict(accepted.payload)
                 )
-                # Runtime-injected schedulers preserve local and Cloud publication behavior.
-                vector_sync_scheduler.schedule_entity_vector_sync(
-                    entity_id=entity.id, project_id=project_id
-                )
+                # The materialization job embeds the note after indexing its file
+                # (#1732); relation resolution stays a runtime-injected scheduler.
                 relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
                 match outcome:
                     case Created():
