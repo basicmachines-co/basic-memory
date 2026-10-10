@@ -156,18 +156,26 @@ class _MaterializationWorkerPool:
 
 
 _materialization_pool = _MaterializationWorkerPool()
+# Embeds notes after their materialized files are indexed (#1732). A separate pool,
+# mirroring cloud's separate index_embeddings job: a slow embedding provider must not
+# hold a materialization worker and delay unrelated notes' file writes. Keyed by note
+# like the materialization pool, so one note's embeds still run one at a time in
+# write order.
+_vector_sync_pool = _MaterializationWorkerPool()
 
 
 async def drain_pending_materializations() -> None:
-    """Block until queued local materializations finish writing + indexing.
+    """Block until queued local materializations finish writing, indexing and embedding.
 
     One-shot clients (``bm tool write-note``, importers) return right after the
     accept enqueues the markdown write/index; without this drain the event loop can
     close before the worker writes the source-of-truth file, silently losing the
     write even though the API already reported it accepted. Long-lived servers keep
-    the loop alive and don't need it.
+    the loop alive and don't need it. Materializations queue the embeds, so the
+    materialization pool drains first.
     """
     await _materialization_pool.join()
+    await _vector_sync_pool.join()
 
 
 # --- Startup Recovery ---
@@ -677,9 +685,9 @@ class LocalNoteContentMaterializationProvider:
     # target (#1351). Optional so providers wired without it (cloud, focused
     # tests) keep working; cloud relies on its orphan sweeper instead.
     relation_cleanup_refresher: ProjectIndexMovedEntitySearchRefresher | None = None
-    # Embeds the note once its materialized file is indexed (#1732). Optional so
-    # providers wired without semantic work (cloud, focused tests) keep working;
-    # cloud embeds from its materialize_note_file job instead.
+    # Embeds the note once its materialized file is indexed (#1732), through the
+    # vector pool. Optional so providers wired without semantic work (cloud, focused
+    # tests) keep working; cloud embeds from its materialize_note_file job instead.
     entity_vector_sync: EntityVectorSync | None = None
 
     async def materialize_write_change(
@@ -827,27 +835,48 @@ class LocalNoteContentMaterializationProvider:
                         or "note-content-materialization",
                     ),
                 )
-                await self._sync_indexed_note_vectors(accepted.materialization.entity_id)
+                await self._embed_indexed_note(accepted.materialization)
                 return indexed
             return accepted
 
-    async def _sync_indexed_note_vectors(self, entity_id: int) -> None:
+    async def _embed_indexed_note(self, materialization: RuntimePendingNoteMaterialization) -> None:
         """Embed a note from the search rows its materialized file just produced.
 
         Trigger: the accepted note's file was written and indexed.
         Why: the accept path only publishes the note body as a temporary search row;
             observations and relations exist only after this index. A request-time
             embed raced this job, embedded the body alone, and nothing re-embedded
-            the rest (#1732). This worker runs one note's jobs in order, so each
-            accepted write embeds exactly once, after its own index. Cloud does the
-            same from its materialize_note_file job.
-        Outcome: vectors match the indexed note. The outer invalidation scope
-            retires reads cached while vectors were stale.
+            the rest (#1732). Cloud likewise queues index_embeddings from its
+            materialize_note_file job.
+        Outcome: one embed per accepted write, queued after its own index. Test mode
+            runs it inline so tests can assert vectors synchronously; production
+            hands it to the vector pool so the materialization worker is free for
+            the next file write.
         """
         if self.entity_vector_sync is None:
             return
+        if self.test_mode:
+            await self._sync_note_vectors(materialization.entity_id)
+            return
+        _vector_sync_pool.submit(
+            self._sync_note_vectors(materialization.entity_id),
+            workers=self.materialization_workers,
+            key=(materialization.project_id, materialization.entity_id),
+        )
+
+    async def _sync_note_vectors(self, entity_id: int) -> None:
+        if self.entity_vector_sync is None:  # pragma: no cover - guarded by caller
+            return
+        # Vector publication can change VECTOR/HYBRID results after the note's own
+        # invalidation, so retire reads cached while vectors were stale.
+        invalidation_scope = (
+            invalidate_cache(self.read_cache, self.project_external_id)
+            if self.read_cache is not None
+            else nullcontext()
+        )
         try:
-            await self.entity_vector_sync.sync_entity_vectors(entity_id)
+            async with invalidation_scope:
+                await self.entity_vector_sync.sync_entity_vectors(entity_id)
         except Exception:
             # Vectors are derived state: the accepted note and its file are already
             # published, and the next write or a reindex re-embeds the note. Keep

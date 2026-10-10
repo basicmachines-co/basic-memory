@@ -596,6 +596,47 @@ async def test_local_materialization_embeds_once_after_index(
 
 
 @pytest.mark.asyncio
+async def test_production_materialization_hands_embed_to_vector_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow embed must not hold the materialization worker (#1732 review).
+
+    The file write finishes and returns while the embed waits in the vector pool;
+    the shutdown drain still waits for that embed.
+    """
+    accepted = accepted_materialization_change()
+    written_materialization(monkeypatch, accepted.payload)
+    vector_pool = note_content_materialization._MaterializationWorkerPool()
+    monkeypatch.setattr(note_content_materialization, "_vector_sync_pool", vector_pool)
+    indexer = RecordingFileIndexer()
+    release_embed = asyncio.Event()
+    embedded: list[int] = []
+
+    class SlowVectorSync:
+        async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
+            await release_embed.wait()
+            embedded.append(entity_id)
+            return VectorSyncBatchResult(entities_total=1, entities_synced=1, entities_failed=0)
+
+    read_cache = RecordingReadCache()
+    provider = replace(
+        local_materialization_provider(indexer, test_mode=False, read_cache=read_cache),
+        entity_vector_sync=SlowVectorSync(),
+    )
+
+    await provider._materialize_write_now(accepted)
+    assert indexer.calls == [("notes/test.md", "note-content-materialization")]
+    assert embedded == []
+
+    release_embed.set()
+    await note_content_materialization.drain_pending_materializations()
+    assert embedded == [42]
+    # Two invalidations close the materialization; the embed adds its own.
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID] * 3
+    await vector_pool.aclose()
+
+
+@pytest.mark.asyncio
 async def test_local_materialization_keeps_indexed_result_when_embed_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
