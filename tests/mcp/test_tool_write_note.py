@@ -15,6 +15,7 @@ from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
+    SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
     _compose_similarity_probe,
@@ -1831,6 +1832,8 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert call["payload"]["retrieval_mode"] == "vector"
     assert call["payload"]["entity_types"] == ["entity"]
     assert call["payload"]["text"].startswith("BU Mapping Analysis\n\n# BU Mapping Analysis")
+    # The advisory asks a stricter question than search relevance (#1718).
+    assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY
     assert call["page"] == 1
     assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
 

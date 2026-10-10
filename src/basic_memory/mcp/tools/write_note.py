@@ -63,6 +63,13 @@ SIMILAR_NOTES_LIMIT = 3
 # The vector index embeds a note's title and opening content as its first chunk, so the
 # probe copies that shape and length to land in the same neighborhood as the note itself.
 SIMILAR_NOTES_PROBE_CHARS = 900
+# The advisory asks "might this be the same note?", a stricter question than search's
+# "is this relevant at all?" (semantic_min_similarity, 0.55). Measured on the default
+# bge-small-en-v1.5 model (#1718): rewrites of an existing note scored 0.77-0.93 against
+# it (0.78-0.87 on the Moby Dick vault, #1259), while the nearest neighbor of a note on an
+# unrelated topic topped out at 0.67. Below this floor the list was only noise; near the
+# top, a duplicate and a closely related note still share one band, so ranking decides.
+SIMILAR_NOTES_MIN_SIMILARITY = 0.70
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -78,6 +85,20 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     """Build the text used to look for existing notes near a freshly written one."""
     body = remove_frontmatter(content)
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def similar_notes_query(title: str, content: str) -> SearchQuery:
+    """Build the search that asks which existing notes might be the one just written.
+
+    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
+    parentheses and boolean words in ordinary prose as operators.
+    """
+    return SearchQuery(
+        text=_compose_similarity_probe(title, content),
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        entity_types=[SearchItemType.ENTITY],
+        min_similarity=SIMILAR_NOTES_MIN_SIMILARITY,
+    )
 
 
 def _collapse_similar_notes(
@@ -117,16 +138,8 @@ async def _find_similar_notes(
     exclude_file_path: str,
     exclude_permalink: str | None,
 ) -> list[SimilarNote]:
-    """Ask the vector index which existing notes sit closest to the note just written.
-
-    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
-    parentheses and boolean words in ordinary prose as operators.
-    """
-    query = SearchQuery(
-        text=_compose_similarity_probe(title, content),
-        retrieval_mode=SearchRetrievalMode.VECTOR,
-        entity_types=[SearchItemType.ENTITY],
-    )
+    """Ask the vector index which existing notes sit closest to the note just written."""
+    query = similar_notes_query(title, content)
     # One extra row leaves room for the new note's own hit before collapsing.
     response = await search_client.search(
         query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
