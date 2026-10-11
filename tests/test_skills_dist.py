@@ -212,11 +212,13 @@ def test_user_facing_lists_reject_internal_skills(tmp_path: Path) -> None:
         validate_skills.validate_skill_lists(root)
 
 
-def test_memory_quest_may_be_absent_from_openclaw_readme_only(tmp_path: Path) -> None:
-    # PR #1677 adds memory-quest everywhere except the OpenClaw README.
+def test_memory_quest_may_be_absent_from_openclaw_lists_only(tmp_path: Path) -> None:
+    # PR #1677 adds memory-quest to the skills README and CLAUDE.md only; OpenClaw
+    # waits for a wrapper fix.
     root = _list_repo(tmp_path, ["memory-a", "memory-quest"])
-    openclaw_readme = root / "integrations/openclaw/README.md"
-    openclaw_readme.write_text("- **memory-a** — x\n")
+    openclaw = root / "integrations/openclaw"
+    (openclaw / "README.md").write_text("- **memory-a** — x\n")
+    (openclaw / "openclaw.plugin.json").write_text(json.dumps({"skills": ["skills/memory-a"]}))
     validate_skills.validate_skill_lists(root)
 
     (root / "skills/CLAUDE.md").write_text("memory-a/SKILL.md\n")
@@ -225,7 +227,7 @@ def test_memory_quest_may_be_absent_from_openclaw_readme_only(tmp_path: Path) ->
 
 
 def test_repo_lists_pass_once_memory_quest_lands(tmp_path: Path) -> None:
-    """Apply what PR #1677 adds to a copy of this repo's lists; the check must still pass."""
+    """Apply what PR #1677 adds (skills README and CLAUDE.md only); the check must pass."""
     root = tmp_path / "repo"
     shutil.copytree(SKILLS_ROOT, root / "skills")
     openclaw = root / "integrations/openclaw"
@@ -238,10 +240,6 @@ def test_repo_lists_pass_once_memory_quest_lands(tmp_path: Path) -> None:
     readme.write_text(readme.read_text() + "\n| **memory-quest** | x | y |\n")
     claude = root / "skills/CLAUDE.md"
     claude.write_text(claude.read_text() + "\nmemory-quest/SKILL.md  # x\n")
-    manifest_path = openclaw / "openclaw.plugin.json"
-    manifest = json.loads(manifest_path.read_text())
-    manifest["skills"].append("skills/memory-quest")
-    manifest_path.write_text(json.dumps(manifest))
 
     validate_skills.validate_skill_lists(root)
 

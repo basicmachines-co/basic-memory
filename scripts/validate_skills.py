@@ -228,14 +228,23 @@ SKILL_LISTS = (
         _pattern_extractor(r"^(memory-[a-z0-9-]+)/SKILL\.md"),
         allows_internal=True,
     ),
-    SkillList("integrations/openclaw/openclaw.plugin.json", _openclaw_manifest_skills),
+    SkillList(
+        "integrations/openclaw/openclaw.plugin.json",
+        _openclaw_manifest_skills,
+        may_omit={
+            # OpenClaw's tool wrappers drop the `source`/`external_id` and
+            # checksum fields memory-quest needs, so OpenClaw users couldn't
+            # finish it. A follow-up fixes the wrappers and adds it here.
+            "memory-quest": "OpenClaw wrappers lack fields the skill needs",
+        },
+    ),
     SkillList(
         "integrations/openclaw/README.md",
         _pattern_extractor(r"^- \*\*(memory-[a-z0-9-]+)\*\* —"),
         may_omit={
-            # PR #1677 adds memory-quest to the other lists but not this README.
-            # Drop this entry once the README lists it.
-            "memory-quest": "added by PR #1677 without an OpenClaw README entry",
+            # Not in the OpenClaw manifest yet either (see above); list it here
+            # when the manifest gains it.
+            "memory-quest": "not shipped for OpenClaw yet",
         },
     ),
 )
