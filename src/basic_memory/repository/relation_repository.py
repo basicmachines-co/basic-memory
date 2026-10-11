@@ -564,6 +564,40 @@ class RelationRepository(Repository[Relation]):
         )
         return frozenset(result.scalars().all())
 
+    async def note_ids_touched_by_resolution(
+        self,
+        session: AsyncSession,
+        *,
+        source_entity_ids: Sequence[int],
+    ) -> frozenset[str]:
+        """External ids of notes whose rendered response a resolution pass changed.
+
+        Each source note now shows its resolved links. A target shows the link only
+        when it is rendered from its entity row (no stored note content, mostly
+        regular files), because that view lists incoming relations.
+        """
+        if not source_entity_ids:
+            return frozenset()
+        sources = await session.execute(
+            select(Entity.external_id).where(
+                Entity.project_id == self.project_id,
+                Entity.id.in_(source_entity_ids),
+            )
+        )
+        targets = await session.execute(
+            select(Entity.external_id)
+            .join(Relation, Relation.to_id == Entity.id)
+            .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+            .where(
+                Relation.project_id == self.project_id,
+                Relation.from_id.in_(source_entity_ids),
+                Relation.to_id.is_not(None),
+                NoteContent.entity_id.is_(None),
+            )
+            .distinct()
+        )
+        return frozenset(sources.scalars().all()) | frozenset(targets.scalars().all())
+
     async def cleanup_relation_generations(
         self,
         session: AsyncSession,

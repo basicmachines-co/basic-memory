@@ -446,17 +446,16 @@ async def test_scope_shapes_the_answer(corpus: Corpus, client: AsyncClient) -> N
 
 
 @pytest.mark.asyncio
-async def test_post_is_the_documented_twin_of_query(
-    corpus: Corpus, client: AsyncClient, app
-) -> None:
+async def test_scoped_search_is_query_only(corpus: Corpus, client: AsyncClient, app) -> None:
     body = {"project_ids": corpus.ids(2), "text": "nebula"}
 
     posted = await client.post("/v2/search/", json=body)
     queried = await client.request("QUERY", "/v2/search/", json=body)
 
-    assert posted.status_code == 200, posted.text
-    assert posted.json() == queried.json()
-    assert set(app.openapi()["paths"]["/v2/search/"]) == {"post"}
+    # QUERY only, no POST compatibility; OpenAPI cannot describe QUERY.
+    assert queried.status_code == 200, queried.text
+    assert posted.status_code == 405
+    assert "/v2/search/" not in app.openapi()["paths"]
 
 
 @pytest.mark.asyncio

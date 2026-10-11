@@ -6,6 +6,8 @@ Covers #1016: the watcher/inline path must vector-embed newly indexed files
 
 from typing import cast
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from basic_memory.index.local_dependencies import LocalIndexSearchService
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
@@ -78,12 +80,14 @@ def _recorder(
     relations: StubRelationRuntime,
     *,
     index_embeddings: bool,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> LocalInlineStorageEventResultRecorder:
     return LocalInlineStorageEventResultRecorder(
         project=_project(),
         search_service=cast(LocalIndexSearchService, search),
         relation_cleanup_search_refresher=cast(ProjectIndexMovedEntitySearchRefresher, object()),
         relation_runtime=cast(RelationResolutionRuntime, relations),
+        session_maker=session_maker,
         index_embeddings=index_embeddings,
     )
 
@@ -102,10 +106,12 @@ def _result(
     )
 
 
-async def test_processed_file_embeds_and_resolves_when_enabled() -> None:
+async def test_processed_file_embeds_and_resolves_when_enabled(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
     search = StubSearchService()
     relations = StubRelationRuntime()
-    recorder = _recorder(search, relations, index_embeddings=True)
+    recorder = _recorder(search, relations, index_embeddings=True, session_maker=session_maker)
 
     await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.processed, 42))
 
@@ -113,10 +119,12 @@ async def test_processed_file_embeds_and_resolves_when_enabled() -> None:
     assert relations.resolve_calls == 1
 
 
-async def test_processed_file_skips_embedding_when_disabled() -> None:
+async def test_processed_file_skips_embedding_when_disabled(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
     search = StubSearchService()
     relations = StubRelationRuntime()
-    recorder = _recorder(search, relations, index_embeddings=False)
+    recorder = _recorder(search, relations, index_embeddings=False, session_maker=session_maker)
 
     await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.processed, 42))
 
@@ -125,10 +133,12 @@ async def test_processed_file_skips_embedding_when_disabled() -> None:
     assert relations.resolve_calls == 1
 
 
-async def test_superseded_file_skips_embedding_when_enabled() -> None:
+async def test_superseded_file_skips_embedding_when_enabled(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
     search = StubSearchService()
     relations = StubRelationRuntime()
-    recorder = _recorder(search, relations, index_embeddings=True)
+    recorder = _recorder(search, relations, index_embeddings=True, session_maker=session_maker)
 
     await recorder.index_file_completed(
         _operation(),
@@ -139,10 +149,12 @@ async def test_superseded_file_skips_embedding_when_enabled() -> None:
     assert relations.resolve_calls == 1
 
 
-async def test_unchanged_file_runs_no_followups() -> None:
+async def test_unchanged_file_runs_no_followups(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
     search = StubSearchService()
     relations = StubRelationRuntime()
-    recorder = _recorder(search, relations, index_embeddings=True)
+    recorder = _recorder(search, relations, index_embeddings=True, session_maker=session_maker)
 
     await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.current, 42))
 

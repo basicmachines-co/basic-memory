@@ -1688,3 +1688,32 @@ async def test_stale_generation_cannot_begin_relation_publication(
             ).all()
         )
     assert markers == []
+
+
+@pytest.mark.asyncio
+async def test_resolution_touches_sources_and_entity_rendered_targets(
+    session_maker, source_entity, target_entity, test_relations, test_project: Project
+):
+    """A resolved source changes; a target changes only while it renders from its entity row.
+
+    A target with stored note content shows outgoing links only, so a new incoming
+    link leaves its cached response correct.
+    """
+    repository = RelationRepository(project_id=test_project.id)
+
+    async with db.scoped_session(session_maker) as session:
+        touched = await repository.note_ids_touched_by_resolution(
+            session, source_entity_ids=[source_entity.id]
+        )
+    assert touched == {source_entity.external_id, target_entity.external_id}
+
+    await set_note_content_generation(
+        session_maker, source_entity=target_entity, test_project=test_project, generation=1
+    )
+    async with db.scoped_session(session_maker) as session:
+        touched = await repository.note_ids_touched_by_resolution(
+            session, source_entity_ids=[source_entity.id]
+        )
+        nothing = await repository.note_ids_touched_by_resolution(session, source_entity_ids=[])
+    assert touched == {source_entity.external_id}
+    assert nothing == frozenset()

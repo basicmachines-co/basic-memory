@@ -543,6 +543,7 @@ async def test_watcher_move_batches_invalidate_real_redis_before_next_batch(
 async def test_watcher_index_failure_invalidates_real_redis(
     test_project: Project,
     redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     project_external_id = str(test_project.external_id)
     generation_before = await _current_generation(redis_cache, project_external_id)
@@ -554,6 +555,7 @@ async def test_watcher_index_failure_invalidates_real_redis(
             object(),
         ),
         relation_runtime=cast(RelationResolutionRuntime, object()),
+        session_maker=engine_factory[1],
         index_embeddings=False,
         read_cache=redis_cache.cache,
     )
@@ -599,6 +601,7 @@ async def test_partial_search_reindex_invalidates_real_redis(
 async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
     test_project: Project,
     redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     completion: Literal["index", "delete"],
 ) -> None:
     """Cancellation after a durable watcher event waits for invalidation."""
@@ -617,6 +620,7 @@ async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
             object(),
         ),
         relation_runtime=cast(RelationResolutionRuntime, object()),
+        session_maker=engine_factory[1],
         index_embeddings=False,
         read_cache=blocking_cache,
     )

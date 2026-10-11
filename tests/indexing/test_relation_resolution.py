@@ -370,6 +370,7 @@ async def test_project_index_completion_relation_resolution_runs_shared_pass() -
         remaining=0,
         passes=2,
         affected_entities=1,
+        affected_entity_ids=frozenset({10}),
     )
     assert runtime.counter_calls == 2
     assert runtime.resolve_calls == 2
@@ -473,6 +474,7 @@ async def test_resolves_until_a_stable_pass_changes_nothing() -> None:
         remaining=1,
         passes=2,
         affected_entities=2,
+        affected_entity_ids=frozenset({10, 11}),
     )
     assert result.resolved == 2
     assert runtime.resolve_calls == 2
@@ -586,6 +588,7 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
         remaining=1,
         passes=2,
         affected_entities=2,
+        affected_entity_ids=frozenset({10, 11}),
     )
     assert result.resolved == 2
     assert repo.write_batches == [

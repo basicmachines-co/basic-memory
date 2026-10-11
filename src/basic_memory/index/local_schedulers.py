@@ -14,13 +14,20 @@ from typing import Any, Coroutine
 
 from loguru import logger
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from basic_memory.index.project_indexing import ProjectIndexRunner
 from basic_memory.index.schedulers import SearchReindexService
 from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
-from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.read_cache import (
+    ReadCacheInvalidator,
+    invalidate_cache,
+    invalidate_recorded_change,
+)
+from basic_memory.services.read_cache_changes import resolved_relations_read_cache_change
 from basic_memory.runtime.vector_sync import EntityVectorSync
 
 # --- Background Task Machinery ---
@@ -219,6 +226,7 @@ class LocalRelationResolutionScheduler:
     """
 
     relation_runtime: RelationResolutionRuntime
+    session_maker: async_sessionmaker[AsyncSession]
     project_external_id: str
     read_cache: ReadCacheInvalidator | None
     test_mode: bool
@@ -255,8 +263,19 @@ class LocalRelationResolutionScheduler:
             if self.read_cache is None:
                 await resolve_project_relations(self.relation_runtime)
             else:
-                async with invalidate_cache(self.read_cache, self.project_external_id):
-                    await resolve_project_relations(self.relation_runtime)
+                # The pass retires the notes whose links it resolved; a raise
+                # retires the whole project.
+                async with invalidate_recorded_change(
+                    self.read_cache, self.project_external_id
+                ) as change:
+                    result = await resolve_project_relations(self.relation_runtime)
+                    change.record(
+                        await resolved_relations_read_cache_change(
+                            self.session_maker,
+                            project_id=project_id,
+                            source_entity_ids=result.affected_entity_ids,
+                        )
+                    )
         finally:
             rerun = project_id in _dirty_relation_resolution
             _dirty_relation_resolution.discard(project_id)

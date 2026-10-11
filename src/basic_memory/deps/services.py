@@ -500,6 +500,7 @@ async def get_relation_resolution_scheduler(
     )
     return LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=project_external_id,
         read_cache=read_cache,
         test_mode=app_config.is_test_env,

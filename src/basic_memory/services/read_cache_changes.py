@@ -6,7 +6,11 @@ materialization and a hosted worker all retire the same reads for the same chang
 
 from collections.abc import Iterable
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.read_cache import ReadCacheChange
+from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.runtime.note_materialization_planning import RuntimePendingNoteMaterialization
 from basic_memory.runtime.project_partition import (
     RuntimeAcceptedProjectNoteChange,
@@ -56,3 +60,26 @@ def materialization_status_read_cache_change(
     if materialization.project_change is None:
         return ReadCacheChange.whole_project()
     return ReadCacheChange(notes=frozenset({materialization.project_change.note_external_id}))
+
+
+async def resolved_relations_read_cache_change(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    project_id: int,
+    source_entity_ids: Iterable[int],
+) -> ReadCacheChange:
+    """The reads a relation-resolution pass made stale.
+
+    The resolved source notes and their entity-rendered targets show new links,
+    and the sources' search rows were re-indexed. A pass that resolved nothing
+    changed nothing, so nothing is retired.
+    """
+    source_ids = sorted(set(source_entity_ids))
+    if not source_ids:
+        return ReadCacheChange()
+    async with db.scoped_session(session_maker) as session:
+        note_ids = await RelationRepository(project_id=project_id).note_ids_touched_by_resolution(
+            session,
+            source_entity_ids=source_ids,
+        )
+    return ReadCacheChange.note_content(note_ids)
