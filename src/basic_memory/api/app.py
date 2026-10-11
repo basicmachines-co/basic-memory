@@ -111,8 +111,11 @@ add_redis_caching(app)
 # fastapi-redis-sdk reads this module constant on every capture and defaults it
 # to 10 MiB. The package re-exports a function named ``cache``, which shadows the
 # submodule on attribute access, so the module is fetched by name.
-redis_fastapi_cache_module = importlib.import_module("redis_fastapi.cache")
-redis_fastapi_cache_module.MAX_CACHEABLE_BODY_SIZE = READ_CACHE_MAX_PAYLOAD_BYTES
+setattr(
+    importlib.import_module("redis_fastapi.cache"),
+    "MAX_CACHEABLE_BODY_SIZE",
+    READ_CACHE_MAX_PAYLOAD_BYTES,
+)
 
 
 @app.middleware("http")
