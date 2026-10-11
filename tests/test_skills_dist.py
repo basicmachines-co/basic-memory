@@ -155,6 +155,24 @@ def test_validator_checks_linked_files(tmp_path: Path) -> None:
     validate_skills.validate_skills(tmp_path)
 
 
+def test_validator_checks_titled_links(tmp_path: Path) -> None:
+    body = "See [the guide](references/guide.md \"More\") and [x](references/x.md 'Why').\n"
+    skill_dir = _write_skill(tmp_path, "memory-x", body=body)
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references/guide.md").write_text("guide")
+    with pytest.raises(SystemExit, match="references/x.md"):
+        validate_skills.validate_skills(tmp_path)
+
+
+def test_combined_rewrite_keeps_link_titles() -> None:
+    body = '[guide](references/guide.md#intro "More") and [plain](./references/guide.md).'
+    rewritten = build_skills_dist.rewrite_resource_links(body, "memory-x", ["references/guide.md"])
+    assert rewritten == (
+        '[guide](memory-x/references/guide.md#intro "More") and '
+        "[plain](memory-x/references/guide.md)."
+    )
+
+
 def test_validator_rejects_links_outside_the_skill(tmp_path: Path) -> None:
     # The target exists in the repo, but the zip holds only the skill folder.
     (tmp_path / "README.md").write_text("repo readme")

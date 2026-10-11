@@ -10,15 +10,18 @@ on:
       - "scripts/build_skills_dist.py"
       - "scripts/validate_skills.py"
       - "scripts/skill-bundle/**"
+      - "scripts/publish_skills_release.py"
       - ".github/workflows/publish-skills.yml"
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+# Queue runs instead of cancelling one mid-publish: a cancelled swap could
+# leave a contract asset renamed aside until the next run.
 concurrency:
   group: publish-skills
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -42,51 +45,13 @@ jobs:
         run: python scripts/build_skills_dist.py
 
       # The Basic Memory web app links to these assets by name at
-      # https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/<asset>,
-      # so basic-memory.zip, basic-memory-chatgpt.zip, and memory-onboarding.zip
-      # are a contract. Both flavors share this one release, so every basename
-      # must be unique.
+      # https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/<asset>.
+      # The script checks the asset names, uploads under staging names, and
+      # swaps them in only after every upload succeeds.
       - name: Publish rolling skill archives
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: skills-latest
         run: |
           set -euo pipefail
-
           mapfile -t assets < <(find dist/skills dist/skills-openai -maxdepth 1 -type f -name '*.zip' | sort)
-          test "${#assets[@]}" -gt 0
-          names="$(printf '%s\n' "${assets[@]}" | xargs -n1 basename | sort)"
-
-          duplicates="$(uniq -d <<<"$names")"
-          if [ -n "$duplicates" ]; then
-            echo "::error::Duplicate asset names: ${duplicates}"
-            exit 1
-          fi
-          for required in basic-memory.zip basic-memory-chatgpt.zip memory-onboarding.zip; do
-            if ! grep -qx "$required" <<<"$names"; then
-              echo "::error::Missing contract asset ${required}"
-              exit 1
-            fi
-          done
-
-          notes="Rolling skill archives built from ${GITHUB_SHA}."
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
-
-            # Drop assets for skills that are no longer built (renamed, removed,
-            # or marked internal) so stale downloads don't linger.
-            gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort \
-              | comm -23 - <(echo "$names") \
-              | while read -r stale; do
-                  echo "Deleting stale asset ${stale}"
-                  gh release delete-asset "$RELEASE_TAG" "$stale" --yes
-                done
-
-            gh release edit "$RELEASE_TAG" --notes "$notes" --latest=false
-          else
-            gh release create "$RELEASE_TAG" "${assets[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "Latest Basic Memory skills" \
-              --notes "$notes" \
-              --latest=false
-          fi
+          python scripts/publish_skills_release.py "${assets[@]}"

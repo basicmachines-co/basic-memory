@@ -223,8 +223,11 @@ def rewrite_resource_links(body: str, skill_name: str, resources: list[str]) -> 
     for resource in resources:
         escaped = re.escape(resource)
         body = re.sub(
-            rf"\]\((?:\./)?{escaped}(#[^)]*)?\)",
-            lambda match, target=f"{skill_name}/{resource}": f"]({target}{match.group(1) or ''})",
+            # An optional anchor and an optional "title" are kept as written.
+            rf"""\]\((?:\./)?{escaped}(#[^)\s]*)?(\s+(?:"[^"]*"|'[^']*'))?\)""",
+            lambda match, target=f"{skill_name}/{resource}": (
+                f"]({target}{match.group(1) or ''}{match.group(2) or ''})"
+            ),
             body,
         )
         root_relative = f"references/{skill_name}/{resource}"

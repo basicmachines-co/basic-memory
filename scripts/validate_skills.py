@@ -28,7 +28,8 @@ RESERVED_NAME_WORDS = ("anthropic", "claude")
 # descriptions at 200, and we ship the same SKILL.md everywhere.
 MAX_DESCRIPTION_LENGTH = 200
 
-MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)\)")
+# A Markdown link destination, with an optional "title" or 'title' after it.
+MARKDOWN_LINK = re.compile(r"""\]\(([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)""")
 # Backticked paths into a skill's own resource folders, e.g. `references/x.md`.
 CODE_RESOURCE_PATH = re.compile(r"`((?:references|assets|scripts)/[^`\s]+)`")
 METADATA_INTERNAL = re.compile(r"^\s+internal:\s*true\s*$")
