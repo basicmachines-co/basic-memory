@@ -536,6 +536,34 @@ class RelationRepository(Repository[Relation]):
             )
         )
 
+    async def resolved_target_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+    ) -> frozenset[str]:
+        """External ids of linked notes whose rendered response lists this link.
+
+        A note served from its stored note content shows only its outgoing links, so
+        republishing this note's links leaves it unchanged. A target without stored
+        note content (a regular file, mostly) is rendered from its entity row, which
+        lists incoming relations too, so its response changes with this note's links.
+        """
+        result = await session.execute(
+            select(Entity.external_id)
+            .join(Relation, Relation.to_id == Entity.id)
+            .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+            .where(
+                Relation.project_id == self.project_id,
+                Relation.from_id == entity_id,
+                Relation.to_id.is_not(None),
+                Relation.to_id != entity_id,
+                NoteContent.entity_id.is_(None),
+            )
+            .distinct()
+        )
+        return frozenset(result.scalars().all())
+
     async def cleanup_relation_generations(
         self,
         session: AsyncSession,

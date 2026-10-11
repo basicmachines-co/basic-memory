@@ -1,6 +1,11 @@
-"""Initial semantic read-cache policy."""
+"""Read-cache retention policy.
 
-READ_CACHE_TTL_SECONDS = 300
-READ_CACHE_MAX_PAYLOAD_BYTES = 1024 * 1024
-DIRECTORY_READ_CACHE_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024
-SEARCH_READ_CACHE_TTL_SECONDS = 1800
+Entries are retired explicitly when their group changes, so these TTLs bound memory,
+not freshness. A note nobody edits stays cached for a week.
+"""
+
+READ_CACHE_TTL_SECONDS = 7 * 24 * 3600
+SEARCH_READ_CACHE_TTL_SECONDS = 24 * 3600
+# Recent activity is relative to "now", so an unchanged project still ages out of
+# its window; keep it short.
+RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS = 15 * 60

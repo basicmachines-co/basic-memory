@@ -19,7 +19,7 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.resources.man import manual_page
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_post
+from basic_memory.mcp.tools.utils import call_get, call_query
 from basic_memory.utils import generate_permalink
 
 NOTE_TEMPLATE = "memory://{project}/{path*}"
@@ -85,7 +85,7 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
             # call's not-found is a confirmed note miss; a 'Project not found' from
             # routing above must surface as the route failure it is.
             try:
-                resolved = await call_post(
+                resolved = await call_query(
                     client,
                     f"/v2/projects/{target.external_id}/knowledge/resolve",
                     json={"identifier": entity_path, "strict": True},

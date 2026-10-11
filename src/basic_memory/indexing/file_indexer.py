@@ -17,6 +17,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentReconciliationAnchor,
     NoteContentReconciliationResult,
 )
+from basic_memory.indexing.relation_persistence import RelationPublishOutcome
 from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
@@ -113,7 +114,7 @@ class IndexCurrentMarkdownFileIndexer(Protocol):
         synced: SyncedMarkdownFile,
         *,
         generation: int,
-    ) -> bool:
+    ) -> RelationPublishOutcome:
         """Publish parsed relations only while ``generation`` remains current."""
         ...
 
@@ -191,7 +192,9 @@ class FileIndexer:
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+        previous_identity = (existing.title, existing.permalink) if existing is not None else None
         content_superseded = False
+        detached_note_ids: frozenset[str] = frozenset()
 
         for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
             if attempt > 0:
@@ -228,11 +231,12 @@ class FileIndexer:
                 break
 
             if reconciliation.generation is not None:
-                generation_is_current = await self.markdown_indexer.publish_relation_generation(
+                publication = await self.markdown_indexer.publish_relation_generation(
                     synced,
                     generation=reconciliation.generation,
                 )
-                if generation_is_current:
+                detached_note_ids |= publication.detached_note_ids
+                if publication.generation_is_current:
                     break
 
             log.info(
@@ -274,6 +278,8 @@ class FileIndexer:
             indexed_bytes=synced.indexed_bytes,
             content_type=synced.entity.content_type,
             content_superseded=content_superseded,
+            identity_changed=previous_identity != (synced.entity.title, synced.entity.permalink),
+            detached_note_ids=detached_note_ids,
         )
 
 

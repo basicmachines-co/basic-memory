@@ -17,6 +17,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexDecisionStatus,
 )
 from basic_memory.markdown.sections import MarkdownSection
+from basic_memory.read_cache.contract import ReadCacheChange
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
@@ -246,6 +247,19 @@ class FileIndexResult:
     # The entity's stored MIME type. Indexers always set it through from_fields;
     # None only appears on results built directly by older callers.
     content_type: str | None = None
+    # The row is new, or its title or permalink differ from before this pass. Name
+    # lookups and the links rendered in other notes may have changed. Defaults to
+    # True so a result that cannot tell retires the whole project's reads.
+    identity_changed: bool = True
+    # Notes whose incoming links this pass republished (see RelationPublishOutcome).
+    detached_note_ids: frozenset[str] = frozenset()
+
+    @property
+    def read_cache_change(self) -> ReadCacheChange:
+        """The cached reads this index pass made stale."""
+        if self.identity_changed:
+            return ReadCacheChange.whole_project()
+        return ReadCacheChange.note_content({self.external_id, *self.detached_note_ids})
 
     @classmethod
     def from_fields(
@@ -262,6 +276,8 @@ class FileIndexResult:
         indexed_bytes: int,
         content_type: str,
         content_superseded: bool = False,
+        identity_changed: bool = True,
+        detached_note_ids: frozenset[str] = frozenset(),
     ) -> FileIndexResult:
         """Validate entity fields loaded for a completed file-index result.
 
@@ -293,6 +309,8 @@ class FileIndexResult:
             indexed_bytes=indexed_bytes,
             content_superseded=content_superseded,
             content_type=content_type,
+            identity_changed=identity_changed,
+            detached_note_ids=detached_note_ids,
         )
 
 

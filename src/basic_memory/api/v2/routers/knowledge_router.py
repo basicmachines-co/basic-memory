@@ -17,7 +17,7 @@ import os
 import pathlib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, Path, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, Path, status
 from loguru import logger
 
 import logfire
@@ -41,7 +41,6 @@ from basic_memory.markdown.sections import (
     slice_note_content,
 )
 from basic_memory.deps import (
-    create_model_read_cache,
     EntityServiceV2ExternalDep,
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -62,13 +61,13 @@ from basic_memory.deps import (
     SessionDep,
     SessionMakerDep,
 )
-from basic_memory.read_cache import (
-    ModelReadCache,
-    ReadCacheKey,
-    ReadCacheOperation,
-    ReadCacheScope,
-    invalidate_cache,
-    read_cache_request_digest,
+from basic_memory.read_cache import ReadCacheOperation, invalidate_cache
+from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
+from basic_memory.read_cache.routes import (
+    cached_read,
+    note_group,
+    project_group,
+    skip_read_cache_store,
 )
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_BASE_CHECKSUM_HEADER,
@@ -93,7 +92,6 @@ from basic_memory.schemas.v2 import (
     OrphanEntitiesResponse,
     IndexFileRequest,
 )
-from basic_memory.workspace_context import current_workspace_permalink_context
 from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import (
     generate_permalink,
@@ -102,32 +100,6 @@ from basic_memory.utils import (
 )
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
-
-
-def get_resolve_read_cache(
-    read_cache: ReadCacheDep,
-) -> ModelReadCache[EntityResolveResponse] | None:
-    """Bind identifier-resolution responses to the optional cache backend."""
-    return create_model_read_cache(read_cache, EntityResolveResponse)
-
-
-ResolveReadCacheDep = Annotated[
-    ModelReadCache[EntityResolveResponse] | None,
-    Depends(get_resolve_read_cache),
-]
-
-
-def get_entity_read_cache(
-    read_cache: ReadCacheDep,
-) -> ModelReadCache[EntityResponseV2] | None:
-    """Bind entity responses to the optional cache backend."""
-    return create_model_read_cache(read_cache, EntityResponseV2)
-
-
-EntityReadCacheDep = Annotated[
-    ModelReadCache[EntityResponseV2] | None,
-    Depends(get_entity_read_cache),
-]
 
 
 def _schedule_post_write_followups(
@@ -278,7 +250,22 @@ async def get_orphan_entities(
 ## Resolution endpoint
 
 
-@router.post("/resolve", response_model=EntityResolveResponse)
+# QUERY only: resolution is a safe, cacheable read with a body (RFC 9110 draft).
+# OpenAPI cannot describe QUERY, so the route stays out of the schema. Exact
+# answers change only with the project's names; see skip_read_cache_store below.
+@router.api_route(
+    "/resolve",
+    methods=["QUERY"],
+    response_model=EntityResolveResponse,
+    include_in_schema=False,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.resolve,
+            group=project_group,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+        )
+    ],
+)
 async def resolve_identifier(
     project_id: ProjectExternalIdPathDep,
     project_external_id: Annotated[
@@ -289,7 +276,7 @@ async def resolve_identifier(
     entity_repository: EntityRepositoryV2ExternalDep,
     project_repository: ProjectRepositoryDep,
     session: SessionDep,
-    read_cache: ResolveReadCacheDep,
+    request: Request,
 ) -> EntityResolveResponse:
     """Resolve an entity inside the target project named in the route.
 
@@ -307,7 +294,7 @@ async def resolve_identifier(
         HTTPException: 404 if identifier cannot be resolved
 
     Example:
-        POST /v2/{project_id}/knowledge/resolve
+        QUERY /v2/{project_id}/knowledge/resolve
         {"identifier": "specs/search"}
 
         Returns:
@@ -329,124 +316,111 @@ async def resolve_identifier(
     ):
         logger.debug("API v2 request: resolve_identifier for {!r}", data.identifier)
 
-        workspace_context = current_workspace_permalink_context()
-        cache_key = ReadCacheKey(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.resolve,
-            request_digest=read_cache_request_digest(
-                data.model_dump_json(),
-                workspace_context.workspace_slug if workspace_context else "",
-                workspace_context.workspace_type if workspace_context else "",
-            ),
-        )
-        cache_scope = (
-            read_cache.read(key=cache_key)
-            if read_cache is not None
-            else nullcontext(ReadCacheScope[EntityResolveResponse]())
-        )
-        async with cache_scope as cached:
-            if cached.value is not None:
-                return cached.value
+        entity = await entity_repository.get_by_external_id(session, data.identifier)
+        resolution_method = "external_id" if entity else "search"
 
-            entity = await entity_repository.get_by_external_id(session, data.identifier)
-            resolution_method = "external_id" if entity else "search"
-
-            if not entity:
-                # Trigger: the identifier uses legacy ``project/note`` syntax and the prefix
-                # names a different project.
-                # Why: non-strict resolution includes fuzzy search, which can otherwise turn a
-                # qualified miss into an unrelated entity from the route project.
-                # Outcome: allow an exact local title/path/permalink first, but reject the miss
-                # before fuzzy fallback and direct the caller to source-aware link resolution.
-                link_identifier, _ = normalize_link_text(data.identifier)
-                normalized_identifier = normalize_project_reference(link_identifier).strip("/")
-                project_prefix, separator, _ = normalized_identifier.partition("/")
-                referenced_project = None
-                if separator:
-                    referenced_project = await project_repository.get_by_name(
+        if not entity:
+            # Trigger: the identifier uses legacy ``project/note`` syntax and the prefix
+            # names a different project.
+            # Why: non-strict resolution includes fuzzy search, which can otherwise turn a
+            # qualified miss into an unrelated entity from the route project.
+            # Outcome: allow an exact local title/path/permalink first, but reject the miss
+            # before fuzzy fallback and direct the caller to source-aware link resolution.
+            link_identifier, _ = normalize_link_text(data.identifier)
+            normalized_identifier = normalize_project_reference(link_identifier).strip("/")
+            project_prefix, separator, _ = normalized_identifier.partition("/")
+            referenced_project = None
+            if separator:
+                referenced_project = await project_repository.get_by_name(session, project_prefix)
+                if referenced_project is None:
+                    referenced_project = await project_repository.get_by_name_case_insensitive(
                         session, project_prefix
                     )
-                    if referenced_project is None:
-                        referenced_project = await project_repository.get_by_name_case_insensitive(
-                            session, project_prefix
-                        )
-                    if referenced_project is None:
-                        referenced_project = await project_repository.get_by_permalink(
-                            session, generate_permalink(project_prefix)
-                        )
-                qualified_other_project = (
-                    referenced_project is not None and referenced_project.id != project_id
-                )
+                if referenced_project is None:
+                    referenced_project = await project_repository.get_by_permalink(
+                        session, generate_permalink(project_prefix)
+                    )
+            qualified_other_project = (
+                referenced_project is not None and referenced_project.id != project_id
+            )
 
-                try:
+            try:
+                entity = await link_resolver.resolve_entity(
+                    data.identifier,
+                    source_path=data.source_path,
+                    strict=True if qualified_other_project else data.strict,
+                    session=session,
+                )
+            except AmbiguousIdentifierError as exc:
+                if qualified_other_project and not data.strict:
+                    # An ambiguity proves that exact local title candidates exist, so retain
+                    # the non-strict caller's historical shortest-path selection without
+                    # opening the fuzzy qualified-miss path.
                     entity = await link_resolver.resolve_entity(
                         data.identifier,
                         source_path=data.source_path,
-                        strict=True if qualified_other_project else data.strict,
+                        strict=False,
                         session=session,
                     )
-                except AmbiguousIdentifierError as exc:
-                    if qualified_other_project and not data.strict:
-                        # An ambiguity proves that exact local title candidates exist, so retain
-                        # the non-strict caller's historical shortest-path selection without
-                        # opening the fuzzy qualified-miss path.
-                        entity = await link_resolver.resolve_entity(
-                            data.identifier,
-                            source_path=data.source_path,
-                            strict=False,
-                            session=session,
-                        )
-                    else:
-                        # A strict resolve refused to guess between several same-title notes
-                        # (#1148). Surface it as 409 so edit/move report ambiguity and ask for
-                        # an exact id.
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail=str(exc),
-                        ) from exc
-                if entity:
-                    if entity.permalink == data.identifier:
-                        resolution_method = "permalink"
-                    elif entity.title == data.identifier:
-                        resolution_method = "title"
-                    elif entity.file_path == data.identifier:
-                        resolution_method = "path"
-
-                if not entity and qualified_other_project:
+                else:
+                    # A strict resolve refused to guess between several same-title notes
+                    # (#1148). Surface it as 409 so edit/move report ambiguity and ask for
+                    # an exact id.
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Qualified project references must use /knowledge/links/resolve",
-                    )
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=str(exc),
+                    ) from exc
+            if entity:
+                if entity.permalink == data.identifier:
+                    resolution_method = "permalink"
+                elif entity.title == data.identifier:
+                    resolution_method = "title"
+                elif entity.file_path == data.identifier:
+                    resolution_method = "path"
 
-            if not entity:
+            if not entity and qualified_other_project:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Entity not found: '{data.identifier}'",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Qualified project references must use /knowledge/links/resolve",
                 )
 
-            if entity.project_id != project_id:  # pragma: no cover
-                raise HTTPException(
-                    status_code=404, detail=f"Entity not found: '{data.identifier}'"
-                )
-
-            result = EntityResolveResponse(
-                external_id=entity.external_id,
-                entity_id=entity.id,
-                project_external_id=project_external_id,
-                permalink=entity.permalink,
-                file_path=entity.file_path,
-                title=entity.title,
-                resolution_method=resolution_method,
+        if not entity:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Entity not found: '{data.identifier}'",
             )
-            logger.debug(
-                f"API v2 response: resolved '{data.identifier}' "
-                f"to external_id={result.external_id} via {resolution_method}"
-            )
-            cached.value = result
-            return result
+
+        if entity.project_id != project_id:  # pragma: no cover
+            raise HTTPException(status_code=404, detail=f"Entity not found: '{data.identifier}'")
+
+        result = EntityResolveResponse(
+            external_id=entity.external_id,
+            entity_id=entity.id,
+            project_external_id=project_external_id,
+            permalink=entity.permalink,
+            file_path=entity.file_path,
+            title=entity.title,
+            resolution_method=resolution_method,
+        )
+        logger.debug(
+            f"API v2 response: resolved '{data.identifier}' "
+            f"to external_id={result.external_id} via {resolution_method}"
+        )
+        # A fuzzy match can change when any note's content changes, but resolve
+        # entries are retired only when the project's names change. Keep it uncached.
+        if resolution_method == "search":
+            skip_read_cache_store(request)
+        return result
 
 
-@router.post("/links/resolve", response_model=LinkResolveResponse)
+# QUERY only, like /resolve: a safe read with a body. Not cached: its answer
+# depends on the source note's project and on other projects' names.
+@router.api_route(
+    "/links/resolve",
+    methods=["QUERY"],
+    response_model=LinkResolveResponse,
+    include_in_schema=False,
+)
 async def resolve_link(
     project_id: ProjectExternalIdPathDep,
     source_project_external_id: Annotated[
@@ -793,7 +767,17 @@ def _apply_note_slice(
     )
 
 
-@router.get("/entities/{entity_id}", response_model=EntityResponseV2)
+@router.get(
+    "/entities/{entity_id}",
+    response_model=EntityResponseV2,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.entity,
+            group=note_group,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+        )
+    ],
+)
 async def get_entity_by_id(
     project_id: ProjectExternalIdPathDep,
     project_external_id: Annotated[
@@ -802,7 +786,7 @@ async def get_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
-    read_cache: EntityReadCacheDep,
+    read_cache: ReadCacheDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     section: str | None = Query(
         None,
@@ -851,60 +835,29 @@ async def get_entity_by_id(
 
         selector, line_range = _parse_note_slice_params(section=section, lines=lines)
 
-        cache_key = ReadCacheKey(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.entity,
-            request_digest=read_cache_request_digest(entity_id),
+        note_payload = await note_content_query_service.get_note_entity_payload_with_read_repair(
+            project_external_id=project_external_id,
+            entity_external_id=entity_id,
+            session=session,
+            read_cache=read_cache,
         )
-        cache_scope = (
-            read_cache.read(key=cache_key)
-            if read_cache is not None
-            else nullcontext(ReadCacheScope[EntityResponseV2]())
-        )
-        async with cache_scope as cached:
-            if cached.value is not None:
-                return _apply_note_slice(
-                    cached.value,
-                    selector=selector,
-                    line_range=line_range,
-                    max_tokens=max_tokens,
-                )
-
-            note_payload = (
-                await note_content_query_service.get_note_entity_payload_with_read_repair(
-                    project_external_id=project_external_id,
-                    entity_external_id=entity_id,
-                    session=session,
-                    read_cache=read_cache,
-                )
-            )
-            if note_payload is not None:
-                result = entity_response_from_note_content_payload(note_payload)
-                logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
-                cached.value = result
-                return _apply_note_slice(
-                    result,
-                    selector=selector,
-                    line_range=line_range,
-                    max_tokens=max_tokens,
-                )
-
+        if note_payload is not None:
+            result = entity_response_from_note_content_payload(note_payload)
+        else:
             entity = await entity_repository.get_by_external_id(session, entity_id)
             if not entity:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Entity with external_id '{entity_id}' not found",
                 )
-
             result = EntityResponseV2.model_validate(entity)
-            logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
-            cached.value = result
-            return _apply_note_slice(
-                result,
-                selector=selector,
-                line_range=line_range,
-                max_tokens=max_tokens,
-            )
+        logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+        return _apply_note_slice(
+            result,
+            selector=selector,
+            line_range=line_range,
+            max_tokens=max_tokens,
+        )
 
 
 ## Create endpoints

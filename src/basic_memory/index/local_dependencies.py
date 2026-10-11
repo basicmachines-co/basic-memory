@@ -39,6 +39,7 @@ from basic_memory.indexing.index_file_runner import (
     CurrentMaterializedNoteEntityRepository,
     IndexFileExecutor,
 )
+from basic_memory.indexing.relation_persistence import RelationPublishOutcome
 from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
@@ -317,7 +318,9 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+        previous_identity = (existing.title, existing.permalink) if existing is not None else None
         content_superseded = False
+        detached_note_ids: frozenset[str] = frozenset()
 
         for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
             if attempt > 0:
@@ -353,11 +356,12 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 break
 
             if reconciliation.generation is not None:
-                generation_is_current = await self.publish_relation_generation(
+                publication = await self.publish_relation_generation(
                     synced,
                     generation=reconciliation.generation,
                 )
-                if generation_is_current:
+                detached_note_ids |= publication.detached_note_ids
+                if publication.generation_is_current:
                     break
 
             logger.info(
@@ -398,6 +402,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             indexed_bytes=synced.indexed_bytes,
             content_type=synced.entity.content_type,
             content_superseded=content_superseded,
+            identity_changed=previous_identity != (synced.entity.title, synced.entity.permalink),
+            detached_note_ids=detached_note_ids,
         )
 
     async def index_regular_file(
@@ -416,6 +422,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+        previous_identity = (existing.title, existing.permalink) if existing is not None else None
 
         stored_file = await self.file_service.read_stored_file(file_path)
         file_bytes = stored_file.content
@@ -470,6 +477,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             operation=operation,
             indexed_bytes=indexed.indexed_bytes,
             content_type=entity.content_type,
+            # A regular file has no links, so only its own response changes.
+            identity_changed=previous_identity != (entity.title, entity.permalink),
         )
 
     async def publish_relation_generation(
@@ -477,7 +486,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         synced: SyncedMarkdownFile,
         *,
         generation: int,
-    ) -> bool:
+    ) -> RelationPublishOutcome:
         """Publish one claimed relation set, then preserve legacy inline resolution."""
         indexed = IndexedEntity(
             path=synced.file_path,
@@ -492,21 +501,36 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             relations=synced.relations,
             resolve_relations=synced.resolve_relations,
         )
-        generation_is_current = await self.batch_indexer.publish_relation_generation(
+        publication = await self.batch_indexer.publish_relation_generation(
             indexed,
             generation=generation,
         )
+        generation_is_current = publication.generation_is_current
+        touched_note_ids = publication.detached_note_ids
         if generation_is_current and synced.resolve_relations:
             await self.batch_indexer.resolve_relation_targets(
                 [synced.entity.id],
                 max_concurrent=1,
             )
+            # Inline resolution can attach links to notes the previous generation never
+            # pointed at; those notes gain an incoming relation now.
+            relation_repository = (
+                self.batch_indexer.relation_generation_publisher.relation_repository
+            )
+            async with db.scoped_session(self.session_maker) as session:
+                touched_note_ids |= await relation_repository.resolved_target_note_ids(
+                    session,
+                    entity_id=synced.entity.id,
+                )
         if generation_is_current:
             await self.batch_indexer.refresh_indexed_entity_search(
                 indexed,
                 generation=generation,
             )
-        return generation_is_current
+        return RelationPublishOutcome(
+            generation_is_current=generation_is_current,
+            detached_note_ids=touched_note_ids,
+        )
 
     async def index_current_markdown_file(
         self,

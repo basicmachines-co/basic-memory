@@ -923,7 +923,7 @@ async def resolve_entity_id(client: AsyncClient, project_external_id: str, ident
         ToolError: If the identifier cannot be resolved
     """
     try:
-        response = await call_post(
+        response = await call_query(
             client,
             f"/v2/projects/{project_external_id}/knowledge/resolve",
             json={"identifier": identifier, "strict": True},

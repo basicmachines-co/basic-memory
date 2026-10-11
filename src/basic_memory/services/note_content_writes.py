@@ -47,9 +47,13 @@ from basic_memory.runtime.note_content import (
     RuntimeNoteContentResponsePayload,
 )
 from basic_memory.read_cache import (
+    ReadCacheChange,
+    ReadCacheChangeRecorder,
     ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
+    finish_read_cache_invalidation,
 )
+from basic_memory.services.read_cache_changes import accepted_note_read_cache_change
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.repository.entity_repository import EntityRepository
@@ -78,7 +82,9 @@ class NoteContentMutationFreshener(Protocol):
         *,
         project_external_id: str,
         entity_external_id: str,
-    ) -> None: ...
+    ) -> ReadCacheChange:
+        """Converge the note's observed file state; return the reads that made stale."""
+        ...
 
 
 type NoteContentMutationKind = Literal["create", "update", "edit", "move", "delete"]
@@ -217,10 +223,13 @@ class NoteContentMutationService:
     async def _publish_relation_generation(
         self,
         publication: RelationGenerationPublication | None,
-    ) -> None:
-        """Publish accepted graph intent only after note-content commit."""
+    ) -> frozenset[str]:
+        """Publish accepted graph intent after note-content commit.
+
+        Returns the other notes whose incoming links the publication rewrote.
+        """
         if publication is None:
-            return
+            return frozenset()
 
         repository = self.mutation_dependencies.write_repositories.relation_repository(
             publication.project_id
@@ -243,19 +252,21 @@ class NoteContentMutationService:
             temporal_repository=temporal_repository,
             session_maker=self.session_maker,
         )
-        await publisher.publish(
+        outcome = await publisher.publish(
             entity_id=publication.entity_id,
             generation=publication.generation,
             relations=publication.relations,
             observations=publication.observations,
             sections=publication.sections,
         )
+        return outcome.detached_note_ids
 
     async def _finish_mutation(
         self,
         result: AcceptedNoteMutationResult,
+        cache_change: ReadCacheChangeRecorder,
     ) -> AcceptedNoteChange:
-        """Run post-commit derived work and expose the accepted response."""
+        """Run post-commit derived work, record what it made stale, expose the response."""
         if result.search_row is not None:
             try:
                 await refresh_accepted_note_search_index(
@@ -275,8 +286,13 @@ class NoteContentMutationService:
                     result.search_row.entity_id,
                 )
         try:
-            await self._publish_relation_generation(result.relation_publication)
+            detached_note_ids = await self._publish_relation_generation(
+                result.relation_publication
+            )
         except Exception:
+            # Publication may have rewritten some links before failing, and which
+            # notes it reached is unknown.
+            cache_change.record(ReadCacheChange.whole_project())
             publication = result.relation_publication
             # Trigger: derived graph publication fails after accepted content committed.
             # Why: failing the response would strand file materialization even though the
@@ -288,6 +304,14 @@ class NoteContentMutationService:
                 publication.entity_id if publication is not None else None,
                 publication.generation if publication is not None else None,
             )
+        else:
+            cache_change.record(
+                accepted_note_read_cache_change(
+                    result.change.project_change,
+                    identity_changed=result.identity_changed,
+                    detached_note_ids=detached_note_ids,
+                )
+            )
         return result.change
 
     @asynccontextmanager
@@ -295,37 +319,36 @@ class NoteContentMutationService:
         self,
         project_external_id: str,
         *,
-        invalidate_on_rejection: bool = False,
-    ) -> AsyncIterator[None]:
-        """Invalidate after a mutation can publish authoritative state."""
+        freshened: ReadCacheChange,
+    ) -> AsyncIterator[ReadCacheChangeRecorder]:
+        """Retire what the mutation recorded once it can publish authoritative state.
+
+        ``freshened`` is what converging the note's file state published before the
+        mutation began; it is stale whether or not the mutation is accepted.
+        """
+        recorder = ReadCacheChangeRecorder()
         read_cache = self.read_cache
         if read_cache is None:
-            yield
+            yield recorder
             return
 
         try:
-            yield
+            yield recorder
         except AcceptedNoteMutationRejected:
-            if invalidate_on_rejection:
-                await finish_project_read_cache_invalidation(
-                    read_cache,
-                    project_external_id,
-                )
+            # A rejection commits nothing of its own.
+            await finish_read_cache_invalidation(read_cache, project_external_id, freshened)
             raise
         except BaseException:
-            # Transaction exit can raise after its commit reached the database.
-            # Invalidation is safe after an earlier rollback and required after
-            # any commit whose response was interrupted.
-            await finish_project_read_cache_invalidation(
-                read_cache,
-                project_external_id,
-            )
+            # Transaction exit can raise after its commit reached the database, and
+            # nothing describes that commit, so retire the whole project.
+            await finish_project_read_cache_invalidation(read_cache, project_external_id)
             raise
-        else:
-            await finish_project_read_cache_invalidation(
-                read_cache,
-                project_external_id,
-            )
+        change = recorder.change
+        if change.is_empty:
+            # Every accepted mutation records itself in _finish_mutation; one that did
+            # not is a gap in this service, and must not leave older reads visible.
+            change = ReadCacheChange.whole_project()
+        await finish_read_cache_invalidation(read_cache, project_external_id, change | freshened)
 
     def _resolve_actor(
         self,
@@ -354,27 +377,26 @@ class NoteContentMutationService:
         *,
         project_external_id: str,
         entity_external_id: str,
-    ) -> bool:
-        """Converge observed file state and report whether it may have published state."""
+    ) -> ReadCacheChange:
+        """Converge observed file state and return the reads that made stale."""
         if self.content_freshener is None:
-            return False
+            return ReadCacheChange()
 
         try:
-            await self.content_freshener.freshen_note_content(
+            return await self.content_freshener.freshen_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
         except BaseException:
             # Freshening can commit entity and note-content state before a later
             # indexing follow-up raises. Invalidate before propagating so those
-            # partial publications cannot retain the previous cache generation.
+            # partial publications cannot stay hidden behind older cached reads.
             if self.read_cache is not None:
                 await finish_project_read_cache_invalidation(
                     self.read_cache,
                     project_external_id,
                 )
             raise
-        return True
 
     async def write_note(
         self,
@@ -640,7 +662,7 @@ class NoteContentMutationService:
             ),
             source=actor.source,
         )
-        freshened = False
+        freshened = ReadCacheChange()
         if isinstance(request, AcceptedNoteUpdateMutation):
             freshened = await self.freshen_existing_note_content(
                 project_external_id=request.project_external_id,
@@ -648,8 +670,8 @@ class NoteContentMutationService:
             )
         async with self._mutation_cache_scope(
             request.project_external_id,
-            invalidate_on_rejection=freshened,
-        ):
+            freshened=freshened,
+        ) as cache_change:
             async with accepted_note_transaction(self.session_maker) as session:
                 match request:
                     case AcceptedNoteCreateMutation():
@@ -673,7 +695,7 @@ class NoteContentMutationService:
                     mutation_kind=kind,
                     source=actor.source,
                 )
-            return await self._finish_mutation(result)
+            return await self._finish_mutation(result, cache_change)
 
     async def edit_note(
         self,
@@ -708,16 +730,15 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
-        freshening_may_have_published = False
         try:
-            freshening_may_have_published = await self.freshen_existing_note_content(
+            freshened = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
             async with self._mutation_cache_scope(
                 project_external_id,
-                invalidate_on_rejection=freshening_may_have_published,
-            ):
+                freshened=freshened,
+            ) as cache_change:
                 async with accepted_note_transaction(self.session_maker) as session:
                     result = await run_accepted_note_edit(
                         session,
@@ -743,7 +764,7 @@ class NoteContentMutationService:
                         mutation_kind="edit",
                         source=actor_context.source,
                     )
-                accepted = await self._finish_mutation(result)
+                accepted = await self._finish_mutation(result, cache_change)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
         return accepted
@@ -767,16 +788,15 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
-        freshening_may_have_published = False
         try:
-            freshening_may_have_published = await self.freshen_existing_note_content(
+            freshened = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
             async with self._mutation_cache_scope(
                 project_external_id,
-                invalidate_on_rejection=freshening_may_have_published,
-            ):
+                freshened=freshened,
+            ) as cache_change:
                 async with accepted_note_transaction(self.session_maker) as session:
                     result = await run_accepted_note_move(
                         session,
@@ -794,7 +814,7 @@ class NoteContentMutationService:
                         ),
                         dependencies=self.mutation_dependencies,
                     )
-                accepted = await self._finish_mutation(result)
+                accepted = await self._finish_mutation(result, cache_change)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
         return accepted
@@ -823,16 +843,15 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
-        freshening_may_have_published = False
         try:
-            freshening_may_have_published = await self.freshen_existing_note_content(
+            freshened = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
             async with self._mutation_cache_scope(
                 project_external_id,
-                invalidate_on_rejection=freshening_may_have_published,
-            ):
+                freshened=freshened,
+            ) as cache_change:
                 async with accepted_note_transaction(self.session_maker) as session:
                     result = await run_accepted_note_delete(
                         session,
@@ -848,7 +867,7 @@ class NoteContentMutationService:
                         ),
                         dependencies=self.mutation_dependencies,
                     )
-                accepted = await self._finish_mutation(result)
+                accepted = await self._finish_mutation(result, cache_change)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
         return accepted

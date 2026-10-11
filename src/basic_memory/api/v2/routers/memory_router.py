@@ -11,6 +11,9 @@ from loguru import logger
 
 import logfire
 from basic_memory import db
+from basic_memory.read_cache import ReadCacheOperation
+from basic_memory.read_cache.policy import RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS
+from basic_memory.read_cache.routes import cached_read, content_group
 from basic_memory.deps import (
     ContextServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
@@ -33,7 +36,17 @@ from basic_memory.api.v2.utils import to_graph_context
 router = APIRouter(tags=["memory"])
 
 
-@router.get("/memory/recent", response_model=GraphContext)
+@router.get(
+    "/memory/recent",
+    response_model=GraphContext,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.recent_activity,
+            group=content_group,
+            ttl_seconds=RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS,
+        )
+    ],
+)
 async def recent(
     context_service: ContextServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,

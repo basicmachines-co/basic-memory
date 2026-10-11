@@ -16,7 +16,7 @@ from typing import Protocol
 
 from basic_memory import db
 from basic_memory.models import Entity
-from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.note_content_responses import runtime_note_content_payload_as_dict
 from basic_memory.runtime.storage import runtime_content_type_is_markdown
 from basic_memory.schemas.response import DirectoryMoveError, DirectoryMoveResult
@@ -50,7 +50,7 @@ async def move_directory(
     materializer: AcceptedNoteMaterializer,
     entity_service: EntityService,
     search_service: SearchService,
-    read_cache: ReadCache | None,
+    read_cache: ReadCacheInvalidator | None,
     schedule_followups: MovedEntityFollowups,
     schedule_regular_file_vector_sync: MovedEntityFollowups,
 ) -> DirectoryMoveResult:
@@ -131,7 +131,7 @@ async def move_regular_file(
     project_external_id: str,
     entity_service: EntityService,
     search_service: SearchService,
-    read_cache: ReadCache | None,
+    read_cache: ReadCacheInvalidator | None,
 ) -> Entity:
     """Move one regular file's stored bytes and its index entry."""
     # The move publishes storage and DB state before it returns, so the read-cache

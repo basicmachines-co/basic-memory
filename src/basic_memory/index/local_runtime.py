@@ -64,7 +64,7 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.models import Entity, Project
 from basic_memory.read_cache import (
-    ReadCache,
+    ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
     invalidate_cache,
 )
@@ -156,7 +156,7 @@ class LocalInlineStorageEventResultRecorder:
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
     index_embeddings: bool
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
     async def index_file_completed(
         self,
@@ -325,7 +325,7 @@ class LocalWatchEventIndexRuntimeFactory:
     # Semantic search is always on, so watched edits refresh their embeddings too.
     index_embeddings: bool = True
     move_batch_size: int = 100
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
         dependencies = await self.dependency_provider.dependencies_for_project(project)

@@ -20,7 +20,8 @@ from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.mcp.empty_results import EmptyListResultMiddleware
-from basic_memory.read_cache import ReadCache, ReadCacheUnavailable
+from basic_memory.read_cache import ReadCacheUnavailable
+from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.read_cache.lifecycle import open_redis_read_cache
 from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import initialize_app
@@ -71,9 +72,9 @@ async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession])
 
 
 async def _invalidate_persisted_read_cache(
-    read_cache: ReadCache,
+    read_cache: RedisReadCache,
     session_maker: async_sessionmaker[AsyncSession],
-) -> ReadCache | None:
+) -> RedisReadCache | None:
     """Invalidate cache generations that may predate offline file changes."""
     project_repository = ProjectRepository()
     async with scoped_session(session_maker) as session:

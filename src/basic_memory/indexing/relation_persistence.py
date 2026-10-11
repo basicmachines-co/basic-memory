@@ -72,6 +72,13 @@ class RelationGenerationStore(Protocol):
         generation: int,
     ) -> RelationGenerationWriteResult: ...
 
+    async def resolved_target_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+    ) -> frozenset[str]: ...
+
 
 class ObservationGenerationStore(Protocol):
     """Repository operation needed to replace one observation generation."""
@@ -125,6 +132,20 @@ class RelationGenerationPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class RelationPublishOutcome:
+    """Whether a publication kept its generation, and which other notes it touched.
+
+    Publication rewrites every outgoing link of the source unresolved until the
+    resolution pass runs, so each note those links pointed to loses an incoming
+    relation now. Callers retire those notes' cached responses whatever the
+    generation outcome, since earlier statements may already have committed.
+    """
+
+    generation_is_current: bool
+    detached_note_ids: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
 class RelationGenerationPublisher:
     """Commit observations, valid time, sections, relations, and cleanup under fences."""
 
@@ -142,6 +163,35 @@ class RelationGenerationPublisher:
         relations: Sequence[IndexedRelation],
         observations: Sequence[IndexedObservation] = (),
         sections: Sequence[IndexedSection] = (),
+    ) -> RelationPublishOutcome:
+        """Publish one generation and report the other notes it detached links from."""
+        # Read before writing: the upsert below clears every target this source's
+        # links resolve to, so afterwards there is no record of which notes they were.
+        async with db.scoped_session(self.session_maker) as session:
+            detached_note_ids = await self.relation_repository.resolved_target_note_ids(
+                session,
+                entity_id=entity_id,
+            )
+        generation_is_current = await self._publish_generation(
+            entity_id=entity_id,
+            generation=generation,
+            relations=relations,
+            observations=observations,
+            sections=sections,
+        )
+        return RelationPublishOutcome(
+            generation_is_current=generation_is_current,
+            detached_note_ids=detached_note_ids,
+        )
+
+    async def _publish_generation(
+        self,
+        *,
+        entity_id: int,
+        generation: int,
+        relations: Sequence[IndexedRelation],
+        observations: Sequence[IndexedObservation],
+        sections: Sequence[IndexedSection],
     ) -> bool:
         """Return whether every statement retained ownership of ``generation``."""
         relations_by_identity: dict[tuple[str, str], IndexedRelation] = {}

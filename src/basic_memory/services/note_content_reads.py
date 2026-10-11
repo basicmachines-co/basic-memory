@@ -21,8 +21,10 @@ from basic_memory.indexing.note_content_read_repair_runner import (
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.read_cache import (
+    ReadCacheChange,
+    ReadCacheChangeRecorder,
     ReadCacheInvalidator,
-    invalidate_cache,
+    invalidate_recorded_change,
 )
 from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
@@ -240,12 +242,15 @@ class NoteContentQueryService:
         # The repair runner owns the transaction that may create note_content.
         # Keep invalidation around that whole await so cancellation during commit
         # exit still advances the cache generation before it propagates.
+        # A repair converges one note's stored content with its file: that note's
+        # response and the content-wide reads change.
         repair_scope = (
-            invalidate_cache(read_cache, project_external_id)
+            invalidate_recorded_change(read_cache, project_external_id)
             if read_cache is not None
-            else nullcontext()
+            else nullcontext(ReadCacheChangeRecorder())
         )
-        async with repair_scope:
+        async with repair_scope as repair_change:
+            repair_change.record(ReadCacheChange.note_content({entity_external_id}))
             repair_run = await run_note_content_read_repair_with_default_reconciler(
                 repair_preflight,
                 session_maker=self.session_maker,

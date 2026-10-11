@@ -16,7 +16,11 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from testcontainers.core.container import DockerContainer
 
+from fastapi import FastAPI, Request
+
+from basic_memory.deps.read_cache import get_read_cache
 from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
+from basic_memory.read_cache.routes import ReadCacheScope
 
 
 def _wait_for_redis(url: str) -> None:
@@ -104,3 +108,36 @@ async def redis_cache(redis_url: str) -> AsyncGenerator[RedisCacheHarness]:
         if keys:
             await client.delete(*keys)
         await client.aclose()
+
+
+@dataclass(frozen=True, slots=True)
+class CachedApp:
+    """The integration app serving reads from, and invalidating, one real Redis cache."""
+
+    app: FastAPI
+    cache: RedisReadCache
+
+
+# Test-only header naming the caller, so per-user isolation is observable. A managed
+# host derives the user from authentication instead.
+TEST_USER_HEADER = "x-test-user"
+
+
+@pytest.fixture
+def cached_app(app: FastAPI, redis_cache: RedisCacheHarness) -> Generator[CachedApp]:
+    """Serve cached reads from the real Redis harness and invalidate it on writes."""
+
+    async def resolve_scope(request: Request) -> ReadCacheScope:
+        return ReadCacheScope(
+            cache=redis_cache.cache,
+            user_key=request.headers.get(TEST_USER_HEADER, ""),
+        )
+
+    previous_resolver = getattr(app.state, "read_cache_scope_resolver", None)
+    app.state.read_cache_scope_resolver = resolve_scope
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    try:
+        yield CachedApp(app=app, cache=redis_cache.cache)
+    finally:
+        app.state.read_cache_scope_resolver = previous_resolver
+        app.dependency_overrides.pop(get_read_cache, None)

@@ -18,6 +18,8 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import FileError
 from basic_memory.indexing.accepted_note_mutation_runner import AcceptedNoteMutationPreparer
+from basic_memory.indexing.models import FileIndexResult
+from basic_memory.read_cache import ReadCacheChange
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRejected,
     DirectoryDeleteRejection,
@@ -140,7 +142,7 @@ class LocalCurrentNoteFileIndexer(Protocol):
         file_path: RuntimeFilePath,
         *,
         source: str,
-    ) -> object: ...
+    ) -> FileIndexResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +159,7 @@ class LocalCurrentNoteContentFreshener:
         *,
         project_external_id: str,
         entity_external_id: str,
-    ) -> None:
+    ) -> ReadCacheChange:
         del project_external_id
 
         async with self.session_maker() as session:
@@ -167,16 +169,17 @@ class LocalCurrentNoteContentFreshener:
                 load_relations=False,
             )
             if entity is None or not runtime_content_type_is_markdown(entity):
-                return
+                return ReadCacheChange()
             file_path = entity.file_path
 
         if not await self.file_service.exists(file_path):
-            return
+            return ReadCacheChange()
 
-        await self.file_indexer.index_file(
+        result = await self.file_indexer.index_file(
             file_path,
             source="note-content-mutation-freshen",
         )
+        return result.read_cache_change
 
 
 # --- Directory-Delete File Cleanup ---
