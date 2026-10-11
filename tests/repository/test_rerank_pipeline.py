@@ -1110,3 +1110,43 @@ async def test_unbounded_reranker_reads_a_lexical_rows_whole_text(
     lexical = next(result for result in results if result.permalink == "specs/archive")
     assert lexical.content == content[:4000]
     assert lexical.content_length == len(content)
+
+
+@pytest.mark.asyncio
+async def test_vector_rerank_prefix_keeps_the_read_cap_for_matched_rows(
+    rerank_search_repository: BackendSearchRepository,
+) -> None:
+    """A vector-matched row is reranked on its chunks, so its note text stays capped.
+
+    Only a row full-text search alone found needs its note body as a rerank document;
+    reading a large vector-matched note in full would restore the transfer #1746 removed.
+    """
+    repo = rerank_search_repository
+    await _index_two_auth_notes(repo)
+    content = "auth session token archive " * 5_000
+    await repo.index_item(
+        _entity_row(
+            project_id=repo.project_id,
+            row_id=405,
+            title="Auth archive",
+            permalink="specs/archive",
+            content=content,
+        )
+    )
+    await repo.sync_entity_vectors(405)
+    reranker = _FakeReranker({"archive": 0.95, "Alpha": 0.8, "Bravo": 0.7})
+    repo._rerank_provider = reranker
+    repo._reranker_max_document_chars = 0
+
+    rows = await repo.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=5,
+    )
+
+    archive = next(row for row in rows if row.permalink == "specs/archive")
+    assert archive.content_snippet == content[:SNIPPET_READ_LIMIT]
+    assert archive.content_snippet_length == len(content)
+    # The reranker read the archive's matched chunks, not its body.
+    assert archive.matched_chunk_text
+    assert reranker.calls == 1
