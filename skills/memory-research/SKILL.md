@@ -1,6 +1,6 @@
 ---
 name: memory-research
-description: "Research an external subject using web search, synthesize findings into a structured Basic Memory entity. Use when asked to research a company, person, technology, or topic — or when a bare name or URL is provided that implies a research request."
+description: "Research an external subject on the web and synthesize it into a structured Basic Memory note. Use when asked to research a company, person, technology, or topic, or given a bare name or URL."
 ---
 
 # Memory Research

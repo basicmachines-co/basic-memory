@@ -212,14 +212,19 @@ openclaw basic-memory status
 
 ## Bundled skills
 
-Ten skills ship with the plugin — no installation needed:
+These skills ship with the plugin — no installation needed:
 
+- **memory-capture** — capture a thread's current state into one coherent note
+- **memory-comark** — charts, tables, boards, and live views in notes with `::bm-*` components
+- **memory-continue** — resume prior work by rebuilding context from the graph
+- **memory-curate** — link orphans, propose relations, merge duplicates, build hub notes
 - **memory-defrag** — cleanup and reorganization of memory files
 - **memory-ingest** — import existing material into Basic Memory
 - **memory-lifecycle** — manage note/project lifecycle workflows
 - **memory-literary-analysis** — analyze texts and reading notes
 - **memory-metadata-search** — query notes by frontmatter fields
 - **memory-notes** — guidance for writing well-structured notes
+- **memory-onboarding** — guided setup of a new knowledge system
 - **memory-reflect** — periodic consolidation of recent notes into durable memory
 - **memory-research** — research synthesis into durable notes
 - **memory-schema** — schema lifecycle (infer, create, validate, diff)

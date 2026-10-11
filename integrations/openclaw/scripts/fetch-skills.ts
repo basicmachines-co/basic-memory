@@ -1,5 +1,6 @@
 /**
- * Copy all memory-* skills from the top-level basic-memory skills source.
+ * Copy all memory-* skills from the top-level basic-memory skills source,
+ * skipping internal ones.
  *
  * Auto-discovers skill directories in ../../../skills, copies each skill's
  * SKILL.md plus any bundled resources (references/, evals/, assets/, ...)
@@ -62,7 +63,23 @@ function discoverSkillDirs(): string[] {
     throw new Error(`No memory-* directories found in ${SOURCE_SKILLS_DIR}`)
   }
 
-  return skillDirs
+  return skillDirs.filter((dir) => {
+    const skillPath = resolve(SOURCE_SKILLS_DIR, dir, "SKILL.md")
+    return !(
+      existsSync(skillPath) && isInternal(readFileSync(skillPath, "utf8"))
+    )
+  })
+}
+
+/**
+ * Internal skills (frontmatter `metadata: { internal: true }`, the `skills`
+ * CLI's marker) are CI tooling, not something a user should run from OpenClaw.
+ */
+function isInternal(md: string): boolean {
+  const yaml = md.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? ""
+  return /^metadata:[^\n]*\n(?:[ \t][^\n]*\n?)*?[ \t]+internal:\s*true\s*$/m.test(
+    yaml,
+  )
 }
 
 function main() {

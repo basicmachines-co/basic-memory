@@ -1,6 +1,6 @@
 ---
 name: memory-defrag
-description: "Defragment and reorganize agent memory files: split bloated files, merge duplicates, remove stale information, and restructure the memory hierarchy. Use when memory files have grown unwieldy, contain redundancies, or need reorganization. Run periodically (weekly) or on demand."
+description: "Defragment agent memory files: split bloated files, merge duplicates, remove stale info, restructure the hierarchy. Use when memory files grow unwieldy or redundant; run weekly or on demand."
 ---
 
 # Memory Defrag

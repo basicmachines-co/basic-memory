@@ -9,6 +9,9 @@ on:
       - "integrations/**"
       - "scripts/update_versions.py"
       - "scripts/validate_*.py"
+      - "scripts/build_skills_dist.py"
+      - "scripts/skill-bundle/**"
+      - ".github/workflows/publish-skills.yml"
       - "justfile"
       - ".github/workflows/consolidated-packages.yml"
   push:
@@ -21,6 +24,9 @@ on:
       - "integrations/**"
       - "scripts/update_versions.py"
       - "scripts/validate_*.py"
+      - "scripts/build_skills_dist.py"
+      - "scripts/skill-bundle/**"
+      - ".github/workflows/publish-skills.yml"
       - "justfile"
       - ".github/workflows/consolidated-packages.yml"
 
@@ -67,7 +73,14 @@ jobs:
 
       - uses: extractions/setup-just@v4
 
-      - name: Validate SKILL.md source
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # `check` validates the sources and skill lists, then builds every
+      # release archive into a temp dir; the build fails on a bad zip layout
+      # or a duplicate asset name, so a broken build fails here, not on main.
+      - name: Validate SKILL.md source and build release archives
         run: just --justfile skills/justfile --working-directory skills check
 
   hermes:

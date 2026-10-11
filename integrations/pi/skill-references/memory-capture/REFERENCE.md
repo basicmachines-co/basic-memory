@@ -7,7 +7,7 @@
 
 ---
 name: memory-capture
-description: "Capture the current state of a working thread or conversation into a single coherent Basic Memory note — synthesize where it landed, don't append a log. On re-capture, rewrite the same note in place instead of duplicating. Use mid-thread or end-of-thread when decisions, insights, or context are worth preserving."
+description: "Capture a working thread's current state into one coherent Basic Memory note; on re-capture, rewrite it in place. Use mid- or end-of-thread when decisions, insights, or context are worth keeping."
 ---
 
 # Memory Capture

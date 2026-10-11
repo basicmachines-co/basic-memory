@@ -46,7 +46,24 @@ just package-check-skills
 just check
 ```
 
-The check validates every `memory-*/SKILL.md` frontmatter block. Skills are markdown-only, so there is no separate compile step.
+The check validates every `memory-*/SKILL.md` (name format, a description of at
+most 200 characters with no `<` or `>`, and that files it links to exist), checks
+that the skill lists in `README.md`, `CLAUDE.md`, and the OpenClaw plugin match the
+skill directories, and builds every release archive into a temp dir.
+
+### Internal skills
+
+A skill meant only for tooling (today, `memory-ci-capture`) carries this in its
+frontmatter:
+
+```yaml
+metadata:
+  internal: true
+```
+
+The [Skills CLI](https://github.com/vercel-labs/skills) hides it unless
+`INSTALL_INTERNAL_SKILLS=1` is set, and the release build, the skill-list check,
+and OpenClaw's `fetch-skills` leave it out.
 
 ## Installing via npx
 
@@ -54,13 +71,13 @@ Users can install or update skills with the [Skills CLI](https://github.com/verc
 
 ```bash
 # Install all skills
-npx skills add basicmachines-co/basic-memory/skills
+npx skills add basicmachines-co/basic-memory/skills -g
 
 # Install a specific skill
-npx skills add basicmachines-co/basic-memory/skills --skill memory-tasks
+npx skills add basicmachines-co/basic-memory/skills -g --skill memory-tasks
 
 # Install for a specific agent
-npx skills add basicmachines-co/basic-memory/skills --agent claude
+npx skills add basicmachines-co/basic-memory/skills -g --agent claude-code
 ```
 
 ## Adding a New Skill
@@ -77,17 +94,38 @@ npx skills add basicmachines-co/basic-memory/skills --agent claude
 `dist/` (at the monorepo root) in two flavors:
 
 ```
-dist/skills/<name>.zip               # Agent Skills format (SKILL.md + resources)
-dist/skills/basic-memory-skills.zip  # all skills bundled
-dist/skills-openai/<name>.zip        # same skill + agents/openai.yaml
-dist/skills-openai/basic-memory-skills.zip
+dist/skills/<name>.zip                              # Agent Skills format (SKILL.md + resources)
+dist/skills/basic-memory.zip                        # one combined skill (see below)
+dist/skills/basic-memory-skills.zip                 # every skill, for unzipping by hand
+dist/skills-openai/<name>-chatgpt.zip               # same skill + agents/openai.yaml
+dist/skills-openai/basic-memory-chatgpt.zip
+dist/skills-openai/basic-memory-skills-chatgpt.zip
 ```
 
 Each zip contains a `<name>/SKILL.md` folder at its root, so unzipping (or
 dropping it into an uploader) lands a valid skill directory — the layout the
-[Agent Skills spec](https://agentskills.io/specification), Claude Desktop, and
-the ChatGPT plugin builder all expect. `dist/` is gitignored; the archives are
-build artifacts, so the `skills/` source stays pure markdown.
+[Agent Skills spec](https://agentskills.io/specification), Claude, and ChatGPT
+all expect. `evals/` folders are left out, and internal skills are not packaged.
+The build checks each zip's layout and fails if two assets share a name.
+`dist/` is gitignored; the archives are build artifacts, so the `skills/` source
+stays pure markdown.
+
+On every push to `main` that touches the skills, `.github/workflows/publish-skills.yml`
+uploads every archive to the rolling `skills-latest` release. The Basic Memory web
+app links to `basic-memory.zip`, `basic-memory-chatgpt.zip`, and
+`memory-onboarding.zip` there by name, so don't rename them.
+
+### The combined `basic-memory` skill
+
+Claude and ChatGPT take one skill per upload, so `basic-memory.zip` folds the
+skills into one. Its router `SKILL.md` comes from
+`scripts/skill-bundle/basic-memory.md` (named so no skill loader discovers it as
+a second copy of these skills); the build fills in its routing table and writes
+each skill's `SKILL.md` to `references/<name>.md`, with its resources under
+`references/<name>/` and links rewritten to match. A new `memory-*` skill joins
+it automatically. `memory-defrag`, `memory-reflect`, and
+`memory-literary-analysis` are left out because they need a local install (see
+`COMBINED_EXCLUDED` in `scripts/build_skills_dist.py`).
 
 ### ChatGPT / Codex (openai.yaml)
 
@@ -97,13 +135,11 @@ OpenAI-specific display metadata. `just dist` generates that file for each skill
 from the SKILL.md frontmatter (`interface.display_name`, `short_description`,
 `brand_color`) — see `scripts/build_skills_dist.py`. To hand-tune a skill, add a
 source `skills/<name>/agents/openai.yaml`; the builder copies it verbatim
-instead of generating one.
+into the `-chatgpt` zip instead of generating one (the plain zip leaves `agents/` out).
 
 No MCP dependency is pinned in `openai.yaml`: these skills need the basic-memory
 MCP server, but that is wired at the host/plugin level (the ChatGPT plugin
-builder's **MCP** step, or a local `.mcp.json`), not per skill. To upload into a
-ChatGPT plugin's **Skills** step, drag one `dist/skills-openai/<name>.zip` per
-skill.
+builder's **MCP** step, or a local `.mcp.json`), not per skill.
 
 ## OpenClaw Plugin Integration
 

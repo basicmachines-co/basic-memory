@@ -1,6 +1,6 @@
 ---
 name: memory-onboarding
-description: "Guide someone new to Basic Memory through designing and building a personal knowledge system: interview them, propose a structure, build it with schemas and instruction notes, teach them to use it, and set up their assistant to load it every session. Use when a user is new to Basic Memory or wants help getting started, asks how to structure a project (folders, schemas, conventions), has an empty or messy project that needs structure, or wants their assistant to remember context between sessions."
+description: "Help a new user design a Basic Memory knowledge system and set up their assistant to load it. Use when someone is getting started, has an empty or messy project, or wants context kept across sessions."
 ---
 
 # Basic Memory Onboarding

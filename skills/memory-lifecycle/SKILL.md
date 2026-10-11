@@ -1,6 +1,6 @@
 ---
 name: memory-lifecycle
-description: "Manage entity status transitions in Basic Memory: archive completed work, move notes between status folders, update frontmatter, and handle edge cases. Use when marking items complete, archiving old entities, or managing any folder-based status workflow."
+description: "Manage note status transitions in Basic Memory: archive completed work, move notes between status folders, update frontmatter. Use when marking items complete or archiving entities."
 ---
 
 # Memory Lifecycle
