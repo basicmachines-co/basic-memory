@@ -681,3 +681,33 @@ def test_declare_ownership_sets_the_named_owner_in_frontmatter_only() -> None:
     assert declare_ownership(flipped, owner="cli") == flipped
     # The thin registry wrapper is declare_ownership with a fixed owner.
     assert declare_registry_ownership(page) == declare_ownership(page, owner="registry")
+
+
+COMPONENT_REFERENCE = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "memory-comark"
+    / "references"
+    / "components.md"
+)
+
+
+def _section(markdown: str, heading: str) -> str:
+    start = markdown.index(heading)
+    end = markdown.find("\n## ", start + len(heading))
+    return markdown[start : end if end != -1 else None]
+
+
+def test_comark_page_lists_the_component_references_vocabulary() -> None:
+    # comark(7) is the quick reference and the memory-comark skill carries the
+    # full one; both are written by hand, so a component added to one must be
+    # added to the other.
+    page = find_page(PageRef("comark", 7))
+    assert page is not None
+    listed = set(re.findall(r"`(bm-[a-z-]+)`", _section(page.body(), "## VOCABULARY")))
+    reference = COMPONENT_REFERENCE.read_text(encoding="utf-8")
+    registered = set(
+        re.findall(r"`(bm-[a-z-]+)`", _section(reference, "## The registered vocabulary"))
+    )
+    assert len(registered) == 39
+    assert listed == registered

@@ -13,7 +13,9 @@ Sections 1 and 3 are canonical **in the package**: `src/basic_memory/man/man1/`
 holds the shell commands run against a project (`ls(1)`, `grep(1)`, ...) and
 `bm` subcommands (`okf-export(1)`, `okf-check(1)`), and
 `src/basic_memory/man/man3/` holds one page per MCP tool, so every install ships
-the same pages: local, cloud, or offline. `bm.1` at the package root is the
+the same pages: local, cloud, or offline. `src/basic_memory/man/man7/` holds
+the concept pages an agent needs without the manual project, such as
+`comark(7)`. `bm.1` at the package root is the
 system man page that `bm man install` copies for `man bm`; it is not a
 `bm man` page.
 The MCP server serves them as resources (`memory://man` is the index,
