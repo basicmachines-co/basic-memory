@@ -98,24 +98,31 @@ export function fetchSkills(
   const skillDirs = discoverSkillDirs(sourceDir)
   console.log(`Found ${skillDirs.length} skills: ${skillDirs.join(", ")}`)
 
-  // The output directory is entirely generated (and gitignored), so rebuild it
-  // from scratch. Clearing only the skills discovered this run would leave
-  // behind a skill that was removed or newly marked internal, and npm pack
-  // ships everything under skills/. Discovery runs first so a bad source
-  // fails before anything is deleted.
-  rmSync(outDir, { recursive: true, force: true })
-
-  const manifest: SkillManifestEntry[] = []
-
-  for (const dir of skillDirs) {
+  // Read and validate every skill before touching the output, so a missing or
+  // malformed SKILL.md fails while the previous generated package is intact.
+  const skills = skillDirs.map((dir) => {
     const skillPath = resolve(sourceDir, dir, "SKILL.md")
     if (!existsSync(skillPath)) {
       throw new Error(`Missing SKILL.md for ${dir}: ${skillPath}`)
     }
-
     const content = readFileSync(skillPath, "utf8")
-    const meta = parseFrontmatter(content)
+    try {
+      return { dir, content, meta: parseFrontmatter(content) }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`${dir}: ${message}`)
+    }
+  })
 
+  // The output directory is entirely generated (and gitignored), so rebuild it
+  // from scratch. Clearing only the skills discovered this run would leave
+  // behind a skill that was removed or newly marked internal, and npm pack
+  // ships everything under skills/.
+  rmSync(outDir, { recursive: true, force: true })
+
+  const manifest: SkillManifestEntry[] = []
+
+  for (const { dir, content, meta } of skills) {
     const skillOutDir = resolve(outDir, dir)
     mkdirSync(skillOutDir, { recursive: true })
     writeFileSync(resolve(skillOutDir, "SKILL.md"), content)

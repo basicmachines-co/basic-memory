@@ -65,7 +65,7 @@ describe("fetchSkills", () => {
     expect(existsSync(join(out, "memory-removed"))).toBe(false)
   })
 
-  test("leaves existing output alone when the source is invalid", () => {
+  test("leaves existing output alone when the source directory is missing", () => {
     writeSkill(
       out,
       "memory-notes",
@@ -75,6 +75,31 @@ describe("fetchSkills", () => {
     expect(() => fetchSkills(join(root, "missing"), out)).toThrow(
       "Missing source skills directory",
     )
+    expect(existsSync(join(out, "memory-notes", "SKILL.md"))).toBe(true)
+  })
+  test.each([
+    [
+      "is missing SKILL.md",
+      "memory-empty",
+      null,
+      "Missing SKILL.md for memory-empty",
+    ],
+    [
+      "has bad frontmatter",
+      "memory-broken",
+      "name: memory-broken",
+      "memory-broken: Frontmatter missing 'description'",
+    ],
+  ])("leaves existing output alone when a source skill %s", (_case, dir, frontmatter, error) => {
+    writeSkill(
+      out,
+      "memory-notes",
+      'name: memory-notes\ndescription: "Write notes."',
+    )
+    if (frontmatter === null) mkdirSync(join(source, dir))
+    else writeSkill(source, dir, frontmatter)
+
+    expect(() => fetchSkills(source, out)).toThrow(error)
     expect(existsSync(join(out, "memory-notes", "SKILL.md"))).toBe(true)
   })
 })
