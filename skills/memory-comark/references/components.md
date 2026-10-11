@@ -61,7 +61,7 @@ Of these, thirty-one form the deterministic Markdown Graphs vocabulary that stri
 
 ## Use the directive form
 
-Every component is a block directive and must close:
+Author components as closed block directives:
 
 ```markdown
 ::bm-meter{title="Migration" value="0.67" ticks="14" caption="Users table" tone="positive"}
@@ -69,6 +69,35 @@ Every component is a block directive and must close:
 ```
 
 Do not put the directive inside a code fence when it should render. Do not treat a code fence as a component when parsing or exporting.
+
+### Authoring errors and repairs
+
+Unknown props produce `prop-unknown`, with the component name, source line and
+registered props. For example, `colour="red"` on `bm-bars` is rejected; it is
+never silently discarded. The reader and rich editor show the affected block in
+its own warning frame with the original directive and data. The rest of the note
+continues rendering, and editing nearby prose preserves the malformed source.
+Remove the unknown prop or replace it with a registered one in Markdown source.
+A closed malformed component also supports a reviewed component replacement and
+undo through the agent tools.
+
+A block with a body but no closing `::` produces `directive-unclosed` near its
+opener. Its warning preserves the opener and any leading YAML properties while
+following headings, lists and prose stay visible outside the frame. Repair the
+source by adding `::` at the intended boundary; the editor never guesses where
+the block ends. Agent component replacements cannot safely claim the rest of an
+unclosed block, so use source editing for this repair.
+
+Existing standalone leaf directives with no body remain valid, though new
+components should use the closed block form above. Nested blocks each need their
+own close. Directive lookalikes inside code fences and escaped literals remain
+literal Markdown.
+
+These diagnostics use the same shared parser in browser rendering, WebMCP and
+the Cloud Comark analyzer. Canonical validation and strict Wiki export reject
+malformed source until repaired. Warning frames are recovery behavior, not a
+new authored vocabulary: never write `bm-problem` or other internal transport
+nodes in a note.
 
 ### Two attribute forms
 
