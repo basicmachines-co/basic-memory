@@ -165,8 +165,8 @@ as a snapshot in prose and keep them in the chart's row grammar.
 
 A broken component renders a coded problem and a fix inside its own frame; the
 rest of the note still renders. In Basic Memory Cloud, `write_note` and
-`edit_note` list these problems under **Component problems** after the save, so
-fix them right away with `edit_note`. `comark(7)` in the manual
+`edit_note` list these problems under **Component problems** in their result
+(they never block the write), so fix them right away with `edit_note`. `comark(7)` in the manual
 (`memory://man/comark(7)`) is a quick reference to the syntax and codes. The
 codes you will meet most:
 
