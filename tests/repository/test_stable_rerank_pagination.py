@@ -217,7 +217,6 @@ async def test_hybrid_tail_orders_by_chunk_position_before_collapse(
             entity_id=700,
             chunk_key=f"entity:700:{i}",
             source_key=("entity", 700),
-            chunk_text=f"auth {i}",
             similarity=1 - i / 1000,
         )
         for i in range(100)
@@ -226,7 +225,6 @@ async def test_hybrid_tail_orders_by_chunk_position_before_collapse(
             entity_id=730,
             chunk_key="entity:730:0",
             source_key=("entity", 730),
-            chunk_text="oauth",
             similarity=0.8,
         )
     ]
@@ -258,8 +256,20 @@ async def test_fixed_prefix_keeps_the_passages_the_fixed_window_read(
     monkeypatch: pytest.MonkeyPatch,
     mode: SearchRetrievalMode,
 ) -> None:
-    """A deeper window's extra chunks of a prefix row never reach the reranker."""
+    """A deeper window's extra chunks of a prefix row never reach the reranker.
+
+    This holds by construction for a built-in index, whose excerpts rank a note's own
+    chunks without reading the window (#1746). An external index quotes the window's
+    chunks, so its prefix rows must quote only those the fixed window read.
+    """
     repo = pagination_repository
+    repo._semantic_vector_index_name = "milvus"
+    passages = {"entity:730:0": "ORIGINAL PASSAGE", "entity:730:1": "LATER PASSAGE"}
+
+    async def chunk_texts(self, keys):
+        return {key: passages.get(key.chunk_key, f"first {key.chunk_key}") for key in keys}
+
+    monkeypatch.setattr(SemanticSearch, "_fetch_chunk_texts", chunk_texts)
     # A long note quotes its matched passages to the reranker instead of its content.
     await repo.index_item(
         _entity_row(
@@ -275,7 +285,6 @@ async def test_fixed_prefix_keeps_the_passages_the_fixed_window_read(
             entity_id=700,
             chunk_key=f"entity:700:{i}",
             source_key=("entity", 700),
-            chunk_text=f"first {i}",
             similarity=1 - i / 1000,
         )
         for i in range(7)
@@ -284,14 +293,12 @@ async def test_fixed_prefix_keeps_the_passages_the_fixed_window_read(
             entity_id=730,
             chunk_key="entity:730:0",
             source_key=("entity", 730),
-            chunk_text="ORIGINAL PASSAGE",
             similarity=0.9,
         ),
         HydratedChunk(
             entity_id=730,
             chunk_key="entity:730:1",
             source_key=("entity", 730),
-            chunk_text="LATER PASSAGE",
             similarity=0.8,
         ),
     ]

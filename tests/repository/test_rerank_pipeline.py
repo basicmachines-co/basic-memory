@@ -42,7 +42,7 @@ from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.services.entity_service import EntityService
-from tests.repository.test_hybrid_fusion import FakeFts, window_of
+from tests.repository.test_hybrid_fusion import FakeFts, window_of, OfflineSemanticSearch
 
 type BackendSearchRepository = SQLiteSearchRepository | PostgresSearchRepository
 
@@ -226,7 +226,9 @@ def _semantic(
         vector_k=vector_k,
         min_similarity=0.0,
     )
-    return SemanticSearch(MagicMock(), ProjectScope.single(1), fts or FakeFts(), vector, rerank)
+    return OfflineSemanticSearch(
+        MagicMock(), ProjectScope.single(1), fts or FakeFts(), vector, rerank
+    )
 
 
 # --- Pure helper behavior ---

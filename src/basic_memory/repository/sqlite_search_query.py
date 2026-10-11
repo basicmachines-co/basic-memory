@@ -30,6 +30,7 @@ from basic_memory.repository.search_index_row import (
     SearchIndexKey,
     SearchIndexRow,
     capped_snippet_columns,
+    snippet_length_columns,
 )
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_scope import ProjectScope
@@ -48,8 +49,10 @@ _SPACE_OR_SPECIAL_CHARS = frozenset(" .:;,<>?/-")
 _WORD_QUOTING_CHARS = _PROBLEMATIC_CHARS | _SPACE_OR_SPECIAL_CHARS
 _BOOLEAN_OPERATOR_PATTERN = r"(\bAND\b|\bOR\b|\bNOT\b)"
 
-# Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = f"""
+
+def _result_columns(text_columns: str) -> str:
+    """The columns every FTS statement returns, plus a score."""
+    return f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -61,7 +64,7 @@ _RESULT_COLUMNS = f"""
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                {capped_snippet_columns("search_index")},
+                {text_columns},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -507,6 +510,7 @@ class SQLiteFts:
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         """Run one FTS5 page.
 
@@ -526,6 +530,11 @@ class SQLiteFts:
         params = compiled.params
         params["limit"] = limit
         params["offset"] = offset
+        text_columns = (
+            capped_snippet_columns("search_index")
+            if with_text
+            else snippet_length_columns("search_index")
+        )
         relaxed_search_text = search_text
         if search_text and "script_text" in params:
             relaxed_search_text = analyze_script_query(search_text.strip()).word_text
@@ -534,7 +543,7 @@ class SQLiteFts:
         # Postgres does: a page, or a fixed rerank prefix read from a larger window,
         # is then the same rows a smaller query returns.
         sql = f"""
-            SELECT{_RESULT_COLUMNS},
+            SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}

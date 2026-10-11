@@ -16,7 +16,11 @@ from basic_memory.repository.search_reader import (
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.schemas.search import SearchRetrievalMode
-from tests.repository.test_hybrid_fusion import FakeFts, fake_vector_retrieval
+from tests.repository.test_hybrid_fusion import (
+    FakeFts,
+    fake_vector_retrieval,
+    OfflineSemanticSearch,
+)
 
 
 @dataclass
@@ -44,7 +48,6 @@ def _make_vector_rows(scores: list[float]) -> list[HydratedChunk]:
             entity_id=index,
             chunk_key=f"entity:{index}:0",
             source_key=("entity", index),
-            chunk_text=f"chunk text for entity:{index}:0",
             similarity=score,
         )
         for index, score in enumerate(scores)
@@ -65,7 +68,7 @@ def vector_semantic(
     *, min_similarity: float = 0.0, fts: FakeFts | None = None, index_name: str = "sqlite-vec"
 ) -> SemanticSearch:
     """A vector pipeline with a stubbed adapter, ready for its neighbour stage to be patched."""
-    return SemanticSearch(
+    return OfflineSemanticSearch(
         fake_session_maker(),
         ProjectScope.single(1),
         fts or FakeFts(),
@@ -188,7 +191,6 @@ def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[Hydra
             entity_id=si_id,
             chunk_key=f"entity:{si_id}:{chunk_index}",
             source_key=("entity", si_id),
-            chunk_text=f"chunk-{chunk_index} (sim={score})",
             similarity=score,
         )
         for chunk_index, score in enumerate(scores)
@@ -216,11 +218,13 @@ async def test_top_n_chunks_joined_in_matched_chunk_text():
     # Top 5 chunks by similarity: 0.9, 0.85, 0.8, 0.75, 0.6 (0.4 and 0.3 excluded)
     parts = text.split("\n---\n")
     assert len(parts) == TOP_CHUNKS_PER_RESULT
-    assert parts[0] == "chunk-1 (sim=0.9)"
-    assert parts[1] == "chunk-6 (sim=0.85)"
-    assert parts[2] == "chunk-3 (sim=0.8)"
-    assert parts[3] == "chunk-4 (sim=0.75)"
-    assert parts[4] == "chunk-0 (sim=0.6)"
+    assert parts == [
+        "chunk text for entity:0:1",  # 0.9
+        "chunk text for entity:0:6",  # 0.85
+        "chunk text for entity:0:3",  # 0.8
+        "chunk text for entity:0:4",  # 0.75
+        "chunk text for entity:0:0",  # 0.6
+    ]
 
 
 @pytest.mark.asyncio

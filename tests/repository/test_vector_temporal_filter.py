@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basic_memory.repository.search_reader import SemanticSearch
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.temporal import TemporalFilter, TimeKind, parse_point
 from tests.repository.test_hybrid_fusion import (
+    OfflineSemanticSearch,
     HYBRID_QUERY,
     FakeFts,
     FakeRow as HybridFakeRow,
@@ -116,7 +116,7 @@ async def test_vector_mode_without_a_temporal_filter_runs_no_intersection_pass()
 async def test_temporal_filter_applies_in_hybrid_mode():
     """Hybrid fuses two legs; both must ask the same valid-time question."""
     fts_leg = FakeFts([HybridFakeRow(id=1, score=5.0, title="dated")])
-    semantic = SemanticSearch(
+    semantic = OfflineSemanticSearch(
         cast(Any, None), ProjectScope.single(1), fts_leg, fake_vector_retrieval()
     )
     vector_leg = AsyncMock(return_value=window_of([HybridFakeRow(id=1, score=0.9, title="dated")]))

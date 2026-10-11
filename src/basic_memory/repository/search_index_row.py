@@ -20,6 +20,16 @@ from basic_memory.utils import ensure_timezone_aware
 SNIPPET_READ_LIMIT = 4000
 
 
+def snippet_length_columns(table: str) -> str:
+    """SELECT columns carrying no note text, only the stored content_snippet's length.
+
+    Ranking reads ids and scores; the text of the rows a search returns is fetched once
+    they are known (#1746). The length still answers content_length and the small-note
+    rule before that text arrives.
+    """
+    return f"NULL AS content_snippet, length({table}.content_snippet) AS content_snippet_length"
+
+
 def capped_snippet_columns(table: str) -> str:
     """SELECT columns carrying a capped content_snippet and the stored text's length."""
     return (

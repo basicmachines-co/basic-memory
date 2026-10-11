@@ -25,7 +25,12 @@ from basic_memory.repository.search_reader import (
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-from tests.repository.test_hybrid_fusion import FakeFts, FakeRow, fake_vector_retrieval
+from tests.repository.test_hybrid_fusion import (
+    FakeFts,
+    FakeRow,
+    fake_vector_retrieval,
+    OfflineSemanticSearch,
+)
 from tests.repository.test_vector_threshold import fake_session_maker
 
 FILTERED = PreparedSearchQuery(
@@ -53,6 +58,7 @@ class AdmittingFts(FakeFts):
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         self.calls.append({"candidate_keys": list(candidate_keys or [])})
         return cast(
@@ -72,7 +78,6 @@ def _ranking(count: int, *, top: float = 0.99, step: float = 0.01) -> list[Hydra
             entity_id=row_id,
             chunk_key=f"entity:{row_id}:0",
             source_key=("entity", row_id),
-            chunk_text=f"chunk {row_id}",
             similarity=top - (row_id - 1) * step,
         )
         for row_id in range(1, count + 1)
@@ -113,7 +118,7 @@ def _semantic(
     index_name: str = "milvus",
 ) -> SemanticSearch:
     """Defaults to an external index: only external indexes filter in the reader and widen."""
-    return SemanticSearch(
+    return OfflineSemanticSearch(
         fake_session_maker(),
         ProjectScope.single(1),
         fts,
@@ -244,7 +249,6 @@ def _multi_chunk_ranking(rows: int, chunks_per_row: int) -> list[HydratedChunk]:
                     entity_id=row_id,
                     chunk_key=f"entity:{row_id}:{chunk}",
                     source_key=("entity", row_id),
-                    chunk_text=f"chunk {row_id}.{chunk}",
                     similarity=0.99 - len(ranking) * 0.0001,
                 )
             )

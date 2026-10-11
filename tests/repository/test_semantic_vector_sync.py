@@ -71,6 +71,7 @@ class _TestRepository(SearchRepositoryBase):
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         return []
 

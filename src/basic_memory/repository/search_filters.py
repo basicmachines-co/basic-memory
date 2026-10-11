@@ -90,7 +90,15 @@ class FtsBackend(Protocol):
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
-    ) -> list[SearchIndexRow]: ...
+        with_text: bool = True,
+    ) -> list[SearchIndexRow]:
+        """Run one full-text page.
+
+        ``with_text=False`` returns rows without note text (``content_snippet`` is None,
+        ``content_snippet_length`` set), for callers that rank first and fetch the text
+        of the rows they keep.
+        """
+        ...
 
     async def count(
         self,

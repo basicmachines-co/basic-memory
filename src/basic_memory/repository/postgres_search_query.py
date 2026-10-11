@@ -31,6 +31,7 @@ from basic_memory.repository.search_index_row import (
     SearchIndexKey,
     SearchIndexRow,
     capped_snippet_columns,
+    snippet_length_columns,
 )
 from basic_memory.repository.search_query import (
     PreparedSearchQuery,
@@ -48,8 +49,10 @@ _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
 
-# Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = f"""
+
+def _result_columns(text_columns: str) -> str:
+    """The columns every FTS statement returns, plus a score."""
+    return f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -61,7 +64,7 @@ _RESULT_COLUMNS = f"""
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                {capped_snippet_columns("search_index")},
+                {text_columns},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -712,6 +715,7 @@ class PostgresFts:
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         """Run one tsquery page, retrying a malformed or empty strict query relaxed."""
         search_text = query.search_text
@@ -721,9 +725,14 @@ class PostgresFts:
         params = compiled.params
         params["limit"] = limit
         params["offset"] = offset
+        text_columns = (
+            capped_snippet_columns("search_index")
+            if with_text
+            else snippet_length_columns("search_index")
+        )
 
         sql = f"""
-            SELECT{_RESULT_COLUMNS},
+            SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
