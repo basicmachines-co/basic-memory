@@ -37,6 +37,10 @@ async def test_cli_project_delete_retires_the_standalone_cache(
     Cache hits are served before project validation, so without this a running
     MCP server keeps answering reads for a project the CLI deleted.
     """
+    # A real CLI process has no MCP or API host container; the autouse
+    # clean_api_container fixture keeps one leaked by an earlier test from
+    # standing in for it.
+    assert not has_installed_container()
     app_config.redis_url = redis_url
     config_manager.save_config(app_config)
     # A sibling of the test project's directory: projects cannot nest.

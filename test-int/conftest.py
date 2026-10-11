@@ -72,6 +72,7 @@ from testcontainers.postgres import PostgresContainer
 
 from httpx import AsyncClient, ASGITransport
 
+import basic_memory.api.container as api_container_module
 from basic_memory import db
 from basic_memory.config import (
     BasicMemoryConfig,
@@ -159,6 +160,19 @@ def clean_routing_env(monkeypatch) -> None:
     monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
     monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def clean_api_container(monkeypatch) -> None:
+    """Keep an API lifespan's container from leaking into later tests.
+
+    The API lifespan installs its container in a module global and never removes
+    it, which a real process can rely on because the lifespan owns it. In one
+    pytest process the leaked container would make every later local ASGI client
+    look like it runs inside an API host, so it would not open the standalone
+    read cache a CLI process opens.
+    """
+    monkeypatch.setattr(api_container_module, "_container", None)
 
 
 @pytest.fixture(autouse=True)
