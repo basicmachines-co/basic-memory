@@ -31,6 +31,9 @@ MAX_DESCRIPTION_LENGTH = 200
 # A Markdown link destination, with an optional "title" or 'title' after it.
 MARKDOWN_LINK = re.compile(r"""\]\(([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)""")
 # Backticked paths into a skill's own resource folders, e.g. `references/x.md`.
+# A reference-style link definition, `[label]: target`. Nothing rewrites these
+# when the combined skill moves a resource, so the validator rejects them.
+LINK_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*\S", re.MULTILINE)
 CODE_RESOURCE_PATH = re.compile(r"`((?:references|assets|scripts)/[^`\s]+)`")
 METADATA_INTERNAL = re.compile(r"^\s+internal:\s*true\s*$")
 
@@ -185,8 +188,14 @@ def validate_skill_file(skill_file: Path, expected_name: str) -> None:
     # Each zip holds only the skill's own folder, so a link that leaves it (for
     # example ../README.md) breaks in the published skill even when the target
     # exists in the repo.
+    body = skill_body(skill_file)
+    if definition := LINK_DEFINITION.search(body):
+        raise SystemExit(
+            f"{skill_file}: use inline links, not reference-style definitions "
+            f"({definition.group(0).strip()!r})"
+        )
     skill_root = skill_file.parent.resolve()
-    for target in relative_link_targets(skill_body(skill_file)):
+    for target in relative_link_targets(body):
         resolved = (skill_file.parent / target).resolve()
         if not resolved.is_relative_to(skill_root):
             raise SystemExit(f"{skill_file}: links outside the skill folder {target!r}")

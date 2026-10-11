@@ -261,11 +261,13 @@ def test_repo_lists_pass_once_memory_quest_lands(tmp_path: Path) -> None:
     for name in ("openclaw.plugin.json", "README.md"):
         shutil.copy(REPO_ROOT / "integrations/openclaw" / name, openclaw / name)
 
-    _write_skill(root / "skills", "memory-quest")
-    readme = root / "skills/README.md"
-    readme.write_text(readme.read_text() + "\n| **memory-quest** | x | y |\n")
-    claude = root / "skills/CLAUDE.md"
-    claude.write_text(claude.read_text() + "\nmemory-quest/SKILL.md  # x\n")
+    # Before #1677 merges, add what it adds; after, the repo already has it.
+    if not (root / "skills/memory-quest").exists():
+        _write_skill(root / "skills", "memory-quest")
+        readme = root / "skills/README.md"
+        readme.write_text(readme.read_text() + "\n| **memory-quest** | x | y |\n")
+        claude = root / "skills/CLAUDE.md"
+        claude.write_text(claude.read_text() + "\nmemory-quest/SKILL.md  # x\n")
 
     validate_skills.validate_skill_lists(root)
 
@@ -476,6 +478,45 @@ def test_combined_template_needs_routing_marker(tmp_path: Path) -> None:
     template.write_text("---\nname: basic-memory\ndescription: x\n---\n")
     with pytest.raises(SystemExit, match="routing-table"):
         build_skills_dist.build_all(SKILLS_ROOT, tmp_path / "dist", template)
+
+
+def _template(tmp_path: Path, description: str) -> Path:
+    template = tmp_path / "template.md"
+    marker = build_skills_dist.ROUTING_TABLE_MARKER
+    template.write_text(f'---\nname: basic-memory\ndescription: "{description}"\n---\n\n{marker}\n')
+    return template
+
+
+def _notes_only_root(tmp_path: Path) -> Path:
+    skills_root = tmp_path / "skills"
+    shutil.copytree(SKILLS_ROOT / "memory-notes", skills_root / "memory-notes")
+    return skills_root
+
+
+def test_generated_router_is_validated_before_archiving(tmp_path: Path) -> None:
+    template = _template(tmp_path, "x" * 201)
+    with pytest.raises(SystemExit, match="201 characters"):
+        build_skills_dist.build_all(_notes_only_root(tmp_path), tmp_path / "dist", template)
+    built = {path.name for path in (tmp_path / "dist").rglob("*.zip")}
+    assert not built & {"basic-memory.zip", "basic-memory-chatgpt.zip"}
+
+
+def test_router_cannot_promise_a_skill_it_does_not_bundle(tmp_path: Path) -> None:
+    template = _template(tmp_path, "Find notes and run Memory Quest.")
+    with pytest.raises(SystemExit, match="promises Memory Quest but memory-quest is not bundled"):
+        build_skills_dist.build_all(_notes_only_root(tmp_path), tmp_path / "dist", template)
+
+    _write_skill(tmp_path / "skills", "memory-quest")
+    build_skills_dist.build_all(tmp_path / "skills", tmp_path / "dist", template)
+
+
+def test_validator_rejects_reference_style_links(tmp_path: Path) -> None:
+    body = "See [the guide][g].\n\n[g]: references/guide.md\n"
+    skill_dir = _write_skill(tmp_path, "memory-x", body=body)
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references/guide.md").write_text("guide")
+    with pytest.raises(SystemExit, match="reference-style"):
+        validate_skills.validate_skills(tmp_path)
 
 
 def test_template_is_invisible_to_skill_discovery() -> None:

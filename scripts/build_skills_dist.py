@@ -43,6 +43,7 @@ from validate_skills import (
     memory_skill_dirs,
     parse_frontmatter,
     skill_body,
+    validate_skill_file,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -76,6 +77,11 @@ ROUTING_INTENTS = {
         "Finish Memory Quest, verify this assistant is set up, or become a Memory Master"
     ),
 }
+
+# Skills the router's description promises by name. Chat apps load a skill from
+# its description alone, so publishing a router that names a skill it doesn't
+# bundle would send users into a skill with none of that skill's instructions.
+ROUTER_PROMISES = {"memory-quest": "Memory Quest"}
 
 # evals/ holds test fixtures for skill authors, not instructions for the agent.
 EVALS_DIR = "evals"
@@ -280,9 +286,8 @@ def stage_combined_skill(
     template_text = template.read_text()
     if ROUTING_TABLE_MARKER not in template_text:
         raise SystemExit(f"{template}: missing {ROUTING_TABLE_MARKER} marker")
-    (out / "SKILL.md").write_text(
-        template_text.replace(ROUTING_TABLE_MARKER, routing_table(included))
-    )
+    router = out / "SKILL.md"
+    router.write_text(template_text.replace(ROUTING_TABLE_MARKER, routing_table(included)))
 
     for skill_dir in included:
         (references / f"{skill_dir.name}.md").write_text(reference_document(skill_dir))
@@ -290,6 +295,17 @@ def stage_combined_skill(
             target = references / skill_dir.name / resource
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(skill_dir / resource, target)
+
+    # The router is generated, so the source validator never sees it. Check it
+    # like any skill (frontmatter, name, description, links) before it is zipped.
+    validate_skill_file(router, COMBINED_NAME)
+    description = parse_frontmatter(router)["description"]
+    bundled = {skill_dir.name for skill_dir in included}
+    for skill, phrase in ROUTER_PROMISES.items():
+        if phrase in description and skill not in bundled:
+            raise SystemExit(
+                f"{template}: description promises {phrase} but {skill} is not bundled"
+            )
 
     if flavor.openai:
         write_openai_yaml(
