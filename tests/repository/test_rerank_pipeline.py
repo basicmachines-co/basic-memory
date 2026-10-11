@@ -614,10 +614,13 @@ async def test_vector_search_reads_prefix_and_tail_from_one_retrieval(
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: Any = None,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
-        return await run_vector_query(self, session, query_embedding, candidate_limit, trace=trace)
+        return await run_vector_query(
+            self, session, query_embedding, candidate_limit, admission=admission, trace=trace
+        )
 
     monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)
 
@@ -771,10 +774,13 @@ async def test_hybrid_search_preserves_candidate_windows(
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: Any = None,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
-        return await run_vector_query(self, session, query_embedding, candidate_limit, trace=trace)
+        return await run_vector_query(
+            self, session, query_embedding, candidate_limit, admission=admission, trace=trace
+        )
 
     monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)
 

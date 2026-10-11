@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import event, text
@@ -25,6 +25,7 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -128,6 +129,7 @@ class RecordingVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         if self.fail_search:
             raise RuntimeError("adapter query failed")
@@ -896,6 +898,77 @@ async def test_filtered_vector_search_fills_its_window_past_nearer_rejected_rows
     )
 
     assert [row.id for row in results] == [1121]
+
+
+@pytest.mark.asyncio
+async def test_filtered_vector_search_ranks_only_admitted_chunks_in_one_read(search_repository):
+    """sqlite-vec evaluates the filter inside its KNN: one read, admitted chunks only (#1746).
+
+    Forty archive rows sit nearer the query than three notes rows. The index is handed
+    the notes-prefix filter as an admission and returns the notes' chunks alone, nearest
+    first, from a single query instead of widening past forty rejected candidates.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    search_repository._semantic_vector_k = 4
+    search_repository._semantic_min_similarity = 0.0
+
+    nearer = list(range(1201, 1241))
+    farther = [1251, 1252, 1253]
+    for row_id in nearer:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Archive {row_id}",
+                permalink=f"archive/entry-{row_id}",
+                content_stems="auth token archive",
+            )
+        )
+    for row_id in farther:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Note {row_id}",
+                permalink=f"notes/entry-{row_id}",
+                content_stems="schema note",
+            )
+        )
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(row_id, project, f"[1,{(row_id - 1200) / 1000:.3f},0,0]") for row_id in nearer]
+        + [(row_id, project, f"[0.5,1,{(row_id - 1250) / 100:.2f},0]") for row_id in farther],
+    )
+
+    calls: list[dict[str, Any]] = []
+    search = index.search
+
+    async def spy(query, *, limit, projects, admission=None):
+        matches = await search(query, limit=limit, projects=projects, admission=admission)
+        calls.append({"admission": admission, "entities": [m.key.entity_id for m in matches]})
+        return matches
+
+    with patch.object(index, "search", spy):
+        results = await search_repository.search(
+            search_text="auth",
+            file_path_prefix="notes",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+            limit=3,
+        )
+
+    assert [row.id for row in results] == farther
+    [call] = calls
+    assert call["admission"] is not None
+    assert call["entities"] == farther
 
 
 @pytest.mark.asyncio

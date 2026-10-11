@@ -18,6 +18,7 @@ from basic_memory.models.search import (
     CREATE_SEARCH_INDEX,
     SQLITE_SEARCH_VECTOR_CHUNK_COLUMNS,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_LOCATION,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
     SQLITE_CHUNK_LOCATION_UPGRADE,
@@ -333,6 +334,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
             await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS)
             await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY)
+            await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_LOCATION)
             await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE)
 
             # Trigger: legacy table from previous semantic implementation exists.

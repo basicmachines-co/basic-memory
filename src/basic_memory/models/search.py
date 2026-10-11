@@ -196,6 +196,13 @@ CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
 ON search_vector_chunks (project_id, entity_id)
 """)
 
+# A filtered vector search admits chunks by the search row they were cut from (#1746),
+# so it looks chunks up by that location: (project_id, source_type, source_row_id).
+CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_LOCATION_INDEX = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_location
+ON search_vector_chunks (project_id, source_type, source_row_id)
+""")
+
 # Local semantic chunk metadata table for SQLite.
 # Embedding vectors live in sqlite-vec virtual table keyed by this table rowid.
 CREATE_SQLITE_SEARCH_VECTOR_CHUNKS = DDL("""
@@ -220,6 +227,11 @@ CREATE TABLE IF NOT EXISTS search_vector_chunks (
 CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
 ON search_vector_chunks (project_id, entity_id)
+""")
+
+CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_LOCATION = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_location
+ON search_vector_chunks (project_id, source_type, source_row_id)
 """)
 
 CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE = DDL("""

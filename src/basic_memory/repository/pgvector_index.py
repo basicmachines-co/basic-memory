@@ -15,6 +15,7 @@ from basic_memory import db
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -29,6 +30,12 @@ from basic_memory.repository.semantic_vector_index import (
 # whatever the LIMIT asks for; the server caps the setting at 1000.
 HNSW_EF_SEARCH_DEFAULT = 40
 HNSW_EF_SEARCH_MAX = 1000
+# A filtered search ranks its admitted chunks exactly while there are at most this many,
+# and uses the filtered HNSW scan above it. Measured on 300,000 clustered 384-dimension
+# chunks (#1746): exact ranking took 47 ms for 30,000 admitted chunks and 600 ms for
+# 270,000; the forced HNSW scan took about 100 ms at any selectivity but recalled only
+# 66% of the true top 100 when 10% of chunks were admitted.
+EXACT_ADMISSION_CHUNK_LIMIT = 50_000
 
 _PGVECTOR_VERSION = re.compile(r"^(\d+)\.(\d+)")
 
@@ -405,6 +412,7 @@ class PgVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         if not query or limit <= 0 or projects.is_empty:
             return []
@@ -418,44 +426,98 @@ class PgVectorIndex:
         # The scope binds its ids once; both predicates reference the same names.
         embeddings_in_scope = projects.predicate("e.project_id", params)
         chunks_in_scope = projects.predicate("c.project_id", params)
+        manifest = (
+            f"{embeddings_in_scope} "
+            "AND e.embedding_dims = :dimensions "
+            f"AND {chunks_in_scope} "
+            "AND c.vector_index = 'pgvector' "
+            "AND c.embedding_status = 'ready' "
+            "AND c.embedding_model = :embedding_identity "
+            "AND e.source_hash = c.source_hash"
+        )
+        admitted = ""
+        if admission is not None:
+            params.update(admission.params)
+            admitted = f" AND {admission.predicate}"
         async with db.scoped_session(self._session_maker) as session:
-            # Both settings are transaction-local, so they last exactly as long as
-            # this scoped session. The scan is sized to the window it must fill
-            # and continues past that until the scope and manifest filters have
-            # admitted enough rows, instead of stopping at the first ef_search
-            # candidates and returning whatever of them survived.
-            await session.execute(
-                text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
-                {"ef_search": str(hnsw_ef_search_for(limit))},
-            )
-            await session.execute(
-                text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
-            )
-            # A relaxed iterative scan may hand rows back slightly out of distance
-            # order, so the window is taken by distance alone and sorted once more.
-            result = await session.execute(
-                text(
-                    "WITH nearest AS MATERIALIZED ("
-                    "SELECT c.entity_id, c.chunk_key, "
-                    "e.embedding <=> CAST(:query AS vector) AS distance "
-                    "FROM search_vector_embeddings e "
-                    "JOIN search_vector_chunks c ON c.id = e.chunk_id "
-                    f"WHERE {embeddings_in_scope} "
-                    "AND e.embedding_dims = :dimensions "
-                    f"AND {chunks_in_scope} "
-                    "AND c.vector_index = 'pgvector' "
-                    "AND c.embedding_status = 'ready' "
-                    "AND c.embedding_model = :embedding_identity "
-                    "AND e.source_hash = c.source_hash "
-                    "ORDER BY e.embedding <=> CAST(:query AS vector) "
-                    "LIMIT :limit"
-                    ") "
-                    "SELECT entity_id, chunk_key, 1 - distance AS similarity "
-                    "FROM nearest "
-                    "ORDER BY distance ASC, entity_id ASC, chunk_key ASC"
-                ),
-                params,
-            )
+            # --- Choosing the scan for a filtered search (#1746) ---
+            # Trigger: the search carries structured filters.
+            # Why: neither plan suits every filter. An HNSW scan that filters as it goes
+            #     is fast when most chunks pass, but a selective filter makes it give up
+            #     before it has the window (recall 0.66 at 10% admitted) or scan for long.
+            #     An exact ranking of just the admitted chunks is always complete and is
+            #     fast while they are few (47 ms for 30,000), slow when they are many
+            #     (600 ms for 270,000). The planner cannot pick: it underestimates the
+            #     filter's rows and chose the exact plan even at 90% admitted.
+            # Outcome: count the admitted chunks, stopping at the limit. Few: rank them
+            #     exactly. Many: force the HNSW scan, which then needs only a short
+            #     iterative walk because most of what it visits passes.
+            exact = False
+            if admission is not None:
+                counted = await session.execute(
+                    text(
+                        "SELECT count(*) FROM ("
+                        "SELECT 1 FROM search_vector_chunks c "
+                        "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
+                        f"WHERE {manifest}{admitted} "
+                        "LIMIT :exact_cap) admitted"
+                    ),
+                    {**params, "exact_cap": EXACT_ADMISSION_CHUNK_LIMIT + 1},
+                )
+                exact = int(counted.scalar_one()) <= EXACT_ADMISSION_CHUNK_LIMIT
+
+            if exact:
+                # Adding zero keeps the HNSW index from serving the ORDER BY, so Postgres
+                # computes every admitted chunk's distance and keeps the nearest.
+                result = await session.execute(
+                    text(
+                        "SELECT c.entity_id, c.chunk_key, "
+                        "1 - (e.embedding <=> CAST(:query AS vector)) AS similarity "
+                        "FROM search_vector_chunks c "
+                        "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
+                        f"WHERE {manifest}{admitted} "
+                        "ORDER BY (e.embedding <=> CAST(:query AS vector)) + 0 ASC, "
+                        "c.entity_id ASC, c.chunk_key ASC "
+                        "LIMIT :limit"
+                    ),
+                    params,
+                )
+            else:
+                # Both settings are transaction-local, so they last exactly as long as
+                # this scoped session. The scan is sized to the window it must fill
+                # and continues past that until the scope and manifest filters have
+                # admitted enough rows, instead of stopping at the first ef_search
+                # candidates and returning whatever of them survived.
+                await session.execute(
+                    text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
+                    {"ef_search": str(hnsw_ef_search_for(limit))},
+                )
+                await session.execute(
+                    text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+                )
+                if admission is not None:
+                    # The only plan without a sort is the ordered HNSW scan; disabling
+                    # sorts keeps the misestimated filter from choosing the exact plan.
+                    await session.execute(text("SELECT set_config('enable_sort', 'off', true)"))
+                # A relaxed iterative scan may hand rows back slightly out of distance
+                # order, so the window is taken by distance alone and sorted once more.
+                result = await session.execute(
+                    text(
+                        "WITH nearest AS MATERIALIZED ("
+                        "SELECT c.entity_id, c.chunk_key, "
+                        "e.embedding <=> CAST(:query AS vector) AS distance "
+                        "FROM search_vector_embeddings e "
+                        "JOIN search_vector_chunks c ON c.id = e.chunk_id "
+                        f"WHERE {manifest}{admitted} "
+                        "ORDER BY e.embedding <=> CAST(:query AS vector) "
+                        "LIMIT :limit"
+                        ") "
+                        "SELECT entity_id, chunk_key, 1 - distance AS similarity "
+                        "FROM nearest "
+                        "ORDER BY distance ASC, entity_id ASC, chunk_key ASC"
+                    ),
+                    params,
+                )
         return [
             VectorMatch(
                 key=VectorKey(

@@ -1,9 +1,11 @@
 """Valid-time filters reach the semantic retrieval modes too (SPEC-82).
 
-Vector and hybrid search do not evaluate the temporal predicate themselves: they build a
-candidate set from embeddings and then intersect it with an FTS-mode pass that carries
-every structured filter. That means a filter is only honored in those modes if it is
-both *counted* as a requested filter and *forwarded* to the intersecting search.
+Vector and hybrid search apply the temporal predicate through the same SQL full-text
+search uses. A built-in index receives it as an admission built from the FTS backend's
+row filter and ranks only admitted chunks (#1746); an external index's matches are
+intersected afterwards with an FTS-mode pass that carries every structured filter.
+Either way a filter is only honored if it is both *counted* as a requested filter and
+*forwarded* to whatever applies it.
 
 Missing either half fails silently -- semantic search would answer a valid-time question
 with unfiltered results, including the undated sources the filter excludes. These tests
@@ -38,12 +40,44 @@ TEMPORAL = TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-28"))
 
 
 @pytest.mark.asyncio
+async def test_temporal_filter_reaches_a_built_in_index_as_its_admission():
+    """A built-in index is handed the valid-time filter, compiled by the FTS backend."""
+    filter_pass = FakeFts([])
+    semantic = vector_semantic(fts=filter_pass)
+    nearest = AsyncMock(return_value=_make_vector_rows([0.9]))
+
+    with (
+        patch.object(semantic, "_run_vector_query", nearest),
+        patch.object(
+            semantic,
+            "_fetch_search_index_rows_by_ids",
+            AsyncMock(return_value={("entity", 0): FakeRow(id=0)}),
+        ),
+    ):
+        results = await semantic.vector_only(
+            replace(VECTOR_QUERY, temporal=TEMPORAL), limit=10, offset=0
+        )
+
+    assert [row.id for row in results] == [0]
+    # Forwarded unchanged to the row filter, without the search text...
+    [row_query] = filter_pass.queries
+    assert row_query.temporal is TEMPORAL
+    assert row_query.search_text is None
+    # ...and handed to the index as the admission, with no filter pass afterwards.
+    assert nearest.await_args is not None
+    admission = nearest.await_args.kwargs["admission"]
+    assert admission is not None
+    assert "(c.project_id, c.source_type, c.source_row_id) IN (" in admission.predicate
+    assert filter_pass.calls == []
+
+
+@pytest.mark.asyncio
 async def test_temporal_filter_applies_in_vector_mode():
-    """A valid-time filter narrows the vector candidate set, and is forwarded verbatim."""
+    """An external index's candidates are narrowed by the filter pass, forwarded verbatim."""
     # The embedding neighbourhood offers three entities; only entity 1 asserts a range
     # covering the queried date, so the FTS intersection pass returns just that one.
     filter_pass = FakeFts([FakeRow(id=1)])
-    semantic = vector_semantic(fts=filter_pass)
+    semantic = vector_semantic(fts=filter_pass, index_name="milvus")
 
     results = await run_vector_only(
         semantic,

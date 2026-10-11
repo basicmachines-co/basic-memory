@@ -25,6 +25,7 @@ from basic_memory.repository.milvus_index import (
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     SemanticVectorIndex,
     SemanticVectorIndexReconciler,
     VectorDeletion,
@@ -543,6 +544,26 @@ async def test_search_clamps_milvus_cosine_scores_and_orders_ties(
     assert [match.similarity for match in matches] == [1.0, 1.0, 0.1, 0.0]
     assert [match.key.entity_id for match in matches] == [0, 1, 2, 3]
     assert repository.searches == [(collection_name(settings, scope, PROJECT), QUERY, 4)]
+
+
+@pytest.mark.asyncio
+async def test_search_refuses_a_sql_admission(
+    scope: VectorIndexScope,
+    settings: MilvusSettings,
+) -> None:
+    """Milvus cannot see the SQL search rows; the reader filters its matches instead."""
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
+
+    with pytest.raises(ValueError, match="cannot evaluate a SQL vector admission"):
+        await index.search(
+            QUERY,
+            limit=4,
+            projects=PROJECTS,
+            admission=VectorAdmission(predicate="c.source_type IN ('entity')", params={}),
+        )
+
+    assert repository.searches == []
 
 
 @pytest.mark.asyncio

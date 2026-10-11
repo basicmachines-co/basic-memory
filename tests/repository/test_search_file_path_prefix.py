@@ -14,13 +14,14 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_filters import file_path_prefix_condition
 from basic_memory.repository.search_reader import HydratedChunk, SemanticSearch
-from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex, VectorAdmission
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchRetrievalMode,
@@ -284,17 +285,22 @@ async def test_nonexistent_scope_is_empty_not_unfiltered(search_repository, seed
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retrieval_mode", [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID])
+@pytest.mark.parametrize("index_name", ["sqlite-vec", "milvus"])
 async def test_semantic_retrieval_honors_the_scope(
-    search_repository, seeded_paths, monkeypatch, retrieval_mode
+    search_repository, seeded_paths, monkeypatch, retrieval_mode, index_name
 ):
     """The vector and hybrid paths apply the scope, not just the FTS path.
 
-    Semantic retrieval has no SQL WHERE of its own: it post-filters its nearest
-    neighbours through a scoped FTS query. A scope threaded only into the FTS
-    entry point would leave `search(retrieval_mode="vector")` answering
-    project-wide, which is the half-wired failure this test rules out. The
-    nearest-neighbour stage is stubbed to return every seeded note so anything
-    that survives did so through the filter.
+    A built-in index ("sqlite-vec") receives the scope as a SQL admission and ranks only
+    the chunks it admits (#1746); an external index ("milvus") returns a similarity-only
+    ranking that the reader filters through a scoped FTS pass. A scope threaded only into
+    the FTS entry point would leave `search(retrieval_mode="vector")` answering
+    project-wide, which is the half-wired failure this test rules out.
+
+    The nearest-neighbour stage is stubbed to offer every seeded note. For a built-in
+    index the stub keeps only the rows the admission's SQL admits, evaluated against the
+    real search rows (each as a one-chunk manifest row), so the generated filter SQL runs
+    on this backend.
     """
     monkeypatch.setattr(search_repository, "_semantic_enabled", True)
     monkeypatch.setattr(search_repository, "_semantic_min_similarity", 0.0)
@@ -315,22 +321,36 @@ async def test_semantic_retrieval_honors_the_scope(
         cast(SemanticVectorIndex, object()),
         raising=False,
     )
-    monkeypatch.setattr(
-        SemanticSearch,
-        "_run_vector_query",
-        AsyncMock(
-            return_value=[
-                HydratedChunk(
-                    entity_id=row_id,
-                    chunk_key=f"entity:{row_id}:0",
-                    source_key=("entity", row_id),
-                    chunk_text="subtree scope fixture",
-                    similarity=0.9,
+    monkeypatch.setattr(search_repository, "_semantic_vector_index_name", index_name)
+    admissions: list[VectorAdmission | None] = []
+
+    async def nearest(self, session, query_embedding, limit, *, admission=None, trace=None):
+        admissions.append(admission)
+        row_ids = list(seeded_paths.values())
+        if admission is not None:
+            async with db.scoped_session(search_repository.session_maker) as admit_session:
+                result = await admit_session.execute(
+                    text(
+                        "SELECT c.source_row_id FROM (SELECT project_id, type AS source_type, "
+                        "id AS source_row_id FROM search_index) c "
+                        f"WHERE {admission.predicate}"
+                    ),
+                    dict(admission.params),
                 )
-                for row_id in seeded_paths.values()
-            ]
-        ),
-    )
+                admitted = {int(row_id) for (row_id,) in result.fetchall()}
+            row_ids = [row_id for row_id in row_ids if row_id in admitted]
+        return [
+            HydratedChunk(
+                entity_id=row_id,
+                chunk_key=f"entity:{row_id}:0",
+                source_key=("entity", row_id),
+                chunk_text="subtree scope fixture",
+                similarity=0.9,
+            )
+            for row_id in row_ids
+        ]
+
+    monkeypatch.setattr(SemanticSearch, "_run_vector_query", nearest)
 
     rows = await search_repository.search(
         search_text="subtree",
@@ -340,6 +360,8 @@ async def test_semantic_retrieval_honors_the_scope(
     )
 
     assert {row.title for row in rows} == {"Alpha", "Beta"}
+    # Only a built-in index is handed the filter; an external one is filtered after.
+    assert all((admission is not None) == (index_name == "sqlite-vec") for admission in admissions)
 
 
 def test_condition_is_one_shared_predicate_for_both_dialects():

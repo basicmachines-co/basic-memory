@@ -15,6 +15,7 @@ from basic_memory.repository.milvus_repository import (
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -218,7 +219,12 @@ class MilvusVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
+        # Milvus lives outside the SQL database that holds the search rows, so it cannot
+        # evaluate a SQL admission; the reader filters its matches afterwards instead.
+        if admission is not None:
+            raise ValueError("Milvus cannot evaluate a SQL vector admission.")
         if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
