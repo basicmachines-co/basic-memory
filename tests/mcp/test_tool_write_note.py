@@ -1797,25 +1797,37 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
     assert similar[0].permalink == "p/a"
 
 
-def test_collapse_similar_notes_skips_notes_the_new_note_links_to():
-    """A note already related by a wikilink is not offered as a possible duplicate."""
+@pytest.mark.parametrize(
+    "link",
+    [
+        "[[reference bu product mapping]]",  # title, any case
+        "[[reference/reference-bu-product-mapping]]",  # project-relative permalink
+        "[[reference/Reference BU Product Mapping.md]]",  # file path
+        "[[../reference/Reference BU Product Mapping]]",  # relative to the new note
+        "[[proj/reference/reference-bu-product-mapping|the mapping]]",  # full permalink
+    ],
+)
+def test_collapse_similar_notes_skips_notes_the_new_note_links_to(link: str):
+    """A note already related by a wikilink, however named, is not offered as a duplicate."""
     rows = [
-        _entity_result("Test Session", "p/test-session", "s/Test Session.md", 0.8),
-        _entity_result("A", "p/a", "a/A.md", 0.75),
-        _entity_result("B", "p/b", "b/B.md", 0.72),
+        _entity_result(
+            "Reference BU Product Mapping",
+            "proj/reference/reference-bu-product-mapping",
+            "reference/Reference BU Product Mapping.md",
+            0.8,
+        ),
+        _entity_result("Other", "proj/other", "Other.md", 0.75),
     ]
 
     similar = _collapse_similar_notes(
         rows,
-        exclude_file_path="new/New.md",
-        exclude_permalink="p/new",
-        linked_targets=_linked_targets(
-            "- discovered_during [[test session]]\n- relates_to [[p/b|the B note]]\n"
-        ),
+        exclude_file_path="notes/New.md",
+        exclude_permalink="proj/notes/new",
+        linked_targets=_linked_targets(f"- relates_to {link}\n", "notes"),
         limit=3,
     )
 
-    assert [note.title for note in similar] == ["A"]
+    assert [note.title for note in similar] == ["Other"]
 
 
 class _StubSearchClient:

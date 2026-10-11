@@ -709,6 +709,62 @@ async def test_semantic_search_uses_probe_pagination_without_count(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("page", "returned", "expected_total"),
+    [
+        # One row at offset 4 proves the ranking holds at least five rows.
+        (3, 1, 5),
+        # An empty page past the end proves nothing about the offset it skipped.
+        (100, 0, 0),
+    ],
+)
+async def test_semantic_search_total_counts_only_proven_rows(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+    page: int,
+    returned: int,
+    expected_total: int,
+):
+    now = datetime.now(timezone.utc)
+    fake_rows = [
+        SearchIndexRow(
+            project_id=1,
+            id=row_id,
+            type="entity",
+            file_path=f"notes/semantic-{row_id}.md",
+            created_at=now,
+            updated_at=now,
+            title=f"Semantic Result {row_id}",
+            permalink=f"notes/semantic-{row_id}",
+            score=0.9,
+        )
+        for row_id in range(1, returned + 1)
+    ]
+
+    class FakeSearchService:
+        async def search(self, query, *, limit, offset):
+            assert offset == (page - 1) * 2
+            return fake_rows
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"text": "semantic query", "retrieval_mode": "vector"},
+            params={"page": page, "page_size": 2},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == expected_total
+    assert data["total_is_exact"] is False
+    assert data["has_more"] is False
+
+
+@pytest.mark.asyncio
 async def test_search_has_more_when_more_results_exist(
     client: AsyncClient,
     test_project: Project,

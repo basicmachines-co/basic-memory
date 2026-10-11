@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+import posixpath
 import re
 import textwrap
 from collections.abc import Sequence
@@ -53,6 +54,7 @@ from basic_memory.schemas.search import (
 from basic_memory.utils import (
     build_qualified_permalink_reference,
     coerce_dict,
+    generate_permalink,
     parse_tags,
     validate_project_path,
 )
@@ -100,9 +102,29 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
 
 
-def _linked_targets(content: str) -> frozenset[str]:
-    """Return the casefolded wikilink targets a note's content already names."""
-    return frozenset(match.strip().casefold() for match in _WIKILINK_TARGET.findall(content))
+def _linked_targets(content: str, note_dir: str) -> frozenset[str]:
+    """Return the wikilink targets a note's content names, in permalink form.
+
+    A link can name a note by title, project-relative path, file path, or a path
+    relative to the linking note (`../Shared.md`). Slugging each one, after resolving
+    relative paths against the note's folder, lets them all compare against
+    _similar_note_keys.
+    """
+    targets: set[str] = set()
+    for match in _WIKILINK_TARGET.findall(content):
+        target = match.strip()
+        if target.startswith(("./", "../")):
+            target = posixpath.normpath(posixpath.join(note_dir, target))
+        targets.add(generate_permalink(target))
+    return frozenset(targets)
+
+
+def _similar_note_keys(result: SearchResult) -> set[str]:
+    """Permalink-form names a wikilink could use for a search result."""
+    keys = {generate_permalink(result.title), generate_permalink(result.file_path)}
+    if result.permalink is not None:
+        keys.add(result.permalink)
+    return keys
 
 
 def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
@@ -167,9 +189,7 @@ def _collapse_similar_notes(
         is_new_note = result.file_path == exclude_file_path or (
             exclude_permalink is not None and result.permalink == exclude_permalink
         )
-        is_linked = result.title.casefold() in linked_targets or (
-            result.permalink is not None and result.permalink.casefold() in linked_targets
-        )
+        is_linked = not linked_targets.isdisjoint(_similar_note_keys(result))
         if is_new_note or is_linked or result.file_path in seen_paths:
             continue
         seen_paths.add(result.file_path)
@@ -192,7 +212,7 @@ async def _find_similar_notes(
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
     query = similar_notes_query(title, content, min_similarity=min_similarity)
-    linked_targets = _linked_targets(content)
+    linked_targets = _linked_targets(content, posixpath.dirname(exclude_file_path))
     # Extra rows leave room for the new note's own hit and for the notes it links to,
     # which are dropped before collapsing. The linked allowance is capped so a hub note
     # with hundreds of links does not turn the probe into a large search.
