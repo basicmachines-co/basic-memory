@@ -57,6 +57,7 @@ from basic_memory.mcp.project_context_identifiers import (
     UnresolvedProjectRouteError,
     WorkspaceMemoryUrlResolution,
     add_project_metadata as _add_project_metadata,
+    routes_to_default_project as _routes_to_default_project,
     canonical_memory_path_for_active_route as _canonical_memory_path_for_active_route,
     canonical_memory_path_for_workspace as _canonical_memory_path_for_workspace,
     canonicalize_project_name as _canonicalize_project_name,
@@ -94,6 +95,7 @@ from basic_memory.mcp.workspace_project_index import (
 # Keep the original module's helper surface intact for callers and tests while
 # the implementations live in focused, dependency-light modules.
 add_project_metadata = _add_project_metadata
+routes_to_default_project = _routes_to_default_project
 _format_qualified_choices = _format_qualified_choices_impl
 _match_workspace_identifier = _match_workspace_identifier_impl
 _split_qualified_project_identifier = _split_qualified_project_identifier_impl

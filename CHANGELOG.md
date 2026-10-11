@@ -373,6 +373,12 @@
     page, still with `total_is_exact: false`, instead of `0`.
   - `tail` rows carry `updated_at`, the time they are ordered by, and `bm tail` shows it.
   - `bm reindex --help` no longer says `--embeddings` requires semantic search (#1696).
+  - Tool docs, the manual and the `list_memory_projects` footer no longer promise a
+    "session's active project". MCP requests carry no session state under the current
+    protocol, so a call without `project` always uses the default project, locally and
+    in the cloud. `write_note` and `edit_note` end with `[Project: 'name']` instead of
+    `[Session: Using project 'name']`, and say when no project was given and the
+    default was used.
 
 - **#1726**: `bm reindex --embeddings` now finishes oversized notes before it reports
   success. Vector sync embeds at most 256 chunks of one note per pass and defers the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -262,9 +263,30 @@ def split_project_prefix(path: str) -> tuple[Optional[str], str]:
     return project_prefix, remainder
 
 
-def add_project_metadata(result: str, project_name: str) -> str:
-    """Add project context as a metadata footer for session tracking."""
-    return f"{result}\n\n[Session: Using project '{project_name}']"
+def routes_to_default_project(project: Optional[str], project_id: Optional[str]) -> bool:
+    """Return whether a call with these arguments is served by the default project.
+
+    MCP requests carry no session state, so a call that names no project goes to the
+    default project, unless the server is constrained to one project
+    (BASIC_MEMORY_MCP_PROJECT), which then serves every call.
+    """
+    if project is not None or project_id is not None:
+        return False
+    return not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+
+
+def add_project_metadata(result: str, project_name: str, *, used_default: bool) -> str:
+    """Name the project a write landed in.
+
+    When the default project served a call that named none, say so, so a caller that
+    meant another project does not mistake where the write went.
+    """
+    if not used_default:
+        return f"{result}\n\n[Project: '{project_name}']"
+    return (
+        f"{result}\n\n[Project: '{project_name}' (no project was given, so this used "
+        "the default project; pass project to target another)]"
+    )
 
 
 def detect_project_from_url_prefix(

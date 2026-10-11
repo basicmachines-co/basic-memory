@@ -27,7 +27,7 @@ async def test_list_projects_basic_operation(mcp_server, app, test_project):
         assert "Available projects:" in list_text
         assert "test-project" in list_text  # Our test project
         assert "Pass a project name (or its [external_id] as project_id)" in list_text
-        assert "session's active project, then the configured default" in list_text
+        assert "Calls without one use the default project." in list_text
 
 
 @pytest.mark.asyncio

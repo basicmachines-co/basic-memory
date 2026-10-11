@@ -24,7 +24,11 @@ from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.mcp.project_context import get_project_client, add_project_metadata
+from basic_memory.mcp.project_context import (
+    add_project_metadata,
+    get_project_client,
+    routes_to_default_project,
+)
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -364,10 +368,9 @@ async def write_note(
                    Examples: "notes", "projects/2025", "research/ml", "/" (root).
                    MCP accepts the aliases folder, dir, and path; the CLI flag is --folder.
         project: Project name to write to. Optional. Omitting both project and project_id
-                writes to the session's active project (the last one this session
-                touched), and only falls back to the configured default project when there
-                is none — so
-                after working in another project, pass project explicitly. Use
+                writes to the configured default project. Calls do not remember a
+                project between them, so after working in another project, pass project
+                explicitly. Use
                 "workspace/project" to route to a project in a specific cloud workspace.
                 A bare name that exists in multiple workspaces resolves to the default
                 workspace, so use the qualified form (or project_id) to disambiguate. If
@@ -501,6 +504,7 @@ async def write_note(
         conditional_overwrite=expected_checksum is not None,
         output_format=output_format,
     ):
+        used_default = routes_to_default_project(project, project_id)
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
             active_project,
@@ -781,7 +785,9 @@ async def write_note(
                 }
 
             summary_result = "\n".join(summary)
-            return add_project_metadata(summary_result, active_project.name)
+            return add_project_metadata(
+                summary_result, active_project.name, used_default=used_default
+            )
 
 
 def _raise_write_refusal(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:

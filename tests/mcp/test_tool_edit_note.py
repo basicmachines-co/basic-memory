@@ -106,7 +106,7 @@ async def test_edit_note_append_operation(client, test_project):
     assert "file_path: test/Test Note.md" in result
     assert f"permalink: {test_project.name}/test/test-note" in result
     assert "Added 3 lines to end of note" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -134,7 +134,7 @@ async def test_edit_note_prepend_operation(client, test_project):
     assert "file_path: meetings/Meeting Notes.md" in result
     assert f"permalink: {test_project.name}/meetings/meeting-notes" in result
     assert "Added 3 lines to beginning of note" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -163,7 +163,7 @@ async def test_edit_note_find_replace_operation(client, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: config/Config Document.md" in result
     assert "operation: Find and replace operation completed" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -191,7 +191,7 @@ async def test_edit_note_replace_section_operation(client, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: specs/API Specification.md" in result
     assert "Replaced content under section '## Implementation'" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -830,7 +830,7 @@ async def test_edit_note_append_with_null_optional_fields(client, test_project):
     assert "Edited note (append)" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Null Fields Test.md" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -873,7 +873,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert "Edited note (append)" in second_result
     assert f"project: {test_project.name}" in second_result
     assert f"permalink: {test_project.name}/test/test-note" in second_result
-    assert f"[Session: Using project '{test_project.name}']" in second_result
+    assert f"[Project: '{test_project.name}']" in second_result
     # The edit should succeed without validation errors
 
 
@@ -966,7 +966,7 @@ async def test_edit_note_insert_before_section_operation(client, test_project):
     assert "Edited note (insert_before_section)" in result
     assert f"project: {test_project.name}" in result
     assert "Inserted content before section '## Details'" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -992,7 +992,7 @@ async def test_edit_note_insert_after_section_operation(client, test_project):
     assert "Edited note (insert_after_section)" in result
     assert f"project: {test_project.name}" in result
     assert "Inserted content after section '## Overview'" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio

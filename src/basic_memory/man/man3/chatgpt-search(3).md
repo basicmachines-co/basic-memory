@@ -51,7 +51,7 @@ search("overwrite conflict")
 
 ## GOTCHAS
 
-- [gotcha] No project parameter exists — the search runs against the session's active project (the last one used), not necessarily the configured default #routing
+- [gotcha] No project parameter exists — the search always runs against the configured default project #routing
 - [gotcha] The payload is JSON-inside-text by design (OpenAI compatibility); normal MCP clients should prefer search_notes #encoding
 
 ## SEE ALSO
