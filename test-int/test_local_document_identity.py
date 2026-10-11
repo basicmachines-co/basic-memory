@@ -16,6 +16,7 @@ from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient
 from basic_memory.models import Project
 from basic_memory.schemas.document import parse_document_ingestion_run_markdown
+from basic_memory.schemas.v2.graph import GraphEdge, GraphResponse
 from basic_memory.services.file_service import FileService
 
 
@@ -48,6 +49,26 @@ async def test_local_run_points_to_the_indexed_document(
     assert indexed.file_path == result.document_file_path
     assert run.frontmatter.output is not None
     assert str(run.frontmatter.output.document_entity_external_id) == indexed.external_id
+    source = await knowledge.resolve_entity_response("riders.csv", strict=True)
+    expected_edge = GraphEdge(
+        from_id=indexed.external_id, to_id=source.external_id, relation_type="derived_from"
+    )
+    graph_url = f"/v2/projects/{test_project.external_id}/knowledge/graph"
+    response = await client.get(graph_url)
+    response.raise_for_status()
+    assert GraphResponse.model_validate(response.json()).edges == [expected_edge]
+
+    # Rebuild provenance from canonical frontmatter without rewriting extraction or run bytes.
+    sidecar_before = (home / result.document_file_path).read_bytes()
+    run_before = (home / result.run_file_path).read_bytes()
+    await ProjectClient(client).index(
+        test_project.external_id, force_full=True, run_in_background=False
+    )
+    response = await client.get(graph_url)
+    response.raise_for_status()
+    assert GraphResponse.model_validate(response.json()).edges == [expected_edge]
+    assert (home / result.document_file_path).read_bytes() == sidecar_before
+    assert (home / result.run_file_path).read_bytes() == run_before
     reused = await runtime.ingest(file_path="riders.csv", observed_etag=None)
     assert reused.document_created is False
     assert reused.run_created is False
