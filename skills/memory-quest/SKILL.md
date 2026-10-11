@@ -52,21 +52,23 @@ If they decline, stop. Say that the mission stays incomplete and they can run `/
 
 ### 5. Save the Memory Master note
 
-First choose a project in Basic Memory Cloud. Call `list_memory_projects` with `output_format: "json"` and pick a project that has a `qualified_name` (its workspace and project, such as `acme/notes`). Cloud-backed projects have one whether they are listed as `cloud` or `local+cloud`; local-only projects don't. Use the default project if it qualifies, otherwise ask the user which to use. Address the project by that `qualified_name`. A workspace-qualified name routes the write to Basic Memory Cloud, while a bare name or ID can resolve to a local copy on this machine, where the cloud never sees the note and the mission stays incomplete even though the write succeeds. If no project has a `qualified_name`, stop and tell the user to create one in Basic Memory Cloud or connect their cloud account, then try again.
+First choose a project that exists only in Basic Memory Cloud. Call `list_memory_projects` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
+
+Don't use a project listed as `local` or `local+cloud`. When this machine has a local project with the same name as a cloud one, which is common because every local install creates `main`, a local Basic Memory server writes the note to the local copy however you address it, by name, workspace-qualified name, or ID. The write reports success, but the cloud never sees it, so the mission stays incomplete. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud (or connect their cloud account), then run `/memory-quest` again.
 
 With approval, call `write_note` once:
 
 - `title`: `Memory Master`
 - `directory`: `memory-quest`
 - `note_type`: `memory_master`
-- `project`: the chosen project's `qualified_name`
+- `project_id`: the chosen project's `external_id`
 - `metadata`: `{"memory_quest_code": "<the code exactly as the user gave it>", "memory_quest_guidance": "active"}`
 - `content`: the template below, unchanged except where it says to fill in
 - `overwrite`: `false`. Always pass it: when it's omitted, `write_note` follows the user's `write_note_overwrite_default` setting and could silently replace an existing note.
 
 Pass the code and guidance in `metadata`, never inside `content`. They must arrive as frontmatter fields for the cloud to recognize the write.
 
-If `write_note` reports that the note already exists, read it with `read_note`, passing the same `project`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `write_note` again with the same arguments, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
+If `write_note` reports that the note already exists, read it with `read_note`, passing the same `project_id`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `write_note` again with the same arguments, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
 
 ### 6. Tell the user what happens next
 
