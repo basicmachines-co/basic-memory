@@ -293,3 +293,57 @@ async def test_each_cached_read_reports_one_span_with_its_outcome(
     assert [span["attributes"]["cache.lookup.outcome"] for span in spans] == ["miss", "hit"]
     assert {span["attributes"]["cache.group"] for span in spans} == {"note"}
     assert {span["attributes"]["cache.operation"] for span in spans} == {"entity"}
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_project_retires_its_cached_reads(
+    cached_app: CachedApp, client: AsyncClient, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Rule: a hit is served before the route checks its project, so deletes must retire.
+
+    Otherwise a deleted project's notes stay readable from the cache for the TTL.
+    """
+    created = await client.post(
+        "/v2/projects/",
+        json={
+            "name": "doomed",
+            "path": str(tmp_path_factory.mktemp("doomed")),
+            "set_default": False,
+        },
+    )
+    assert created.status_code == 201, created.text
+    doomed_id = created.json()["new_project"]["external_id"]
+    doomed_url = f"/v2/projects/{doomed_id}"
+    note = await _create(client, doomed_url, "Doomed Note")
+    note_url = f"{doomed_url}/knowledge/entities/{note['external_id']}"
+    await client.get(note_url)
+    assert _status(await client.get(note_url)) == "HIT"
+
+    deleted = await client.delete(doomed_url, params={"delete_notes": "true"})
+    assert deleted.status_code == 200, deleted.text
+
+    after = await client.get(note_url)
+    assert after.status_code == 404
+    assert _status(after) != "HIT"
+
+
+@pytest.mark.asyncio
+async def test_query_values_are_keyed_structurally_and_only_when_declared(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: different requests never share an entry, and ignored parameters do not split one.
+
+    An encoded ``&`` inside a value must not collide with a real second parameter,
+    and a parameter the route does not read (a cache-busting nonce) must not create
+    a separate entry.
+    """
+    await _create(client, project_url, "Listed")
+    list_url = f"{project_url}/directory/list"
+
+    await client.get(list_url, params={"dir_name": "foo&page=2"})
+    decoded = await client.get(f"{list_url}?dir_name=foo&page=2")
+    assert _status(decoded) == "MISS"
+
+    await client.get(list_url, params={"dir_name": "/", "nonce": "1"})
+    other_nonce = await client.get(list_url, params={"dir_name": "/", "nonce": "2"})
+    assert _status(other_nonce) == "HIT"

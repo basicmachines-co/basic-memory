@@ -21,6 +21,8 @@ from typing import Any, override
 
 import logfire
 from fastapi import Depends, Request
+from fastapi.dependencies.utils import get_flat_dependant
+from fastapi.routing import APIRoute
 from redis_fastapi.cache import CacheHitException, cache
 
 from basic_memory.read_cache.contract import (
@@ -218,23 +220,46 @@ async def _cached_target(request: Request, group: GroupForRequest) -> _CachedTar
 
 
 async def _request_identity(request: Request) -> str:
-    """Everything besides tenant, user and versions that shapes the response."""
-    body = ""
+    """Everything besides tenant, user and versions that shapes the response.
+
+    Only the query parameters the route declares go into the key, serialized as
+    JSON so values can never run together (``a=b%26c=d`` is not ``a=b&c=d``), and
+    undeclared parameters (a cache-busting nonce) cannot multiply entries.
+    """
+    body = None
     if request.method == "QUERY":
         raw = await request.body()
         if raw:
-            body = json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":"))
-    query = "&".join(
-        f"{name}={value}" for name, value in sorted(request.query_params.multi_items())
-    )
+            body = json.loads(raw)
+    query = {
+        name: request.query_params.getlist(name)
+        for name in sorted(_declared_query_params(request))
+        if name in request.query_params
+    }
     workspace = current_workspace_permalink_context()
     return read_cache_request_digest(
-        request.url.path,
-        query,
-        body,
-        workspace.workspace_slug if workspace else "",
-        workspace.workspace_type if workspace else "",
+        json.dumps(
+            {
+                "path": request.url.path,
+                "query": query,
+                "body": body,
+                "workspace": [
+                    workspace.workspace_slug if workspace else "",
+                    workspace.workspace_type if workspace else "",
+                ],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     )
+
+
+def _declared_query_params(request: Request) -> frozenset[str]:
+    """Query parameter names the matched route and its dependencies read."""
+    route = request.scope["route"]
+    if not isinstance(route, APIRoute):
+        raise TypeError("cached_read is only valid on FastAPI API routes")
+    return frozenset(param.alias for param in get_flat_dependant(route.dependant).query_params)
 
 
 # --- Groups by route ---
