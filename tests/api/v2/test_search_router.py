@@ -62,7 +62,9 @@ async def test_search_entities(
     )
 
     # Search for the entity
-    response = await client.post(f"{v2_project_url}/search/", json={"text": "Searchable"})
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/search/", json={"text": "Searchable"}
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -74,22 +76,23 @@ async def test_search_entities(
 
 
 @pytest.mark.asyncio
-async def test_query_search_uses_same_contract_and_advertises_media_type(
+async def test_search_is_query_only_and_advertises_media_type(
     client: AsyncClient,
     app,
     v2_project_url: str,
 ):
-    """QUERY is canonical while POST remains the documented compatibility route."""
+    """QUERY is the only search method; OpenAPI cannot describe it, so it is unlisted."""
     response = await client.request(
         "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "safe search"},
     )
+    posted = await client.post(f"{v2_project_url}/search/", json={"text": "safe search"})
 
     assert response.status_code == 200
     assert response.headers["Accept-Query"] == "application/json"
-    search_path = app.openapi()["paths"]["/v2/projects/{project_id}/search/"]
-    assert set(search_path) == {"post"}
+    assert posted.status_code == 405
+    assert "/v2/projects/{project_id}/search/" not in app.openapi()["paths"]
 
 
 @pytest.mark.asyncio
@@ -116,7 +119,8 @@ async def test_search_with_pagination(
         )
 
     # Search with pagination
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "Search Entity"},
         params={"page": 1, "page_size": 3},
@@ -130,7 +134,8 @@ async def test_search_with_pagination(
     assert data["total_is_exact"] is True
     assert data["has_more"] is True
 
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "Search Entity"},
         params={"page": 2, "page_size": 3},
@@ -168,7 +173,8 @@ async def test_search_with_item_type_filter_returns_total(
             test_project, entity_data, entity_repository, search_service, file_service
         )
 
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"entity_types": ["entity"]},
         params={"page": 1, "page_size": 3},
@@ -206,8 +212,8 @@ async def test_search_by_permalink(
     )
 
     # Search by permalink
-    response = await client.post(
-        f"{v2_project_url}/search/", json={"permalink": "permalink-search"}
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/search/", json={"permalink": "permalink-search"}
     )
 
     assert response.status_code == 200
@@ -238,7 +244,9 @@ async def test_search_by_title(
     )
 
     # Search by title
-    response = await client.post(f"{v2_project_url}/search/", json={"title": "Unique Title"})
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/search/", json={"title": "Unique Title"}
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -269,8 +277,8 @@ async def test_search_with_type_filter(
         )
 
     # Search with type filter
-    response = await client.post(
-        f"{v2_project_url}/search/", json={"text": "Type", "note_types": ["note"]}
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/search/", json={"text": "Type", "note_types": ["note"]}
     )
 
     assert response.status_code == 200
@@ -301,7 +309,8 @@ async def test_search_with_date_filter(
     )
 
     # Search with date filter
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "Date Filtered", "after_date": "2024-01-01T00:00:00Z"},
     )
@@ -318,7 +327,7 @@ async def test_search_empty_query(
     v2_project_url: str,
 ):
     """Test search with empty query."""
-    response = await client.post(f"{v2_project_url}/search/", json={})
+    response = await client.request("QUERY", f"{v2_project_url}/search/", json={})
 
     # Empty query should still be valid (returns all)
     assert response.status_code in [200, 422]
@@ -345,7 +354,7 @@ async def test_search_whitespace_text_is_treated_as_empty(
         test_project, entity_data, entity_repository, search_service, file_service
     )
 
-    response = await client.post(f"{v2_project_url}/search/", json={"text": "   "})
+    response = await client.request("QUERY", f"{v2_project_url}/search/", json={"text": "   "})
 
     assert response.status_code == 200
     data = response.json()
@@ -360,7 +369,7 @@ async def test_search_invalid_project_id(
     client: AsyncClient,
 ):
     """Test searching with invalid project ID returns 404."""
-    response = await client.post("/v2/projects/999999/search/", json={"text": "test"})
+    response = await client.request("QUERY", "/v2/projects/999999/search/", json={"text": "test"})
 
     assert response.status_code == 404
 
@@ -400,7 +409,9 @@ async def test_v2_search_endpoints_use_project_id_not_name(
 ):
     """Test that v2 search endpoints reject string project names."""
     # Try to use project name instead of ID - should fail
-    response = await client.post(f"/v2/{test_project.name}/search/", json={"text": "test"})
+    response = await client.request(
+        "QUERY", f"/v2/{test_project.name}/search/", json={"text": "test"}
+    )
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]
@@ -419,7 +430,8 @@ async def test_search_router_returns_400_for_malformed_metadata_key(
     the server for a caller's typo. Runs against the real search service so
     the whole request path is what is being pinned.
     """
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "test", "metadata_filters": {key: "x"}},
     )
@@ -433,7 +445,8 @@ async def test_search_router_accepts_a_well_formed_nested_metadata_key(
     client: AsyncClient, v2_project_url
 ):
     """The nested dot path the malformed spellings are typos of still works."""
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "test", "metadata_filters": {"review.approved": "True"}},
     )
@@ -446,7 +459,8 @@ async def test_search_router_accepts_bare_and_multi_operator_filters(
     client: AsyncClient, v2_project_url
 ):
     """The production shapes that used to 400: a bare `gte` and a two-bound range."""
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"metadata_filters": {"started": {"gte": "2026-01-01", "$lt": "2026-02-01"}}},
     )
@@ -476,7 +490,8 @@ async def test_search_router_refuses_a_bad_operator_before_running_any_query(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RecordingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"metadata_filters": {"started": {"$ne": "2026-01-01"}}},
         )
@@ -515,7 +530,9 @@ async def test_search_failure_cancels_the_count_before_responding(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FailingSearchService()
     try:
-        response = await client.post(f"{v2_project_url}/search/", json={"text": "anything"})
+        response = await client.request(
+            "QUERY", f"{v2_project_url}/search/", json={"text": "anything"}
+        )
     finally:
         app.dependency_overrides.pop(get_search_service_v2_external, None)
 
@@ -539,7 +556,8 @@ async def test_search_router_returns_400_for_semantic_disabled(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": "vector"},
         )
@@ -565,7 +583,8 @@ async def test_search_router_returns_400_for_semantic_missing_deps(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": "hybrid"},
         )
@@ -591,7 +610,8 @@ async def test_search_router_returns_503_for_transient_reranker_failure(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": "hybrid"},
         )
@@ -617,7 +637,8 @@ async def test_search_router_returns_502_for_reranker_contract_failure(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": "hybrid"},
         )
@@ -643,7 +664,8 @@ async def test_search_router_returns_400_for_invalid_vector_query(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"title": "Root", "retrieval_mode": "vector"},
         )
@@ -691,7 +713,8 @@ async def test_semantic_search_uses_probe_pagination_without_count(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": retrieval_mode},
             params={"page": 1, "page_size": 2},
@@ -749,7 +772,8 @@ async def test_semantic_search_total_counts_only_proven_rows(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "semantic query", "retrieval_mode": "vector"},
             params={"page": page, "page_size": 2},
@@ -788,7 +812,8 @@ async def test_search_has_more_when_more_results_exist(
         )
 
     # Request page_size=2 — with 4 entities, has_more should be True
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "HasMore Entity"},
         params={"page": 1, "page_size": 2},
@@ -821,7 +846,8 @@ async def test_search_has_more_false_on_last_page(
         test_project, entity_data, entity_repository, search_service, file_service
     )
 
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "Solo Search Entity"},
         params={"page": 1, "page_size": 10},
@@ -862,7 +888,8 @@ async def test_search_result_includes_matched_chunk(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "pricing"},
         )
@@ -906,7 +933,8 @@ async def test_search_result_omits_matched_chunk_when_none(
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
-        response = await client.post(
+        response = await client.request(
+            "QUERY",
             f"{v2_project_url}/search/",
             json={"text": "general"},
         )

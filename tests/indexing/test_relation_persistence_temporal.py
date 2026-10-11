@@ -253,7 +253,7 @@ async def test_publisher_addresses_the_observation_rows_it_just_minted(
         ],
     )
 
-    assert published
+    assert published.generation_is_current
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
         rows = await temporal_repository.find_by_entity(session, sample_entity.id)
@@ -299,12 +299,16 @@ async def test_republishing_rebuilds_the_projection_against_the_new_row_ids(
         temporal=(_assertion("[2026-06-10,2026-07-27)"),),
     )
 
-    assert await publisher.publish(
-        entity_id=sample_entity.id, generation=1, relations=[], observations=[observation]
-    )
-    assert await publisher.publish(
-        entity_id=sample_entity.id, generation=1, relations=[], observations=[observation]
-    )
+    assert (
+        await publisher.publish(
+            entity_id=sample_entity.id, generation=1, relations=[], observations=[observation]
+        )
+    ).generation_is_current
+    assert (
+        await publisher.publish(
+            entity_id=sample_entity.id, generation=1, relations=[], observations=[observation]
+        )
+    ).generation_is_current
 
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
@@ -438,6 +442,6 @@ async def test_stale_observation_fence_publishes_no_valid_time(
         ],
     )
 
-    assert not published
+    assert not published.generation_is_current
     async with db.scoped_session(session_maker) as session:
         assert await temporal_repository.find_by_entity(session, sample_entity.id) == []

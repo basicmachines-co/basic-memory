@@ -10,6 +10,7 @@ import pytest
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.indexing.relation_persistence import RelationPublishOutcome
 from basic_memory.indexing.file_indexer import (
     FileIndexer,
     IndexCurrentMarkdownFileIndexer,
@@ -89,7 +90,9 @@ def _file_indexer(
     markdown_indexer.session_maker = _FakeSession
     markdown_indexer.entity_repository = entity_repository
     markdown_indexer.index_current_markdown_file = AsyncMock(return_value=index_result)
-    markdown_indexer.publish_relation_generation = AsyncMock(return_value=True)
+    markdown_indexer.publish_relation_generation = AsyncMock(
+        return_value=RelationPublishOutcome(generation_is_current=True)
+    )
     markdown_indexer.index_file = AsyncMock(
         return_value=FileIndexResult(
             indexed_bytes=0,
@@ -326,7 +329,10 @@ async def test_file_indexer_retries_when_generation_changes_before_relation_publ
         existing_entity,
     ]
     markdown_indexer.index_current_markdown_file.side_effect = [stale_file, current_file]
-    markdown_indexer.publish_relation_generation.side_effect = [False, True]
+    markdown_indexer.publish_relation_generation.side_effect = [
+        RelationPublishOutcome(generation_is_current=False),
+        RelationPublishOutcome(generation_is_current=True),
+    ]
     note_content_reconciler.reconcile.side_effect = [
         NoteContentReconciliationResult.current(3),
         NoteContentReconciliationResult.current(4),

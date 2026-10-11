@@ -13,7 +13,7 @@ from basic_memory.index.local_schedulers import (
     LocalSearchReindexScheduler,
     drain_background_tasks,
 )
-from basic_memory.read_cache import ReadCacheInvalidationStatus
+from basic_memory.read_cache import ReadCacheChange, ReadCacheInvalidationStatus
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
@@ -47,12 +47,23 @@ class StubSearchService:
 
 
 class RecordingReadCache:
+    """Records every invalidation, scoped or whole-project, in call order."""
+
     def __init__(self) -> None:
         self.invalidated_project_ids: list[str] = []
+        self.changes: list[ReadCacheChange] = []
+
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        self.invalidated_project_ids.append(project_id)
+        self.changes.append(change)
+        return ReadCacheInvalidationStatus.invalidated
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        self.invalidated_project_ids.append(project_id)
-        return ReadCacheInvalidationStatus.invalidated
+        return await self.invalidate(project_id, ReadCacheChange.whole_project())
 
 
 @pytest.mark.asyncio

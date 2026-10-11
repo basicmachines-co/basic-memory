@@ -525,8 +525,8 @@ async def test_project_route_results_carry_project_identity(
 ) -> None:
     project = corpus.projects[0]
 
-    response = await client.post(
-        f"/v2/projects/{project.external_id}/search/", json={"text": "nebula"}
+    response = await client.request(
+        "QUERY", f"/v2/projects/{project.external_id}/search/", json={"text": "nebula"}
     )
 
     assert response.status_code == 200, response.text

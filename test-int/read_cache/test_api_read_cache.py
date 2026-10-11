@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Protocol, override
+from typing import Any, Literal, Protocol, override
 from uuid import uuid4
 
 import pytest
@@ -36,15 +36,11 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.models import NoteContent, Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
+    PROJECT,
+    NoteGroup,
+    ReadCacheChange,
     ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
-    ReadCacheKey,
-    ReadCacheOperation,
-    read_cache_request_digest,
-)
-from basic_memory.read_cache.keys import (
-    redis_read_cache_generation_key,
-    redis_read_cache_keys,
 )
 from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository
@@ -150,8 +146,12 @@ class DestinationObservingRedisReadCache(RedisReadCache):
         self.project_ids: list[str] = []
 
     @override
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        status = await super().invalidate_project(project_id)
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        status = await super().invalidate(project_id, change)
         self.project_ids.append(project_id)
         self.destination_counts.append(
             sum(destination.exists() for destination in self.destination_paths)
@@ -177,8 +177,12 @@ class AcceptedMoveObservingRedisReadCache(RedisReadCache):
         self.accepted_counts: list[int] = []
 
     @override
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        status = await super().invalidate_project(project_id)
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        status = await super().invalidate(project_id, change)
         async with db.scoped_session(self.session_maker) as session:
             accepted = await session.scalar(
                 select(func.count())
@@ -204,24 +208,14 @@ class BlockingInvalidationRedisReadCache(RedisReadCache):
         self.release_invalidation = asyncio.Event()
 
     @override
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
         self.invalidation_started.set()
         await self.release_invalidation.wait()
-        return await super().invalidate_project(project_id)
-
-
-def _cache_key(
-    *,
-    project_id: str,
-    operation: ReadCacheOperation,
-    request: str,
-    request_context: tuple[str, ...] = (),
-) -> ReadCacheKey:
-    return ReadCacheKey(
-        project_id=project_id,
-        operation=operation,
-        request_digest=read_cache_request_digest(request, *request_context),
-    )
+        return await super().invalidate(project_id, change)
 
 
 def descendant_paths(node: DirectoryNode) -> set[str]:
@@ -232,28 +226,9 @@ def descendant_paths(node: DirectoryNode) -> set[str]:
     return paths
 
 
-async def _initialized_generation(
-    redis_cache: RedisCacheHarness,
-    project_id: str,
-    *,
-    request: str,
-) -> bytes | str:
-    await redis_cache.cache.lookup(
-        _cache_key(
-            project_id=project_id,
-            operation=ReadCacheOperation.entity,
-            request=request,
-        )
-    )
-    generation = await redis_cache.client.get(
-        redis_read_cache_generation_key(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            project_id=project_id,
-        )
-    )
-    assert generation is not None
-    return generation
+async def _project_version(redis_cache: RedisCacheHarness, project_id: str) -> str:
+    """The project epoch: it moves whenever the whole project's reads are retired."""
+    return await redis_cache.cache.versions(project_id, PROJECT)
 
 
 @pytest.mark.asyncio
@@ -267,11 +242,7 @@ async def test_cancelled_committed_create_finishes_real_redis_invalidation(
 ) -> None:
     """Cancellation after commit waits for invalidation before propagating."""
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-create",
-    )
+    generation_before = await _project_version(redis_cache, project_external_id)
     blocking_cache = BlockingInvalidationRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
@@ -324,11 +295,7 @@ async def test_cancelled_committed_create_finishes_real_redis_invalidation(
     with pytest.raises(asyncio.CancelledError):
         await request_task
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-create",
-    )
+    generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before
 
     _, session_maker = engine_factory
@@ -341,14 +308,13 @@ async def test_cancelled_committed_create_finishes_real_redis_invalidation(
 
 
 @pytest.mark.asyncio
-async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_invalidates(
-    app: FastAPI,
+async def test_entity_and_resolve_cache_then_freshened_write_invalidates(
+    cached_app: Any,
     client: AsyncClient,
     test_project: Project,
     redis_cache: RedisCacheHarness,
 ) -> None:
-    """Pre-write freshening invalidates even when the following write is rejected."""
-    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    """Pre-write freshening retires the note even when the following write is rejected."""
     project_external_id = str(test_project.external_id)
     project_url = f"/v2/projects/{project_external_id}"
 
@@ -363,69 +329,33 @@ async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_inva
     assert created_response.status_code == 202
     created = created_response.json()
     entity_id = created["external_id"]
+    entity_url = f"{project_url}/knowledge/entities/{entity_id}"
+    note = NoteGroup(entity_id)
     await drain_pending_materializations()
 
-    entity_response = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
-    resolve_request = EntityResolveRequest(identifier=created["permalink"])
-    resolve_response = await client.post(
-        f"{project_url}/knowledge/resolve",
-        json=resolve_request.model_dump(mode="json"),
-    )
-    workspace_resolve_response = await client.post(
-        f"{project_url}/knowledge/resolve",
-        headers={
-            WORKSPACE_SLUG_HEADER: "team-paul",
-            WORKSPACE_TYPE_HEADER: "organization",
-        },
-        json=resolve_request.model_dump(mode="json"),
-    )
-    resource_response = await client.get(f"{project_url}/resource/{entity_id}")
-
-    assert entity_response.status_code == 200
-    assert resolve_response.status_code == 200
-    assert workspace_resolve_response.status_code == 200
-    assert resource_response.status_code == 200
-    assert "Version one." in resource_response.text
-
-    keys = (
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.entity,
-            request=entity_id,
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.resolve,
-            request=resolve_request.model_dump_json(),
-            request_context=("", ""),
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.resolve,
-            request=resolve_request.model_dump_json(),
-            request_context=("team-paul", "organization"),
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.resource,
-            request=entity_id,
-        ),
-    )
-    for key in keys:
-        redis_keys = redis_read_cache_keys(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            key=key,
+    resolve_body = EntityResolveRequest(identifier=created["permalink"]).model_dump(mode="json")
+    workspace_headers = {
+        WORKSPACE_SLUG_HEADER: "team-paul",
+        WORKSPACE_TYPE_HEADER: "organization",
+    }
+    for _ in range(2):
+        entity_response = await client.get(entity_url)
+        resolve_response = await client.request(
+            "QUERY", f"{project_url}/knowledge/resolve", json=resolve_body
         )
-        assert await redis_cache.client.exists(redis_keys.data_key) == 1
+        workspace_resolve_response = await client.request(
+            "QUERY",
+            f"{project_url}/knowledge/resolve",
+            headers=workspace_headers,
+            json=resolve_body,
+        )
 
-    generation_key = redis_read_cache_generation_key(
-        prefix=redis_cache.prefix,
-        namespace=redis_cache.namespace,
-        project_id=project_external_id,
-    )
-    populated_generation = await redis_cache.client.get(generation_key)
-    assert populated_generation is not None
+    # The workspace permalink context is part of the key: both resolves were filled
+    # separately and both now hit.
+    assert entity_response.headers["x-redis-cache"] == "HIT"
+    assert resolve_response.headers["x-redis-cache"] == "HIT"
+    assert workspace_resolve_response.headers["x-redis-cache"] == "HIT"
+    note_before = await redis_cache.cache.versions(project_external_id, note)
 
     disk_path = Path(test_project.path) / created["file_path"]
     disk_path.write_text(
@@ -433,7 +363,7 @@ async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_inva
         encoding="utf-8",
     )
     rejected_response = await client.put(
-        f"{project_url}/knowledge/entities/{entity_id}",
+        entity_url,
         headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale-checksum"},
         json={
             "title": "Redis Cached Note",
@@ -442,42 +372,31 @@ async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_inva
         },
     )
     assert rejected_response.status_code == 409
-    freshened_generation = await redis_cache.client.get(generation_key)
-    assert freshened_generation is not None
-    assert freshened_generation != populated_generation
+    note_after_freshen = await redis_cache.cache.versions(project_external_id, note)
+    assert note_after_freshen != note_before
 
-    freshened_entity = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
-    freshened_resource = await client.get(f"{project_url}/resource/{entity_id}")
-    assert freshened_entity.status_code == 200
+    freshened_entity = await client.get(entity_url)
+    assert freshened_entity.headers["x-redis-cache"] == "MISS"
     assert "Externally edited" in freshened_entity.json()["content"]
-    assert freshened_resource.status_code == 200
+    freshened_resource = await client.get(f"{project_url}/resource/{entity_id}")
     assert "Externally edited" in freshened_resource.text
 
     edited_response = await client.patch(
-        f"{project_url}/knowledge/entities/{entity_id}",
-        json={
-            "operation": "append",
-            "content": "\n\nVersion two.",
-        },
+        entity_url,
+        json={"operation": "append", "content": "\n\nVersion two."},
     )
     assert edited_response.status_code == 202
-    invalidated_generation = await redis_cache.client.get(generation_key)
-    assert invalidated_generation is not None
-    assert invalidated_generation != freshened_generation
+    assert await redis_cache.cache.versions(project_external_id, note) != note_after_freshen
 
-    refreshed_entity = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
-    refreshed_resource = await client.get(f"{project_url}/resource/{entity_id}")
-    assert refreshed_entity.status_code == 200
+    refreshed_entity = await client.get(entity_url)
+    assert refreshed_entity.headers["x-redis-cache"] == "MISS"
     assert "Externally edited" in refreshed_entity.json()["content"]
     assert "Version two." in refreshed_entity.json()["content"]
-    assert refreshed_resource.status_code == 200
-    assert "Externally edited" in refreshed_resource.text
-    assert "Version two." in refreshed_resource.text
 
 
 @pytest.mark.asyncio
 async def test_directory_reads_cache_then_project_invalidation_refreshes(
-    app: FastAPI,
+    cached_app: Any,
     client: AsyncClient,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     test_project: Project,
@@ -515,7 +434,6 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
             ),
         )
 
-    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
     tree_url = f"{project_url}/directory/tree"
     structure_url = f"{project_url}/directory/structure"
     list_url = f"{project_url}/directory/list"
@@ -554,38 +472,6 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
         "Existing cached directory note",
     ]
 
-    cache_keys = (
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.directory_tree,
-            request="tree",
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.directory_structure,
-            request="structure",
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.directory_list,
-            request="/cache-surface",
-            request_context=("2", "", "", "1", "200"),
-        ),
-        _cache_key(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.directory_list,
-            request="/cache-surface",
-            request_context=("2", "", "title_desc", "1", "200"),
-        ),
-    )
-    for key in cache_keys:
-        redis_keys = redis_read_cache_keys(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            key=key,
-        )
-        assert await redis_cache.client.exists(redis_keys.data_key) == 1
-
     async with db.scoped_session(session_maker) as session:
         await repository.add(
             session,
@@ -607,6 +493,13 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
         list_url,
         params={**list_params, "sort": "title_desc"},
     )
+    for response in (
+        cached_tree_response,
+        cached_structure_response,
+        cached_list_response,
+        cached_title_desc_response,
+    ):
+        assert response.headers["x-redis-cache"] == "HIT"
     assert cached_tree_response.json() == first_tree_response.json()
     assert cached_structure_response.json() == first_structure_response.json()
     assert cached_list_response.json() == first_list_response.json()
@@ -626,20 +519,32 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
 
 
 @pytest.mark.asyncio
-async def test_non_markdown_resource_is_never_cached(
-    app: FastAPI,
+@pytest.mark.parametrize(
+    ("file_path", "content_type", "body"),
+    [
+        ("cache/plain.txt", "text/plain", "Plain text remains uncached."),
+        ("cache/resource-note.md", "text/markdown", "# Markdown resources stay uncached\n"),
+    ],
+)
+async def test_resources_are_never_cached(
+    cached_app: Any,
     client: AsyncClient,
     test_project: Project,
     redis_cache: RedisCacheHarness,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    file_path: str,
+    content_type: str,
+    body: str,
 ) -> None:
-    """Arbitrary files remain authoritative even when they fit under the payload cap."""
-    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    """Raw resources are served from storage on every read.
+
+    fastapi-redis-sdk 0.8.1 replays every hit as application/json, which would
+    corrupt a markdown or binary resource, so the resource route has no cache.
+    """
     project_external_id = str(test_project.external_id)
-    file_path = "cache/plain.txt"
     disk_path = Path(test_project.path) / file_path
     disk_path.parent.mkdir(parents=True, exist_ok=True)
-    disk_path.write_text("Plain text remains uncached.", encoding="utf-8")
+    disk_path.write_text(body, encoding="utf-8")
 
     repository = EntityRepository(project_id=test_project.id)
     _, session_maker = engine_factory
@@ -647,11 +552,11 @@ async def test_non_markdown_resource_is_never_cached(
         entity = await repository.add(
             session,
             Entity(
-                title="plain.txt",
+                title=Path(file_path).name,
                 note_type="file",
-                content_type="text/plain",
+                content_type=content_type,
                 file_path=file_path,
-                checksum="plain-checksum",
+                checksum=f"{file_path}-checksum",
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             ),
@@ -660,21 +565,15 @@ async def test_non_markdown_resource_is_never_cached(
     resource_url = f"/v2/projects/{project_external_id}/resource/{entity.external_id}"
     first = await client.get(resource_url)
     second = await client.get(resource_url)
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert second.text == "Plain text remains uncached."
 
-    key = _cache_key(
-        project_id=project_external_id,
-        operation=ReadCacheOperation.resource,
-        request=entity.external_id,
-    )
-    redis_keys = redis_read_cache_keys(
-        prefix=redis_cache.prefix,
-        namespace=redis_cache.namespace,
-        key=key,
-    )
-    assert await redis_cache.client.exists(redis_keys.data_key) == 0
+    assert first.status_code == 200
+    assert second.text == body
+    assert "x-redis-cache" not in second.headers
+    stored = {key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*")}
+    versions = {
+        key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:version:*")
+    }
+    assert stored == versions
 
 
 @pytest.mark.asyncio
@@ -721,11 +620,7 @@ async def test_project_root_change_invalidates_cached_markdown_resource(
     cached_response = await client.get(resource_url)
     assert cached_response.status_code == 200
     assert cached_response.text == "# Old project root\n"
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="project-root-change",
-    )
+    generation_before = await _project_version(redis_cache, project_external_id)
 
     move_response = await client.patch(
         project_url,
@@ -733,11 +628,7 @@ async def test_project_root_change_invalidates_cached_markdown_resource(
     )
 
     assert move_response.status_code == 200
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="project-root-change",
-    )
+    generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before
     refreshed_response = await client.get(resource_url)
     assert refreshed_response.status_code == 200
@@ -754,11 +645,7 @@ async def test_direct_index_failure_invalidates_real_redis(
     app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
     app.dependency_overrides[get_index_file_executor_v2_external] = FailingIndexFileExecutor
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="direct-index-failure",
-    )
+    generation_before = await _project_version(redis_cache, project_external_id)
     file_path = "cache/direct-index-failure.md"
     disk_path = Path(test_project.path) / file_path
     disk_path.parent.mkdir(parents=True, exist_ok=True)
@@ -774,11 +661,7 @@ async def test_direct_index_failure_invalidates_real_redis(
         )
 
     assert response.status_code == 500
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="direct-index-failure",
-    )
+    generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -818,11 +701,7 @@ async def test_partial_import_failure_invalidates_cached_resource_in_real_redis(
     cached_response = await client.get(resource_url)
     assert cached_response.status_code == 200
     assert cached_response.text == "# Before import\n"
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="partial-import-failure",
-    )
+    generation_before = await _project_version(redis_cache, project_external_id)
     app.dependency_overrides[get_chatgpt_importer_v2_external] = lambda: PartiallyFailingImporter(
         disk_path
     )
@@ -833,11 +712,7 @@ async def test_partial_import_failure_invalidates_cached_resource_in_real_redis(
     )
 
     assert response.status_code == 500
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="partial-import-failure",
-    )
+    generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before
     refreshed_response = await client.get(resource_url)
     assert refreshed_response.status_code == 200
@@ -898,7 +773,7 @@ async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
     test_project: Project,
     redis_cache: RedisCacheHarness,
 ) -> None:
-    """A resource-triggered note_content repair supersedes cached entity metadata."""
+    """A resource-triggered note_content repair retires that note's cached response."""
     app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
     project_external_id = str(test_project.external_id)
     file_path = "cache/read-repair.md"
@@ -928,10 +803,8 @@ async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
     cached_entity = await client.get(entity_url)
     assert cached_entity.status_code == 200
     assert cached_entity.json().get("db_version") is None
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="resource-read-repair",
+    generation_before = await redis_cache.cache.versions(
+        project_external_id, NoteGroup(str(entity.external_id))
     )
 
     query_service = NoteContentQueryService(
@@ -943,10 +816,8 @@ async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
     repaired_resource = await client.get(resource_url)
     assert repaired_resource.status_code == 200
     assert repaired_resource.text == "# Read repair\n\nCanonical file content.\n"
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="resource-read-repair",
+    generation_after = await redis_cache.cache.versions(
+        project_external_id, NoteGroup(str(entity.external_id))
     )
     assert generation_after != generation_before
 
@@ -994,10 +865,8 @@ async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
         namespace=redis_cache.namespace,
         prefix=redis_cache.prefix,
     )
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-read-repair",
+    generation_before = await redis_cache.cache.versions(
+        project_external_id, NoteGroup(str(entity.external_id))
     )
     transaction_committed = asyncio.Event()
     hold_after_commit = asyncio.Event()
@@ -1061,10 +930,8 @@ async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
     with pytest.raises(asyncio.CancelledError):
         await request_task
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-read-repair",
+    generation_after = await redis_cache.cache.versions(
+        project_external_id, NoteGroup(str(entity.external_id))
     )
     assert generation_after != generation_before
 
@@ -1115,11 +982,7 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
         destination_paths=destination_paths,
     )
     app.dependency_overrides[get_read_cache] = lambda: observing_cache
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="directory-move",
-    )
+    generation_before = await _project_version(redis_cache, project_external_id)
 
     response = await client.post(
         f"{project_url}/knowledge/move-directory",
@@ -1137,9 +1000,5 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
     assert (counts[0], counts[-1]) == (1, 2)
     assert counts == sorted(counts)
     assert all((Path(test_project.path) / path).exists() for path in destination_paths)
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="directory-move",
-    )
+    generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before

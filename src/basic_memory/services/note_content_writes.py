@@ -286,9 +286,7 @@ class NoteContentMutationService:
                     result.search_row.entity_id,
                 )
         try:
-            detached_note_ids = await self._publish_relation_generation(
-                result.relation_publication
-            )
+            detached_note_ids = await self._publish_relation_generation(result.relation_publication)
         except Exception:
             # Publication may have rewritten some links before failing, and which
             # notes it reached is unknown.

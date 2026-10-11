@@ -10,6 +10,7 @@ from loguru import logger
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.indexing.relation_persistence import RelationPublishOutcome
 from basic_memory.index.local_dependencies import (
     LocalIndexEntityRepository,
     LocalMarkdownFileIndexer,
@@ -75,8 +76,14 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
         ]
     )
     batch_indexer = Mock()
-    batch_indexer.publish_relation_generation = AsyncMock(return_value=True)
+    batch_indexer.publish_relation_generation = AsyncMock(
+        return_value=RelationPublishOutcome(generation_is_current=True)
+    )
     batch_indexer.resolve_relation_targets = AsyncMock()
+    # Inline resolution reads back which notes the links now resolve to.
+    batch_indexer.relation_generation_publisher.relation_repository.resolved_target_note_ids = (
+        AsyncMock(return_value=frozenset())
+    )
     batch_indexer.refresh_indexed_entity_search = AsyncMock()
     indexer = LocalMarkdownFileIndexer(
         file_service=cast(FileService, Mock()),

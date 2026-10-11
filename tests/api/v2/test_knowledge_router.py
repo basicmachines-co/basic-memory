@@ -70,7 +70,9 @@ async def test_resolve_identifier_by_permalink(
 
     # Now resolve it by permalink
     resolve_data = {"identifier": created_entity.permalink}
-    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/knowledge/resolve", json=resolve_data
+    )
 
     assert response.status_code == 200
     resolved = EntityResolveResponse.model_validate(response.json())
@@ -116,11 +118,13 @@ async def test_entity_and_link_resolution_use_distinct_project_contracts(
             ),
         )
 
-    entity_response = await client.post(
+    entity_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project::Cross Project Note", "strict": True},
     )
-    link_response = await client.post(
+    link_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/links/resolve",
         json={"identifier": "other-project::Cross Project Note", "strict": True},
     )
@@ -137,7 +141,9 @@ async def test_entity_and_link_resolution_use_distinct_project_contracts(
 async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url):
     """Test resolving a non-existent identifier returns 404."""
     resolve_data = {"identifier": "nonexistent/entity"}
-    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/knowledge/resolve", json=resolve_data
+    )
 
     assert response.status_code == 404
     assert "Entity not found" in response.json()["detail"]
@@ -157,7 +163,8 @@ async def test_resolve_identifier_ambiguous_title_returns_409(client: AsyncClien
         )
         assert create.status_code == 202
 
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "Duplicate Report", "strict": True},
     )
@@ -187,7 +194,9 @@ async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project
 
     # Try to resolve "nonexistent" - should NOT fuzzy match to "link-test"
     resolve_data = {"identifier": "nonexistent"}
-    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/knowledge/resolve", json=resolve_data
+    )
 
     # Must return 404, not a fuzzy match to "link-test"
     assert response.status_code == 404
@@ -217,7 +226,9 @@ async def test_resolve_link_with_source_path_no_fuzzy_match(client: AsyncClient,
         "source_path": "testing/nested/other-note.md",
         "strict": True,
     }
-    response = await client.post(f"{v2_project_url}/knowledge/links/resolve", json=resolve_data)
+    response = await client.request(
+        "QUERY", f"{v2_project_url}/knowledge/links/resolve", json=resolve_data
+    )
 
     # Must return 404, not a fuzzy match
     assert response.status_code == 404
@@ -2001,7 +2012,8 @@ async def test_index_file_indexes_file_on_disk(
     assert entity.file_path == "incoming/disk-note.md"
 
     # The file is now resolvable by path, which is what edit_note retries with
-    resolve_response = await client.post(
+    resolve_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "incoming/disk-note.md", "strict": True},
     )
@@ -2756,55 +2768,6 @@ async def test_get_entity_without_slice_params_has_no_slice_metadata(
     assert entity.content_total_lines is None
     assert entity.content_truncated is None
     assert entity.content_continue_line is None
-
-
-@pytest.mark.asyncio
-async def test_get_entity_slices_apply_after_cache_retrieval(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url,
-    session_maker,
-    fake_read_cache,
-):
-    """The read cache stores the pristine full note; every slice is per-request."""
-    external_id = await _seed_sliceable_note(
-        client,
-        v2_project_url,
-        test_project,
-        session_maker,
-        title="SliceCache",
-        content=_SLICEABLE_DOC,
-    )
-    url = f"{v2_project_url}/knowledge/entities/{external_id}"
-
-    # Warm the cache with a full read, then request two different slices: both
-    # are computed from the one stored full-note entry (slice params are not in
-    # the cache digest).
-    full_first = EntityResponseV2.model_validate((await client.get(url)).json())
-    assert full_first.content == _SLICEABLE_DOC
-    assert len(fake_read_cache.payloads) == 1
-    (stored_payload,) = fake_read_cache.payloads.values()
-
-    section_slice = EntityResponseV2.model_validate(
-        (await client.get(url, params={"section": "Ops"})).json()
-    )
-    assert section_slice.content == "## Ops\no1"
-
-    line_slice = EntityResponseV2.model_validate(
-        (await client.get(url, params={"lines": "8-9"})).json()
-    )
-    assert line_slice.content == "d1\nd2"
-
-    # The sliced reads shared the warm entry: no new key, and the stored value
-    # is still the pristine full note.
-    assert list(fake_read_cache.payloads.values()) == [stored_payload]
-    cached_entity = EntityResponseV2.model_validate_json(stored_payload)
-    assert cached_entity.content == _SLICEABLE_DOC
-
-    # A later full read still serves the complete document, not a cached slice.
-    full_after = EntityResponseV2.model_validate((await client.get(url)).json())
-    assert full_after.content == _SLICEABLE_DOC
-    assert full_after.section is None
 
 
 @pytest.mark.asyncio

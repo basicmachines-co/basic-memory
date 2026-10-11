@@ -12,6 +12,7 @@ from typing import Any, Protocol
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient, Response
+from logfire.testing import CaptureLogfire, capfire as capfire
 
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
@@ -29,6 +30,7 @@ class CachedApp(Protocol):
     app: FastAPI
     cache: RedisReadCache
 
+
 STATUS = "x-redis-cache"
 
 
@@ -36,7 +38,9 @@ def _status(response: Response) -> str | None:
     return response.headers.get(STATUS)
 
 
-async def _create(client: AsyncClient, project_url: str, title: str, body: str = "") -> dict[str, Any]:
+async def _create(
+    client: AsyncClient, project_url: str, title: str, body: str = ""
+) -> dict[str, Any]:
     response = await client.post(
         f"{project_url}/knowledge/entities",
         json={"title": title, "directory": "rules", "content": f"# {title}\n\n{body}"},
@@ -91,7 +95,9 @@ async def test_a_body_edit_retires_that_note_and_content_reads_only(
         await client.get(f"{project_url}/directory/structure")
         await _query(client, f"{project_url}/search/", search_body)
 
-    patch = await client.patch(edited_url, json={"operation": "append", "content": "\n\nVersion two."})
+    patch = await client.patch(
+        edited_url, json={"operation": "append", "content": "\n\nVersion two."}
+    )
     assert patch.status_code == 202, patch.text
     await drain_pending_materializations()
 
@@ -245,3 +251,45 @@ async def test_search_and_resolve_accept_query_only(
 
     assert search.status_code == 405
     assert resolve.status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_each_slice_of_a_note_is_its_own_entry(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: a hit returns exactly what the database would; slice params are in the key."""
+    note = await _create(client, project_url, "Sliced Note", "## Ops\no1\n\n## Dev\nd1")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+
+    full = await client.get(url)
+    section = await client.get(url, params={"section": "Ops"})
+    full_again = await client.get(url)
+    section_again = await client.get(url, params={"section": "Ops"})
+
+    assert (_status(full), _status(section)) == ("MISS", "MISS")
+    assert (_status(full_again), _status(section_again)) == ("HIT", "HIT")
+    assert full_again.json()["content"] == full.json()["content"]
+    assert section_again.json()["content"] == section.json()["content"]
+    assert section.json()["content"].strip() == "## Ops\no1"
+
+
+@pytest.mark.asyncio
+async def test_each_cached_read_reports_one_span_with_its_outcome(
+    cached_app: CachedApp, client: AsyncClient, project_url: str, capfire: CaptureLogfire
+) -> None:
+    """Rule: every cached read is observable as one span with outcome and group kind."""
+    note = await _create(client, project_url, "Observed Read")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+    capfire.exporter.clear()
+
+    await client.get(url)
+    await client.get(url)
+
+    spans = [
+        span
+        for span in capfire.exporter.exported_spans_as_dict()
+        if span["name"] == "read_cache.read_through"
+    ]
+    assert [span["attributes"]["cache.lookup.outcome"] for span in spans] == ["miss", "hit"]
+    assert {span["attributes"]["cache.group"] for span in spans} == {"note"}
+    assert {span["attributes"]["cache.operation"] for span in spans} == {"entity"}

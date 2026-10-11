@@ -97,7 +97,7 @@ async def test_non_404_failures_keep_their_cause(
     async def failing_resolve(client, url, json=None):
         raise ToolError("Authentication required: You need to authenticate to access 'x'")
 
-    monkeypatch.setattr(notes_module, "call_post", failing_resolve)
+    monkeypatch.setattr(notes_module, "call_query", failing_resolve)
     with pytest.raises(ResourceError, match="Authentication required"):
         await note_resource(project=test_project.name, path="anything")
 

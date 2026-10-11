@@ -165,35 +165,6 @@ class RelationGenerationPublisher:
         sections: Sequence[IndexedSection] = (),
     ) -> RelationPublishOutcome:
         """Publish one generation and report the other notes it detached links from."""
-        # Read before writing: the upsert below clears every target this source's
-        # links resolve to, so afterwards there is no record of which notes they were.
-        async with db.scoped_session(self.session_maker) as session:
-            detached_note_ids = await self.relation_repository.resolved_target_note_ids(
-                session,
-                entity_id=entity_id,
-            )
-        generation_is_current = await self._publish_generation(
-            entity_id=entity_id,
-            generation=generation,
-            relations=relations,
-            observations=observations,
-            sections=sections,
-        )
-        return RelationPublishOutcome(
-            generation_is_current=generation_is_current,
-            detached_note_ids=detached_note_ids,
-        )
-
-    async def _publish_generation(
-        self,
-        *,
-        entity_id: int,
-        generation: int,
-        relations: Sequence[IndexedRelation],
-        observations: Sequence[IndexedObservation],
-        sections: Sequence[IndexedSection],
-    ) -> bool:
-        """Return whether every statement retained ownership of ``generation``."""
         relations_by_identity: dict[tuple[str, str], IndexedRelation] = {}
         for relation in relations:
             if relation.target_id is not None and relation.target_id != entity_id:
@@ -221,6 +192,35 @@ class RelationGenerationPublisher:
                 )
             )
 
+        # Read before writing: the upsert below clears every target this source's
+        # links resolve to, so afterwards there is no record of which notes they were.
+        async with db.scoped_session(self.session_maker) as session:
+            detached_note_ids = await self.relation_repository.resolved_target_note_ids(
+                session,
+                entity_id=entity_id,
+            )
+        generation_is_current = await self._publish_relations(
+            entity_id=entity_id,
+            generation=generation,
+            ordered_relations=ordered_relations,
+            observations=observations,
+            sections=sections,
+        )
+        return RelationPublishOutcome(
+            generation_is_current=generation_is_current,
+            detached_note_ids=detached_note_ids,
+        )
+
+    async def _publish_relations(
+        self,
+        *,
+        entity_id: int,
+        generation: int,
+        ordered_relations: Sequence[AcceptedRelationWrite],
+        observations: Sequence[IndexedObservation],
+        sections: Sequence[IndexedSection],
+    ) -> bool:
+        """Return whether every statement retained ownership of ``generation``."""
         # Commit retry intent before the first independently committed chunk. If
         # any later statement fails, change detection will re-drive this source.
         async with db.scoped_session(self.session_maker) as session:
