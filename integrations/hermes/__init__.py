@@ -112,7 +112,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "Read a specific note by title, permalink, or memory:// URL. Returns the "
             "full markdown body with observations and relations. To read back a note "
             "written to another project, pass the same `project` or `project_id` "
-            "used for bm_write; otherwise the active project is used."
+            "used for bm_write; otherwise the active project is used. Pass "
+            "output_format 'json' to get the note's `checksum`, which bm_write "
+            "accepts as `expected_checksum` to replace only the revision you read."
         ),
         "parameters": {
             "type": "object",
@@ -120,6 +122,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "identifier": {
                     "type": "string",
                     "description": "Note title, permalink, or memory:// URL.",
+                },
+                "include_frontmatter": {
+                    "type": "boolean",
+                    "description": (
+                        "Return the raw note including its YAML frontmatter (default false)."
+                    ),
+                },
+                "output_format": {
+                    "type": "string",
+                    "enum": ["text", "json"],
+                    "description": (
+                        "'text' (default) returns the markdown. 'json' returns title, "
+                        "permalink, file_path, content, frontmatter, and checksum."
+                    ),
                 },
             },
             "required": ["identifier"],
@@ -133,7 +149,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "without this call saves nothing. The result returns the note's "
             "permalink: quote it when confirming the save, never a filename "
             "recalled from memory. Use clear titles and a folder "
-            "(e.g. 'projects', 'decisions', 'meetings')."
+            "(e.g. 'projects', 'decisions', 'meetings'). An existing note is "
+            "replaced only with overwrite=true; add expected_checksum (from "
+            "bm_read with output_format 'json') to replace only that revision."
         ),
         "parameters": {
             "type": "object",
@@ -145,6 +163,33 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Optional tags.",
+                },
+                "note_type": {
+                    "type": "string",
+                    "description": "Note type stored in frontmatter `type:` (default 'note').",
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "description": (
+                        "Extra frontmatter fields merged into the note. Nested "
+                        "objects are supported."
+                    ),
+                },
+                "overwrite": {
+                    "type": "boolean",
+                    "description": (
+                        "true replaces an existing note; false refuses when one "
+                        "exists. Omitted, Basic Memory's write_note_overwrite_default "
+                        "setting decides."
+                    ),
+                },
+                "expected_checksum": {
+                    "type": "string",
+                    "description": (
+                        "Requires overwrite=true. The checksum of the note as read; "
+                        "the note is replaced only while it is still that revision."
+                    ),
                 },
             },
             "required": ["title", "content", "folder"],
@@ -260,7 +305,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "bm_projects",
         "description": (
             "List all available Basic Memory projects (local + cloud). Returns "
-            "JSON with name and `external_id` (UUID) per project. Use the UUID "
+            "JSON with name, `external_id` (UUID), `source` ('local', 'cloud', or "
+            "'local+cloud'), and `qualified_name` per project. Use the UUID "
             "as `project_id` on other bm_* tools for unambiguous routing across "
             "cloud workspaces. Call this when the user names a project that "
             "isn't the active one, or when you need to disambiguate same-name "
@@ -530,7 +576,10 @@ def _extract_mcp_text(result: Any) -> str:
     # The `mcp` SDK is an unpinned dependency (see plugin.yaml), and its result
     # shapes (CallToolResult, content blocks) have shifted across versions — read
     # these fields defensively with getattr rather than direct attribute access.
-    is_error = bool(getattr(result, "isError", False))
+    # mcp 2.x (pinned in plugin.yaml) names the flag `is_error`; the wire
+    # field `isError` is not an attribute, so reading it would report every
+    # refused write (note exists, revision conflict) to the agent as success.
+    is_error = bool(getattr(result, "is_error", False))
     parts: list[str] = []
     for c in getattr(result, "content", None) or []:
         text = getattr(c, "text", None)
@@ -838,12 +887,21 @@ def _translate_args(
             out["page_size"] = int(args["limit"])
     elif hermes_tool == "bm_read":
         out["identifier"] = args["identifier"]
+        for key in ("include_frontmatter", "output_format"):
+            if args.get(key) is not None:
+                out[key] = args[key]
     elif hermes_tool == "bm_write":
         out["title"] = args["title"]
         out["content"] = args["content"]
         out["directory"] = args["folder"]
         if args.get("tags"):
             out["tags"] = list(args["tags"])
+        # Forwarded as given so BM's own validation applies (e.g. it rejects
+        # expected_checksum without overwrite=true). `is not None` keeps an
+        # explicit overwrite=false, which must reach BM to refuse a replace.
+        for key in ("note_type", "metadata", "overwrite", "expected_checksum"):
+            if args.get(key) is not None:
+                out[key] = args[key]
     elif hermes_tool == "bm_edit":
         out["identifier"] = args["identifier"]
         out["operation"] = args["operation"]

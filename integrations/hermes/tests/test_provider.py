@@ -114,6 +114,34 @@ def test_handle_tool_call_dispatches(bm):
     assert bm_args == {"project": "proj", "query": "hi", "page_size": 3}
 
 
+def test_bm_projects_returns_routing_fields_verbatim(bm, fake_result):
+    """bm_projects hands BM's JSON to the agent unchanged, so the fields a
+    skill selects a project by (source, external_id, qualified_name) survive."""
+    payload = {
+        "projects": [
+            {
+                "name": "getting-started",
+                "external_id": "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+                "source": "cloud",
+                "qualified_name": "personal/getting-started",
+            }
+        ]
+    }
+    p = bm.BasicMemoryProvider()
+    p._initialized = True
+    p._project = "proj"
+    actor = MagicMock()
+    actor.call.side_effect = lambda *_a, **_k: bm._extract_mcp_text(
+        fake_result([json.dumps(payload)])
+    )
+    p._actor = actor
+
+    out = json.loads(p.handle_tool_call("bm_projects", {}))
+
+    assert actor.call.call_args[0][:2] == ("list_memory_projects", {"output_format": "json"})
+    assert out == payload
+
+
 def test_handle_tool_call_missing_arg(bm):
     p = bm.BasicMemoryProvider()
     p._initialized = True

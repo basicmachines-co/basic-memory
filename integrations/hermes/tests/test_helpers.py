@@ -229,6 +229,79 @@ def test_translate_write_no_tags(bm):
     assert args["directory"] == "F"
 
 
+# Memory Quest Mission 8 drives these exact fields through bm_write/bm_read:
+# a create with overwrite=false, then a checksum-guarded replace.
+_CLOUD_PROJECT_ID = "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55"
+
+
+def test_translate_write_forwards_note_fields_and_project_id(bm):
+    tool, args = bm._translate_args(
+        "bm_write",
+        {
+            "title": "Memory Master",
+            "content": "body",
+            "folder": "memory-quest",
+            "note_type": "memory_master",
+            "metadata": {"memory_quest_code": "MQ-1", "memory_quest_guidance": "active"},
+            "overwrite": True,
+            "expected_checksum": "abc123",
+            "project_id": _CLOUD_PROJECT_ID,
+        },
+        "proj",
+    )
+    assert tool == "write_note"
+    assert args == {
+        "project_id": _CLOUD_PROJECT_ID,
+        "title": "Memory Master",
+        "content": "body",
+        "directory": "memory-quest",
+        "note_type": "memory_master",
+        "metadata": {"memory_quest_code": "MQ-1", "memory_quest_guidance": "active"},
+        "overwrite": True,
+        "expected_checksum": "abc123",
+    }
+
+
+def test_translate_write_keeps_explicit_overwrite_false(bm):
+    """overwrite=false must reach BM: omitted, BM falls back to the user's
+    write_note_overwrite_default and could replace the note."""
+    _, args = bm._translate_args(
+        "bm_write",
+        {"title": "T", "content": "C", "folder": "F", "overwrite": False},
+        "proj",
+    )
+    assert args["overwrite"] is False
+
+
+def test_translate_read_forwards_frontmatter_and_output_format(bm):
+    tool, args = bm._translate_args(
+        "bm_read",
+        {
+            "identifier": "memory-quest/memory-master",
+            "include_frontmatter": True,
+            "output_format": "json",
+            "project_id": _CLOUD_PROJECT_ID,
+        },
+        "proj",
+    )
+    assert tool == "read_note"
+    assert args == {
+        "project_id": _CLOUD_PROJECT_ID,
+        "identifier": "memory-quest/memory-master",
+        "include_frontmatter": True,
+        "output_format": "json",
+    }
+
+
+def test_note_tool_schemas_expose_passthrough_fields(bm):
+    schemas = {s["name"]: s["parameters"]["properties"] for s in bm.TOOL_SCHEMAS}
+    for key in ("note_type", "metadata", "overwrite", "expected_checksum", "project_id"):
+        assert key in schemas["bm_write"], key
+    for key in ("include_frontmatter", "output_format", "project_id"):
+        assert key in schemas["bm_read"], key
+    assert schemas["bm_read"]["output_format"]["enum"] == ["text", "json"]
+
+
 def test_translate_edit_minimal(bm):
     tool, args = bm._translate_args(
         "bm_edit",

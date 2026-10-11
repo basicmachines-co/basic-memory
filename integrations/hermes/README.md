@@ -64,14 +64,14 @@ Ten tools (curated subset of Basic Memory's MCP surface):
 | Tool | Use |
 |---|---|
 | `bm_search` | Semantic + full-text search; **call this before answering** |
-| `bm_read` | Fetch a note by title, permalink, or `memory://` URL |
-| `bm_write` | Create a new note (capture decisions, meeting notes, insights) |
+| `bm_read` | Fetch a note by title, permalink, or `memory://` URL; `output_format: "json"` adds frontmatter and the revision `checksum` |
+| `bm_write` | Create a new note (capture decisions, meeting notes, insights); accepts `note_type`, `metadata`, `overwrite`, and `expected_checksum` |
 | `bm_edit` | Append, prepend, find/replace, replace-section |
 | `bm_context` | Navigate via `memory://` URLs to find related notes |
 | `bm_delete` | Delete a note |
 | `bm_move` | Move a note to a different folder |
 | `bm_recent` | List notes updated recently (default `7d`; accepts natural-language timeframes) |
-| `bm_projects` | List available projects with their UUIDs (for cross-project routing) |
+| `bm_projects` | List available projects with their UUIDs, `source`, and qualified names (for cross-project routing) |
 | `bm_workspaces` | List Basic Memory Cloud workspaces |
 
 Every read/write tool also accepts optional `project` / `project_id` for per-call routing — write or read against a project other than the configured one without reconfiguring the plugin.
