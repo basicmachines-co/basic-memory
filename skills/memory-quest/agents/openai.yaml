@@ -1,0 +1,9 @@
+# Hand-written so ChatGPT and Codex show a clean card, and so the skill never
+# starts on its own: it saves a note, and only after the user asks for it.
+# https://learn.chatgpt.com/docs/build-skills
+interface:
+  display_name: "Memory Quest"
+  short_description: "Finish Memory Quest Mission 8 by saving your Memory Master note."
+  brand_color: "#2563EB"
+policy:
+  allow_implicit_invocation: false

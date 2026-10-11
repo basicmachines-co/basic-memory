@@ -1,6 +1,6 @@
 ---
 name: memory-quest
-description: "Finish Basic Memory's Memory Quest (Mission 8): confirm this assistant reaches the user's Basic Memory Cloud account and starts work from Basic Memory, then — with approval — save a Memory Master note carrying the verification code from app.basicmemory.com/memory-quest. Use when the user runs /memory-quest or asks to verify their assistant for Memory Quest."
+description: "Finish Memory Quest Mission 8: confirm this assistant reaches Basic Memory Cloud and starts from Basic Memory, then, with approval, save a Memory Master note with the user's verification code."
 ---
 
 # Memory Quest
@@ -15,6 +15,8 @@ The note write *is* the verification. There is no other endpoint to call and not
 - The user asks to verify their assistant, finish Mission 8, or become a Memory Master
 - Memory Quest in the web app pointed them here
 
+When you tell the user to run Memory Quest again, use their host's form: `/memory-quest` in Claude Code, `$memory-quest` in Codex, or just asking for it in a chat app.
+
 Take no task context from the invocation. This skill checks setup; it does not need to find memory relevant to a task.
 
 ## Steps
@@ -25,7 +27,7 @@ Work through these in order. Stop at the first step that fails, explain what's m
 
 Call `list_workspaces`.
 
-- If it fails, Basic Memory isn't connected to this assistant. Tell the user to connect it and run `/memory-quest` again.
+- If it fails, Basic Memory isn't connected to this assistant. Tell the user to connect it and run Memory Quest again.
 - If the only workspace has `tenant_id` `personal`, this assistant is connected to a local-only Basic Memory. Memory Quest lives in Basic Memory Cloud: tell the user to connect their cloud account (`bm cloud login` for the CLI, or the Basic Memory connector in a chat app) and try again.
 - Otherwise the connection works. You may show the user one line about what you can see, such as the workspace names. That is a courtesy, not evidence.
 
@@ -36,7 +38,7 @@ Mission 8 is about Basic Memory being this assistant's starting point, so check 
 - Your context contains the Basic Memory session briefing — a section headed `# Basic Memory — session context`, injected at session start by the Basic Memory plugin for Claude Code or Codex.
 - Your persistent instructions (custom instructions, project instructions, or an agent context file) tell you to use Basic Memory at the start of tasks to find relevant context.
 
-If neither is true, stop. Tell the user to install the Basic Memory plugin for their assistant, or to save the memory routine from the Memory Quest panel in their assistant's instructions, then start a fresh conversation and run `/memory-quest` again. Do not report the guidance as active when it isn't: that report is the one part of this check the server cannot see for itself.
+If neither is true, stop. Tell the user to install the Basic Memory plugin for their assistant, or to save the memory routine from the Memory Quest panel in their assistant's instructions, then start a fresh conversation and run Memory Quest again. Do not report the guidance as active when it isn't: that report is the one part of this check the server cannot see for itself.
 
 ### 3. Ask for the verification code
 
@@ -48,13 +50,13 @@ Accept the code as the user gives it; case and separators don't matter. If what 
 
 Say plainly what you are about to do: save a note titled "Memory Master" to their Basic Memory, and that saving it is what completes Mission 8. Ask for approval.
 
-If they decline, stop. Say that the mission stays incomplete and they can run `/memory-quest` again any time.
+If they decline, stop. Say that the mission stays incomplete and they can run Memory Quest again any time.
 
 ### 5. Save the Memory Master note
 
 First choose a project that exists only in Basic Memory Cloud. Call `list_memory_projects` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
 
-Don't use a project listed as `local` or `local+cloud`. When this machine has a local project with the same name as a cloud one, which is common because every local install creates `main`, a local Basic Memory server writes the note to the local copy however you address it, by name, workspace-qualified name, or ID. The write reports success, but the cloud never sees it, so the mission stays incomplete. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud (or connect their cloud account), then run `/memory-quest` again.
+Don't use a project listed as `local` or `local+cloud`. When this machine has a local project with the same name as a cloud one, which is common because every local install creates `main`, a local Basic Memory server writes the note to the local copy however you address it, by name, workspace-qualified name, or ID. The write reports success, but the cloud never sees it, so the mission stays incomplete. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud (or connect their cloud account), then run Memory Quest again.
 
 With approval, call `write_note` once:
 
@@ -72,7 +74,7 @@ If `write_note` reports that the note already exists, read it with `read_note`, 
 
 ### 6. Tell the user what happens next
 
-Tell them the note is saved and to open Memory Quest in the web app, where Mission 8 shows complete once the cloud has processed it. You cannot see the award yourself, so don't claim it happened. If Memory Quest still shows Mission 8 as current after a minute, the usual cause is an expired or replaced code: get a new code and run `/memory-quest` again.
+Tell them the note is saved and to open Memory Quest in the web app, where Mission 8 shows complete once the cloud has processed it. You cannot see the award yourself, so don't claim it happened. If Memory Quest still shows Mission 8 as current after a minute, the usual cause is an expired or replaced code: get a new code and run Memory Quest again.
 
 ## Memory Master template
 
