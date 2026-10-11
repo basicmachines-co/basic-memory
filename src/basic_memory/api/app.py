@@ -1,5 +1,6 @@
 """FastAPI application for basic-memory knowledge graph API."""
 
+import importlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -10,6 +11,8 @@ from loguru import logger
 from basic_memory import __version__ as version
 from basic_memory.api.container import ApiContainer, set_container
 from redis_fastapi.cache import add_redis_caching
+
+from basic_memory.read_cache.policy import READ_CACHE_MAX_PAYLOAD_BYTES
 from basic_memory.api.v2.routers import (
     accepted_content_router as v2_accepted_content,
     knowledge_router as v2_knowledge,
@@ -105,6 +108,11 @@ app = FastAPI(
 # workspace middleware so capture runs inside it; cached routes opt in with
 # ``cached_read`` dependencies, and every other response passes straight through.
 add_redis_caching(app)
+# fastapi-redis-sdk reads this module constant on every capture and defaults it
+# to 10 MiB. The package re-exports a function named ``cache``, which shadows the
+# submodule on attribute access, so the module is fetched by name.
+redis_fastapi_cache_module = importlib.import_module("redis_fastapi.cache")
+redis_fastapi_cache_module.MAX_CACHEABLE_BODY_SIZE = READ_CACHE_MAX_PAYLOAD_BYTES
 
 
 @app.middleware("http")

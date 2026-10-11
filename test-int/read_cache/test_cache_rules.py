@@ -7,6 +7,7 @@ reports whether a response came from the cache.
 
 from __future__ import annotations
 
+import importlib
 from typing import Any, Protocol
 
 import pytest
@@ -16,6 +17,7 @@ from logfire.testing import CaptureLogfire, capfire as capfire
 
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
+from basic_memory.read_cache.policy import READ_CACHE_MAX_PAYLOAD_BYTES
 from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
 
 pytestmark = pytest.mark.redis
@@ -347,3 +349,32 @@ async def test_query_values_are_keyed_structurally_and_only_when_declared(
     await client.get(list_url, params={"dir_name": "/", "nonce": "1"})
     other_nonce = await client.get(list_url, params={"dir_name": "/", "nonce": "2"})
     assert _status(other_nonce) == "HIT"
+
+
+@pytest.mark.asyncio
+async def test_oversized_responses_are_served_but_not_stored(
+    cached_app: CachedApp,
+    client: AsyncClient,
+    project_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule: responses over the payload cap are answered normally and never cached.
+
+    The app sets the SDK's cap to READ_CACHE_MAX_PAYLOAD_BYTES. Building a real
+    multi-megabyte note is slow, so this test lowers the cap (an injected edge case)
+    to exercise the same path with a small note.
+    """
+    redis_fastapi_cache = importlib.import_module("redis_fastapi.cache")
+
+    assert redis_fastapi_cache.MAX_CACHEABLE_BODY_SIZE == READ_CACHE_MAX_PAYLOAD_BYTES
+
+    note = await _create(client, project_url, "Too Big", "x" * 600)
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+    monkeypatch.setattr(redis_fastapi_cache, "MAX_CACHEABLE_BODY_SIZE", 256)
+
+    first = await client.get(url)
+    second = await client.get(url)
+
+    assert first.status_code == 200
+    assert "x" * 600 in first.json()["content"]
+    assert _status(second) != "HIT"
