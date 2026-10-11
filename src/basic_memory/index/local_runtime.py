@@ -177,11 +177,9 @@ class LocalInlineStorageEventResultRecorder:
             entity_id=result.entity_id,
         )
 
-        if result.status == IndexFileJobStatus.processed and self.read_cache is not None:
-            await finish_project_read_cache_invalidation(
-                self.read_cache,
-                self.project.project_external_id,
-            )
+        # The file indexer is wrapped in InvalidatingIndexFileExecutor, which already
+        # retired exactly what this file changed; a project-wide clear here would
+        # evict every unrelated note on each watched edit.
 
         # --- Relation repair ---
         # Back-resolve forward references now that this file is indexed.
@@ -193,9 +191,9 @@ class LocalInlineStorageEventResultRecorder:
             )
         )
         if relation_request is not None:
-            # Relation repair changes cached entity payloads after indexing.
-            # A second generation bump closes the fill window opened by the
-            # first post-index invalidation, even after partial failure.
+            # Relation repair changes cached entity payloads after indexing, so
+            # the notes it resolved are retired too, or the whole project if it
+            # fails partway.
             invalidation_scope = (
                 invalidate_recorded_change(
                     self.read_cache,

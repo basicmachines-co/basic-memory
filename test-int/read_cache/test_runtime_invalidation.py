@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol, cast, override
+from typing import Protocol, cast, override
 
 import pytest
 from redis.asyncio import Redis
@@ -597,14 +597,65 @@ async def test_partial_search_reindex_invalidates_real_redis(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("completion", ["index", "delete"])
-async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
+async def test_watcher_index_completion_leaves_unrelated_reads_cached(
     test_project: Project,
     redis_cache: RedisCacheHarness,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
-    completion: Literal["index", "delete"],
 ) -> None:
-    """Cancellation after a durable watcher event waits for invalidation."""
+    """A watched body edit does not clear the project on completion.
+
+    InvalidatingIndexFileExecutor already retired what the file changed, and a
+    relation pass that resolves nothing retires nothing, so the project epoch
+    that every other cached read depends on must stay put.
+    """
+    project_external_id = str(test_project.external_id)
+    generation_before = await _current_generation(redis_cache, project_external_id)
+    recorder = LocalInlineStorageEventResultRecorder(
+        project=ProjectRuntimeReference.from_project(test_project),
+        search_service=cast(LocalIndexSearchService, object()),
+        relation_cleanup_search_refresher=cast(
+            ProjectIndexMovedEntitySearchRefresher,
+            object(),
+        ),
+        relation_runtime=cast(RelationResolutionRuntime, _NoUnresolvedRelations()),
+        session_maker=engine_factory[1],
+        index_embeddings=False,
+        read_cache=redis_cache.cache,
+    )
+
+    await recorder.index_file_completed(
+        _index_operation("notes/watched-edit.md"),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed",
+            entity_id=42,
+        ),
+    )
+
+    assert await _current_generation(redis_cache, project_external_id) == generation_before
+
+
+class _NoUnresolvedRelations:
+    """A relation runtime with nothing left to resolve."""
+
+    async def count_unresolved_relations(self) -> int:
+        return 0
+
+    async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
+        return set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_watcher_delete_completion_finishes_real_redis_invalidation(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """Cancellation after a durable watcher delete waits for invalidation.
+
+    Index completion no longer invalidates; a cancelled index commit is covered
+    by test_cancelled_watcher_index_commit_finishes_real_redis_invalidation.
+    """
     project_external_id = str(test_project.external_id)
     generation_before = await _current_generation(redis_cache, project_external_id)
     blocking_cache = BlockingInvalidationRedisReadCache(
@@ -625,48 +676,38 @@ async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
         read_cache=blocking_cache,
     )
 
-    if completion == "index":
-        completion_call = recorder.index_file_completed(
-            _index_operation("notes/cancelled-index.md"),
-            IndexFileJobResult(
-                status=IndexFileJobStatus.processed,
-                reason="file indexed",
-                entity_id=42,
+    deleted_entity = Entity(
+        id=42,
+        project_id=test_project.id,
+        external_id="cancelled-watcher-delete",
+        title="Cancelled watcher delete",
+        permalink="notes/cancelled-watcher-delete",
+        note_type="note",
+        content_type="text/markdown",
+        file_path="notes/cancelled-delete.md",
+        checksum="cancelled-watcher-delete-checksum",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    completion_call = recorder.delete_file_completed(
+        RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.delete_file,
+            storage_event=_move_event(
+                STORAGE_OBJECT_DELETED_EVENT,
+                deleted_entity.file_path,
             ),
-        )
-    else:
-        deleted_entity = Entity(
-            id=42,
-            project_id=test_project.id,
-            external_id="cancelled-watcher-delete",
-            title="Cancelled watcher delete",
-            permalink="notes/cancelled-watcher-delete",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="notes/cancelled-delete.md",
-            checksum="cancelled-watcher-delete-checksum",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-        completion_call = recorder.delete_file_completed(
-            RuntimeStorageEventOperation(
-                kind=RuntimeStorageEventOperationKind.delete_file,
-                storage_event=_move_event(
-                    STORAGE_OBJECT_DELETED_EVENT,
-                    deleted_entity.file_path,
-                ),
-                relative_path=deleted_entity.file_path,
+            relative_path=deleted_entity.file_path,
+        ),
+        ExternalFileDeleteResult(
+            plan=RuntimeExternalFileDeletePlan.from_existing_entity(
+                deleted_entity,
+                file_path=deleted_entity.file_path,
+                object_exists=False,
             ),
-            ExternalFileDeleteResult(
-                plan=RuntimeExternalFileDeletePlan.from_existing_entity(
-                    deleted_entity,
-                    file_path=deleted_entity.file_path,
-                    object_exists=False,
-                ),
-                entity_deleted=True,
-                deleted_entity=deleted_entity,
-            ),
-        )
+            entity_deleted=True,
+            deleted_entity=deleted_entity,
+        ),
+    )
 
     completion_task = asyncio.create_task(completion_call)
     async with asyncio.timeout(5):
