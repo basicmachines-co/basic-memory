@@ -124,7 +124,7 @@ In Basic Memory Cloud:
 
 - `write_note` and `edit_note` list the components that will render as errors,
   under **Component problems** (a `component_problems` field in JSON output).
-  The note is saved either way; fix the problems with `edit_note`.
+  The problems never block the write; fix them in the note's Markdown.
 - `read_note(view="text")` returns the note as a reader sees it: each component
   as plain Markdown, with live queries run now. Use it to confirm a live view
   has rows before you quote its numbers. Edit from the default view, which is
