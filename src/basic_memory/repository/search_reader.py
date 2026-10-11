@@ -846,6 +846,14 @@ class SemanticSearch:
                 materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
             else:
                 materialized.append(replace(row, matched_chunk_text=row.content_snippet))
+        # Every byte of note text a search moves is read here, so this is its budget.
+        logfire.info(
+            "search.materialize",
+            rows=len(materialized),
+            excerpt_rows=len(excerpt_keys),
+            snippet_chars=sum(len(row.content_snippet or "") for row in materialized),
+            excerpt_chars=sum(len(text) for text in chunk_texts.values()),
+        )
         return materialized
 
     async def _materialize_unread(
