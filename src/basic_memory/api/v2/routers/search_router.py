@@ -225,10 +225,12 @@ async def search(
                 else:
                     # Trigger: semantic modes would need another vector/hybrid retrieval to count.
                     # Why: search requests should not pay for a second semantic pass.
-                    # Outcome: preserve probe pagination, leave total at 0, and mark it unknown.
+                    # Outcome: preserve probe pagination and report the rows seen through
+                    #   this page as a lower bound, marked inexact.
                     has_more = len(results) > page_size
                     if has_more:
                         results = results[:page_size]
+                    total = offset + len(results)
 
             with logfire.span(
                 "api.search.search.hydrate_results",

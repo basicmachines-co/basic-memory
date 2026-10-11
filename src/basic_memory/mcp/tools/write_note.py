@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+import re
 import textwrap
 from collections.abc import Sequence
 from typing import (
@@ -74,6 +75,10 @@ SIMILAR_NOTES_PROBE_CHARS = 900
 # top, a duplicate and a closely related note still share one band, so ranking decides.
 # The number holds for that model only; see similar_notes_min_similarity.
 SIMILAR_NOTES_MIN_SIMILARITY = 0.70
+# Most linked notes the probe makes room for; see _find_similar_notes.
+SIMILAR_NOTES_LINKED_ALLOWANCE = 10
+# A wikilink target, without its alias: [[Target]] or [[Target|alias]].
+_WIKILINK_TARGET = re.compile(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -89,6 +94,11 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     """Build the text used to look for existing notes near a freshly written one."""
     body = remove_frontmatter(content)
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def _linked_targets(content: str) -> frozenset[str]:
+    """Return the casefolded wikilink targets a note's content already names."""
+    return frozenset(match.strip().casefold() for match in _WIKILINK_TARGET.findall(content))
 
 
 def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
@@ -137,12 +147,15 @@ def _collapse_similar_notes(
     *,
     exclude_file_path: str,
     exclude_permalink: str | None,
+    linked_targets: frozenset[str],
     limit: int,
 ) -> list[SimilarNote]:
     """Drop the note that was just written and keep one row per remaining note.
 
     The new note's own row may or may not be indexed yet — vectors publish in the
-    background — so it is removed when present rather than expected.
+    background — so it is removed when present rather than expected. Notes the new
+    note already links to are dropped too: the caller has related them on purpose,
+    which is the advisory's "related but distinct" answer given in advance.
     """
     similar_notes: list[SimilarNote] = []
     seen_paths: set[str] = set()
@@ -150,7 +163,10 @@ def _collapse_similar_notes(
         is_new_note = result.file_path == exclude_file_path or (
             exclude_permalink is not None and result.permalink == exclude_permalink
         )
-        if is_new_note or result.file_path in seen_paths:
+        is_linked = result.title.casefold() in linked_targets or (
+            result.permalink is not None and result.permalink.casefold() in linked_targets
+        )
+        if is_new_note or is_linked or result.file_path in seen_paths:
             continue
         seen_paths.add(result.file_path)
         similar_notes.append(
@@ -172,14 +188,19 @@ async def _find_similar_notes(
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
     query = similar_notes_query(title, content, min_similarity=min_similarity)
-    # One extra row leaves room for the new note's own hit before collapsing.
+    linked_targets = _linked_targets(content)
+    # Extra rows leave room for the new note's own hit and for the notes it links to,
+    # which are dropped before collapsing. The linked allowance is capped so a hub note
+    # with hundreds of links does not turn the probe into a large search.
+    linked_allowance = min(len(linked_targets), SIMILAR_NOTES_LINKED_ALLOWANCE)
     response = await search_client.search(
-        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
+        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1 + linked_allowance
     )
     return _collapse_similar_notes(
         response.results,
         exclude_file_path=exclude_file_path,
         exclude_permalink=exclude_permalink,
+        linked_targets=linked_targets,
         limit=SIMILAR_NOTES_LIMIT,
     )
 

@@ -19,7 +19,7 @@ from basic_memory.repository.postgres_search_repository import PostgresSearchRep
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import ensure_timezone_aware, generate_permalink
 from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 
 if TYPE_CHECKING:
@@ -43,6 +43,17 @@ class ContextResultRow:
     content: Optional[str] = None
     category: Optional[str] = None
     entity_id: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        """Make created_at timezone-aware, as SearchIndexRow does for primary results.
+
+        The related-items query returns raw timestamps (a naive datetime, or a string on
+        SQLite), so without this a primary result and its related rows report the same
+        clock in two different shapes.
+        """
+        if isinstance(self.created_at, str):
+            self.created_at = datetime.fromisoformat(self.created_at)
+        self.created_at = ensure_timezone_aware(self.created_at)
 
 
 @dataclass
@@ -187,10 +198,13 @@ class ContextService:
 
                         if not primary and self.link_resolver:
                             async with db.scoped_session(self._require_session_maker()) as session:
+                                # strict=True: a title shared by several notes raises
+                                #   AmbiguousIdentifierError instead of picking one, the
+                                #   same refusal read_note gives for that title.
                                 entity = await self.link_resolver.resolve_link(
                                     path,
                                     use_search=False,
-                                    strict=False,
+                                    strict=True,
                                     session=session,
                                 )
                             if entity:

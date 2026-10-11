@@ -427,7 +427,8 @@ async def test_filters_narrow_the_scope_and_results_carry_project_identity(
     assert row["observation_id"] == OBSERVATION_IDS[0]
     assert row["entity"] == "notes/shared"
     assert data["total_is_exact"] == (mode == SearchRetrievalMode.FTS)
-    assert data["total"] == int(mode == SearchRetrievalMode.FTS)
+    # One result either way: counted exactly for FTS, a lower bound for semantic modes.
+    assert data["total"] == 1
     assert not data["has_more"]
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["accept-query"] == "application/json"

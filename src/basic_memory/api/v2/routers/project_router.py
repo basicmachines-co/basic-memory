@@ -591,12 +591,15 @@ async def delete_project_by_id(
             raise HTTPException(status_code=400, detail=detail)
 
         # Delete using project name (service layer still uses names internally)
-        await project_service.remove_project(old_project.name, delete_notes=delete_notes)
+        file_delete_status = await project_service.remove_project(
+            old_project.name, delete_notes=delete_notes
+        )
 
         return ProjectStatusResponse(
             message=f"Project '{old_project.name}' removed successfully",
             status="success",
             default=False,
+            file_delete_status=file_delete_status,
             old_project=ProjectItem(
                 id=old_project.id,
                 external_id=old_project.external_id,

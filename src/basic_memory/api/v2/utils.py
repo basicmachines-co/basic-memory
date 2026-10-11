@@ -180,6 +180,7 @@ async def to_graph_context(
                         content=item.content,
                         file_path=_required_str(item.file_path, "file_path"),
                         created_at=item.created_at,
+                        updated_at=(item.updated_at if isinstance(item, SearchIndexRow) else None),
                     )
                 case SearchItemType.OBSERVATION:
                     entity_ext_id = None

@@ -1,5 +1,7 @@
 """Tests for discussion context MCP tool."""
 
+from datetime import datetime
+
 import pytest
 
 from fastmcp.exceptions import ToolError
@@ -420,3 +422,39 @@ async def test_build_context_miss_returns_nothing(client, test_project):
     titled = await build_context(project=test_project.name, url="memory://Cache Layer Design")
     assert isinstance(titled, dict)
     assert [r["primary_result"]["title"] for r in titled["results"]] == ["Cache Layer Design"]
+
+
+@pytest.mark.asyncio
+async def test_build_context_refuses_ambiguous_title(client, test_project):
+    """A title URL naming two notes is refused, as read_note refuses it, not guessed."""
+    for directory in ("coffee", "archive"):
+        await write_note(
+            project=test_project.name,
+            title="Bean Origins",
+            directory=directory,
+            content=f"# Bean Origins\n\nThe {directory} copy.\n",
+        )
+
+    with pytest.raises(ToolError, match="Ambiguous identifier 'Bean Origins'"):
+        await build_context(project=test_project.name, url="memory://Bean Origins")
+
+    exact = await build_context(project=test_project.name, url="memory://archive/bean-origins")
+    assert isinstance(exact, dict)
+    assert [r["primary_result"]["file_path"] for r in exact["results"]] == [
+        "archive/Bean Origins.md"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_context_timestamps_all_carry_an_offset(client, test_graph, test_project):
+    """Primary and related results report created_at in one shape, offset included."""
+    result = await build_context(project=test_project.name, url="memory://test/root")
+    assert isinstance(result, dict)
+
+    item = result["results"][0]
+    timestamps = [item["primary_result"]["created_at"]] + [
+        related["created_at"] for related in item["related_results"]
+    ]
+    assert len(timestamps) > 1
+    for timestamp in timestamps:
+        assert datetime.fromisoformat(timestamp).tzinfo is not None, timestamp

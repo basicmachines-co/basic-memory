@@ -229,14 +229,16 @@ FIND_META_FIELDS_EMPTY = {**GREP_RESULT_EMPTY, "results": []}
 
 FIND_META_FIELDS_MORE = {**FIND_META_FIELDS_RESULT, "has_more": True}
 
-# tail rows: {type, title, permalink, file_path, created_at}, newest first.
+# tail rows: {type, title, permalink, file_path, created_at, updated_at}, newest change
+# first. The second row has no updated_at, as a server before v0.24 sends it.
 TAIL_RESULT = [
     {
         "type": "entity",
         "title": "Note A",
         "permalink": "notes/note-a",
         "file_path": "notes/Note A.md",
-        "created_at": "2025-01-02T10:00:00",
+        "created_at": "2024-12-30T08:00:00",
+        "updated_at": "2025-01-02T10:00:00",
     },
     {
         "type": "entity",

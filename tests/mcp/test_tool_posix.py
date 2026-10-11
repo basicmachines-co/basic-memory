@@ -1665,9 +1665,20 @@ async def test_tail_returns_recent_rows(client, test_graph, test_project):
 
     assert rows
     for row in rows:
-        assert set(row) == {"type", "title", "permalink", "file_path", "created_at"}
+        assert set(row) == {
+            "type",
+            "title",
+            "permalink",
+            "file_path",
+            "created_at",
+            "updated_at",
+        }
         assert row["type"] == "entity"
         assert isinstance(row["created_at"], str)
+        # tail orders by last change, so each row says when that was.
+        assert isinstance(row["updated_at"], str)
+    changed = [row["updated_at"] for row in rows]
+    assert changed == sorted(changed, reverse=True)
     titles = {row["title"] for row in rows}
     assert "Root" in titles
 

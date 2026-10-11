@@ -25,7 +25,13 @@ async def test_view_note_basic_functionality(app, test_project):
     assert 'Note retrieved: "Test View Note"' in result
     assert "Display this note as a markdown artifact for the user" in result
     assert "Content:" in result
-    assert "---" in result
+
+    # The header is flush left, and the note sits between markers that cannot be
+    # mistaken for its own `---` frontmatter fence.
+    assert result.startswith('Note retrieved: "Test View Note"\n\nDisplay this note')
+    assert "Content:\n<note>\n---\ntitle: Test View Note" in result
+    assert "\n---\n---" not in result
+    assert result.endswith("</note>")
 
     # Should contain the note content
     assert "# Test View Note" in result

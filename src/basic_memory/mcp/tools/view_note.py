@@ -80,14 +80,14 @@ async def view_note(
     if "# Note Not Found" in content:
         return content  # Return error message directly
 
-    # Return instructions for Claude to create an artifact
-    return dedent(f"""
+    # The note opens with its own `---` frontmatter fence, so the content is set off by
+    # named markers that cannot collide with it. The header is joined, not dedented:
+    # dedent sees the note's unindented lines and would leave the header indented.
+    header = dedent(f"""
         Note retrieved: "{identifier}"
-        
+
         Display this note as a markdown artifact for the user.
-    
+
         Content:
-        ---
-        {content}
-        ---
         """).strip()
+    return f"{header}\n<note>\n{content.strip()}\n</note>"

@@ -18,6 +18,7 @@ from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
+    _linked_targets,
     _compose_similarity_probe,
     _compose_workspace_project_route,
     similar_notes_min_similarity,
@@ -1784,11 +1785,36 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
     ]
 
     similar = _collapse_similar_notes(
-        rows, exclude_file_path="new/New.md", exclude_permalink="p/new", limit=3
+        rows,
+        exclude_file_path="new/New.md",
+        exclude_permalink="p/new",
+        linked_targets=frozenset(),
+        limit=3,
     )
 
     assert [note.title for note in similar] == ["A", "B", "C"]
     assert similar[0].permalink == "p/a"
+
+
+def test_collapse_similar_notes_skips_notes_the_new_note_links_to():
+    """A note already related by a wikilink is not offered as a possible duplicate."""
+    rows = [
+        _entity_result("Test Session", "p/test-session", "s/Test Session.md", 0.8),
+        _entity_result("A", "p/a", "a/A.md", 0.75),
+        _entity_result("B", "p/b", "b/B.md", 0.72),
+    ]
+
+    similar = _collapse_similar_notes(
+        rows,
+        exclude_file_path="new/New.md",
+        exclude_permalink="p/new",
+        linked_targets=_linked_targets(
+            "- discovered_during [[test session]]\n- relates_to [[p/b|the B note]]\n"
+        ),
+        limit=3,
+    )
+
+    assert [note.title for note in similar] == ["A"]
 
 
 class _StubSearchClient:

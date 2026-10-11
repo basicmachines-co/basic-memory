@@ -324,9 +324,7 @@ async def index_project_and_report_readiness(project: str) -> None:
 
 @app.command()
 def reindex(
-    embeddings: bool = typer.Option(
-        False, "--embeddings", "-e", help="Rebuild vector embeddings (requires semantic search)"
-    ),
+    embeddings: bool = typer.Option(False, "--embeddings", "-e", help="Rebuild vector embeddings"),
     search: bool = typer.Option(False, "--search", "-s", help="Rebuild full-text search index"),
     full: bool = typer.Option(
         False,

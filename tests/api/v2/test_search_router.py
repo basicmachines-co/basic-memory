@@ -701,7 +701,8 @@ async def test_semantic_search_uses_probe_pagination_without_count(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 0
+    # No count query ran, so total is the rows seen through this page: a lower bound.
+    assert data["total"] == 2
     assert data["total_is_exact"] is False
     assert data["has_more"] is True
     assert len(data["results"]) == 2

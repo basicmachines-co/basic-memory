@@ -140,10 +140,19 @@ class EntitySummary(BaseModel):
     created_at: Annotated[
         datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
     ]
+    # Optional: older servers do not send it, and context rows reached by relation
+    # traversal do not load it.
+    updated_at: Annotated[
+        Optional[datetime], Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ] = None
 
     @field_serializer("created_at")
     def serialize_created_at(self, dt: datetime) -> str:
         return dt.isoformat()
+
+    @field_serializer("updated_at")
+    def serialize_updated_at(self, dt: Optional[datetime]) -> Optional[str]:
+        return dt.isoformat() if dt else None
 
 
 class RelationSummary(BaseModel):
