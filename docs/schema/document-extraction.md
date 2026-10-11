@@ -5,7 +5,7 @@ permalink: schema/document-extraction
 entity: extracted_text
 version: 1
 schema:
-  extracted_from?: Entity, optional provenance relation on an enriched document
+  derived_from: Entity, provenance relation to the source file, projected from source
 settings:
   validation: warn
   frontmatter:
@@ -77,8 +77,13 @@ versions, page counts, OCR diagnostics, and citation `sources`.
 
 Raw and failed documents use the literal YAML boolean `bm_parse_semantics: false`.
 Their bodies remain searchable, but extracted `- [category]` or `[[Target]]`
-syntax does not create graph observations or relations. An `extracted_from`
-relation is optional on enriched content; raw extraction does not create it.
+syntax does not create graph observations or relations.
+
+Every extracted-text note, raw or enriched, gets one `derived_from` relation to
+its source file. Core projects it at index time from the validated
+`source.entity_external_id` frontmatter, not from body syntax, so it exists even
+while semantic parsing is off and it never changes the extracted text. Do not
+write it into the body.
 
 Ready and needs-review documents enable semantic parsing after trusted assembly
 has validated the structured enrichment output. A later enrichment must compare

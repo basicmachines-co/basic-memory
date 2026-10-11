@@ -13,7 +13,7 @@ from basic_memory.document_ingestion.local_runtime import (
 )
 from basic_memory.document_ingestion.raw_document import RawDocumentRuntime, canonical_db_checksum
 from basic_memory.markdown import EntityParser, MarkdownProcessor
-from basic_memory.mcp.clients import KnowledgeClient, ProjectClient
+from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SchemaClient
 from basic_memory.models import Project
 from basic_memory.schemas.document import parse_document_ingestion_run_markdown
 from basic_memory.schemas.v2.graph import GraphEdge, GraphResponse
@@ -78,6 +78,45 @@ async def test_local_run_points_to_the_indexed_document(
     assert refreshed.document_db_checksum == canonical_db_checksum(
         await files.compute_checksum(refreshed.document_file_path)
     )
+
+
+# The public schema users copy into a project; the sidecar's `schema:` names this path.
+EXTRACTION_SCHEMA_DOC = Path(__file__).parents[1] / "docs" / "schema" / "document-extraction.md"
+
+
+@pytest.mark.asyncio
+async def test_bundled_extraction_schema_declares_the_projected_relation(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    """A raw sidecar validates against the bundled schema with its derived_from edge covered."""
+    home = Path(test_project.path)
+    (home / "schema").mkdir()
+    (home / "schema" / "document-extraction.md").write_bytes(EXTRACTION_SCHEMA_DOC.read_bytes())
+    (home / "riders.csv").write_bytes(b"team,name\nAST,Ana\n")
+    await ProjectClient(client).index(
+        test_project.external_id, force_full=False, run_in_background=False
+    )
+    knowledge = KnowledgeClient(client, test_project.external_id)
+    files = FileService(home, MarkdownProcessor(EntityParser(home)))
+    runtime = RawDocumentRuntime(
+        source_resolver=ApiDocumentSourceEntityResolver(knowledge),
+        source_reader=LocalDocumentSourceReader(home),
+        extractors=default_document_extractors(),
+        writer=LocalRawDocumentWriter(files, knowledge),
+    )
+    result = await runtime.ingest(file_path="riders.csv", observed_etag=None)
+
+    report = await SchemaClient(client, test_project.external_id).validate(
+        identifier=result.document_file_path
+    )
+
+    [note] = report.results
+    assert note.schema_entity == "extracted_text"
+    assert note.unmatched_relations == []
+    [derived_from] = [field for field in note.field_results if field.field_name == "derived_from"]
+    assert derived_from.status == "present"
+    assert derived_from.required is True
 
 
 @pytest.mark.asyncio
