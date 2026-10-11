@@ -2,15 +2,23 @@
 
 repo_root := ".."
 
-# Validate every memory-* SKILL.md has required frontmatter.
+# Validate every memory-* SKILL.md and the repo's hand-kept skill lists.
 validate:
     python3 {{repo_root}}/scripts/validate_skills.py .
 
-# Skills are markdown-only, so validation is the build check.
-check: validate
+# Build every release archive into a throwaway dir; the build verifies each
+# zip's `<name>/SKILL.md` layout and that no two assets share a name.
+dist-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="$(mktemp -d)"
+    trap 'rm -rf "$out"' EXIT
+    python3 {{repo_root}}/scripts/build_skills_dist.py --dist-root "$out"
+
+check: validate dist-check
 
 # Package skills into zips under ../dist: dist/skills/*.zip (Agent Skills) +
-# dist/skills-openai/*.zip (adds agents/openai.yaml for ChatGPT/Codex).
+# dist/skills-openai/*-chatgpt.zip (adds agents/openai.yaml for ChatGPT/Codex).
 dist: validate
     python3 {{repo_root}}/scripts/build_skills_dist.py
 

@@ -45,48 +45,58 @@ Cloud extends local-first — still plain markdown, still yours. Start with a [7
 
 ## Installation
 
-### Via npx skills (recommended)
+### Claude Code, Codex, Cursor, and other coding agents
 
-Install or update skills using the [Skills CLI](https://github.com/vercel-labs/skills):
+Install or update every skill with the [Skills CLI](https://github.com/vercel-labs/skills). `-g` installs at user level, so the skills are available in every project:
 
 ```bash
-# Install all skills
-npx skills add basicmachines-co/basic-memory/skills
+# Install all skills for every agent the CLI detects
+npx skills add basicmachines-co/basic-memory/skills -g
 
 # Install a specific skill
-npx skills add basicmachines-co/basic-memory/skills --skill memory-tasks
+npx skills add basicmachines-co/basic-memory/skills -g --skill memory-tasks
 
-# Install all skills for a specific agent
-npx skills add basicmachines-co/basic-memory/skills --agent claude
+# Install for a specific agent
+npx skills add basicmachines-co/basic-memory/skills -g --agent claude-code
 
 # List available skills without installing
 npx skills add basicmachines-co/basic-memory/skills --list
-
-# Check for updates
-npx skills check
 
 # Update installed skills
 npx skills update
 ```
 
-Skills are installed to your agent's skills directory (e.g., `~/.claude/skills/` for Claude Code global, or `.claude/skills/` for project-scoped).
+Leave off `-g` to install into the current project instead (for example `.claude/skills/`). Start a new session afterwards, then invoke a skill by name — `/memory-tasks` in Claude Code, `$memory-tasks` in Codex — or just describe the task and let the agent pick it up.
 
-If your installed Skills CLI cannot load `basicmachines-co/basic-memory/skills`, update the CLI or copy the `memory-*` directories manually.
+If your installed Skills CLI cannot load `basicmachines-co/basic-memory/skills`, update the CLI or copy the `memory-*` directories manually (below).
 
-### Claude Desktop (claude.ai)
+### Claude and ChatGPT: upload a zip
 
-Claude Desktop loads skills through **Settings > Capabilities**:
+Chat apps take skills as uploaded zips, one skill per upload. Every build of `main` publishes them to the rolling [`skills-latest`](https://github.com/basicmachines-co/basic-memory/releases/tag/skills-latest) release, at `https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/<asset>`:
 
-1. Clone or download this repository
-2. In Claude, go to **Settings > Capabilities** and ensure both **Code execution** and **Skills** are enabled
-3. Click **Upload skill** and upload the `SKILL.md` file (or ZIP the skill folder and upload that)
-4. Toggle the skill on — Claude will use it automatically when relevant
+| Asset | Upload to |
+|---|---|
+| [`basic-memory.zip`](https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/basic-memory.zip) | **Recommended for Claude.** One skill that routes to the others, which it carries as references. |
+| [`basic-memory-chatgpt.zip`](https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/basic-memory-chatgpt.zip) | **Recommended for ChatGPT.** The same skill with ChatGPT metadata. |
+| `<skill>.zip`, e.g. [`memory-onboarding.zip`](https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/memory-onboarding.zip) | One individual skill, for Claude. |
+| `<skill>-chatgpt.zip`, e.g. `memory-onboarding-chatgpt.zip` | One individual skill, for ChatGPT. |
+| `basic-memory-skills.zip`, `basic-memory-skills-chatgpt.zip` | Every individual skill in one archive, for unzipping by hand. Don't upload these. |
 
-Repeat for each skill you want. Custom uploaded skills are private to your account.
+The combined `basic-memory` skill leaves out `memory-defrag`, `memory-reflect`, and `memory-literary-analysis`, which need a local Basic Memory install; their individual zips are still published. Either way, the skills need the Basic Memory connector (or MCP server) connected in the same app.
 
-> **Tip:** Start with **memory-notes** (core note-writing patterns) and add others as needed. You don't need all of them at once.
+**Claude (claude.ai and Claude Desktop):**
 
-See [Using Skills in Claude](https://support.claude.com/en/articles/12512180-using-skills-in-claude) for more details.
+1. Turn on **Code execution** in **Settings → Capabilities** — skills need it.
+2. Go to **Customize → Skills**, click **+**, choose **Create skill**, then **Upload a skill**.
+3. Upload `basic-memory.zip` (or one `<skill>.zip`), and make sure the skill is toggled on.
+
+Uploaded skills are private to your account. See [Using Skills in Claude](https://support.claude.com/en/articles/12512180-using-skills-in-claude).
+
+**ChatGPT** (Business, Enterprise, Healthcare, and Edu workspaces where an admin has turned on **Enable skill uploading**):
+
+1. Open **Plugins** and switch to the **Skills** tab.
+2. Choose **Create**, then **Upload from your computer**.
+3. Upload `basic-memory-chatgpt.zip` (or one `<skill>-chatgpt.zip`). Use the `-chatgpt` zips here: they add the `agents/openai.yaml` card ChatGPT displays.
 
 ### Manual install
 
@@ -95,8 +105,6 @@ Copy skill directories into your agent's skills folder:
 ```bash
 # Claude Code — global
 cp -r memory-tasks ~/.claude/skills/
-cp -r memory-notes ~/.claude/skills/
-# ... etc.
 
 # Claude Code — project-scoped
 cp -r memory-tasks .claude/skills/
@@ -113,7 +121,8 @@ All skills are also bundled in the [`@basicmemory/openclaw-basic-memory`](../int
 
 These skills work with any AI coding agent that supports the SKILL.md format:
 
-- **Claude Desktop** — upload skill ZIPs via Settings > Capabilities
+- **Claude (claude.ai, Claude Desktop)** and **ChatGPT** — upload a zip from the `skills-latest` release
+- **Codex** — loads skills installed by `npx skills add ... -g`
 - **Claude Code** — loads skills from `~/.claude/skills/` or `.claude/skills/`
 - **Cursor** — AI-powered coding with skill support
 - **Windsurf** — agent-based development with skill loading

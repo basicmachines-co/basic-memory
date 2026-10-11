@@ -7,7 +7,7 @@
 
 ---
 name: memory-notes
-description: "How to write well-structured Basic Memory notes: frontmatter, observations with semantic categories, relations with wiki-links, and best practices for building a rich knowledge graph. Use when creating or improving notes."
+description: "How to write well-structured Basic Memory notes: frontmatter, categorized observations, wiki-link relations, and knowledge-graph best practices. Use when creating or improving notes."
 ---
 
 # Memory Notes

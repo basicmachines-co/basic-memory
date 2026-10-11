@@ -182,14 +182,14 @@ the skills are already present as source; don't run the command. Quick check:
 git ls-files skills/ | grep -q memory- && echo "source repo - skip install"
 ```
 
-Otherwise, run from the project root:
+Otherwise, run:
 
 ```
-npx skills add basicmachines-co/basic-memory/skills
+npx skills add basicmachines-co/basic-memory/skills -g
 ```
 
-This installs the canonical `memory-*` skills into the user's skills directory — the
-single source of truth, shared with OpenClaw. The plugin does **not** vendor copies;
+`-g` installs the canonical `memory-*` skills at user level (`~/.claude/skills/`),
+so every project gets them — the single source of truth, shared with OpenClaw. The plugin does **not** vendor copies;
 it relies on this shared set. If `npx` / the `skills` CLI isn't available, point the
 user at the manual install in the top-level [`skills/README.md`](../../../../skills/README.md).
 

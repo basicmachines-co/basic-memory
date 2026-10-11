@@ -1,6 +1,6 @@
 ---
 name: memory-reflect
-description: "Sleep-time memory reflection: review recent conversations and daily notes, extract insights, and consolidate into long-term memory. Use when triggered by cron, heartbeat, or explicit request to reflect on recent activity. Runs as background processing to improve memory quality over time."
+description: "Sleep-time memory reflection: review recent conversations and daily notes, then consolidate insights into long-term memory. Use on a cron or heartbeat trigger, or when asked to reflect on recent work."
 ---
 
 # Memory Reflect
