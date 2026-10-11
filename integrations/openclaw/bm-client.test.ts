@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
-import { BmClient } from "./bm-client.ts"
+import {
+  BmClient,
+  BmToolError,
+  NoteAlreadyExistsError,
+  NoteRevisionConflictError,
+} from "./bm-client.ts"
 
 const DEFAULT_PROJECT = "test-project"
 
@@ -13,6 +18,10 @@ function mcpResult(payload: unknown) {
       },
     ],
   }
+}
+
+function mcpToolError(text: string) {
+  return { isError: true, content: [{ type: "text", text }] }
 }
 
 function setConnected(client: BmClient, callTool: jest.Mock) {
@@ -201,6 +210,157 @@ describe("BmClient MCP behavior", () => {
     await expect(
       client.writeNote("Existing", "content", "notes"),
     ).rejects.toThrow("Note already exists")
+  })
+
+  it("readNote routes by project_id alone and returns the checksum", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpResult({
+        title: "t",
+        permalink: "p",
+        content: "body",
+        file_path: "notes/t.md",
+        frontmatter: { type: "memory_master" },
+        checksum: "abc123",
+      }),
+    )
+    setConnected(client, callTool)
+
+    const note = await client.readNote("t", {
+      includeFrontmatter: true,
+      projectId: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+    })
+
+    expect(callTool).toHaveBeenCalledWith({
+      name: "read_note",
+      arguments: {
+        identifier: "t",
+        include_frontmatter: true,
+        output_format: "json",
+        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+      },
+    })
+    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project")
+    expect(note.checksum).toBe("abc123")
+  })
+
+  it("writeNote routes by project_id alone and passes expected_checksum", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpResult({
+        title: "Memory Master",
+        permalink: "memory-quest/memory-master",
+        file_path: "memory-quest/Memory Master.md",
+        checksum: "new",
+        action: "updated",
+      }),
+    )
+    setConnected(client, callTool)
+
+    await client.writeNote(
+      "Memory Master",
+      "body",
+      "memory-quest",
+      undefined,
+      true,
+      {
+        noteType: "memory_master",
+        metadata: {
+          memory_quest_code: "MQ-1",
+          memory_quest_guidance: "active",
+        },
+        projectId: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        expectedChecksum: "old",
+      },
+    )
+
+    expect(callTool).toHaveBeenCalledWith({
+      name: "write_note",
+      arguments: {
+        title: "Memory Master",
+        content: "body",
+        directory: "memory-quest",
+        output_format: "json",
+        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        overwrite: true,
+        note_type: "memory_master",
+        metadata: {
+          memory_quest_code: "MQ-1",
+          memory_quest_guidance: "active",
+        },
+        expected_checksum: "old",
+      },
+    })
+    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project")
+  })
+
+  it("writeNote maps a JSON NOTE_ALREADY_EXISTS tool error to NoteAlreadyExistsError", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpToolError(
+        JSON.stringify({
+          title: "Memory Master",
+          permalink: "probe/memory-quest/memory-master",
+          file_path: "memory-quest/Memory Master.md",
+          checksum: null,
+          action: "conflict",
+          error: "NOTE_ALREADY_EXISTS",
+        }),
+      ),
+    )
+    setConnected(client, callTool)
+
+    const err = await client
+      .writeNote("Memory Master", "body", "memory-quest", undefined, false)
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(NoteAlreadyExistsError)
+    expect((err as NoteAlreadyExistsError).permalink).toBe(
+      "probe/memory-quest/memory-master",
+    )
+  })
+
+  it("writeNote maps NOTE_REVISION_CONFLICT to NoteRevisionConflictError", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpToolError(
+        JSON.stringify({
+          title: "Memory Master",
+          permalink: "probe/memory-quest/memory-master",
+          file_path: "memory-quest/Memory Master.md",
+          checksum: null,
+          action: "conflict",
+          error: "NOTE_REVISION_CONFLICT",
+          currentChecksum: "current",
+        }),
+      ),
+    )
+    setConnected(client, callTool)
+
+    const err = await client
+      .writeNote("Memory Master", "body", "memory-quest", undefined, true, {
+        expectedChecksum: "stale",
+      })
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(NoteRevisionConflictError)
+    expect((err as NoteRevisionConflictError).currentChecksum).toBe("current")
+  })
+
+  it("writeNote rethrows tool errors that are not refusal payloads", async () => {
+    const callTool = jest
+      .fn()
+      .mockResolvedValue(
+        mcpToolError("expected_checksum requires overwrite=True"),
+      )
+    setConnected(client, callTool)
+
+    const err = await client
+      .writeNote("Note", "body", "notes", undefined, false, {
+        expectedChecksum: "abc",
+      })
+      .catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(BmToolError)
+    expect((err as Error).message).toBe(
+      "BM MCP tool write_note failed: expected_checksum requires overwrite=True",
+    )
   })
 
   it("editNote calls edit_note with MCP argument names", async () => {

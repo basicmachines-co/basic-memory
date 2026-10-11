@@ -13,7 +13,9 @@ export function registerReadTool(
       label: "Read Note",
       description:
         "Read a specific note from the Basic Memory knowledge graph by title or permalink. " +
-        "Returns the full note content including observations and relations.",
+        "Returns the full note content including observations and relations, " +
+        "followed by the note's checksum: pass it to write_note as " +
+        "expected_checksum (with overwrite=true) to replace only this revision.",
       parameters: Type.Object({
         identifier: Type.String({
           description: "Note title, permalink, or memory:// URL to read",
@@ -29,6 +31,13 @@ export function registerReadTool(
             description: "Target project name (defaults to current project)",
           }),
         ),
+        project_id: Type.Optional(
+          Type.String({
+            description:
+              "Target project external_id from list_memory_projects. Routes to " +
+              "that exact project and takes precedence over `project`.",
+          }),
+        ),
       }),
       async execute(
         _toolCallId: string,
@@ -36,6 +45,7 @@ export function registerReadTool(
           identifier: string
           include_frontmatter?: boolean
           project?: string
+          project_id?: string
         },
       ) {
         log.debug(`read_note: identifier="${params.identifier}"`)
@@ -43,15 +53,23 @@ export function registerReadTool(
         try {
           const note = await client.readNote(
             params.identifier,
-            { includeFrontmatter: params.include_frontmatter === true },
+            {
+              includeFrontmatter: params.include_frontmatter === true,
+              projectId: params.project_id,
+            },
             params.project,
           )
+          // The checksum identifies the revision just read; the model sees only
+          // `content`, so it has to travel in the text to reach a guarded write.
+          const text = note.checksum
+            ? `${note.content}\n\nChecksum: ${note.checksum}`
+            : note.content
 
           return {
             content: [
               {
                 type: "text" as const,
-                text: note.content,
+                text,
               },
             ],
             details: {
@@ -59,6 +77,7 @@ export function registerReadTool(
               permalink: note.permalink,
               file_path: note.file_path,
               frontmatter: note.frontmatter ?? null,
+              checksum: note.checksum ?? null,
             },
           }
         } catch (err) {
