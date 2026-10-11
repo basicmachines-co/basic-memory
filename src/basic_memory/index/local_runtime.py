@@ -67,6 +67,7 @@ from basic_memory.indexing.relation_resolution import (
 from basic_memory.models import Entity, Project
 from basic_memory.services.read_cache_changes import resolved_relations_read_cache_change
 from basic_memory.read_cache import (
+    ReadCacheChange,
     ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
     invalidate_cache,
@@ -232,7 +233,16 @@ class LocalInlineStorageEventResultRecorder:
             and result.entity_id is not None
             and not result.content_superseded
         ):
-            await self.search_service.sync_entity_vectors_batch([result.entity_id])
+            # The file's index retired content before these vectors existed, so a
+            # VECTOR/HYBRID search cached meanwhile is retired again.
+            vector_scope = (
+                invalidate_recorded_change(self.read_cache, self.project.project_external_id)
+                if self.read_cache is not None
+                else nullcontext(ReadCacheChangeRecorder())
+            )
+            async with vector_scope as vector_change:
+                await self.search_service.sync_entity_vectors_batch([result.entity_id])
+                vector_change.record(ReadCacheChange.search_index())
             logger.info(
                 "Local event-index embedding completed",
                 entity_id=result.entity_id,

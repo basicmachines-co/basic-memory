@@ -352,6 +352,26 @@ async def test_query_values_are_keyed_structurally_and_only_when_declared(
 
 
 @pytest.mark.asyncio
+async def test_query_bodies_are_keyed_by_their_validated_model(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: body fields the model ignores, key order and spelled-out defaults share an entry.
+
+    The search model ignores unknown fields, so a nonce in the body runs the same
+    search and must not store a second copy of the response.
+    """
+    await _create(client, project_url, "Searched", "needle")
+    search_url = f"{project_url}/search/"
+
+    first = await _query(client, search_url, {"text": "needle", "nonce": "1"})
+    assert _status(first) == "MISS"
+    other_nonce = await _query(client, search_url, {"nonce": "2", "text": "needle"})
+    assert _status(other_nonce) == "HIT"
+    different = await _query(client, search_url, {"text": "haystack"})
+    assert _status(different) == "MISS"
+
+
+@pytest.mark.asyncio
 async def test_oversized_responses_are_served_but_not_stored(
     cached_app: CachedApp,
     client: AsyncClient,

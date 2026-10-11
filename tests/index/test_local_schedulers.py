@@ -82,7 +82,8 @@ async def test_entity_vector_scheduler_maps_to_search_service():
     await asyncio.sleep(0.05)
 
     assert search_service.vector_synced == [7]
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    # Vectors change search results only, never a note's own response.
+    assert read_cache.changes == [ReadCacheChange.search_index()]
 
 
 @pytest.mark.asyncio
@@ -107,7 +108,7 @@ async def test_entity_vector_scheduler_invalidates_after_partial_failure():
     with pytest.raises(RuntimeError, match="vector publication failed"):
         await scheduler._run_entity_vector_sync(7)
 
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    assert read_cache.changes == [ReadCacheChange.whole_project()]
 
 
 def _clear_project_index_scheduler_state() -> None:

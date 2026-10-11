@@ -17,12 +17,14 @@ opens a database connection.
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, override
 
 import logfire
 from fastapi import Depends, Request
 from fastapi.dependencies.utils import get_flat_dependant
 from fastapi.routing import APIRoute
+from pydantic import TypeAdapter
 from redis_fastapi.cache import CacheHitException, cache
 
 from basic_memory.read_cache.contract import (
@@ -224,13 +226,15 @@ async def _request_identity(request: Request) -> str:
 
     Only the query parameters the route declares go into the key, serialized as
     JSON so values can never run together (``a=b%26c=d`` is not ``a=b&c=d``), and
-    undeclared parameters (a cache-busting nonce) cannot multiply entries.
+    undeclared parameters (a cache-busting nonce) cannot multiply entries. A QUERY
+    body is keyed by its validated model for the same reason: fields the model
+    ignores, key order and spelled-out defaults do not change the response.
     """
     body = None
     if request.method == "QUERY":
         raw = await request.body()
         if raw:
-            body = json.loads(raw)
+            body = _validated_body(request, json.loads(raw))
     query = {
         name: request.query_params.getlist(name)
         for name in sorted(_declared_query_params(request))
@@ -254,12 +258,34 @@ async def _request_identity(request: Request) -> str:
     )
 
 
-def _declared_query_params(request: Request) -> frozenset[str]:
-    """Query parameter names the matched route and its dependencies read."""
+def _validated_body(request: Request, raw_body: object) -> object:
+    """The QUERY body as the route will see it, raising ValueError when invalid."""
+    body_params = get_flat_dependant(_api_route(request).dependant).body_params
+    if len(body_params) != 1:
+        raise TypeError("cached QUERY routes take exactly one body model")
+    adapter = _body_adapter(body_params[0].field_info.annotation)
+    # A pydantic ValidationError is a ValueError, so an invalid body bypasses
+    # the cache and the route answers it with its own 422.
+    return adapter.dump_python(adapter.validate_python(raw_body), mode="json")
+
+
+# One adapter per body model, built on the first request that needs it.
+@lru_cache(maxsize=32)
+def _body_adapter(annotation: Any) -> TypeAdapter[Any]:
+    return TypeAdapter(annotation)
+
+
+def _api_route(request: Request) -> APIRoute:
     route = request.scope["route"]
     if not isinstance(route, APIRoute):
         raise TypeError("cached_read is only valid on FastAPI API routes")
-    return frozenset(param.alias for param in get_flat_dependant(route.dependant).query_params)
+    return route
+
+
+def _declared_query_params(request: Request) -> frozenset[str]:
+    """Query parameter names the matched route and its dependencies read."""
+    dependant = get_flat_dependant(_api_route(request).dependant)
+    return frozenset(param.alias for param in dependant.query_params)
 
 
 # --- Groups by route ---

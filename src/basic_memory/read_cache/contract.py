@@ -136,6 +136,14 @@ class ReadCacheChange:
         """A body change to these notes: their responses and the content-wide reads."""
         return cls(content=True, notes=frozenset(entity_ids))
 
+    @classmethod
+    def search_index(cls) -> "ReadCacheChange":
+        """Derived search state (vector chunks) changed: only content-wide reads.
+
+        Note responses do not include embeddings, so no note's own entry is stale.
+        """
+        return cls(content=True)
+
     def __or__(self, other: "ReadCacheChange") -> "ReadCacheChange":
         return ReadCacheChange(
             project=self.project or other.project,

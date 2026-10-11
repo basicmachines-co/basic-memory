@@ -23,6 +23,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_relations,
 )
 from basic_memory.read_cache import (
+    ReadCacheChange,
     ReadCacheInvalidator,
     invalidate_cache,
     invalidate_recorded_change,
@@ -111,11 +112,14 @@ class LocalEntityVectorSyncScheduler:
             await self.search_service.sync_entity_vectors(entity_id)
             return
 
-        # Vector publication happens after the mutation/index generation bump and can change
-        # VECTOR/HYBRID results. Advance the generation after success or partial failure so a
-        # result cached while vectors were stale cannot survive this derived-state update.
-        async with invalidate_cache(self.read_cache, self.project_external_id):
+        # Vector publication happens after the write retired its reads and can change
+        # VECTOR/HYBRID results, so searches cached meanwhile are retired again. A partial
+        # failure retires the whole project.
+        async with invalidate_recorded_change(
+            self.read_cache, self.project_external_id
+        ) as vector_change:
             await self.search_service.sync_entity_vectors(entity_id)
+            vector_change.record(ReadCacheChange.search_index())
 
 
 # Process-lifetime single-flight state: project ids with an index run already

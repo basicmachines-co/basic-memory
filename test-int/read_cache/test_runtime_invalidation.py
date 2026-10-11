@@ -72,7 +72,7 @@ from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
-from basic_memory.read_cache import PROJECT, ReadCacheChange, ReadCacheInvalidationStatus
+from basic_memory.read_cache import CONTENT, PROJECT, ReadCacheChange, ReadCacheInvalidationStatus
 from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import (
     EntityRepository,
@@ -597,29 +597,34 @@ async def test_partial_search_reindex_invalidates_real_redis(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("index_embeddings", [False, True])
 async def test_watcher_index_completion_leaves_unrelated_reads_cached(
     test_project: Project,
     redis_cache: RedisCacheHarness,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    index_embeddings: bool,
 ) -> None:
     """A watched body edit does not clear the project on completion.
 
     InvalidatingIndexFileExecutor already retired what the file changed, and a
     relation pass that resolves nothing retires nothing, so the project epoch
-    that every other cached read depends on must stay put.
+    that every other cached read depends on must stay put. Embedding the file
+    afterwards changes vector search results, so it retires content reads again.
     """
     project_external_id = str(test_project.external_id)
     generation_before = await _current_generation(redis_cache, project_external_id)
+    content_before = await redis_cache.cache.versions(project_external_id, CONTENT)
+    vector_sync = _RecordingVectorSync()
     recorder = LocalInlineStorageEventResultRecorder(
         project=ProjectRuntimeReference.from_project(test_project),
-        search_service=cast(LocalIndexSearchService, object()),
+        search_service=cast(LocalIndexSearchService, vector_sync),
         relation_cleanup_search_refresher=cast(
             ProjectIndexMovedEntitySearchRefresher,
             object(),
         ),
         relation_runtime=cast(RelationResolutionRuntime, _NoUnresolvedRelations()),
         session_maker=engine_factory[1],
-        index_embeddings=False,
+        index_embeddings=index_embeddings,
         read_cache=redis_cache.cache,
     )
 
@@ -633,6 +638,21 @@ async def test_watcher_index_completion_leaves_unrelated_reads_cached(
     )
 
     assert await _current_generation(redis_cache, project_external_id) == generation_before
+    content_after = await redis_cache.cache.versions(project_external_id, CONTENT)
+    assert vector_sync.batches == ([[42]] if index_embeddings else [])
+    assert (content_after != content_before) is index_embeddings
+
+
+class _RecordingVectorSync:
+    """Records the entity batches the watcher embeds."""
+
+    def __init__(self) -> None:
+        self.batches: list[list[int]] = []
+
+    async def sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback: object = None
+    ) -> None:
+        self.batches.append(list(entity_ids))
 
 
 class _NoUnresolvedRelations:
