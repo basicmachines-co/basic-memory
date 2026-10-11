@@ -14,7 +14,8 @@ from basic_memory.utils import ensure_timezone_aware
 # Search reads never carry more of content_snippet than any reader of a search row
 # uses: the displayed `content` (CONTENT_DISPLAY_LIMIT), the small-note passage
 # (2,000), and the reranker's fallback document (reranker_max_document_chars, 2,000
-# by default; a larger setting is held to this cap). content_snippet stores the whole
+# by default). Only the rerank prefix reads further, to honor a larger or unbounded
+# reranker setting (see SemanticSearch._materialize). content_snippet stores the whole
 # note, 41 KB on average in a large production project, so selecting it uncapped
 # moved megabytes per search (#1746).
 SNIPPET_READ_LIMIT = 4000
@@ -30,10 +31,18 @@ def snippet_length_columns(table: str) -> str:
     return f"NULL AS content_snippet, length({table}.content_snippet) AS content_snippet_length"
 
 
-def capped_snippet_columns(table: str) -> str:
-    """SELECT columns carrying a capped content_snippet and the stored text's length."""
+def capped_snippet_columns(table: str, limit: int | None = SNIPPET_READ_LIMIT) -> str:
+    """SELECT columns carrying content_snippet, cut at ``limit``, and the stored length.
+
+    ``None`` reads the whole text: the reranker's own document limit can be unbounded.
+    """
+    text_column = (
+        f"{table}.content_snippet"
+        if limit is None
+        else f"substr({table}.content_snippet, 1, {int(limit)})"
+    )
     return (
-        f"substr({table}.content_snippet, 1, {SNIPPET_READ_LIMIT}) AS content_snippet, "
+        f"{text_column} AS content_snippet, "
         f"length({table}.content_snippet) AS content_snippet_length"
     )
 

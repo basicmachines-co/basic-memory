@@ -30,6 +30,7 @@ from basic_memory.repository.rerank_provider import (
 from basic_memory.repository.search_filters import FtsBackend
 from basic_memory.repository.search_index_row import (
     SearchIndexKey,
+    SNIPPET_READ_LIMIT,
     SearchIndexRow,
     capped_snippet_columns,
     snippet_length_columns,
@@ -388,6 +389,17 @@ class SemanticSearch:
     def _active_rerank(self, query_text: str) -> Reranking | None:
         """The reranker this query runs: one is configured and there is text to score."""
         return self.rerank if query_text else None
+
+    def _rerank_snippet_limit(self, rerank: Reranking) -> int | None:
+        """How much of a prefix row's text the reranker may read: its document limit.
+
+        A row only full-text search found has no matched chunk, so its rerank document
+        is its note text; ``0`` (unbounded) reads all of it, and a limit above the read
+        cap reads that far.
+        """
+        if rerank.max_document_chars == 0:
+            return None
+        return max(SNIPPET_READ_LIMIT, rerank.max_document_chars)
 
     def _rerank_candidate_limit(self, rerank: Reranking) -> int:
         """Return the fixed chunk window that owns reranker-prefix membership."""
@@ -797,6 +809,7 @@ class SemanticSearch:
         *,
         vector_keys: Collection[SearchIndexKey],
         position_bound: int | None = None,
+        snippet_limit: int | None = SNIPPET_READ_LIMIT,
     ) -> list[SearchIndexRow]:
         """Attach note text to the rows a search returns (#1746).
 
@@ -806,10 +819,13 @@ class SemanticSearch:
         small, otherwise the note's ``TOP_CHUNKS_PER_RESULT`` chunks nearest the query.
         ``position_bound`` limits an external index's excerpts to the chunks the fixed
         rerank window read, so a reranked prefix quotes the same passages on every page.
+        ``snippet_limit`` is how much of each row's text to read; the rerank prefix reads
+        as far as the reranker's document limit (``_rerank_snippet_limit``). The public
+        ``content`` is cut at its display limit either way.
         """
         if not rows:
             return []
-        texts = await self._fetch_row_texts([row_key(row) for row in rows])
+        texts = await self._fetch_row_texts([row_key(row) for row in rows], snippet_limit)
         rows = [
             replace(
                 row,
@@ -872,9 +888,9 @@ class SemanticSearch:
         return [by_key.get(row_key(row), row) for row in rows]
 
     async def _fetch_row_texts(
-        self, keys: Sequence[SearchIndexKey]
+        self, keys: Sequence[SearchIndexKey], snippet_limit: int | None = SNIPPET_READ_LIMIT
     ) -> dict[SearchIndexKey, tuple[str | None, int | None]]:
-        """The capped content_snippet and stored length of each search row in ``keys``."""
+        """The content_snippet, cut at ``snippet_limit``, and stored length of each row."""
         wanted = set(keys)
         row_ids = list(dict.fromkeys(row_id for _, row_id in keys))
         texts: dict[SearchIndexKey, tuple[str | None, int | None]] = {}
@@ -887,7 +903,7 @@ class SemanticSearch:
                 scope_predicate = self.scope.predicate("project_id", params)
                 result = await session.execute(
                     text(
-                        f"SELECT type, id, {capped_snippet_columns('search_index')} "
+                        f"SELECT type, id, {capped_snippet_columns('search_index', snippet_limit)} "
                         f"FROM search_index WHERE {scope_predicate} "
                         f"AND id IN ({', '.join(f':id_{index}' for index in range(len(batch)))})"
                     ),
@@ -1078,7 +1094,11 @@ class SemanticSearch:
             prefix, prefix_bound = self._prefix_rows(window, rerank.candidates, query, rerank)
             # The reranker reads the prefix's text, so it is materialized first.
             prefix = await self._materialize(
-                prefix, window, vector_keys=vector_keys, position_bound=prefix_bound
+                prefix,
+                window,
+                vector_keys=vector_keys,
+                position_bound=prefix_bound,
+                snippet_limit=self._rerank_snippet_limit(rerank),
             )
             prefix_keys = {row_key(row) for row in prefix}
             tail = [row for row in ranked_rows if row_key(row) not in prefix_keys]
@@ -1486,6 +1506,7 @@ class SemanticSearch:
                 window,
                 vector_keys=prefix_fusion.vector_scores.keys(),
                 position_bound=prefix_bound,
+                snippet_limit=self._rerank_snippet_limit(rerank),
             )
             prefix_keys = {row_key(row) for row in prefix}
 
