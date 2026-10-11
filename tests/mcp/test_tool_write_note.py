@@ -19,7 +19,7 @@ from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
-    _linked_targets,
+    LinkedNotes,
     _compose_similarity_probe,
     _compose_workspace_project_route,
     similar_notes_min_similarity,
@@ -1789,7 +1789,7 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
         rows,
         exclude_file_path="new/New.md",
         exclude_permalink="p/new",
-        linked_targets=frozenset(),
+        linked_notes=LinkedNotes.from_content("", "new/New.md"),
         limit=3,
     )
 
@@ -1798,17 +1798,23 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
 
 
 @pytest.mark.parametrize(
-    "link",
+    ("link", "hidden"),
     [
-        "[[reference bu product mapping]]",  # title, any case
-        "[[reference/reference-bu-product-mapping]]",  # project-relative permalink
-        "[[reference/Reference BU Product Mapping.md]]",  # file path
-        "[[../reference/Reference BU Product Mapping]]",  # relative to the new note
-        "[[proj/reference/reference-bu-product-mapping|the mapping]]",  # full permalink
+        ("[[reference bu product mapping]]", True),  # title, any case
+        ("[[reference/reference-bu-product-mapping]]", True),  # project-relative permalink
+        ("[[reference/Reference BU Product Mapping.md]]", True),  # file path
+        ("[[proj/reference/reference-bu-product-mapping|the mapping]]", True),  # full permalink
+        ("[[../reference/Reference BU Product Mapping.md]]", True),  # relative path
+        ("[[/reference/Reference BU Product Mapping.md]]", True),  # rooted path
+        # A path names one exact file; without the extension it resolves to nothing in
+        # the graph, so the note was not linked and stays in the advisory.
+        ("[[../reference/Reference BU Product Mapping]]", False),
+        # A path that climbs out of the project names no file.
+        ("[[../../reference/Reference BU Product Mapping.md]]", False),
     ],
 )
-def test_collapse_similar_notes_skips_notes_the_new_note_links_to(link: str):
-    """A note already related by a wikilink, however named, is not offered as a duplicate."""
+def test_collapse_similar_notes_skips_notes_the_new_note_links_to(link: str, hidden: bool):
+    """A note the new note links to, as the link resolver would resolve it, is not listed."""
     rows = [
         _entity_result(
             "Reference BU Product Mapping",
@@ -1823,11 +1829,12 @@ def test_collapse_similar_notes_skips_notes_the_new_note_links_to(link: str):
         rows,
         exclude_file_path="notes/New.md",
         exclude_permalink="proj/notes/new",
-        linked_targets=_linked_targets(f"- relates_to {link}\n", "notes"),
+        linked_notes=LinkedNotes.from_content(f"- relates_to {link}\n", "notes/New.md"),
         limit=3,
     )
 
-    assert [note.title for note in similar] == ["Other"]
+    expected = ["Other"] if hidden else ["Reference BU Product Mapping", "Other"]
+    assert [note.title for note in similar] == expected
 
 
 class _StubSearchClient:
