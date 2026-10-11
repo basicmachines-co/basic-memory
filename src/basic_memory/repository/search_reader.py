@@ -28,7 +28,11 @@ from basic_memory.repository.rerank_provider import (
     validate_rerank_scores,
 )
 from basic_memory.repository.search_filters import FtsBackend
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+)
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import (
@@ -240,8 +244,11 @@ class CandidateWindow:
 
             # Small notes: return full content so the answer is always present.
             # Large notes: return top-N most relevant chunks for richer context.
+            # content_length is the stored note's length; the snippet a search read
+            # carries is capped, so its own length cannot say whether the note is small.
             content_snippet = row.content_snippet or ""
-            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
+            content_length = row.content_length or 0
+            if content_snippet and content_length <= SMALL_NOTE_CONTENT_LIMIT:
                 matched_chunk_text = content_snippet
             else:
                 best_chunks = sorted(chunks, key=lambda chunk: chunk.similarity, reverse=True)
@@ -605,7 +612,8 @@ class SemanticSearch:
         sql = f"""
             SELECT
                 project_id, id, title, permalink, file_path, type, metadata,
-                from_id, to_id, relation_type, entity_id, content_snippet,
+                from_id, to_id, relation_type, entity_id,
+                {capped_snippet_columns("search_index")},
                 category, created_at, updated_at, 0 as score
             FROM search_index
             WHERE {scope_predicate}
@@ -642,16 +650,7 @@ class SemanticSearch:
         allowed_keys: set[SearchIndexKey] = set()
         for batch_start in range(0, len(candidate_keys), VECTOR_HYDRATION_BATCH_SIZE):
             batch = candidate_keys[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
-            filtered_rows = await self.fts.search(
-                self.scope,
-                filter_query,
-                # The restriction, not this limit, is what bounds the result: one row per
-                # requested key, since (id, type, project_id) identifies a search row.
-                limit=len(batch),
-                offset=0,
-                candidate_keys=batch,
-            )
-            allowed_keys.update((row.type, row.id) for row in filtered_rows if row.id is not None)
+            allowed_keys.update(await self.fts.admitted_keys(self.scope, filter_query, batch))
         return allowed_keys
 
     # --- Reranking ---

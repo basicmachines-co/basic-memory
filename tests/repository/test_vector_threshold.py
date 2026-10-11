@@ -28,6 +28,13 @@ class FakeRow:
     score: float = 0.0
     matched_chunk_text: str | None = None
     content_snippet: str | None = None
+    content_snippet_length: int | None = None
+
+    @property
+    def content_length(self) -> int | None:
+        if self.content_snippet_length is not None:
+            return self.content_snippet_length
+        return len(self.content_snippet) if self.content_snippet is not None else None
 
 
 def _make_vector_rows(scores: list[float]) -> list[HydratedChunk]:

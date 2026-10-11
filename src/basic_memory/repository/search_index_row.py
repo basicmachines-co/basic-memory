@@ -11,6 +11,23 @@ from basic_memory.schemas.search import SearchItemType
 from basic_memory.utils import ensure_timezone_aware
 
 
+# Search reads never carry more of content_snippet than any reader of a search row
+# uses: the displayed `content` (CONTENT_DISPLAY_LIMIT), the small-note passage
+# (2,000), and the reranker's fallback document (reranker_max_document_chars, 2,000
+# by default; a larger setting is held to this cap). content_snippet stores the whole
+# note, 41 KB on average in a large production project, so selecting it uncapped
+# moved megabytes per search (#1746).
+SNIPPET_READ_LIMIT = 4000
+
+
+def capped_snippet_columns(table: str) -> str:
+    """SELECT columns carrying a capped content_snippet and the stored text's length."""
+    return (
+        f"substr({table}.content_snippet, 1, {SNIPPET_READ_LIMIT}) AS content_snippet, "
+        f"length({table}.content_snippet) AS content_snippet_length"
+    )
+
+
 @dataclass
 class SearchIndexRow:
     """Search result with score and metadata."""
@@ -43,6 +60,9 @@ class SearchIndexRow:
 
     # Matched chunk text from vector search (the actual content that matched the query)
     matched_chunk_text: Optional[str] = None
+    # Length of the stored content_snippet when a search read capped the text it
+    # transported (see SNIPPET_READ_LIMIT); None when content_snippet is the whole value.
+    content_snippet_length: Optional[int] = None
 
     CONTENT_DISPLAY_LIMIT = 4000
 
@@ -70,6 +90,7 @@ class SearchIndexRow:
             entity_id=row.get("entity_id"),
             content_stems=row.get("content_stems"),
             content_snippet=row.get("content_snippet"),
+            content_snippet_length=row.get("content_snippet_length"),
             category=row.get("category"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -94,15 +115,15 @@ class SearchIndexRow:
     @property
     def content_length(self) -> int | None:
         """Return the full indexed content length before display truncation."""
+        if self.content_snippet_length is not None:
+            return self.content_snippet_length
         return len(self.content_snippet) if self.content_snippet is not None else None
 
     @property
     def content_truncated(self) -> bool:
         """Whether the transported content omits characters from the indexed value."""
-        return bool(
-            self.content_snippet is not None
-            and len(self.content_snippet) > self.CONTENT_DISPLAY_LIMIT
-        )
+        length = self.content_length
+        return length is not None and length > self.CONTENT_DISPLAY_LIMIT
 
     @property
     def directory(self) -> str:

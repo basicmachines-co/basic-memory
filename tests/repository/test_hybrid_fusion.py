@@ -51,6 +51,13 @@ class FakeRow:
     updated_at: str | None = None
     project_id: int = 1
     matched_chunk_text: str | None = None
+    content_snippet_length: int | None = None
+
+    @property
+    def content_length(self) -> int | None:
+        if self.content_snippet_length is not None:
+            return self.content_snippet_length
+        return len(self.content_snippet) if self.content_snippet is not None else None
 
 
 class FakeFts:
@@ -100,6 +107,19 @@ class FakeFts:
         allow_relaxed: bool = False,
     ) -> int:
         return len(self.answer(0))
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        # The keys of whatever this fake's search answers for the same restriction,
+        # so a subclass that overrides search() defines the filter in one place.
+        rows = await self.search(
+            scope, query, limit=len(candidate_keys), offset=0, candidate_keys=candidate_keys
+        )
+        return {(row.type, row.id) for row in rows if row.id is not None}
 
 
 def fake_vector_retrieval(

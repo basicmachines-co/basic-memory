@@ -26,7 +26,11 @@ from basic_memory.repository.search_filters import (
     metadata_filter_content_type_condition,
     shared_filter_conditions,
 )
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+)
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector, build_fts_page_stage
@@ -45,7 +49,7 @@ _WORD_QUOTING_CHARS = _PROBLEMATIC_CHARS | _SPACE_OR_SPECIAL_CHARS
 _BOOLEAN_OPERATOR_PATTERN = r"(\bAND\b|\bOR\b|\bNOT\b)"
 
 # Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = """
+_RESULT_COLUMNS = f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -57,7 +61,7 @@ _RESULT_COLUMNS = """
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                search_index.content_snippet,
+                {capped_snippet_columns("search_index")},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -616,6 +620,27 @@ class SQLiteFts:
                 f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
             )
         return results
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only."""
+        entity_columns = (
+            await self._entity_column_names() if query.metadata_filters else frozenset()
+        )
+        compiled = compile_fts_filter(
+            scope, query, entity_columns=entity_columns, candidate_keys=candidate_keys
+        )
+        sql = (
+            "SELECT search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        async with db.scoped_session(self._session_maker) as session:
+            result = await session.execute(text(sql), compiled.params)
+            return {(row.type, row.id) for row in result.fetchall()}
 
     async def count(
         self,

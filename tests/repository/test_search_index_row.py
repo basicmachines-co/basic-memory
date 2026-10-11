@@ -86,3 +86,24 @@ def test_missing_content_has_no_length_and_is_not_truncated():
     assert row.content is None
     assert row.content_length is None
     assert row.content_truncated is False
+
+
+def test_capped_read_reports_the_stored_length():
+    """A search read carries a capped snippet; length and truncation come from the store."""
+    now = datetime.now()
+    row = SearchIndexRow.from_mapping(
+        {
+            "project_id": 1,
+            "id": 2,
+            "type": "entity",
+            "file_path": "notes/big.md",
+            "created_at": now,
+            "updated_at": now,
+            "content_snippet": "a" * SearchIndexRow.CONTENT_DISPLAY_LIMIT,
+            "content_snippet_length": 41_522,
+        }
+    )
+
+    assert row.content == "a" * SearchIndexRow.CONTENT_DISPLAY_LIMIT
+    assert row.content_length == 41_522
+    assert row.content_truncated is True
