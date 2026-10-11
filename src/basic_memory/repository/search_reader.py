@@ -809,7 +809,7 @@ class SemanticSearch:
         *,
         vector_keys: Collection[SearchIndexKey],
         position_bound: int | None = None,
-        snippet_limit: int | None = SNIPPET_READ_LIMIT,
+        lexical_snippet_limit: int | None = SNIPPET_READ_LIMIT,
     ) -> list[SearchIndexRow]:
         """Attach note text to the rows a search returns (#1746).
 
@@ -819,13 +819,18 @@ class SemanticSearch:
         small, otherwise the note's ``TOP_CHUNKS_PER_RESULT`` chunks nearest the query.
         ``position_bound`` limits an external index's excerpts to the chunks the fixed
         rerank window read, so a reranked prefix quotes the same passages on every page.
-        ``snippet_limit`` is how much of each row's text to read; the rerank prefix reads
-        as far as the reranker's document limit (``_rerank_snippet_limit``). The public
-        ``content`` is cut at its display limit either way.
+        ``lexical_snippet_limit`` is how much text to read for rows the vector leg did
+        not match. A hybrid rerank prefix reads those as far as the reranker's document
+        limit (``_rerank_snippet_limit``), since their note text is their rerank document.
+        Vector-matched rows are reranked on their matched chunks, so they always read at
+        the cap. The public ``content`` is cut at its display limit either way.
         """
         if not rows:
             return []
-        texts = await self._fetch_row_texts([row_key(row) for row in rows], snippet_limit)
+        keys = [row_key(row) for row in rows]
+        texts = await self._fetch_row_texts([key for key in keys if key in vector_keys])
+        lexical_keys = [key for key in keys if key not in vector_keys]
+        texts.update(await self._fetch_row_texts(lexical_keys, lexical_snippet_limit))
         rows = [
             replace(
                 row,
@@ -891,6 +896,8 @@ class SemanticSearch:
         self, keys: Sequence[SearchIndexKey], snippet_limit: int | None = SNIPPET_READ_LIMIT
     ) -> dict[SearchIndexKey, tuple[str | None, int | None]]:
         """The content_snippet, cut at ``snippet_limit``, and stored length of each row."""
+        if not keys:
+            return {}
         wanted = set(keys)
         row_ids = list(dict.fromkeys(row_id for _, row_id in keys))
         texts: dict[SearchIndexKey, tuple[str | None, int | None]] = {}
@@ -1098,7 +1105,6 @@ class SemanticSearch:
                 window,
                 vector_keys=vector_keys,
                 position_bound=prefix_bound,
-                snippet_limit=self._rerank_snippet_limit(rerank),
             )
             prefix_keys = {row_key(row) for row in prefix}
             tail = [row for row in ranked_rows if row_key(row) not in prefix_keys]
@@ -1506,7 +1512,7 @@ class SemanticSearch:
                 window,
                 vector_keys=prefix_fusion.vector_scores.keys(),
                 position_bound=prefix_bound,
-                snippet_limit=self._rerank_snippet_limit(rerank),
+                lexical_snippet_limit=self._rerank_snippet_limit(rerank),
             )
             prefix_keys = {row_key(row) for row in prefix}
 
