@@ -77,6 +77,7 @@ async def _search_with_exact_count(
             ReadCacheOperation.search,
             group=content_group,
             ttl_seconds=SEARCH_READ_CACHE_TTL_SECONDS,
+            hit_headers={"Accept-Query": "application/json"},
         )
     ],
 )

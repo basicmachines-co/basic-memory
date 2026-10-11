@@ -90,8 +90,10 @@ async def test_equivalent_query_bodies_share_one_real_redis_entry(
     )
 
     assert first.status_code == 200
-    assert first.headers["Accept-Query"] == "application/json"
     assert (first.headers["x-redis-cache"], reordered.headers["x-redis-cache"]) == ("MISS", "HIT")
+    # The search contract holds on a hit too, though the route never runs for it.
+    assert first.headers["Accept-Query"] == "application/json"
+    assert reordered.headers["Accept-Query"] == "application/json"
     assert reordered.json() == first.json()
     assert search_service.search_calls == 1
     assert search_service.count_calls == 1

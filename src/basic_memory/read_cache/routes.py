@@ -15,7 +15,7 @@ opens a database connection.
 """
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, override
 
@@ -111,8 +111,14 @@ def cached_read(
     *,
     group: GroupForRequest,
     ttl_seconds: int,
+    hit_headers: Mapping[str, str] | None = None,
 ) -> Any:
-    """A route dependency that serves and fills the read cache for ``operation``."""
+    """A route dependency that serves and fills the read cache for ``operation``.
+
+    ``hit_headers`` are response headers the route always sets. A hit returns before
+    the route runs, and fastapi-redis-sdk 0.8.1 does not replay stored headers, so
+    they are added to every cached response here.
+    """
 
     async def key_builder(request: Request, eviction_group: str = "", prefix: str = "") -> str:
         target: _CachedTarget = request.state.basic_memory_read_cache_target
@@ -154,8 +160,9 @@ def cached_read(
                 # Raises the SDK's CacheHitException on a hit; its handler turns
                 # it into the cached response before the endpoint runs.
                 await anext(steps)
-            except CacheHitException:
+            except CacheHitException as hit:
                 span.set_attribute("cache.lookup.outcome", "hit")
+                hit.response.headers.update(hit_headers or {})
                 raise
             except ReadCacheUnavailable:
                 # Version lookup failed: Redis is down, so the database answers
