@@ -17,7 +17,12 @@ from logfire.testing import CaptureLogfire, capfire as capfire
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import PreparedSearchQuery
-from basic_memory.repository.search_reader import HydratedChunk, SearchReader, SemanticSearch
+from basic_memory.repository.search_reader import (
+    HydratedChunk,
+    SearchReader,
+    SemanticSearch,
+    VectorRetrieval,
+)
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.schemas.search import SearchRetrievalMode
 from tests.repository.test_rerank_pipeline import (
@@ -132,14 +137,21 @@ def _scoped_route(repo: BackendSearchRepository, mode: SearchRetrievalMode) -> P
 @pytest.mark.parametrize("route", [_project_route, _scoped_route])
 @pytest.mark.parametrize("mode", [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID])
 @pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("external", [False, True], ids=["built-in-index", "external-index"])
 async def test_one_retrieval_per_page_and_stable_reranked_pages(
     pagination_repository: BackendSearchRepository,
     route: Callable[[BackendSearchRepository, SearchRetrievalMode], Page],
     mode: SearchRetrievalMode,
     enabled: bool,
+    external: bool,
     capfire: CaptureLogfire,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = pagination_repository
+    if external:
+        # The same real index read the way an external one is: ranked by similarity
+        # alone, filtered afterwards and widened, as the reader does for Milvus.
+        monkeypatch.setattr(VectorRetrieval, "external", property(lambda self: True))
     reranker = _FakeReranker({f"Note {i:02d}": (i + 1) / 33 for i in range(32)})
     repo._rerank_provider = reranker if enabled else None
     if not enabled:

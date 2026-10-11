@@ -23,7 +23,8 @@ from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_reader import SemanticSearch
+from basic_memory.repository import search_reader as search_reader_module
+from basic_memory.repository.search_reader import CandidateWindow, SemanticSearch
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
@@ -2223,3 +2224,25 @@ async def test_returned_rows_quote_their_own_best_chunks_and_ranking_reads_no_te
     assert fetched_rows
     assert all(row.content_snippet is None for row in fetched_rows)
     assert all(row.content_snippet_length is not None for row in fetched_rows)
+
+    # Excerpt ranking batches notes under its chunk budget and skips a note that has no
+    # ready chunks. A budget of two puts the eight-chunk note in a batch of its own.
+    semantic = search_repository._semantic_search()
+    chunkless = replace(long_row, id=3999, entity_id=3999, permalink="notes/chunkless")
+    other = _entity_row(
+        project_id=project,
+        row_id=others[0],
+        entity_id=others[0],
+        title="Other",
+        permalink="notes/other",
+        content_stems="auth",
+    )
+    window = CandidateWindow({}, {}, {}, 0, query_embedding=(1.0, 0.0, 0.0, 0.0))
+    with patch.object(search_reader_module, "EXCERPT_RANKING_CHUNK_BUDGET", 2):
+        excerpts = await semantic._excerpt_chunk_keys([long_row, chunkless, other], window, None)
+
+    assert [key.chunk_key for key in excerpts[("entity", long_note)]] == [
+        f"entity:long:{i}" for i in range(5)
+    ]
+    assert [key.chunk_key for key in excerpts[("entity", others[0])]] == [f"entity:{others[0]}:0"]
+    assert ("entity", 3999) not in excerpts
