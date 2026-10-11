@@ -9,6 +9,7 @@ from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from unittest.mock import patch
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -17,6 +18,7 @@ from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 import basic_memory.repository.postgres_search_query as postgres_search_query_module
+import basic_memory.repository.pgvector_index as pgvector_index_module
 from basic_memory.repository.postgres_search_query import (
     compile_fts_filter,
     prepare_search_term,
@@ -1545,3 +1547,98 @@ async def test_postgres_search_supports_more_than_one_hundred_operands(
 
     assert any(row.id == 80 for row in results)
     assert await repo.count(search_text=query, allow_relaxed=True) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exact_limit", [None, 0], ids=["exact-ranking", "filtered-hnsw"])
+async def test_postgres_filtered_vector_search_ranks_only_admitted_chunks(
+    session_maker, test_project, monkeypatch, exact_limit
+):
+    """pgvector ranks only the chunks a filter admits (#1746).
+
+    Thirty archive rows embed exactly onto the query; three notes rows are orthogonal to
+    it. A notes-prefix vector search hands the index the filter as an admission and gets
+    the notes' chunks back from one query, with no archive chunk spent on the window.
+    Three admitted chunks are ranked exactly; a zero threshold forces the filtered HNSW
+    scan instead, which must return the same chunks.
+    """
+    await _skip_if_pgvector_unavailable(session_maker)
+    if exact_limit is not None:
+        monkeypatch.setattr(pgvector_index_module, "EXACT_ADMISSION_CHUNK_LIMIT", exact_limit)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_min_similarity=0.0,
+        semantic_vector_k=4,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo.init_search_index()
+
+    now = datetime.now(timezone.utc)
+    archive = list(range(501, 531))
+    notes = [541, 542, 543]
+    rows = [
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=row_id,
+            title=f"Archive {row_id}",
+            content_stems="auth token archive",
+            content_snippet="auth token archive",
+            permalink=f"archive/entry-{row_id}",
+            file_path=f"archive/entry-{row_id}.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=row_id,
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+        for row_id in archive
+    ] + [
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=row_id,
+            title=f"Note {row_id}",
+            content_stems="schema migration",
+            content_snippet="schema migration",
+            permalink=f"notes/entry-{row_id}",
+            file_path=f"notes/entry-{row_id}.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=row_id,
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+        for row_id in notes
+    ]
+    await repo.bulk_index_items(rows)
+    for row_id in archive + notes:
+        await repo.sync_entity_vectors(row_id)
+
+    index = repo._semantic_vector_index
+    search = index.search
+    calls: list[dict[str, object]] = []
+
+    async def spy(query, *, limit, projects, admission=None):
+        matches = await search(query, limit=limit, projects=projects, admission=admission)
+        calls.append({"admission": admission, "entities": sorted(m.key.entity_id for m in matches)})
+        return matches
+
+    with patch.object(index, "search", spy):
+        results = await repo.search(
+            search_text="session token auth",
+            file_path_prefix="notes",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+            limit=3,
+        )
+
+    assert sorted(row.id for row in results) == notes
+    [call] = calls
+    assert call["admission"] is not None
+    assert call["entities"] == notes

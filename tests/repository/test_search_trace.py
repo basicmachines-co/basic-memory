@@ -38,6 +38,7 @@ from basic_memory.repository.search_trace import (
     finalize_query_trace,
 )
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -89,8 +90,15 @@ class _TraceVectorIndex:
         return None
 
     async def search(
-        self, query: Sequence[float], *, limit: int, projects: ProjectScope
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+        projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
+        # "trace-test" is an external index name, so the reader never sends an admission.
+        assert admission is None
         return self.matches[:limit]
 
 

@@ -189,8 +189,10 @@ def _stub_vector_stream(monkeypatch: pytest.MonkeyPatch, stream: list[HydratedCh
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: Any = None,
         trace: Any = None,
     ) -> list[HydratedChunk]:
+        # The stream holds only entity chunks, which is all these queries admit.
         windows.append(candidate_limit)
         return stream[:candidate_limit]
 

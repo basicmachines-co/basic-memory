@@ -227,7 +227,7 @@ class TestEnsureVectorTablesSchemaBootstrapping:
         # A fresh database: answer each catalog read by what it asks for.
         def respond(statement, params=None):
             sql = str(statement)
-            if "count(*) = 2" in sql:
+            if "count(*) = 3" in sql:
                 return chunks_missing
             if "AS has_indexes" in sql:
                 return storage_missing

@@ -33,6 +33,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -173,6 +174,7 @@ class _RecordingVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         return []
 

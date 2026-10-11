@@ -158,6 +158,9 @@ def _semantic_repo(search_repository):
     search_repository._embedding_provider = _fake_embedding_provider()
     # The nearest-neighbour stage is stubbed below, so the adapter is never consulted.
     search_repository._semantic_vector_index = cast(SemanticVectorIndex, object())
+    # The reader's filter pass serves external indexes; a built-in index evaluates the
+    # filters inside its own nearest-neighbour query instead (#1746).
+    search_repository._semantic_vector_index_name = "milvus"
     return search_repository
 
 

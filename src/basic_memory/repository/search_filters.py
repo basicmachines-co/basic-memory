@@ -100,6 +100,17 @@ class FtsBackend(Protocol):
         allow_relaxed: bool = False,
     ) -> int: ...
 
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        """Return the query's structured filters as a subquery and its binds.
+
+        The subquery selects ``project_id, type, id`` of every search row in ``scope``
+        the filters admit, for a vector index to evaluate inside its nearest-neighbour
+        query (#1746). The query carries no text: only structured filters apply.
+        """
+        ...
+
     async def admitted_keys(
         self,
         scope: ProjectScope,

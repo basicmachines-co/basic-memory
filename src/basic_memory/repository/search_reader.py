@@ -51,8 +51,10 @@ from basic_memory.repository.search_trace import (
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
+    VectorAdmission,
     VectorKey,
     VectorMatch,
+    prefixed_binds,
 )
 from basic_memory.schemas.search import SearchRetrievalMode
 
@@ -422,9 +424,13 @@ class SemanticSearch:
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: VectorAdmission | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[HydratedChunk]:
-        """Query the configured adapter and hydrate only live, ready manifest rows."""
+        """Query the configured adapter and hydrate only live, ready manifest rows.
+
+        ``admission`` restricts a built-in index to the chunks a filtered query admits.
+        """
         if trace is not None:
             trace.vector = build_vector_stage(
                 candidate_limit=candidate_limit,
@@ -436,7 +442,10 @@ class SemanticSearch:
 
         if not self.vector.external:
             matches = await self.vector.index.search(
-                query_embedding, limit=candidate_limit, projects=self.scope
+                query_embedding,
+                limit=candidate_limit,
+                projects=self.scope,
+                admission=admission,
             )
             if trace is not None:
                 trace.readiness = await read_manifest_readiness(
@@ -447,6 +456,8 @@ class SemanticSearch:
                 )
             return await self._hydrate_vector_matches(session, matches, trace=trace)
 
+        if admission is not None:  # pragma: no cover - the reader never builds one
+            raise ValueError("An external vector index cannot evaluate a SQL admission.")
         scan_limit = min(candidate_limit, VECTOR_FILTER_SCAN_LIMIT)
         while True:
             matches = await self.vector.index.search(
@@ -671,14 +682,16 @@ class SemanticSearch:
         through that same position bound instead of from a second retrieval (#1557).
         """
         position_bound = self._rerank_candidate_limit(rerank)
-        # Trigger: the query carries structured filters.
+        # Trigger: the query carries structured filters and an external index, which
+        #     filters in the reader (a built-in index admits only matching chunks, so
+        #     its positions already count admitted chunks and need no extension).
         # Why: the fixed window then keeps widening past the bound until it admits
         #     enough rows, so its leading admitted rows can enter the ranking beyond
         #     it. Every window of this request admits at least as many rows, so those
         #     leading rows are the same in all of them.
         # Outcome: the bound extends to cover the leading rows; passages past it
         #     stay out of the prefix, since a smaller window may not have read them.
-        if query.has_filters:
+        if query.has_filters and self.vector.external:
             leading = window.ranked_rows()[:count]
             if leading:
                 last_position = max(window.position(row_key(row)) for row in leading)
@@ -869,6 +882,36 @@ class SemanticSearch:
             )
         return replace(window, embed_ms=embed_ms)
 
+    async def _vector_admission(self, query: PreparedSearchQuery) -> VectorAdmission | None:
+        """The query's structured filters as a predicate a built-in index evaluates.
+
+        Row types are a column of the chunk manifest, so the default entity filter
+        costs one comparison per chunk. Every other filter is the same SQL full-text
+        search applies, as a subquery naming the search rows it admits.
+        """
+        if not query.has_filters:
+            return None
+        params: dict[str, object] = {}
+        predicates: list[str] = []
+        if query.search_item_types:
+            type_binds = []
+            for index, item_type in enumerate(query.search_item_types):
+                params[f"admit_type_{index}"] = item_type.value
+                type_binds.append(f":admit_type_{index}")
+            predicates.append(f"c.source_type IN ({', '.join(type_binds)})")
+        row_query = replace(
+            query,
+            search_text=None,
+            search_item_types=None,
+            retrieval_mode=SearchRetrievalMode.FTS,
+        )
+        if row_query.has_filters:
+            row_sql, row_params = await self.fts.row_filter(self.scope, row_query)
+            row_sql, row_params = prefixed_binds(row_sql, row_params, "admit_")
+            params.update(row_params)
+            predicates.append(f"(c.project_id, c.source_type, c.source_row_id) IN ({row_sql})")
+        return VectorAdmission(predicate=" AND ".join(predicates), params=params)
+
     async def _candidate_window(
         self,
         query: PreparedSearchQuery,
@@ -899,7 +942,18 @@ class SemanticSearch:
         chunk budget could never succeed for notes cut into dozens of chunks, so nearly
         every filtered search (and every default MCP search, which filters to entities)
         widened to the scan limit.
+
+        A built-in index evaluates the filters itself (``_vector_admission``): its one
+        read is already the exact top ``candidate_limit`` of the admitted chunks, so it
+        never widens and no filter pass runs. Only an external index, which cannot see
+        the SQL search rows, filters its matches here and widens.
         """
+        # Trigger: the vectors live in the SQL database (sqlite-vec, pgvector).
+        # Why: the index can rank only admitted chunks; filtering a similarity-only
+        #     ranking afterwards forced repeated, ever wider reads to fill one page.
+        # Outcome: one admitted read. External indexes keep the filter-and-widen path.
+        admission = None if self.vector.external else await self._vector_admission(query)
+        filter_in_reader = query.has_filters and admission is None
         scan_limit = candidate_limit
         scanned = -1
         rounds = 0
@@ -913,11 +967,13 @@ class SemanticSearch:
             # defers checkout until hydration runs after adapter search has released it.
             async with self.session_maker() as session:
                 chunks = await self._run_vector_query(
-                    session, query_embedding, scan_limit, trace=trace
+                    session, query_embedding, scan_limit, admission=admission, trace=trace
                 )
             vector_query_ms += (time.perf_counter() - vector_query_start) * 1000
             hydrate_start = time.perf_counter()
-            window = await self._resolve_rows(chunks, query, min_similarity, trace=trace)
+            window = await self._resolve_rows(
+                chunks, query, min_similarity, filter_rows=filter_in_reader, trace=trace
+            )
             hydrate_ms += (time.perf_counter() - hydrate_start) * 1000
 
             exhausted = (
@@ -927,7 +983,7 @@ class SemanticSearch:
             )
             tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
             if (
-                not query.has_filters
+                not filter_in_reader
                 or window.admitted >= row_target
                 or exhausted
                 or tail_below_threshold
@@ -940,6 +996,7 @@ class SemanticSearch:
                     row_target=row_target,
                     rows_admitted=window.admitted,
                     has_filters=query.has_filters,
+                    filtered_in_index=admission is not None,
                 )
                 return replace(window, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms)
             scanned = len(chunks)
@@ -951,9 +1008,14 @@ class SemanticSearch:
         query: PreparedSearchQuery,
         min_similarity: float,
         *,
+        filter_rows: bool,
         trace: SearchTraceCollector | None = None,
     ) -> CandidateWindow:
-        """Turn ranked chunks into the search rows above threshold that the filters admit."""
+        """Turn ranked chunks into the search rows above threshold that the filters admit.
+
+        ``filter_rows`` runs the structured filters over the rows here; it is False when
+        the index already admitted only matching chunks.
+        """
         # Build per-search_index_row similarity scores from chunk-level results.
         # Keep the row type in the key because different row types can share the same
         # numeric id (#982). Track the best similarity per row (for ranking) and all
@@ -999,7 +1061,7 @@ class SemanticSearch:
                 ),
             )
 
-        if query.has_filters:
+        if filter_rows:
             allowed_keys = await self._filter_candidate_keys(list(search_index_rows), query)
             if trace is not None:
                 trace.vector = build_vector_stage(

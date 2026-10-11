@@ -19,6 +19,8 @@ from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
 )
 from basic_memory.repository.semantic_vector_index import (
+    prefixed_binds,
+    VectorAdmission,
     SemanticVectorIndex,
     VectorDeletion,
     VectorIndexScope,
@@ -75,6 +77,7 @@ class StubVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         return []
 
@@ -235,3 +238,17 @@ def test_search_repository_composition_root_injects_selected_adapter(monkeypatch
     assert isinstance(repository, PostgresSearchRepository)
     assert repository._semantic_vector_index_name == "milvus"
     assert repository._semantic_vector_index is index
+
+
+def test_prefixed_binds_renames_every_bind_without_touching_casts_or_longer_names():
+    """An embedded filter's binds get their own names; Postgres casts stay as written."""
+    sql, params = prefixed_binds(
+        "a = :scope_1 AND b = :scope_10 AND c::text = :x AND d = :x_y",
+        {"scope_1": 1, "scope_10": 2, "x": 3, "x_y": 4},
+        "admit_",
+    )
+
+    assert sql == (
+        "a = :admit_scope_1 AND b = :admit_scope_10 AND c::text = :admit_x AND d = :admit_x_y"
+    )
+    assert params == {"admit_scope_1": 1, "admit_scope_10": 2, "admit_x": 3, "admit_x_y": 4}

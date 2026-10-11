@@ -61,13 +61,15 @@ def fake_session_maker() -> Any:
     return session
 
 
-def vector_semantic(*, min_similarity: float = 0.0, fts: FakeFts | None = None) -> SemanticSearch:
+def vector_semantic(
+    *, min_similarity: float = 0.0, fts: FakeFts | None = None, index_name: str = "sqlite-vec"
+) -> SemanticSearch:
     """A vector pipeline with a stubbed adapter, ready for its neighbour stage to be patched."""
     return SemanticSearch(
         fake_session_maker(),
         ProjectScope.single(1),
         fts or FakeFts(),
-        fake_vector_retrieval(min_similarity=min_similarity),
+        fake_vector_retrieval(min_similarity=min_similarity, index_name=index_name),
     )
 
 

@@ -828,6 +828,19 @@ class PostgresFts:
             )
         return results
 
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        """Return the query's structured filters as a subquery over search rows."""
+        if query.search_text:
+            raise ValueError("A row filter applies structured filters only; it takes no text.")
+        compiled = compile_fts_filter(scope, query)
+        sql = (
+            "SELECT search_index.project_id, search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        return sql, compiled.params
+
     async def admitted_keys(
         self,
         scope: ProjectScope,

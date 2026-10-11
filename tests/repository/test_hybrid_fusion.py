@@ -108,6 +108,12 @@ class FakeFts:
     ) -> int:
         return len(self.answer(0))
 
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        self.queries.append(query)
+        return "SELECT project_id, type, id FROM search_index WHERE 1 = 1", {}
+
     async def admitted_keys(
         self,
         scope: ProjectScope,
@@ -127,8 +133,13 @@ def fake_vector_retrieval(
     vector_k: int = 100,
     min_similarity: float = 0.0,
     embed_query: AsyncMock | None = None,
+    index_name: str = "sqlite-vec",
 ) -> VectorRetrieval:
-    """A semantic stack whose adapter is never consulted: tests stub the neighbour stage."""
+    """A semantic stack whose adapter is never consulted: tests stub the neighbour stage.
+
+    ``index_name`` picks the reader's path: a built-in name ("sqlite-vec") has its
+    filters evaluated in the index, any other name is external and filtered in the reader.
+    """
     provider = type(
         "EP",
         (),
@@ -142,7 +153,7 @@ def fake_vector_retrieval(
     )()
     return VectorRetrieval(
         index=cast(SemanticVectorIndex, object()),
-        index_name="sqlite-vec",
+        index_name=index_name,
         embedding_provider=cast(EmbeddingProvider, provider),
         embedding_model="fake:384",
         vector_k=vector_k,

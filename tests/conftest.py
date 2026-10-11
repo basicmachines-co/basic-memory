@@ -169,6 +169,7 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
         CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
         CREATE_POSTGRES_SEARCH_INDEX_TABLE,
         CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX,
+        CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_LOCATION_INDEX,
         CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE,
     )
 
@@ -187,6 +188,7 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
         await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE)
         await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX)
+        await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_LOCATION_INDEX)
 
         for table_name in POSTGRES_EPHEMERAL_TABLES:
             await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
@@ -379,6 +381,7 @@ async def engine_factory(
     from basic_memory.models.search import (
         CREATE_SEARCH_INDEX,
         CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
+        CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_LOCATION,
         CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
         CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
     )
@@ -438,6 +441,7 @@ async def engine_factory(
                 await conn.execute(CREATE_SEARCH_INDEX)
                 await conn.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS)
                 await conn.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY)
+                await conn.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_LOCATION)
                 await conn.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE)
 
             # Yield after setup is complete
