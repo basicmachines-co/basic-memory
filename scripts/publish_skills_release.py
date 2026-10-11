@@ -5,7 +5,8 @@ The Basic Memory web app links to these assets by name, so a failed publish must
 never leave a download URL empty. `gh release upload --clobber` deletes each old
 asset before uploading its replacement, which is exactly that failure. Instead:
 
-1. Clear staging and retired assets left by an earlier run that died midway.
+1. Recover from an earlier run that died midway: put back any live asset it
+   renamed aside without replacing, then clear its staging and retired assets.
 2. Upload every new archive under a staging name. The live assets are untouched,
    so a failure here changes nothing users can see.
 3. Only once every upload has succeeded, swap each asset into place: rename the
@@ -65,6 +66,14 @@ def archive_names(archives: Sequence[Path]) -> dict[str, Path]:
 
 def publish(release: Release, archives: dict[str, Path]) -> None:
     # --- Leftovers from an interrupted run ---
+    # A run that died between its two renames left the live name empty and the
+    # old archive under its retired name. That retired copy is the only one
+    # serving the URL, so put it back before deleting anything.
+    names = set(release.asset_names())
+    for name in sorted(names):
+        live_name = name.removeprefix(RETIRED_PREFIX)
+        if name.startswith(RETIRED_PREFIX) and live_name not in names:
+            release.rename(name, live_name)
     for name in release.asset_names():
         if name.startswith((STAGING_PREFIX, RETIRED_PREFIX)):
             release.delete(name)

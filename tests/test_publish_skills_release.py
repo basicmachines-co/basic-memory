@@ -123,6 +123,28 @@ def test_next_run_recovers_from_an_interrupted_one(archives: dict[str, Path]) ->
     assert release.assets == {name: f"new {name}" for name in archives}
 
 
+def test_next_run_restores_an_asset_left_renamed_aside(archives: dict[str, Path]) -> None:
+    # The first run dies on its second rename: basic-memory.zip is now only
+    # retired--basic-memory.zip, and the URL is empty.
+    release = FakeRelease(
+        _live(list(CONTRACT), "old"), fail_on=("rename", f"{STAGING}basic-memory.zip")
+    )
+    with pytest.raises(RuntimeError):
+        publish_skills_release.publish(release, archives)
+    assert "basic-memory.zip" not in release.assets
+
+    # The next run fails too, at an upload. Recovery must already have put the
+    # old archive back rather than deleting it as a leftover.
+    release.fail_on = ("upload", f"{STAGING}memory-onboarding.zip")
+    with pytest.raises(RuntimeError):
+        publish_skills_release.publish(release, archives)
+    assert release.assets["basic-memory.zip"] == "old basic-memory.zip"
+
+    release.fail_on = None
+    publish_skills_release.publish(release, archives)
+    assert release.assets == {name: f"new {name}" for name in archives}
+
+
 def test_archive_names_enforce_the_contract(tmp_path: Path) -> None:
     def paths(*names: str, folder: str = "a") -> list[Path]:
         return [tmp_path / folder / name for name in names]
