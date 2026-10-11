@@ -358,6 +358,28 @@
 
 ### Bug Fixes
 
+- Fixes from the v0.24.0 release live run:
+  - `build_context` refuses a `memory://` title URL that names more than one note, as
+    `read_note` does, instead of building context for one of them. Pass the permalink.
+  - `build_context` related results report `created_at` with a timezone offset, like
+    primary results.
+  - `delete_project(delete_notes=True)` on a local project reports that the files were
+    deleted, instead of "did not report a completion status".
+  - `write_note`'s "Similar existing notes" advisory skips notes the new note already
+    links to.
+  - `view_note` sets the note off with `<note>` markers instead of `---`, which ran into
+    the note's own frontmatter fence, and its instructions are no longer indented.
+  - Vector and hybrid searches report `total` as the results seen through the current
+    page, still with `total_is_exact: false`, instead of `0`.
+  - `tail` rows carry `updated_at`, the time they are ordered by, and `bm tail` shows it.
+  - `bm reindex --help` no longer says `--embeddings` requires semantic search (#1696).
+  - Tool docs, the manual and the `list_memory_projects` footer no longer promise a
+    "session's active project". MCP requests carry no session state under the current
+    protocol, so a call without `project` always uses the default project, locally and
+    in the cloud. `write_note` and `edit_note` end with `[Project: 'name']` instead of
+    `[Session: Using project 'name']`, and say when no project was given and the
+    default was used.
+
 - **#1726**: `bm reindex --embeddings` now finishes oversized notes before it reports
   success. Vector sync embeds at most 256 chunks of one note per pass and defers the
   rest, and the explicit reindex ran a single pass, then printed "Embeddings complete"

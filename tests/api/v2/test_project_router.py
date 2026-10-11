@@ -280,6 +280,8 @@ async def test_delete_project_by_id(
     old_project = _project_item(status_response.old_project)
     assert old_project.external_id == created_project.external_id
     assert status_response.new_project is None
+    # Files were kept, and the response says so instead of leaving the status unset.
+    assert status_response.file_delete_status == "skipped"
 
     # Verify it's deleted - trying to get it should return 404
     response = await client.get(f"{v2_projects_url}/{created_project.external_id}")
@@ -319,6 +321,8 @@ async def test_delete_project_with_delete_notes_param(
         )
 
         assert response.status_code == 200
+        status_response = ProjectStatusResponse.model_validate(response.json())
+        assert status_response.file_delete_status == "complete"
 
         # Verify directory was deleted
         assert not project_path.exists()

@@ -45,7 +45,10 @@ async def test_default_project_write_note(mcp_server, app, test_project):
             assert f"project: {test_project.name}" in response_text
             assert "# Created note" in response_text
             assert "file_path: test/Default Mode Test.md" in response_text
-            assert f"[Session: Using project '{test_project.name}']" in response_text
+            assert (
+                f"[Project: '{test_project.name}' (no project was given, so this used the "
+                "default project"
+            ) in response_text
 
 
 @pytest.mark.asyncio
@@ -91,7 +94,7 @@ async def test_explicit_project_overrides_default(
 
             assert f"project: {other_project.name}" in response_text
             assert "# Created note" in response_text
-            assert f"[Session: Using project '{other_project.name}']" in response_text
+            assert f"[Project: '{other_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -168,7 +171,7 @@ async def test_cli_constraint_overrides_default_project(
 
                 assert f"project: {other_project.name}" in response_text
                 assert "# Created note" in response_text
-                assert f"[Session: Using project '{other_project.name}']" in response_text
+                assert f"[Project: '{other_project.name}']" in response_text
 
     finally:
         if "BASIC_MEMORY_MCP_PROJECT" in os.environ:

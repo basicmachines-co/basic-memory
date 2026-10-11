@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -107,7 +106,7 @@ def test_handle_tool_call_dispatches(bm):
     actor.call.return_value = json.dumps({"results": []})
     p._actor = actor
 
-    out = p.handle_tool_call("bm_search", {"query": "hi", "limit": 3})
+    p.handle_tool_call("bm_search", {"query": "hi", "limit": 3})
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
     assert bm_tool == "search_notes"

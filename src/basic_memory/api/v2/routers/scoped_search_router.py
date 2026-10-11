@@ -82,11 +82,13 @@ async def search_scope(
             else:
                 # Trigger: semantic modes would need another vector or hybrid pass to count.
                 # Why: a search should not pay for a second semantic retrieval.
-                # Outcome: probe one row past the page, leave total at 0, mark it inexact.
+                # Outcome: probe one row past the page and report a lower bound, marked
+                #   inexact: rows at this offset prove offset + len(results) exist; an
+                #   empty page proves nothing about the offset it skipped, so it reports 0.
                 results = await service.search(query, limit=page_size + 1, offset=offset)
-                total = 0
                 has_more = len(results) > page_size
                 results = results[:page_size]
+                total = offset + len(results) if results else 0
 
         temporal_by_source = {}
         project_external_ids: dict[int, str] = {}

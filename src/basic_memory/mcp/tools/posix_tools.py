@@ -61,6 +61,7 @@ from basic_memory.schemas.directory import (
     DirectoryListResponse,
     DirectoryNode,
 )
+from basic_memory.schemas.memory import EntitySummary
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 from basic_memory.utils import coerce_list, generate_permalink
 
@@ -1299,7 +1300,8 @@ async def tail(
         context: Optional FastMCP context.
 
     Returns:
-        Rows of {type, title, permalink, file_path, created_at}, newest first.
+        Rows of {type, title, permalink, file_path, created_at, updated_at}, newest
+        change first.
     """
     if lines < 1:
         raise ValueError(f"lines must be >= 1, got {lines}")
@@ -1331,6 +1333,9 @@ async def tail(
     rows: list[dict[str, Any]] = []
     for result in activity.results:
         primary = result.primary_result
+        # The recent query above asks for entity rows only.
+        if not isinstance(primary, EntitySummary):  # pragma: no cover
+            raise TypeError(f"tail expected entity rows, got {primary.type}")
         rows.append(
             {
                 "type": primary.type,
@@ -1338,6 +1343,8 @@ async def tail(
                 "permalink": primary.permalink,
                 "file_path": primary.file_path,
                 "created_at": primary.created_at.isoformat() if primary.created_at else None,
+                # The order is by last change, so the row says when that was.
+                "updated_at": primary.updated_at.isoformat() if primary.updated_at else None,
             }
         )
     return rows

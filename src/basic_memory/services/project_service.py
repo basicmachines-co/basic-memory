@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, Literal, Optional, Sequence
 
 
 from loguru import logger
@@ -431,12 +431,18 @@ class ProjectService:
             raise ValueError("Failed to retrieve doctor project")
         return project
 
-    async def remove_project(self, name: str, delete_notes: bool = False) -> None:
+    async def remove_project(
+        self, name: str, delete_notes: bool = False
+    ) -> Literal["skipped", "complete", "failed"]:
         """Remove a project from configuration and database.
 
         Args:
             name: The name of the project to remove
             delete_notes: If True, delete the project directory from filesystem
+
+        Returns:
+            What happened to the note files: "skipped" when they were kept,
+            "complete" when the directory is gone, "failed" when it remains.
 
         Raises:
             ValueError: If the project doesn't exist or is the default project
@@ -492,21 +498,25 @@ class ProjectService:
 
         logger.info(f"Project '{name}' removed from configuration and database")
 
+        if not (delete_notes and project_path):
+            return "skipped"
+
         # Optionally delete the project directory
-        if delete_notes and project_path:
-            try:
-                path_obj = Path(project_path)
-                if path_obj.exists() and path_obj.is_dir():
-                    await asyncio.to_thread(shutil.rmtree, project_path)
-                    logger.info(f"Deleted project directory: {project_path}")
-                else:
-                    logger.warning(  # pragma: no cover
-                        f"Project directory not found or not a directory: {project_path}"
-                    )  # pragma: no cover
-            except Exception as e:  # pragma: no cover
+        try:
+            path_obj = Path(project_path)
+            if path_obj.exists() and path_obj.is_dir():
+                await asyncio.to_thread(shutil.rmtree, project_path)
+                logger.info(f"Deleted project directory: {project_path}")
+            else:
                 logger.warning(  # pragma: no cover
-                    f"Failed to delete project directory {project_path}: {e}"
-                )
+                    f"Project directory not found or not a directory: {project_path}"
+                )  # pragma: no cover
+        except Exception as e:  # pragma: no cover
+            logger.warning(  # pragma: no cover
+                f"Failed to delete project directory {project_path}: {e}"
+            )
+            return "failed"  # pragma: no cover
+        return "complete"
 
     async def set_default_project(self, name: str) -> None:
         """Set the default project in configuration and database.

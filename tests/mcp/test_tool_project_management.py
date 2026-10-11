@@ -199,8 +199,9 @@ async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_fac
 
     delete_result = await delete_project("Delete Notes Project", delete_notes=True)
     assert delete_result.startswith("✓")
-    assert "did not report a completion status" in delete_result
-    assert "Note files on disk were deleted" not in delete_result
+    # The local route deletes the directory before answering, so it reports completion.
+    assert "Note files on disk were deleted along with the project" in delete_result
+    assert "did not report a completion status" not in delete_result
     assert "Re-add the project" not in delete_result
     assert not project_root.exists()
 

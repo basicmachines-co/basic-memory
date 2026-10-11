@@ -363,6 +363,12 @@ def _display_grep_lines(result: dict[str, Any], *, plain: bool) -> None:
 # than reusing _display_recent_activity.
 
 
+def _tail_changed_at(row: dict[str, Any]) -> str:
+    """When a tail row last changed; tail orders by it."""
+    # COMPAT(v0.24): servers before v0.24 send only created_at.
+    return str(row.get("updated_at") or row.get("created_at") or "")
+
+
 def _display_tail(rows: list[dict[str, Any]]) -> None:
     """Render recently changed notes as a Rich table, newest first."""
     if not rows:
@@ -370,14 +376,14 @@ def _display_tail(rows: list[dict[str, Any]]) -> None:
         return
 
     table = Table(show_header=True, header_style="bold", expand=False)
-    table.add_column("Created", style="dim")
+    table.add_column("Updated", style="dim")
     table.add_column("Type", style="dim", width=12)
     table.add_column("Title", style="bold cyan")
     table.add_column("Permalink", style="green")
     table.add_column("File", style="dim")
     for row in rows:
         table.add_row(
-            str(row.get("created_at") or ""),
+            _tail_changed_at(row),
             str(row.get("type") or ""),
             markup_escape(str(row.get("title") or "")),
             markup_escape(str(row.get("permalink") or "")),
@@ -390,7 +396,7 @@ def _plain_tail(rows: list[dict[str, Any]]) -> None:
     """Render recently changed notes as tab-separated lines."""
     for row in rows:
         columns = (
-            str(row.get("created_at") or ""),
+            _tail_changed_at(row),
             str(row.get("type") or ""),
             str(row.get("title") or ""),
             str(row.get("permalink") or ""),

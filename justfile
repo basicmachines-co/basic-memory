@@ -514,7 +514,7 @@ lint: fix
 
 # Lint and fix code
 fix:
-    uv run ruff check --fix --unsafe-fixes src tests test-int
+    uv run ruff check --fix --unsafe-fixes .
 
 # Type check code (ty)
 typecheck:

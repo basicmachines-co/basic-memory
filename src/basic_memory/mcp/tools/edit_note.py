@@ -29,6 +29,7 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     add_project_metadata,
     resolve_project_and_path,
+    routes_to_default_project,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
@@ -704,6 +705,9 @@ async def edit_note(
         has_metadata=bool(metadata),
         has_expected_checksum=expected_checksum is not None,
     ):
+        # Decided before the client opens: a memory:// prefix on the identifier has
+        # already filled project in by now.
+        used_default = routes_to_default_project(project, project_id)
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
             active_project,
@@ -1038,7 +1042,9 @@ async def edit_note(
                     }
 
                 summary_result = "\n".join(summary)
-                return add_project_metadata(summary_result, active_project.name)
+                return add_project_metadata(
+                    summary_result, active_project.name, used_default=used_default
+                )
 
             except EditRefused:
                 raise

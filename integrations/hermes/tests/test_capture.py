@@ -11,8 +11,6 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _provider_with_mock_actor(bm, *, project="test-proj", capture_folder="hermes-sessions"):
     p = bm.BasicMemoryProvider()

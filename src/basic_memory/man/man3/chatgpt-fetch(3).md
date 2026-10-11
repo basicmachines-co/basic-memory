@@ -50,7 +50,7 @@ fetch("manual/man3/delete-project-3")
 ## GOTCHAS
 
 - [gotcha] The returned title is title-cased from the permalink ("Delete Project 3"), not the note's actual title ("delete-project(3)") #fidelity
-- [gotcha] Same session-active-project routing as chatgpt-search — no project parameter #routing
+- [gotcha] Same default-project routing as chatgpt-search — no project parameter #routing
 
 ## SEE ALSO
 

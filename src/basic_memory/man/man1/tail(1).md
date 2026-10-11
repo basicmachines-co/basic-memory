@@ -24,9 +24,9 @@ bm tail [--timeframe TIMEFRAME] [--lines N] [--json | --plain]
 
 Shows the most recently changed notes in a project, newest first — tail as
 in "the tail of the change log", not of one file. Each row carries the
-creation time, type, title, permalink, and file path. On a TTY rows render
-as a table; `--plain` prints tab-separated lines; `--json` (or piped
-output) emits the rows as a JSON array.
+last-change time, type, title, permalink, and file path; `--json` rows also
+keep `created_at`. On a TTY rows render as a table; `--plain` prints
+tab-separated lines; `--json` (or piped output) emits the rows as a JSON array.
 
 ## OPTIONS
 
