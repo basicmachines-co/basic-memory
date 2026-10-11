@@ -77,9 +77,16 @@ function discoverSkillDirs(): string[] {
  */
 function isInternal(md: string): boolean {
   const yaml = md.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? ""
-  return /^metadata:[^\n]*\n(?:[ \t][^\n]*\n?)*?[ \t]+internal:\s*true\s*$/m.test(
-    yaml,
-  )
+  // Walk lines rather than one regex: the nested-block regex backtracks badly.
+  let inMetadata = false
+  for (const line of yaml.split(/\r?\n/)) {
+    if (!/^[ \t]/.test(line)) {
+      inMetadata = line.split(":", 1)[0].trim() === "metadata"
+    } else if (inMetadata && /^\s+internal:\s*true\s*$/.test(line)) {
+      return true
+    }
+  }
+  return false
 }
 
 function main() {
