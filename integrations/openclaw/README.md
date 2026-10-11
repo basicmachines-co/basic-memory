@@ -214,10 +214,7 @@ openclaw basic-memory status
 
 These skills ship with the plugin — no installation needed:
 
-- **memory-capture** — capture a thread's current state into one coherent note
 - **memory-comark** — charts, tables, boards, and live views in notes with `::bm-*` components
-- **memory-continue** — resume prior work by rebuilding context from the graph
-- **memory-curate** — link orphans, propose relations, merge duplicates, build hub notes
 - **memory-defrag** — cleanup and reorganization of memory files
 - **memory-ingest** — import existing material into Basic Memory
 - **memory-lifecycle** — manage note/project lifecycle workflows

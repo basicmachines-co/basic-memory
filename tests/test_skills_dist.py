@@ -155,6 +155,14 @@ def test_validator_checks_linked_files(tmp_path: Path) -> None:
     validate_skills.validate_skills(tmp_path)
 
 
+def test_validator_rejects_links_outside_the_skill(tmp_path: Path) -> None:
+    # The target exists in the repo, but the zip holds only the skill folder.
+    (tmp_path / "README.md").write_text("repo readme")
+    _write_skill(tmp_path, "memory-x", body="See [the readme](../README.md).\n")
+    with pytest.raises(SystemExit, match="outside the skill folder"):
+        validate_skills.validate_skills(tmp_path)
+
+
 def test_is_internal_reads_nested_metadata(tmp_path: Path) -> None:
     internal = _write_skill(tmp_path, "memory-a", metadata="\n  owner: ci\n  internal: true")
     not_internal = _write_skill(tmp_path, "memory-b", metadata="\n  internal: false")

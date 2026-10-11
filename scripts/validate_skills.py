@@ -181,8 +181,15 @@ def validate_skill_file(skill_file: Path, expected_name: str) -> None:
     validate_name(skill_file, name)
     validate_description(skill_file, frontmatter.get("description"))
 
+    # Each zip holds only the skill's own folder, so a link that leaves it (for
+    # example ../README.md) breaks in the published skill even when the target
+    # exists in the repo.
+    skill_root = skill_file.parent.resolve()
     for target in relative_link_targets(skill_body(skill_file)):
-        if not (skill_file.parent / target).is_file():
+        resolved = (skill_file.parent / target).resolve()
+        if not resolved.is_relative_to(skill_root):
+            raise SystemExit(f"{skill_file}: links outside the skill folder {target!r}")
+        if not resolved.is_file():
             raise SystemExit(f"{skill_file}: links to missing file {target!r}")
 
 
@@ -236,6 +243,12 @@ SKILL_LISTS = (
             # checksum fields memory-quest needs, so OpenClaw users couldn't
             # finish it. A follow-up fixes the wrappers and adds it here.
             "memory-quest": "OpenClaw wrappers lack fields the skill needs",
+            # These call tools OpenClaw doesn't register (recent_activity,
+            # list_directory) or a metadata-only search_notes, which OpenClaw's
+            # schema rejects without `query`. List them once OpenClaw has the tools.
+            "memory-capture": "needs a query-less search_notes",
+            "memory-continue": "needs recent_activity",
+            "memory-curate": "needs list_directory",
         },
     ),
     SkillList(
@@ -245,6 +258,9 @@ SKILL_LISTS = (
             # Not in the OpenClaw manifest yet either (see above); list it here
             # when the manifest gains it.
             "memory-quest": "not shipped for OpenClaw yet",
+            "memory-capture": "not shipped for OpenClaw yet",
+            "memory-continue": "not shipped for OpenClaw yet",
+            "memory-curate": "not shipped for OpenClaw yet",
         },
     ),
 )
