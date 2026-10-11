@@ -159,6 +159,11 @@ def set_container(container: ApiContainer) -> None:
     _container = container
 
 
+def has_installed_container() -> bool:
+    """Whether an MCP or API host has installed its container for this process."""
+    return _container is not None
+
+
 @contextmanager
 def installed_container(container: ApiContainer) -> Iterator[None]:
     """Temporarily expose a container to off-lifespan ASGI requests."""
