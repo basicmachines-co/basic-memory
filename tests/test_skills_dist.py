@@ -353,6 +353,9 @@ def test_combined_skill_layout_and_routing(repo_dist: Path, tmp_path: Path, asse
     assert frontmatter["name"] == "basic-memory"
     validate_skills.validate_name(skill_file, frontmatter["name"])
     validate_skills.validate_description(skill_file, frontmatter.get("description"))
+    # Chat apps load a skill from its description alone, and the Memory Quest panel
+    # tells users to "run Memory Quest"; the routing table is read only after loading.
+    assert "Memory Quest" in frontmatter["description"]
     assert build_skills_dist.ROUTING_TABLE_MARKER not in skill_file.read_text()
 
     expected = sorted(set(_distributed()) - COMBINED_EXCLUDED)

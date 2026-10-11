@@ -1,6 +1,6 @@
 ---
 name: basic-memory
-description: "Work from the user's Basic Memory knowledge base: find and read notes for context, save linked notes, resume and organize work. Use when a task could benefit from prior notes or should be remembered."
+description: "Use the user's Basic Memory knowledge base: find notes for context, save linked notes, resume work, run Memory Quest. Use when a task needs prior notes, should be remembered, or mentions Memory Quest."
 ---
 
 # Basic Memory
