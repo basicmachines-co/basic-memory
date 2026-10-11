@@ -832,7 +832,7 @@ async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(mo
     semantic = _semantic(vector_k=2, rerank=_reranking(reranker, candidates=2), fts=fts)
 
     async def vector_window(
-        query: PreparedSearchQuery, candidate_limit: int, *, trace: Any = None
+        query: PreparedSearchQuery, candidate_limit: int, row_target: int, *, trace: Any = None
     ) -> CandidateWindow:
         return window_of(vector_stream[:candidate_limit])
 
