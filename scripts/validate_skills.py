@@ -34,8 +34,11 @@ MARKDOWN_LINK = re.compile(r"""\]\(([^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)""")
 # A reference-style link definition, `[label]: target`. Nothing rewrites these
 # when the combined skill moves a resource, so the validator rejects them.
 LINK_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:\s*\S", re.MULTILINE)
+# An angle-bracket destination, `[text](<path with spaces.md>)`. Neither the link
+# check nor the combined skill's rewriter reads this form, so it is rejected.
+ANGLE_LINK = re.compile(r"\]\(\s*<")
 CODE_RESOURCE_PATH = re.compile(r"`((?:references|assets|scripts)/[^`\s]+)`")
-METADATA_INTERNAL = re.compile(r"^\s+internal:\s*true\s*$")
+METADATA_INTERNAL = re.compile(r"^\s+internal:\s*true\s*(?:#.*)?$")
 
 
 def strip_matching_quotes(value: str) -> str:
@@ -100,11 +103,23 @@ def is_internal_skill(skill_file: Path) -> bool:
     of both `npx skills add` and our release archives.
     """
     in_metadata = False
+    child_indent: int | None = None
     for line in frontmatter_lines(skill_file):
+        stripped = line.strip()
+        # YAML keeps a mapping open across blank and comment lines.
+        if not stripped or stripped.startswith("#"):
+            continue
         if line[:1] not in (" ", "\t"):
             in_metadata = line.split(":", 1)[0].strip() == "metadata"
+            child_indent = None
             continue
-        if in_metadata and METADATA_INTERNAL.match(line):
+        if not in_metadata:
+            continue
+        # Only a direct child counts: metadata.sub.internal is not the marker.
+        indent = len(line) - len(line.lstrip())
+        if child_indent is None:
+            child_indent = indent
+        if indent == child_indent and METADATA_INTERNAL.match(line):
             return True
     return False
 
@@ -189,6 +204,8 @@ def validate_skill_file(skill_file: Path, expected_name: str) -> None:
     # example ../README.md) breaks in the published skill even when the target
     # exists in the repo.
     body = skill_body(skill_file)
+    if ANGLE_LINK.search(body):
+        raise SystemExit(f"{skill_file}: use plain link destinations, not <angle brackets>")
     if definition := LINK_DEFINITION.search(body):
         raise SystemExit(
             f"{skill_file}: use inline links, not reference-style definitions "

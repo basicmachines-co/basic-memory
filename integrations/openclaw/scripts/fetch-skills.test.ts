@@ -44,6 +44,23 @@ describe("fetchSkills", () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  test("treats internal: true after a blank or comment line as internal", () => {
+    writeSkill(
+      source,
+      "memory-spaced",
+      'name: memory-spaced\ndescription: "CI too."\nmetadata:\n  owner: ci\n\n# hidden\n  internal: true',
+    )
+    writeSkill(
+      source,
+      "memory-nested",
+      'name: memory-nested\ndescription: "Public."\nmetadata:\n  sub:\n    internal: true',
+    )
+
+    const dirs = fetchSkills(source, out).map((entry) => entry.dir)
+
+    expect(dirs).toEqual(["memory-nested", "memory-notes"])
+  })
+
   test("removes generated skills that are no longer distributed", () => {
     // A copy left by an earlier run, before the skill was marked internal.
     writeSkill(

@@ -190,6 +190,27 @@ def test_is_internal_reads_nested_metadata(tmp_path: Path) -> None:
     assert not validate_skills.is_internal_skill(top_level / "SKILL.md")
 
 
+@pytest.mark.parametrize(
+    ("metadata", "internal"),
+    [
+        # YAML keeps the mapping open across blank and comment lines.
+        ("\n  owner: ci\n\n  internal: true", True),
+        ("\n  owner: ci\n# note\n  internal: true  # hide", True),
+        # metadata.sub.internal is not metadata.internal.
+        ("\n  sub:\n    internal: true", False),
+    ],
+)
+def test_is_internal_follows_yaml_scope(tmp_path: Path, metadata: str, internal: bool) -> None:
+    skill = _write_skill(tmp_path, "memory-a", metadata=metadata)
+    assert validate_skills.is_internal_skill(skill / "SKILL.md") is internal
+
+
+def test_validator_rejects_angle_bracket_links(tmp_path: Path) -> None:
+    _write_skill(tmp_path, "memory-x", body="See [guide](<references/my guide.md>).\n")
+    with pytest.raises(SystemExit, match="angle brackets"):
+        validate_skills.validate_skills(tmp_path)
+
+
 # --- Validator: skill lists ---
 
 

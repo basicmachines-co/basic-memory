@@ -78,11 +78,23 @@ function discoverSkillDirs(sourceDir: string): string[] {
 function isInternal(md: string): boolean {
   const yaml = md.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? ""
   // Walk lines rather than one regex: the nested-block regex backtracks badly.
+  // Mirrors is_internal_skill in scripts/validate_skills.py.
   let inMetadata = false
+  let childIndent: number | null = null
   for (const line of yaml.split(/\r?\n/)) {
+    const stripped = line.trim()
+    // YAML keeps a mapping open across blank and comment lines.
+    if (stripped === "" || stripped.startsWith("#")) continue
     if (!/^[ \t]/.test(line)) {
       inMetadata = line.split(":", 1)[0].trim() === "metadata"
-    } else if (inMetadata && /^\s+internal:\s*true\s*$/.test(line)) {
+      childIndent = null
+      continue
+    }
+    if (!inMetadata) continue
+    // Only a direct child counts: metadata.sub.internal is not the marker.
+    const indent = line.length - line.trimStart().length
+    childIndent ??= indent
+    if (indent === childIndent && /^\s+internal:\s*true\s*(#.*)?$/.test(line)) {
       return true
     }
   }
