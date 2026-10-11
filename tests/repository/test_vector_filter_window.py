@@ -329,3 +329,24 @@ async def test_a_query_without_filters_has_no_admission():
         await _semantic(AdmittingFts(set()), index_name="sqlite-vec")._vector_admission(UNFILTERED)
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_index_widens_until_long_notes_fill_the_page():
+    """Admitted chunks still collapse to rows: a few long notes can fill a chunk window.
+
+    With 52 chunks per note, a 100-chunk admitted read holds two notes; a five-result
+    page widens, each read still handed the admission, until five rows are admitted.
+    """
+    fts = AdmittingFts(admitted=set())
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=52))
+
+    found = await _search(
+        _semantic(fts, vector_k=100, index_name="sqlite-vec"), adapter, query=FILTERED, limit=5
+    )
+
+    assert found == [1, 2, 3, 4, 5]
+    assert _windows(adapter) == [100, 200, 400]
+    assert all(call.kwargs["admission"] is not None for call in adapter.await_args_list)
+    # The index admitted the chunks, so no reader-side filter pass ran.
+    assert fts.calls == []

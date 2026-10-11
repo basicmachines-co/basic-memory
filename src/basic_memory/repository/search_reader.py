@@ -694,16 +694,14 @@ class SemanticSearch:
         through that same position bound instead of from a second retrieval (#1557).
         """
         position_bound = self._rerank_candidate_limit(rerank)
-        # Trigger: the query carries structured filters and an external index, which
-        #     filters in the reader (a built-in index admits only matching chunks, so
-        #     its positions already count admitted chunks and need no extension).
+        # Trigger: the query carries structured filters.
         # Why: the fixed window then keeps widening past the bound until it admits
         #     enough rows, so its leading admitted rows can enter the ranking beyond
         #     it. Every window of this request admits at least as many rows, so those
         #     leading rows are the same in all of them.
         # Outcome: the bound extends to cover the leading rows; passages past it
         #     stay out of the prefix, since a smaller window may not have read them.
-        if query.has_filters and self.vector.external:
+        if query.has_filters:
             leading = window.ranked_rows()[:count]
             if leading:
                 last_position = max(window.position(row_key(row)) for row in leading)
@@ -1217,15 +1215,16 @@ class SemanticSearch:
         every filtered search (and every default MCP search, which filters to entities)
         widened to the scan limit.
 
-        A built-in index evaluates the filters itself (``_vector_admission``): its one
-        read is already the exact top ``candidate_limit`` of the admitted chunks, so it
-        never widens and no filter pass runs. Only an external index, which cannot see
-        the SQL search rows, filters its matches here and widens.
+        A built-in index evaluates the filters itself (``_vector_admission``): each read
+        is the exact top ``scan_limit`` of the admitted chunks, so no filter pass runs,
+        and it widens only while its chunks collapse to fewer rows than ``row_target``.
+        An external index, which cannot see the SQL search rows, filters its matches
+        here as well.
         """
         # Trigger: the vectors live in the SQL database (sqlite-vec, pgvector).
         # Why: the index can rank only admitted chunks; filtering a similarity-only
-        #     ranking afterwards forced repeated, ever wider reads to fill one page.
-        # Outcome: one admitted read. External indexes keep the filter-and-widen path.
+        #     ranking afterwards wasted most of every read on rejected chunks.
+        # Outcome: admitted reads with no filter pass. External indexes still filter here.
         admission = None if self.vector.external else await self._vector_admission(query)
         filter_in_reader = query.has_filters and admission is None
         scan_limit = candidate_limit
@@ -1256,8 +1255,10 @@ class SemanticSearch:
                 or scan_limit >= VECTOR_FILTER_SCAN_LIMIT
             )
             tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
+            # Admitted rows, not chunks, decide: a few long notes can fill a chunk
+            # window with one or two rows, so even an admitted read widens to the target.
             if (
-                not filter_in_reader
+                not query.has_filters
                 or window.admitted >= row_target
                 or exhausted
                 or tail_below_threshold
