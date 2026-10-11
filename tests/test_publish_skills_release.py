@@ -22,16 +22,26 @@ RETIRED = publish_skills_release.RETIRED_PREFIX
 CONTRACT = publish_skills_release.CONTRACT_ASSETS
 
 
+class Killed(BaseException):
+    """The runner dying mid-call (a cancelled job): no handler gets to run."""
+
+
 class FakeRelease:
     """An in-memory release whose operations can be made to fail."""
 
-    def __init__(self, assets: dict[str, str], fail_on: tuple[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        assets: dict[str, str],
+        fail_on: tuple[str, str] | None = None,
+        failure: type[BaseException] = RuntimeError,
+    ) -> None:
         self.assets = dict(assets)  # name -> content
         self.fail_on = fail_on  # (operation, asset name)
+        self.failure = failure
 
     def _maybe_fail(self, operation: str, name: str) -> None:
         if self.fail_on == (operation, name):
-            raise RuntimeError(f"{operation} {name} failed")
+            raise self.failure(f"{operation} {name} failed")
 
     def asset_names(self) -> list[str]:
         return sorted(self.assets)
@@ -123,19 +133,33 @@ def test_next_run_recovers_from_an_interrupted_one(archives: dict[str, Path]) ->
     assert release.assets == {name: f"new {name}" for name in archives}
 
 
-def test_next_run_restores_an_asset_left_renamed_aside(archives: dict[str, Path]) -> None:
-    # The first run dies on its second rename: basic-memory.zip is now only
-    # retired--basic-memory.zip, and the URL is empty.
+def test_a_failed_staged_rename_puts_the_old_asset_back(archives: dict[str, Path]) -> None:
+    # GitHub rejects the second rename after the live asset was moved aside.
     release = FakeRelease(
         _live(list(CONTRACT), "old"), fail_on=("rename", f"{STAGING}basic-memory.zip")
     )
     with pytest.raises(RuntimeError):
+        publish_skills_release.publish(release, archives)
+    assert release.assets["basic-memory.zip"] == "old basic-memory.zip"
+    assert f"{RETIRED}basic-memory.zip" not in release.assets
+
+
+def test_next_run_restores_an_asset_left_renamed_aside(archives: dict[str, Path]) -> None:
+    # The first run is killed on its second rename, so no handler runs:
+    # basic-memory.zip is now only retired--basic-memory.zip, and the URL is empty.
+    release = FakeRelease(
+        _live(list(CONTRACT), "old"),
+        fail_on=("rename", f"{STAGING}basic-memory.zip"),
+        failure=Killed,
+    )
+    with pytest.raises(Killed):
         publish_skills_release.publish(release, archives)
     assert "basic-memory.zip" not in release.assets
 
     # The next run fails too, at an upload. Recovery must already have put the
     # old archive back rather than deleting it as a leftover.
     release.fail_on = ("upload", f"{STAGING}memory-onboarding.zip")
+    release.failure = RuntimeError
     with pytest.raises(RuntimeError):
         publish_skills_release.publish(release, archives)
     assert release.assets["basic-memory.zip"] == "old basic-memory.zip"

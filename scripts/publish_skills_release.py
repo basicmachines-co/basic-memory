@@ -87,7 +87,15 @@ def publish(release: Release, archives: dict[str, Path]) -> None:
     for name in sorted(archives):
         if name in live:
             release.rename(name, RETIRED_PREFIX + name)
-        release.rename(STAGING_PREFIX + name, name)
+        try:
+            release.rename(STAGING_PREFIX + name, name)
+        except Exception:
+            # The live name is empty right now. Put the old archive back before
+            # failing: the workflow runs only when skills change, so the next
+            # run (and its recovery step) may be a long way off.
+            if name in live:
+                release.rename(RETIRED_PREFIX + name, name)
+            raise
         if name in live:
             release.delete(RETIRED_PREFIX + name)
 
