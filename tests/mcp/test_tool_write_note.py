@@ -19,7 +19,6 @@ from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
     _collapse_similar_notes,
-    LinkedNotes,
     _compose_similarity_probe,
     _compose_workspace_project_route,
     similar_notes_min_similarity,
@@ -1708,13 +1707,20 @@ class TestWriteNoteOverwriteGuard:
 # ---------------------------------------------------------------------------
 
 
-def _entity_result(title: str, permalink: str | None, file_path: str, score: float) -> SearchResult:
+def _entity_result(
+    title: str,
+    permalink: str | None,
+    file_path: str,
+    score: float,
+    external_id: str | None = None,
+) -> SearchResult:
     return SearchResult(
         title=title,
         type=SearchItemType.ENTITY,
         score=score,
         permalink=permalink,
         file_path=file_path,
+        external_id=external_id,
     )
 
 
@@ -1789,52 +1795,12 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
         rows,
         exclude_file_path="new/New.md",
         exclude_permalink="p/new",
-        linked_notes=LinkedNotes.from_content("", "new/New.md"),
+        linked_external_ids=frozenset(),
         limit=3,
     )
 
     assert [note.title for note in similar] == ["A", "B", "C"]
     assert similar[0].permalink == "p/a"
-
-
-@pytest.mark.parametrize(
-    ("link", "hidden"),
-    [
-        ("[[reference bu product mapping]]", True),  # title, any case
-        ("[[reference/reference-bu-product-mapping]]", True),  # project-relative permalink
-        ("[[reference/Reference BU Product Mapping.md]]", True),  # file path
-        ("[[proj/reference/reference-bu-product-mapping|the mapping]]", True),  # full permalink
-        ("[[../reference/Reference BU Product Mapping.md]]", True),  # relative path
-        ("[[/reference/Reference BU Product Mapping.md]]", True),  # rooted path
-        # A path names one exact file; without the extension it resolves to nothing in
-        # the graph, so the note was not linked and stays in the advisory.
-        ("[[../reference/Reference BU Product Mapping]]", False),
-        # A path that climbs out of the project names no file.
-        ("[[../../reference/Reference BU Product Mapping.md]]", False),
-    ],
-)
-def test_collapse_similar_notes_skips_notes_the_new_note_links_to(link: str, hidden: bool):
-    """A note the new note links to, as the link resolver would resolve it, is not listed."""
-    rows = [
-        _entity_result(
-            "Reference BU Product Mapping",
-            "proj/reference/reference-bu-product-mapping",
-            "reference/Reference BU Product Mapping.md",
-            0.8,
-        ),
-        _entity_result("Other", "proj/other", "Other.md", 0.75),
-    ]
-
-    similar = _collapse_similar_notes(
-        rows,
-        exclude_file_path="notes/New.md",
-        exclude_permalink="proj/notes/new",
-        linked_notes=LinkedNotes.from_content(f"- relates_to {link}\n", "notes/New.md"),
-        limit=3,
-    )
-
-    expected = ["Other"] if hidden else ["Reference BU Product Mapping", "Other"]
-    assert [note.title for note in similar] == expected
 
 
 class _StubSearchClient:
@@ -1924,6 +1890,77 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY
     assert call["page"] == 1
     assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("link", "hidden"),
+    [
+        ("[[reference bu product mapping]]", True),  # title, any case
+        ("[[reference/reference-bu-product-mapping]]", True),  # project-relative permalink
+        ("[[reference/Reference BU Product Mapping.md]]", True),  # file path
+        ("[[../reference/Reference BU Product Mapping.md]]", True),  # relative path
+        ("[[/reference/Reference BU Product Mapping.md]]", True),  # rooted path
+        ("[[{project}/reference/reference-bu-product-mapping|the map]]", True),  # qualified
+        # A path names one exact file, so without its extension it names nothing.
+        ("[[../reference/Reference BU Product Mapping]]", False),
+        # A forward reference resolves to no note and leaves the advisory alone.
+        ("[[Not Written Yet]]", False),
+    ],
+)
+async def test_write_note_advisory_skips_notes_the_new_note_links_to(
+    app, client, test_project, stub_search_client, link: str, hidden: bool
+):
+    """The link resolver, not string matching, decides which neighbors are already linked."""
+    reference = await write_note(
+        project=test_project.name,
+        title="Reference BU Product Mapping",
+        directory="reference",
+        content="# Reference BU Product Mapping\n",
+        output_format="json",
+    )
+    catalog = await write_note(
+        project=test_project.name,
+        title="Product Catalog",
+        directory="reference",
+        content="# Product Catalog\n",
+        output_format="json",
+    )
+    assert isinstance(reference, dict) and isinstance(catalog, dict)
+    knowledge = KnowledgeClient(client, test_project.external_id)
+    for note in (reference, catalog):
+        note["external_id"] = await knowledge.resolve_entity(note["permalink"], strict=True)
+    stub_search_client.results = [
+        _entity_result(
+            "Reference BU Product Mapping",
+            reference["permalink"],
+            reference["file_path"],
+            0.86,
+            external_id=reference["external_id"],
+        ),
+        _entity_result(
+            "Product Catalog",
+            catalog["permalink"],
+            catalog["file_path"],
+            0.74,
+            external_id=catalog["external_id"],
+        ),
+    ]
+
+    result = await write_note(
+        project=test_project.name,
+        title="BU Mapping Analysis",
+        directory="analysis",
+        content=f"# BU Mapping Analysis\n\n- relates_to {link.format(project=test_project.name)}\n",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    listed = [note["title"] for note in result["similar_notes"]]
+    expected = ["Product Catalog"]
+    if not hidden:
+        expected.insert(0, "Reference BU Product Mapping")
+    assert listed == expected
 
 
 @pytest.mark.asyncio

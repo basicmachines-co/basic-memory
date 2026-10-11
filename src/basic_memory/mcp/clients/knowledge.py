@@ -5,7 +5,7 @@ Encapsulates all /v2/projects/{project_id}/knowledge/* endpoints.
 
 from typing import Any
 
-from httpx import AsyncClient
+from httpx import AsyncClient, HTTPStatusError
 
 import logfire
 
@@ -20,7 +20,11 @@ from basic_memory.schemas.response import (
     DirectoryDeleteResult,
 )
 from basic_memory.schemas.v2.graph import GraphNode, OrphanEntitiesResponse
-from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
+from basic_memory.schemas.v2.entity import (
+    EntityResolveResponse,
+    EntityResponseV2,
+    LinkResolveResponse,
+)
 from basic_memory.schemas.v2.accepted_content import AcceptedNoteContentBatchResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
@@ -491,6 +495,37 @@ class KnowledgeClient:
         """
         data = await self._resolve_entity_data(identifier, strict=strict)
         return EntityResolveResponse.model_validate(data)
+
+    async def resolve_link(
+        self, identifier: str, *, source_path: str
+    ) -> LinkResolveResponse | None:
+        """Resolve a wikilink as indexing resolves it, from the note at ``source_path``.
+
+        Returns None when the link names no note: a forward reference is an ordinary
+        link, so the API's 404 is an answer here, not a failure.
+
+        Raises:
+            ToolError: If the request fails for any other reason
+        """
+        from fastmcp.exceptions import ToolError
+
+        from basic_memory.mcp.tools.utils import call_post
+
+        try:
+            response = await call_post(
+                self.http_client,
+                f"{self._base_path}/links/resolve",
+                json={"identifier": identifier, "source_path": source_path},
+                client_name="knowledge",
+                operation="resolve_link",
+                path_template="/v2/projects/{project_id}/knowledge/links/resolve",
+            )
+        except ToolError as error:
+            cause = error.__cause__
+            if isinstance(cause, HTTPStatusError) and cause.response.status_code == 404:
+                return None
+            raise
+        return LinkResolveResponse.model_validate(response.json())
 
     async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
         """Resolve a string identifier to an entity external_id."""

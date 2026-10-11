@@ -1,5 +1,6 @@
 """Write note tool for Basic Memory MCP server."""
 
+import asyncio
 import dataclasses
 import json
 import re
@@ -24,7 +25,6 @@ from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.markdown.path_links import is_path_target, resolve_project_path
 from basic_memory.mcp.project_context import (
     add_project_metadata,
     get_project_client,
@@ -54,14 +54,13 @@ from basic_memory.schemas.search import (
 from basic_memory.utils import (
     build_qualified_permalink_reference,
     coerce_dict,
-    generate_permalink,
     parse_tags,
     validate_project_path,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 if TYPE_CHECKING:  # pragma: no cover
-    from basic_memory.mcp.clients import SearchClient
+    from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
@@ -81,7 +80,8 @@ SIMILAR_NOTES_PROBE_CHARS = 900
 # top, a duplicate and a closely related note still share one band, so ranking decides.
 # The number holds for that model only; see similar_notes_min_similarity.
 SIMILAR_NOTES_MIN_SIMILARITY = 0.70
-# Most linked notes the probe makes room for; see _find_similar_notes.
+# Most wikilinks the advisory resolves to recognize notes the new note already links
+# to; see _find_similar_notes.
 SIMILAR_NOTES_LINKED_ALLOWANCE = 10
 # A wikilink target, without its alias: [[Target]] or [[Target|alias]].
 _WIKILINK_TARGET = re.compile(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]")
@@ -102,47 +102,9 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class LinkedNotes:
-    """The notes a new note's wikilinks name, split the way the link resolver splits them.
-
-    A path target (`/`, `./`, `../`) names exactly one file, resolved against the
-    linking note's own path; it never falls through to a title or permalink. Any
-    other target names a note by identity: title, permalink or file path.
-    """
-
-    file_paths: frozenset[str]
-    identities: frozenset[str]
-
-    @classmethod
-    def from_content(cls, content: str, note_file_path: str) -> "LinkedNotes":
-        file_paths: set[str] = set()
-        identities: set[str] = set()
-        for match in _WIKILINK_TARGET.findall(content):
-            target = match.strip()
-            if is_path_target(target):
-                # Same resolution indexing applies; a path that climbs out of the
-                # project names no file and is dropped.
-                project_path = resolve_project_path(target, note_file_path)
-                if project_path is not None:
-                    file_paths.add(project_path.removeprefix("/"))
-            else:
-                identities.add(generate_permalink(target))
-        return cls(file_paths=frozenset(file_paths), identities=frozenset(identities))
-
-    def __len__(self) -> int:
-        return len(self.file_paths) + len(self.identities)
-
-    def includes(self, result: SearchResult) -> bool:
-        """Whether one of the links names this search result."""
-        if result.file_path in self.file_paths:
-            return True
-        # Identity links compare in permalink form: a title, a project-relative path
-        # or file path, or the full permalink.
-        names = {generate_permalink(result.title), generate_permalink(result.file_path)}
-        if result.permalink is not None:
-            names.add(result.permalink)
-        return not self.identities.isdisjoint(names)
+def _wikilink_targets(content: str) -> list[str]:
+    """Return a note's distinct wikilink targets, in the order they first appear."""
+    return list(dict.fromkeys(match.strip() for match in _WIKILINK_TARGET.findall(content)))
 
 
 def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
@@ -191,7 +153,7 @@ def _collapse_similar_notes(
     *,
     exclude_file_path: str,
     exclude_permalink: str | None,
-    linked_notes: LinkedNotes,
+    linked_external_ids: frozenset[str],
     limit: int,
 ) -> list[SimilarNote]:
     """Drop the note that was just written and keep one row per remaining note.
@@ -207,7 +169,7 @@ def _collapse_similar_notes(
         is_new_note = result.file_path == exclude_file_path or (
             exclude_permalink is not None and result.permalink == exclude_permalink
         )
-        is_linked = linked_notes.includes(result)
+        is_linked = result.external_id in linked_external_ids
         if is_new_note or is_linked or result.file_path in seen_paths:
             continue
         seen_paths.add(result.file_path)
@@ -221,6 +183,7 @@ def _collapse_similar_notes(
 
 async def _find_similar_notes(
     search_client: "SearchClient",
+    knowledge_client: "KnowledgeClient",
     *,
     title: str,
     content: str,
@@ -230,19 +193,36 @@ async def _find_similar_notes(
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
     query = similar_notes_query(title, content, min_similarity=min_similarity)
-    linked_notes = LinkedNotes.from_content(content, exclude_file_path)
+    # The cap keeps a hub note with hundreds of links from costing hundreds of requests;
+    # a linked note past it can still be listed, which the advisory tolerates.
+    linked_targets = _wikilink_targets(content)[:SIMILAR_NOTES_LINKED_ALLOWANCE]
     # Extra rows leave room for the new note's own hit and for the notes it links to,
-    # which are dropped before collapsing. The linked allowance is capped so a hub note
-    # with hundreds of links does not turn the probe into a large search.
-    linked_allowance = min(len(linked_notes), SIMILAR_NOTES_LINKED_ALLOWANCE)
+    # which are dropped before collapsing.
     response = await search_client.search(
-        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1 + linked_allowance
+        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1 + len(linked_targets)
     )
+
+    # Trigger: the search found neighbors and the new note has wikilinks.
+    # Why: a neighbor the caller already linked is the advisory's "related but distinct"
+    #   answer given in advance. Which note a link names is the link resolver's call
+    #   (titles, permalinks, relative and rooted paths, workspace-qualified forms), so
+    #   each link is resolved by the server from the new note's path, not re-derived here.
+    # Outcome: neighbors whose external_id a link resolves to are dropped.
+    linked_external_ids: frozenset[str] = frozenset()
+    if response.results and linked_targets:
+        resolved = await asyncio.gather(
+            *(
+                knowledge_client.resolve_link(target, source_path=exclude_file_path)
+                for target in linked_targets
+            )
+        )
+        linked_external_ids = frozenset(link.external_id for link in resolved if link)
+
     return _collapse_similar_notes(
         response.results,
         exclude_file_path=exclude_file_path,
         exclude_permalink=exclude_permalink,
-        linked_notes=linked_notes,
+        linked_external_ids=linked_external_ids,
         limit=SIMILAR_NOTES_LIMIT,
     )
 
@@ -712,6 +692,7 @@ async def write_note(
                 try:
                     similar_notes = await _find_similar_notes(
                         SearchClient(client, active_project.external_id),
+                        knowledge_client,
                         title=title,
                         content=content,
                         exclude_file_path=result.file_path,
