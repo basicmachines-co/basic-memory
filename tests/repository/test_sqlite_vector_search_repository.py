@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +23,8 @@ from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository import search_reader as search_reader_module
+from basic_memory.repository.search_reader import CandidateWindow, SemanticSearch
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
@@ -2111,3 +2114,135 @@ async def test_sqlite_vec_load_failure_falls_back_to_keyword_search(search_repos
 
     assert search_repository._semantic_enabled is False
     assert await search_repository.semantic_effectively_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_returned_rows_quote_their_own_best_chunks_and_ranking_reads_no_text(
+    search_repository,
+):
+    """Text is fetched only for returned rows, and excerpts never depend on the window (#1746).
+
+    One long note owns eight chunks; only its best sits inside the ten-chunk window,
+    behind which twenty other notes' chunks crowd out its other seven. The returned
+    excerpt still quotes the note's five chunks nearest the query, ranked against the
+    note itself, while the candidate rows the ranking read carried no note text.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    # limit 1 with vector_k 2 sizes the window at ten chunks.
+    search_repository._semantic_vector_k = 2
+    search_repository._semantic_min_similarity = 0.0
+
+    long_note = 3000
+    long_row = _entity_row(
+        project_id=project,
+        row_id=long_note,
+        entity_id=long_note,
+        title="Long note",
+        permalink="notes/long",
+        content_stems="auth",
+    )
+    await search_repository.index_item(replace(long_row, content_snippet="body " * 1000))
+    others = list(range(3101, 3121))
+    for row_id in others:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Other {row_id}",
+                permalink=f"notes/other-{row_id}",
+                content_stems="auth",
+            )
+        )
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(row_id, project, f"[1,{0.10 + (row_id - 3100) / 100:.2f},0,0]") for row_id in others],
+    )
+    # The long note's chunks: chunk 0 nearest of all, chunks 1-7 behind every other note.
+    embedding_identity = search_repository._embedding_model_key()
+    async with db.scoped_session(search_repository.session_maker) as session:
+        for chunk in range(8):
+            chunk_id = 4000 + chunk
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_chunks (id, entity_id, project_id, chunk_key, "
+                    "source_type, source_row_id, chunk_index, chunk_text, source_hash, "
+                    "entity_fingerprint, embedding_model, vector_index, embedding_status) "
+                    "VALUES (:id, :entity_id, :project_id, :chunk_key, 'entity', :row_id, "
+                    ":chunk, :chunk_text, 'hash', 'fingerprint', :model, 'sqlite-vec', 'ready')"
+                ),
+                {
+                    "id": chunk_id,
+                    "entity_id": long_note,
+                    "project_id": project,
+                    "chunk_key": f"entity:long:{chunk}",
+                    "row_id": long_note,
+                    "chunk": chunk,
+                    "chunk_text": f"passage {chunk}",
+                    "model": embedding_identity,
+                },
+            )
+            similarity_axis = 0.01 if chunk == 0 else 0.5 + chunk * 0.05
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_embeddings (rowid, project_id, embedding, "
+                    "source_hash) VALUES (:rowid, :project_id, :embedding, 'hash')"
+                ),
+                {
+                    "rowid": chunk_id,
+                    "project_id": project,
+                    "embedding": f"[1,{similarity_axis:.2f},0,0]",
+                },
+            )
+
+    fetched_rows: list[SearchIndexRow] = []
+    fetch_rows = SemanticSearch._fetch_search_index_rows_by_ids
+
+    async def spy(self, row_ids):
+        rows = await fetch_rows(self, row_ids)
+        fetched_rows.extend(rows.values())
+        return rows
+
+    with patch.object(SemanticSearch, "_fetch_search_index_rows_by_ids", spy):
+        [result] = await search_repository.search(
+            search_text="auth", retrieval_mode=SearchRetrievalMode.VECTOR, limit=1
+        )
+
+    assert result.id == long_note
+    # Its five nearest chunks, although the window read only chunk 0.
+    assert result.matched_chunk_text == "\n---\n".join(f"passage {i}" for i in range(5))
+    assert result.content_snippet == ("body " * 1000)[:4000]
+    assert result.content_length == len("body " * 1000)
+    # The ranking's candidate rows carried lengths, never text.
+    assert fetched_rows
+    assert all(row.content_snippet is None for row in fetched_rows)
+    assert all(row.content_snippet_length is not None for row in fetched_rows)
+
+    # Excerpt ranking batches notes under its chunk budget and skips a note that has no
+    # ready chunks. A budget of two puts the eight-chunk note in a batch of its own.
+    semantic = search_repository._semantic_search()
+    chunkless = replace(long_row, id=3999, entity_id=3999, permalink="notes/chunkless")
+    other = _entity_row(
+        project_id=project,
+        row_id=others[0],
+        entity_id=others[0],
+        title="Other",
+        permalink="notes/other",
+        content_stems="auth",
+    )
+    window = CandidateWindow({}, {}, {}, 0, query_embedding=(1.0, 0.0, 0.0, 0.0))
+    with patch.object(search_reader_module, "EXCERPT_RANKING_CHUNK_BUDGET", 2):
+        excerpts = await semantic._excerpt_chunk_keys([long_row, chunkless, other], window, None)
+
+    assert [key.chunk_key for key in excerpts[("entity", long_note)]] == [
+        f"entity:long:{i}" for i in range(5)
+    ]
+    assert [key.chunk_key for key in excerpts[("entity", others[0])]] == [f"entity:{others[0]}:0"]
+    assert ("entity", 3999) not in excerpts

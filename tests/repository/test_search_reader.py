@@ -19,6 +19,7 @@ from basic_memory.repository.search_trace import ManifestReadiness, SearchTraceC
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.schemas.search import SearchRetrievalMode
 from tests.repository.test_hybrid_fusion import (
+    OfflineSemanticSearch,
     HYBRID_QUERY,
     FakeFts,
     FakeRow,
@@ -31,7 +32,7 @@ SEMANTIC_MODES = [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID]
 
 
 def _semantic(fts: FakeFts | None = None) -> SemanticSearch:
-    return SemanticSearch(cast(Any, None), SCOPE, fts or FakeFts(), fake_vector_retrieval())
+    return OfflineSemanticSearch(cast(Any, None), SCOPE, fts or FakeFts(), fake_vector_retrieval())
 
 
 # --- Eligibility and keys ---
@@ -143,7 +144,7 @@ async def test_empty_candidate_window_skips_the_adapter():
     adapter = MagicMock()
     adapter.search = AsyncMock(side_effect=AssertionError("adapter must not be consulted"))
     vector = replace(fake_vector_retrieval(), index=adapter)
-    semantic = SemanticSearch(cast(Any, None), SCOPE, FakeFts(), vector)
+    semantic = OfflineSemanticSearch(cast(Any, None), SCOPE, FakeFts(), vector)
 
     assert await semantic._run_vector_query(AsyncMock(), [0.1], 0) == []
 
@@ -151,7 +152,7 @@ async def test_empty_candidate_window_skips_the_adapter():
 @pytest.mark.asyncio
 async def test_no_row_ids_means_no_row_fetch():
     session_maker = MagicMock(side_effect=AssertionError("no session for an empty fetch"))
-    semantic = SemanticSearch(session_maker, SCOPE, FakeFts(), fake_vector_retrieval())
+    semantic = OfflineSemanticSearch(session_maker, SCOPE, FakeFts(), fake_vector_retrieval())
 
     assert await semantic._fetch_search_index_rows_by_ids([]) == {}
 
@@ -192,7 +193,7 @@ async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatc
     """A traced built-in lookup reports how much of the manifest retrieval can answer from."""
     adapter = MagicMock()
     adapter.search = AsyncMock(return_value=[])
-    semantic = SemanticSearch(
+    semantic = OfflineSemanticSearch(
         cast(Any, None), SCOPE, FakeFts(), replace(fake_vector_retrieval(), index=adapter)
     )
     readiness = ManifestReadiness(
@@ -248,7 +249,7 @@ async def test_hybrid_page_past_the_prefix_retrieves_once():
         for index in range(1, 6)
     ]
     fts = FakeFts(rows)
-    semantic = SemanticSearch(
+    semantic = OfflineSemanticSearch(
         cast(Any, None),
         SCOPE,
         fts,
@@ -270,7 +271,7 @@ async def test_empty_scope_answers_nothing_without_embedding_or_lexical_work() -
     """An empty scope admits no rows, so neither leg runs and the query is never embedded."""
     fts = FakeFts([FakeRow(id=1)])
     embed_query = AsyncMock(side_effect=AssertionError("must not embed for an empty scope"))
-    semantic = SemanticSearch(
+    semantic = OfflineSemanticSearch(
         cast(Any, None), ProjectScope.of([]), fts, fake_vector_retrieval(embed_query=embed_query)
     )
     vector_query = PreparedSearchQuery(

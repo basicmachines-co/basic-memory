@@ -10,7 +10,7 @@ one directly over a wider scope.
 """
 
 import time
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, assert_never
 
@@ -32,6 +32,7 @@ from basic_memory.repository.search_index_row import (
     SearchIndexKey,
     SearchIndexRow,
     capped_snippet_columns,
+    snippet_length_columns,
 )
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_scope import ProjectScope
@@ -77,6 +78,9 @@ FUSION_FORMULA_VERSION = "max+0.3*min/v1"
 FTS_GATE_THRESHOLD = 0.0
 TOP_CHUNKS_PER_RESULT = 5
 SMALL_NOTE_CONTENT_LIMIT = 2000
+# Most chunks one excerpt-ranking query asks the index for. sqlite-vec answers at most
+# 4096 neighbours per query, so the returned rows' chunks are ranked in batches under it.
+EXCERPT_RANKING_CHUNK_BUDGET = 4000
 
 
 # The manifest conditions under which semantic retrieval will use a stored vector.
@@ -177,7 +181,6 @@ class HydratedChunk:
 
     entity_id: int
     chunk_key: str
-    chunk_text: str
     similarity: float
     # The search_index row this chunk was cut from, read from the manifest's location
     # columns. Several chunks of one row collapse into one candidate on this key.
@@ -186,11 +189,15 @@ class HydratedChunk:
 
 @dataclass(frozen=True, slots=True)
 class WindowChunk:
-    """One chunk of a candidate window and its position in the adapter's ranking."""
+    """One chunk of a candidate window and its position in the adapter's ranking.
+
+    Carries the chunk's key, not its text: ranking needs positions and similarities,
+    and only the rows a search returns read chunk text (#1746).
+    """
 
     position: int
     similarity: float
-    text: str
+    key: VectorKey
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +215,8 @@ class CandidateWindow:
     chunks_by_key: dict[SearchIndexKey, list[WindowChunk]]
     rows: dict[SearchIndexKey, SearchIndexRow]
     chunk_count: int
+    # The embedded query, kept so the returned rows' excerpts are ranked against it.
+    query_embedding: tuple[float, ...] = ()
     embed_ms: float = 0.0
     vector_query_ms: float = 0.0
     hydrate_ms: float = 0.0
@@ -227,9 +236,9 @@ class CandidateWindow:
         """Admitted rows, best similarity first, as a window of ``position_bound`` sees them.
 
         A window reaching further down the adapter ranking only appends chunks, so the
-        rows that enter before ``position_bound``, their scores, and the passages drawn
-        from chunks before it are the same in every window that reaches the bound.
-        ``None`` reads the whole window.
+        rows that enter before ``position_bound`` and their scores are the same in every
+        window that reaches the bound. ``None`` reads the whole window. Rows carry no
+        note text here; ``SemanticSearch._materialize`` adds it to the rows returned.
         """
         ranked: list[SearchIndexRow] = []
         for key, similarity in self.similarity_by_key.items():
@@ -243,24 +252,28 @@ class CandidateWindow:
             ]
             if not chunks:
                 continue
-
-            # Small notes: return full content so the answer is always present.
-            # Large notes: return top-N most relevant chunks for richer context.
-            # content_length is the stored note's length; the snippet a search read
-            # carries is capped, so its own length cannot say whether the note is small.
-            content_snippet = row.content_snippet or ""
-            content_length = row.content_length or 0
-            if content_snippet and content_length <= SMALL_NOTE_CONTENT_LIMIT:
-                matched_chunk_text = content_snippet
-            else:
-                best_chunks = sorted(chunks, key=lambda chunk: chunk.similarity, reverse=True)
-                matched_chunk_text = "\n---\n".join(
-                    chunk.text for chunk in best_chunks[:TOP_CHUNKS_PER_RESULT]
-                )
-            ranked.append(replace(row, score=similarity, matched_chunk_text=matched_chunk_text))
+            ranked.append(replace(row, score=similarity))
 
         ranked.sort(key=lambda item: item.score or 0.0, reverse=True)
         return ranked
+
+
+def _location_values(
+    locations: Sequence[tuple[int, str, int]], params: dict[str, Any], *, prefix: str = ""
+) -> str:
+    """Bind search-row locations as a SQL VALUES list of (project_id, type, id)."""
+    rows = []
+    for index, (project_id, row_type, row_id) in enumerate(locations):
+        params[f"{prefix}loc_project_{index}"] = project_id
+        params[f"{prefix}loc_type_{index}"] = row_type
+        params[f"{prefix}loc_id_{index}"] = row_id
+        # Postgres types untyped binds in a bare VALUES list as text; cast each column.
+        rows.append(
+            f"(CAST(:{prefix}loc_project_{index} AS INTEGER), "
+            f"CAST(:{prefix}loc_type_{index} AS TEXT), "
+            f"CAST(:{prefix}loc_id_{index} AS INTEGER))"
+        )
+    return ", ".join(rows)
 
 
 def row_key(row: SearchIndexRow) -> SearchIndexKey:
@@ -526,7 +539,7 @@ class SemanticSearch:
         if not matches:
             return []
 
-        chunks_by_key: dict[VectorKey, tuple[str, SearchIndexKey]] = {}
+        chunks_by_key: dict[VectorKey, SearchIndexKey] = {}
         for batch_start in range(0, len(matches), VECTOR_HYDRATION_BATCH_SIZE):
             batch = matches[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
             params: dict[str, Any] = {
@@ -547,7 +560,7 @@ class SemanticSearch:
             # batches while retaining the adapter's original ranking in the final list.
             result = await session.execute(
                 text(
-                    "SELECT entity_id, chunk_key, chunk_text, source_type, source_row_id "
+                    "SELECT entity_id, chunk_key, source_type, source_row_id "
                     "FROM search_vector_chunks "
                     "WHERE " + manifest_predicate + " "
                     "AND (" + " OR ".join(predicates) + ")"
@@ -559,10 +572,7 @@ class SemanticSearch:
                     VectorKey(
                         entity_id=int(row["entity_id"]),
                         chunk_key=str(row["chunk_key"]),
-                    ): (
-                        str(row["chunk_text"]),
-                        (str(row["source_type"]), int(row["source_row_id"])),
-                    )
+                    ): (str(row["source_type"]), int(row["source_row_id"]))
                     for row in result.mappings().all()
                 }
             )
@@ -570,9 +580,8 @@ class SemanticSearch:
             HydratedChunk(
                 entity_id=match.key.entity_id,
                 chunk_key=match.key.chunk_key,
-                chunk_text=chunks_by_key[match.key][0],
                 similarity=match.similarity,
-                source_key=chunks_by_key[match.key][1],
+                source_key=chunks_by_key[match.key],
             )
             for match in matches
             if match.key in chunks_by_key
@@ -624,7 +633,7 @@ class SemanticSearch:
             SELECT
                 project_id, id, title, permalink, file_path, type, metadata,
                 from_id, to_id, relation_type, entity_id,
-                {capped_snippet_columns("search_index")},
+                {snippet_length_columns("search_index")},
                 category, created_at, updated_at, 0 as score
             FROM search_index
             WHERE {scope_predicate}
@@ -672,8 +681,11 @@ class SemanticSearch:
         count: int,
         query: PreparedSearchQuery,
         rerank: Reranking,
-    ) -> list[SearchIndexRow]:
+    ) -> tuple[list[SearchIndexRow], int]:
         """The first ``count`` vector rows exactly as the fixed rerank window sees them.
+
+        Returns the rows and the position bound they were read through, which also
+        bounds the chunks an external index's excerpts may quote for them.
 
         A request whose page reaches past the reranked prefix retrieves a larger
         window, but its prefix must match the one every shallower page reranked, or
@@ -682,21 +694,19 @@ class SemanticSearch:
         through that same position bound instead of from a second retrieval (#1557).
         """
         position_bound = self._rerank_candidate_limit(rerank)
-        # Trigger: the query carries structured filters and an external index, which
-        #     filters in the reader (a built-in index admits only matching chunks, so
-        #     its positions already count admitted chunks and need no extension).
+        # Trigger: the query carries structured filters.
         # Why: the fixed window then keeps widening past the bound until it admits
         #     enough rows, so its leading admitted rows can enter the ranking beyond
         #     it. Every window of this request admits at least as many rows, so those
         #     leading rows are the same in all of them.
         # Outcome: the bound extends to cover the leading rows; passages past it
         #     stay out of the prefix, since a smaller window may not have read them.
-        if query.has_filters and self.vector.external:
+        if query.has_filters:
             leading = window.ranked_rows()[:count]
             if leading:
                 last_position = max(window.position(row_key(row)) for row in leading)
                 position_bound = max(position_bound, last_position + 1)
-        return window.ranked_rows(position_bound)[:count]
+        return window.ranked_rows(position_bound)[:count], position_bound
 
     async def _rerank_and_paginate(
         self,
@@ -778,6 +788,258 @@ class SemanticSearch:
             )
         return reranked_rows[offset:page_end]
 
+    # --- Text for the rows a search returns ---
+
+    async def _materialize(
+        self,
+        rows: Sequence[SearchIndexRow],
+        window: CandidateWindow,
+        *,
+        vector_keys: Collection[SearchIndexKey],
+        position_bound: int | None = None,
+    ) -> list[SearchIndexRow]:
+        """Attach note text to the rows a search returns (#1746).
+
+        Ranking reads ids, scores and stored lengths only. Once the returned rows are
+        known, each gets its capped ``content_snippet``, and each row the vector leg
+        matched (``vector_keys``) gets ``matched_chunk_text``: the whole note when it is
+        small, otherwise the note's ``TOP_CHUNKS_PER_RESULT`` chunks nearest the query.
+        ``position_bound`` limits an external index's excerpts to the chunks the fixed
+        rerank window read, so a reranked prefix quotes the same passages on every page.
+        """
+        if not rows:
+            return []
+        texts = await self._fetch_row_texts([row_key(row) for row in rows])
+        rows = [
+            replace(
+                row,
+                content_snippet=texts[row_key(row)][0],
+                content_snippet_length=texts[row_key(row)][1],
+            )
+            if row_key(row) in texts
+            else row
+            for row in rows
+        ]
+        # Small notes quote themselves whole, so the answer is always present.
+        excerpt_rows = [
+            row
+            for row in rows
+            if row_key(row) in vector_keys
+            and not (row.content_snippet and (row.content_length or 0) <= SMALL_NOTE_CONTENT_LIMIT)
+        ]
+        excerpt_keys = await self._excerpt_chunk_keys(excerpt_rows, window, position_bound)
+        chunk_texts = await self._fetch_chunk_texts(
+            [key for keys in excerpt_keys.values() for key in keys]
+        )
+
+        materialized: list[SearchIndexRow] = []
+        for row in rows:
+            key = row_key(row)
+            if key not in vector_keys:
+                materialized.append(row)
+            elif key in excerpt_keys:
+                passages = [
+                    chunk_texts[chunk] for chunk in excerpt_keys[key] if chunk in chunk_texts
+                ]
+                materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
+            else:
+                materialized.append(replace(row, matched_chunk_text=row.content_snippet))
+        # Every byte of note text a search moves is read here, so this is its budget.
+        logfire.info(
+            "search.materialize",
+            rows=len(materialized),
+            excerpt_rows=len(excerpt_keys),
+            snippet_chars=sum(len(row.content_snippet or "") for row in materialized),
+            excerpt_chars=sum(len(text) for text in chunk_texts.values()),
+        )
+        return materialized
+
+    async def _materialize_unread(
+        self,
+        rows: Sequence[SearchIndexRow],
+        read_keys: Collection[SearchIndexKey],
+        window: CandidateWindow,
+        *,
+        vector_keys: Collection[SearchIndexKey],
+    ) -> list[SearchIndexRow]:
+        """Materialize the rows not in ``read_keys`` (a reranked prefix already is)."""
+        unread = await self._materialize(
+            [row for row in rows if row_key(row) not in read_keys],
+            window,
+            vector_keys=vector_keys,
+        )
+        by_key = {row_key(row): row for row in unread}
+        return [by_key.get(row_key(row), row) for row in rows]
+
+    async def _fetch_row_texts(
+        self, keys: Sequence[SearchIndexKey]
+    ) -> dict[SearchIndexKey, tuple[str | None, int | None]]:
+        """The capped content_snippet and stored length of each search row in ``keys``."""
+        wanted = set(keys)
+        row_ids = list(dict.fromkeys(row_id for _, row_id in keys))
+        texts: dict[SearchIndexKey, tuple[str | None, int | None]] = {}
+        async with db.scoped_session(self.session_maker) as session:
+            for batch_start in range(0, len(row_ids), VECTOR_HYDRATION_BATCH_SIZE):
+                batch = row_ids[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
+                params: dict[str, Any] = {
+                    f"id_{index}": row_id for index, row_id in enumerate(batch)
+                }
+                scope_predicate = self.scope.predicate("project_id", params)
+                result = await session.execute(
+                    text(
+                        f"SELECT type, id, {capped_snippet_columns('search_index')} "
+                        f"FROM search_index WHERE {scope_predicate} "
+                        f"AND id IN ({', '.join(f':id_{index}' for index in range(len(batch)))})"
+                    ),
+                    params,
+                )
+                for row in result.mappings().all():
+                    key = (str(row["type"]), int(row["id"]))
+                    if key in wanted:
+                        texts[key] = (row["content_snippet"], row["content_snippet_length"])
+        return texts
+
+    async def _excerpt_chunk_keys(
+        self,
+        rows: Sequence[SearchIndexRow],
+        window: CandidateWindow,
+        position_bound: int | None,
+    ) -> dict[SearchIndexKey, list[VectorKey]]:
+        """Each row's chunks nearest the query, best first, at most TOP_CHUNKS_PER_RESULT.
+
+        A built-in index ranks every chunk of each row against the query, so an excerpt
+        never depends on how far the candidate window reached. An external index cannot
+        be asked about chosen chunks; its rows quote the window chunks it returned.
+        """
+        if not rows:
+            return {}
+        if self.vector.external:
+            excerpts: dict[SearchIndexKey, list[VectorKey]] = {}
+            for row in rows:
+                chunks = [
+                    chunk
+                    for chunk in window.chunks_by_key.get(row_key(row), [])
+                    if position_bound is None or chunk.position < position_bound
+                ]
+                chunks.sort(key=lambda chunk: chunk.similarity, reverse=True)
+                excerpts[row_key(row)] = [chunk.key for chunk in chunks[:TOP_CHUNKS_PER_RESULT]]
+            return excerpts
+
+        # --- Built-in index: rank each row's own chunks ---
+        locations = [(row.project_id, row.type, row.id) for row in rows]
+        chunk_rows = await self._ready_chunks_of(locations)
+        ranked: dict[SearchIndexKey, list[tuple[float, VectorKey]]] = {}
+        batch: list[tuple[int, str, int]] = []
+        batch_chunks = 0
+        chunk_counts: dict[tuple[int, str, int], int] = {}
+        for location in chunk_rows.values():
+            chunk_counts[location] = chunk_counts.get(location, 0) + 1
+        for location in locations:
+            count = chunk_counts.get(location, 0)
+            if count == 0:
+                continue
+            if batch and batch_chunks + count > EXCERPT_RANKING_CHUNK_BUDGET:
+                await self._rank_chunks_of(batch, batch_chunks, window, chunk_rows, ranked)
+                batch, batch_chunks = [], 0
+            batch.append(location)
+            batch_chunks += count
+        if batch:
+            await self._rank_chunks_of(batch, batch_chunks, window, chunk_rows, ranked)
+        return {
+            key: [
+                chunk
+                for _, chunk in sorted(
+                    scored, key=lambda item: (-item[0], item[1].entity_id, item[1].chunk_key)
+                )[:TOP_CHUNKS_PER_RESULT]
+            ]
+            for key, scored in ranked.items()
+        }
+
+    async def _ready_chunks_of(
+        self, locations: Sequence[tuple[int, str, int]]
+    ) -> dict[VectorKey, tuple[int, str, int]]:
+        """Every ready chunk cut from the given search rows, keyed to its row location."""
+        params: dict[str, Any] = {
+            "vector_index": self.vector.index_name,
+            "embedding_model": self.vector.embedding_model,
+        }
+        manifest_predicate = current_vector_manifest_predicate(self.scope, params)
+        values = _location_values(locations, params)
+        async with db.scoped_session(self.session_maker) as session:
+            result = await session.execute(
+                text(
+                    "SELECT entity_id, chunk_key, project_id, source_type, source_row_id "
+                    "FROM search_vector_chunks WHERE " + manifest_predicate + " "
+                    f"AND (project_id, source_type, source_row_id) IN (VALUES {values})"
+                ),
+                params,
+            )
+            return {
+                VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])): (
+                    int(row["project_id"]),
+                    str(row["source_type"]),
+                    int(row["source_row_id"]),
+                )
+                for row in result.mappings().all()
+            }
+
+    async def _rank_chunks_of(
+        self,
+        locations: Sequence[tuple[int, str, int]],
+        chunk_count: int,
+        window: CandidateWindow,
+        chunk_rows: dict[VectorKey, tuple[int, str, int]],
+        ranked: dict[SearchIndexKey, list[tuple[float, VectorKey]]],
+    ) -> None:
+        """Rank every chunk of ``locations`` against the query through the index."""
+        params: dict[str, object] = {}
+        values = _location_values(locations, params, prefix="excerpt_")
+        admission = VectorAdmission(
+            predicate=f"(c.project_id, c.source_type, c.source_row_id) IN (VALUES {values})",
+            params=params,
+        )
+        matches = await self.vector.index.search(
+            list(window.query_embedding),
+            limit=chunk_count,
+            projects=self.scope,
+            admission=admission,
+        )
+        for match in matches:
+            location = chunk_rows.get(match.key)
+            if location is not None:
+                ranked.setdefault((location[1], location[2]), []).append(
+                    (match.similarity, match.key)
+                )
+
+    async def _fetch_chunk_texts(self, keys: Sequence[VectorKey]) -> dict[VectorKey, str]:
+        """The text of each chunk in ``keys``, read from the manifest."""
+        chunk_keys = list(dict.fromkeys(keys))
+        texts: dict[VectorKey, str] = {}
+        async with db.scoped_session(self.session_maker) as session:
+            for batch_start in range(0, len(chunk_keys), VECTOR_HYDRATION_BATCH_SIZE):
+                batch = chunk_keys[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
+                params: dict[str, Any] = {}
+                scope_predicate = self.scope.predicate("project_id", params)
+                predicates = []
+                for index, key in enumerate(batch):
+                    params[f"entity_id_{index}"] = key.entity_id
+                    params[f"chunk_key_{index}"] = key.chunk_key
+                    predicates.append(
+                        f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
+                    )
+                result = await session.execute(
+                    text(
+                        "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
+                        f"WHERE {scope_predicate} AND (" + " OR ".join(predicates) + ")"
+                    ),
+                    params,
+                )
+                for row in result.mappings().all():
+                    texts[
+                        VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"]))
+                    ] = str(row["chunk_text"])
+        return texts
+
     # --- Vector-only retrieval ---
 
     async def vector_only(
@@ -805,16 +1067,26 @@ class SemanticSearch:
         window = await self._vector_window(query, candidate_limit, row_target, trace=trace)
         ranked_rows = window.ranked_rows()
 
+        vector_keys = window.rows.keys()
         if rerank is None:
-            output = ranked_rows[offset : offset + limit]
+            output = await self._materialize(
+                ranked_rows[offset : offset + limit], window, vector_keys=vector_keys
+            )
         else:
             # One window feeds both halves: the fixed prefix is read from it at the
             # fixed window's bound, and the tail is every other row in similarity order.
-            prefix = self._prefix_rows(window, rerank.candidates, query, rerank)
+            prefix, prefix_bound = self._prefix_rows(window, rerank.candidates, query, rerank)
+            # The reranker reads the prefix's text, so it is materialized first.
+            prefix = await self._materialize(
+                prefix, window, vector_keys=vector_keys, position_bound=prefix_bound
+            )
             prefix_keys = {row_key(row) for row in prefix}
             tail = [row for row in ranked_rows if row_key(row) not in prefix_keys]
             output = await self._rerank_and_paginate(
                 rerank, query_text, prefix, tail, offset=offset, limit=limit, trace=trace
+            )
+            output = await self._materialize_unread(
+                output, prefix_keys, window, vector_keys=vector_keys
             )
 
         # Vector latency owns the optional rerank stage too. Logging before the
@@ -880,7 +1152,7 @@ class SemanticSearch:
                 embed_ms=embed_ms,
                 vector_query_ms=window.vector_query_ms,
             )
-        return replace(window, embed_ms=embed_ms)
+        return replace(window, embed_ms=embed_ms, query_embedding=tuple(query_embedding))
 
     async def _vector_admission(self, query: PreparedSearchQuery) -> VectorAdmission | None:
         """The query's structured filters as a predicate a built-in index evaluates.
@@ -943,15 +1215,16 @@ class SemanticSearch:
         every filtered search (and every default MCP search, which filters to entities)
         widened to the scan limit.
 
-        A built-in index evaluates the filters itself (``_vector_admission``): its one
-        read is already the exact top ``candidate_limit`` of the admitted chunks, so it
-        never widens and no filter pass runs. Only an external index, which cannot see
-        the SQL search rows, filters its matches here and widens.
+        A built-in index evaluates the filters itself (``_vector_admission``): each read
+        is the exact top ``scan_limit`` of the admitted chunks, so no filter pass runs,
+        and it widens only while its chunks collapse to fewer rows than ``row_target``.
+        An external index, which cannot see the SQL search rows, filters its matches
+        here as well.
         """
         # Trigger: the vectors live in the SQL database (sqlite-vec, pgvector).
         # Why: the index can rank only admitted chunks; filtering a similarity-only
-        #     ranking afterwards forced repeated, ever wider reads to fill one page.
-        # Outcome: one admitted read. External indexes keep the filter-and-widen path.
+        #     ranking afterwards wasted most of every read on rejected chunks.
+        # Outcome: admitted reads with no filter pass. External indexes still filter here.
         admission = None if self.vector.external else await self._vector_admission(query)
         filter_in_reader = query.has_filters and admission is None
         scan_limit = candidate_limit
@@ -982,8 +1255,10 @@ class SemanticSearch:
                 or scan_limit >= VECTOR_FILTER_SCAN_LIMIT
             )
             tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
+            # Admitted rows, not chunks, decide: a few long notes can fill a chunk
+            # window with one or two rows, so even an admitted read widens to the target.
             if (
-                not filter_in_reader
+                not query.has_filters
                 or window.admitted >= row_target
                 or exhausted
                 or tail_below_threshold
@@ -1028,7 +1303,11 @@ class SemanticSearch:
             if current is None or chunk.similarity > current:
                 similarity_by_key[si_key] = chunk.similarity
             chunks_by_key.setdefault(si_key, []).append(
-                WindowChunk(position=position, similarity=chunk.similarity, text=chunk.chunk_text)
+                WindowChunk(
+                    position=position,
+                    similarity=chunk.similarity,
+                    key=VectorKey(entity_id=chunk.entity_id, chunk_key=chunk.chunk_key),
+                )
             )
 
         # Filter out results below the minimum similarity threshold.
@@ -1102,6 +1381,8 @@ class SemanticSearch:
                 offset=0,
                 allow_relaxed=True,
                 trace=trace,
+                # Fusion reads scores; the returned rows' text is fetched afterwards.
+                with_text=False,
             )
             fts_span.set_attribute("result_count", len(fts_results))
         fts_ms = (time.perf_counter() - fts_start) * 1000
@@ -1185,7 +1466,11 @@ class SemanticSearch:
 
         if rerank is None:
             # The disabled path stays cheap by materializing only the requested page.
-            output = fusion.rows(fusion.ranked[offset : offset + limit])
+            output = await self._materialize(
+                fusion.rows(fusion.ranked[offset : offset + limit]),
+                window,
+                vector_keys=fusion.vector_scores.keys(),
+            )
         else:
             # --- Fixed reranked prefix, read from this one retrieval (#1557) ---
             # The prefix is the fusion the fixed window would compute: its leading
@@ -1193,11 +1478,15 @@ class SemanticSearch:
             # extend those rankings, so every page of a query reranks the same rows
             # with the same documents, whatever window its depth asked for.
             fixed_limit = self._rerank_candidate_limit(rerank)
-            prefix_fusion = fuse(
-                fts_results[:fixed_limit],
-                self._prefix_rows(window, fixed_limit, query, rerank),
+            prefix_vector_rows, prefix_bound = self._prefix_rows(window, fixed_limit, query, rerank)
+            prefix_fusion = fuse(fts_results[:fixed_limit], prefix_vector_rows)
+            # The reranker reads the prefix's text, so it is materialized first.
+            prefix = await self._materialize(
+                prefix_fusion.rows(prefix_fusion.ranked[: rerank.candidates]),
+                window,
+                vector_keys=prefix_fusion.vector_scores.keys(),
+                position_bound=prefix_bound,
             )
-            prefix = prefix_fusion.rows(prefix_fusion.ranked[: rerank.candidates])
             prefix_keys = {row_key(row) for row in prefix}
 
             # Trigger: rows outside the prefix, including rows only a deeper window found.
@@ -1221,6 +1510,9 @@ class SemanticSearch:
                 offset=offset,
                 limit=limit,
                 trace=trace,
+            )
+            output = await self._materialize_unread(
+                output, prefix_keys, window, vector_keys=fusion.vector_scores.keys()
             )
         total_ms = (time.perf_counter() - query_start) * 1000
         if total_ms > 2500:
