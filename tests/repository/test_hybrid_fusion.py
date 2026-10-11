@@ -140,7 +140,7 @@ class OfflineSemanticSearch(SemanticSearch):
     """
 
     @override
-    async def _fetch_row_texts(self, keys):
+    async def _fetch_row_texts(self, keys, snippet_limit=None):
         return {}
 
     @override

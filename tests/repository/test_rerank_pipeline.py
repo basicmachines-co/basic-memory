@@ -1069,3 +1069,44 @@ def test_repository_self_resolves_reranker(
 
     resolver.assert_called_once_with(config)
     assert repository._rerank_provider is reranker
+
+
+@pytest.mark.asyncio
+async def test_unbounded_reranker_reads_a_lexical_rows_whole_text(
+    rerank_search_repository: BackendSearchRepository,
+    entity_service: EntityService,
+) -> None:
+    """``reranker_max_document_chars=0`` sends the full text, past the 4,000-char read cap.
+
+    A note only full-text search finds has no matched chunk, so its rerank document is its
+    note text. The prefix reads that text as far as the reranker's limit; the public
+    preview stays at its display limit.
+    """
+    repo = rerank_search_repository
+    await _index_two_auth_notes(repo)
+    content = "auth session token archive " * 200 + "needle-past-the-cap"
+    assert content.index("needle-past-the-cap") > 4000
+    await repo.index_item(
+        _entity_row(
+            project_id=repo.project_id,
+            row_id=404,
+            title="Auth archive",
+            permalink="specs/archive",
+            content=content,
+        )
+    )
+    reranker = _FakeReranker({"archive": 0.95, "Alpha": 0.8, "Bravo": 0.7})
+    repo._rerank_provider = reranker
+    repo._reranker_max_document_chars = 0
+
+    rows = await repo.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=5,
+    )
+    results = await to_search_results(entity_service, rows)
+
+    assert any("needle-past-the-cap" in doc for doc in reranker.document_batches[0])
+    lexical = next(result for result in results if result.permalink == "specs/archive")
+    assert lexical.content == content[:4000]
+    assert lexical.content_length == len(content)
