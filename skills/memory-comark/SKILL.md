@@ -135,12 +135,16 @@ Semantics to state honestly in the surrounding prose:
 - Frontmatter numbers are stored as text; comparisons and sums treat decimal text
   as numbers and ignore everything else.
 
-### You cannot see the rendered result: check the numbers yourself
+### Check the rendered result before you quote it
 
-You write the query, but only the browser runs it. Before you state a number in
-prose, run the equivalent read yourself (for example `search_notes` with
-metadata filters; see the memory-metadata-search skill) and confirm the result
-has rows. A query over a field no note has renders an empty view.
+In Basic Memory Cloud, `read_note(view="text")` returns the note as a reader
+sees it: every component as plain Markdown, with live queries run now. Read it
+back after writing a live view and confirm the view has rows before you state a
+number in prose. A query over a field no note has renders an empty view.
+
+Elsewhere, only the browser runs the query, so run the equivalent read yourself
+(for example `search_notes` with metadata filters; see the
+memory-metadata-search skill).
 
 A live chart's body is its **snapshot**: the rows readers see when live data
 cannot load. A new live view can leave the body empty; people fill it with
@@ -160,7 +164,11 @@ as a snapshot in prose and keep them in the chart's row grammar.
 ## When a component shows an error
 
 A broken component renders a coded problem and a fix inside its own frame; the
-rest of the note still renders. The codes you will meet most:
+rest of the note still renders. In Basic Memory Cloud, `write_note` and
+`edit_note` list these problems under **Component problems** after the save, so
+fix them right away with `edit_note`. `comark(7)` in the manual
+(`memory://man/comark(7)`) is a quick reference to the syntax and codes. The
+codes you will meet most:
 
 | Code | Meaning | Fix |
 | --- | --- | --- |
