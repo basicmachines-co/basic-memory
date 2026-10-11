@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from basic_memory.markdown.entity_parser import EntityParser
+from basic_memory.markdown.schemas import Relation
 from basic_memory.schemas.document import (
     DocumentAgentObservationV1,
     DocumentAgentOutputV1,
@@ -643,7 +644,7 @@ async def test_raw_extraction_body_stays_out_of_graph_only_via_opt_out(tmp_path)
     """Regression for the Codex P1 on #1178.
 
     A serialized raw extraction whose body carries observation, hashtag, and wiki-link
-    syntax must parse through the real EntityParser with zero graph semantics while the
+    syntax must parse through the real EntityParser with only source provenance while the
     body text survives for search. The control parse of the same note with the opt-out
     stripped MUST mint them, proving bm_parse_semantics is the operative suppression.
     """
@@ -657,7 +658,7 @@ async def test_raw_extraction_body_stays_out_of_graph_only_via_opt_out(tmp_path)
 
     parsed = await parser.parse_markdown_content(tmp_path / "raw-doc.md", markdown)
     assert parsed.observations == []
-    assert parsed.relations == []
+    assert parsed.relations == [Relation(type="derived_from", target=str(SOURCE_ENTITY_ID))]
     assert parsed.content is not None
     assert "- [result] something #hashtag" in parsed.content
     assert "[[Some Note]]" in parsed.content
@@ -668,11 +669,14 @@ async def test_raw_extraction_body_stays_out_of_graph_only_via_opt_out(tmp_path)
     control = await parser.parse_markdown_content(tmp_path / "control-doc.md", without_opt_out)
     assert [observation.content for observation in control.observations] == ["something #hashtag"]
     assert "hashtag" in (control.observations[0].tags or [])
-    assert [relation.target for relation in control.relations] == ["Some Note"]
+    assert [relation.target for relation in control.relations] == [
+        "Some Note",
+        str(SOURCE_ENTITY_ID),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> None:
+async def test_extraction_provenance_survives_enrichment(tmp_path) -> None:
     parser = EntityParser(tmp_path)
     raw = raw_document()
 
@@ -684,7 +688,7 @@ async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> N
     assert parsed_raw.content is not None
     assert "accidental" in parsed_raw.content
     assert parsed_raw.observations == []
-    assert parsed_raw.relations == []
+    assert parsed_raw.relations == [Relation(type="derived_from", target=str(SOURCE_ENTITY_ID))]
 
     raw_checksum = document_markdown_checksum(assemble_document_markdown(raw))
     enriched = enrich_document_markdown(
@@ -714,7 +718,34 @@ async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> N
     assert [observation.content for observation in parsed_enriched.observations] == [
         "Intentional fact"
     ]
-    assert [relation.target for relation in parsed_enriched.relations] == ["Source note"]
+    assert parsed_enriched.relations == [
+        Relation(type="references", target="Source note"),
+        Relation(type="derived_from", target=str(SOURCE_ENTITY_ID)),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("note_type", ["extracted_text", "document"])
+async def test_extraction_provenance_deduplicates_authored_relation(tmp_path, note_type) -> None:
+    raw = raw_document()
+    markdown = assemble_document_markdown(raw).replace("type: extracted_text", f"type: {note_type}")
+    markdown = markdown.replace("bm_parse_semantics: false", "bm_parse_semantics: true")
+    markdown += f"\n- derived_from [[{SOURCE_ENTITY_ID}]]\n"
+    parsed = await EntityParser(tmp_path).parse_markdown_content(tmp_path / "doc.md", markdown)
+    assert parsed.relations.count(Relation(type="derived_from", target=str(SOURCE_ENTITY_ID))) == 1
+
+
+@pytest.mark.asyncio
+async def test_provenance_requires_extraction_schema_and_valid_source(tmp_path) -> None:
+    markdown = assemble_document_markdown(raw_document())
+    parser = EntityParser(tmp_path)
+    ordinary = markdown.replace("schema/document-extraction", "schema/document-ingestion-run")
+    parsed = await parser.parse_markdown_content(tmp_path / "run.md", ordinary)
+    assert parsed.relations == []
+    with pytest.raises(ValidationError, match="entity_external_id"):
+        await parser.parse_markdown_content(
+            tmp_path / "invalid.md", markdown.replace(str(SOURCE_ENTITY_ID), "invalid-uuid")
+        )
 
 
 def test_ingestion_run_note_round_trip_and_failure_contract() -> None:

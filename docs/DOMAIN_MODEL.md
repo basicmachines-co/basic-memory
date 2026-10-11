@@ -96,6 +96,9 @@ A relation is a directed semantic statement owned by its source entity.
 - Source and resolved target belong to the same project graph.
 - The durable representation is the relation syntax in the source note. Resolution enriches that
   statement; it does not replace it.
+- Document extraction notes also project a `derived_from` relation from their validated
+  `source.entity_external_id` frontmatter. This provenance connects extracted text to its source
+  file even when raw body semantics are disabled, without changing extracted text or page offsets.
 
 Incoming graph navigation does not transfer ownership to the target. Re-indexing the source note
 may recreate, resolve, or remove its outgoing relations.
