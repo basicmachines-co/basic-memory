@@ -220,12 +220,11 @@ async def test_filter_pass_answers_every_candidate_within_the_bind_bound(
     assert len(candidates) > VECTOR_HYDRATION_BATCH_SIZE
 
     batched_key_counts: list[int] = []
-    original_search = repo._fts.search
+    original_admitted_keys = repo._fts.admitted_keys
 
-    async def recording_search(scope, query, **kwargs):
-        if kwargs.get("candidate_keys") is not None:
-            batched_key_counts.append(len(kwargs["candidate_keys"]))
-        return await original_search(scope, query, **kwargs)
+    async def recording_admitted_keys(scope, query, candidate_keys):
+        batched_key_counts.append(len(candidate_keys))
+        return await original_admitted_keys(scope, query, candidate_keys)
 
     with (
         patch.object(
@@ -234,7 +233,7 @@ async def test_filter_pass_answers_every_candidate_within_the_bind_bound(
             new_callable=AsyncMock,
             return_value=_vector_chunks(candidates),
         ),
-        patch.object(repo._fts, "search", recording_search),
+        patch.object(repo._fts, "admitted_keys", recording_admitted_keys),
     ):
         results = await repo._semantic_search().vector_only(
             PreparedSearchQuery(

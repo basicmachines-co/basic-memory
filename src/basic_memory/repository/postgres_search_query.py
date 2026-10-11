@@ -27,7 +27,11 @@ from basic_memory.repository.search_filters import (
     metadata_filter_content_type_condition,
     shared_filter_conditions,
 )
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+)
 from basic_memory.repository.search_query import (
     PreparedSearchQuery,
     relaxation_word_tokens,
@@ -45,7 +49,7 @@ _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
 
 # Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = """
+_RESULT_COLUMNS = f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -57,7 +61,7 @@ _RESULT_COLUMNS = """
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                search_index.content_snippet,
+                {capped_snippet_columns("search_index")},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -823,6 +827,22 @@ class PostgresFts:
                 f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
             )
         return results
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only."""
+        compiled = compile_fts_filter(scope, query, candidate_keys=candidate_keys)
+        sql = (
+            "SELECT search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        async with db.scoped_session(self._session_maker) as session:
+            result = await session.execute(text(sql), compiled.params)
+            return {(row.type, row.id) for row in result.fetchall()}
 
     async def count(
         self,

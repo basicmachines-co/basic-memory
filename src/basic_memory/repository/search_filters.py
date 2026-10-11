@@ -100,6 +100,19 @@ class FtsBackend(Protocol):
         allow_relaxed: bool = False,
     ) -> int: ...
 
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only.
+
+        Vector retrieval asks this of its candidates to apply structured filters. It
+        needs a yes or no per key, so no row text leaves the database (#1746).
+        """
+        ...
+
 
 # --- Filters both backends compile identically ---
 

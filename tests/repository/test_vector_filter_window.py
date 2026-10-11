@@ -215,3 +215,52 @@ async def test_each_round_asks_the_filter_only_about_rows_that_exist():
 
     asked = [sorted(row_id for _type, row_id in call["candidate_keys"]) for call in fts.calls]
     assert asked == [list(range(1, 21)), list(range(1, 26))]
+
+
+def _multi_chunk_ranking(rows: int, chunks_per_row: int) -> list[HydratedChunk]:
+    """Rows 1..rows, each cut into ``chunks_per_row`` chunks, nearest row first."""
+    ranking: list[HydratedChunk] = []
+    for row_id in range(1, rows + 1):
+        for chunk in range(chunks_per_row):
+            ranking.append(
+                HydratedChunk(
+                    entity_id=row_id,
+                    chunk_key=f"entity:{row_id}:{chunk}",
+                    source_key=("entity", row_id),
+                    chunk_text=f"chunk {row_id}.{chunk}",
+                    similarity=0.99 - len(ranking) * 0.0001,
+                )
+            )
+    return ranking
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_window_that_fills_the_page_reads_once():
+    """Large notes own dozens of chunks; admitted rows never reach a chunk-sized budget (#1746).
+
+    Every row passes the filter (as every entity passes the default entity_types filter),
+    so the first window already holds a full page and must not widen.
+    """
+    fts = AdmittingFts(admitted=set(range(1, 1001)))
+    # 52 chunks per note, as measured in production: a 100-chunk window covers two notes.
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=52))
+
+    found = await _search(_semantic(fts, vector_k=100), adapter, query=FILTERED)
+
+    assert found == [1, 2]
+    # Before #1746 this widened 100, 200, 400 ... to the 50,000-chunk scan limit.
+    assert _windows(adapter) == [100]
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_window_widens_only_to_the_page_it_must_fill():
+    """Widening stops once the page is full, not when admitted rows match the chunk budget."""
+    # Only even rows pass. Each row has 10 chunks, so a 20-chunk window covers two
+    # rows and admits one; the page needs two.
+    fts = AdmittingFts(admitted=set(range(2, 1001, 2)))
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=10))
+
+    found = await _search(_semantic(fts), adapter, query=FILTERED)
+
+    assert found == [2, 4]
+    assert _windows(adapter) == [20, 40]

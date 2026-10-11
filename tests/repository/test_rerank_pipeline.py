@@ -13,7 +13,7 @@ import basic_memory.repository.sqlite_search_repository as sqlite_search_reposit
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_index_row import SearchIndexRow, SNIPPET_READ_LIMIT
 from basic_memory.repository.rerank_provider import (
     build_rerank_document,
     demote_tail_scores,
@@ -716,6 +716,10 @@ async def test_hybrid_fts_only_preview_stays_bounded_through_api_hydration(
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=5,
     )
+    # The read carried the capped text, not the 135 KB note, and still knows its length.
+    archive_row = next(row for row in rows if row.permalink == "specs/archive")
+    assert archive_row.content_snippet == content[:SNIPPET_READ_LIMIT]
+    assert archive_row.content_snippet_length == len(content)
     results = await to_search_results(entity_service, rows)
 
     lexical = next(result for result in results if result.permalink == "specs/archive")
@@ -832,7 +836,7 @@ async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(mo
     semantic = _semantic(vector_k=2, rerank=_reranking(reranker, candidates=2), fts=fts)
 
     async def vector_window(
-        query: PreparedSearchQuery, candidate_limit: int, *, trace: Any = None
+        query: PreparedSearchQuery, candidate_limit: int, row_target: int, *, trace: Any = None
     ) -> CandidateWindow:
         return window_of(vector_stream[:candidate_limit])
 

@@ -28,7 +28,11 @@ from basic_memory.repository.rerank_provider import (
     validate_rerank_scores,
 )
 from basic_memory.repository.search_filters import FtsBackend
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+)
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import (
@@ -240,8 +244,11 @@ class CandidateWindow:
 
             # Small notes: return full content so the answer is always present.
             # Large notes: return top-N most relevant chunks for richer context.
+            # content_length is the stored note's length; the snippet a search read
+            # carries is capped, so its own length cannot say whether the note is small.
             content_snippet = row.content_snippet or ""
-            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
+            content_length = row.content_length or 0
+            if content_snippet and content_length <= SMALL_NOTE_CONTENT_LIMIT:
                 matched_chunk_text = content_snippet
             else:
                 best_chunks = sorted(chunks, key=lambda chunk: chunk.similarity, reverse=True)
@@ -392,6 +399,19 @@ class SemanticSearch:
         # for the untouched tail that this request must return.
         tail_size = max(0, limit + offset - rerank.candidates)
         return self._rerank_candidate_limit(rerank) + tail_size * 10
+
+    def _row_target(self, limit: int, offset: int, query_text: str) -> int:
+        """How many admitted *rows* a filtered window must hold to answer this request.
+
+        The page needs ``offset + limit`` rows, and a reranked query also needs its
+        whole fixed prefix. This is a row count; ``_candidate_limit`` is a chunk count,
+        and a large note owns dozens of chunks, so the two must never be compared.
+        """
+        rerank = self._active_rerank(query_text)
+        page_end = offset + limit
+        if rerank is None:
+            return page_end
+        return max(rerank.candidates, page_end)
 
     # --- Vector nearest neighbours through the ready manifest ---
 
@@ -592,7 +612,8 @@ class SemanticSearch:
         sql = f"""
             SELECT
                 project_id, id, title, permalink, file_path, type, metadata,
-                from_id, to_id, relation_type, entity_id, content_snippet,
+                from_id, to_id, relation_type, entity_id,
+                {capped_snippet_columns("search_index")},
                 category, created_at, updated_at, 0 as score
             FROM search_index
             WHERE {scope_predicate}
@@ -629,16 +650,7 @@ class SemanticSearch:
         allowed_keys: set[SearchIndexKey] = set()
         for batch_start in range(0, len(candidate_keys), VECTOR_HYDRATION_BATCH_SIZE):
             batch = candidate_keys[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
-            filtered_rows = await self.fts.search(
-                self.scope,
-                filter_query,
-                # The restriction, not this limit, is what bounds the result: one row per
-                # requested key, since (id, type, project_id) identifies a search row.
-                limit=len(batch),
-                offset=0,
-                candidate_keys=batch,
-            )
-            allowed_keys.update((row.type, row.id) for row in filtered_rows if row.id is not None)
+            allowed_keys.update(await self.fts.admitted_keys(self.scope, filter_query, batch))
         return allowed_keys
 
     # --- Reranking ---
@@ -775,8 +787,9 @@ class SemanticSearch:
         query_text = (query.search_text or "").strip()
         rerank = self._active_rerank(query_text)
         candidate_limit = self._candidate_limit(limit, offset, query_text)
+        row_target = self._row_target(limit, offset, query_text)
         query_start = time.perf_counter()
-        window = await self._vector_window(query, candidate_limit, trace=trace)
+        window = await self._vector_window(query, candidate_limit, row_target, trace=trace)
         ranked_rows = window.ranked_rows()
 
         if rerank is None:
@@ -818,10 +831,15 @@ class SemanticSearch:
         self,
         query: PreparedSearchQuery,
         candidate_limit: int,
+        row_target: int,
         *,
         trace: SearchTraceCollector | None = None,
     ) -> CandidateWindow:
-        """Embed the query once and resolve its candidate window of ``candidate_limit`` chunks."""
+        """Embed the query once and resolve its candidate window of ``candidate_limit`` chunks.
+
+        ``row_target`` is how many admitted rows a filtered window must reach before it
+        stops widening; see ``_candidate_window``.
+        """
         query_text = (query.search_text or "").strip()
         embed_start = time.perf_counter()
         with logfire.span("search.embed_query", query_chars=len(query_text)):
@@ -836,6 +854,7 @@ class SemanticSearch:
             query,
             query_embedding,
             candidate_limit,
+            row_target,
             min_similarity=effective_min_similarity,
             trace=trace,
         )
@@ -855,26 +874,39 @@ class SemanticSearch:
         query: PreparedSearchQuery,
         query_embedding: list[float],
         candidate_limit: int,
+        row_target: int,
         *,
         min_similarity: float,
         trace: SearchTraceCollector | None = None,
     ) -> CandidateWindow:
         """Resolve the nearest chunks to admitted search rows, widening past rejections.
 
-        Trigger: the query carries structured filters the adapter cannot evaluate.
+        The first read takes ``candidate_limit`` chunks, the same window an unfiltered
+        query reads, so a filtered ranking is the unfiltered one restricted to the
+        filter.
+
+        Trigger: the query carries structured filters the adapter cannot evaluate, and
+            that first window admitted fewer than ``row_target`` rows.
         Why: the adapter ranks by similarity alone, so a window taken straight from
             its ranking can hold few admitted rows while more sit just past it, and a
             page built from that window comes up short although matches exist.
         Outcome: the window is re-read with a bounded geometric overfetch until it
-            holds ``candidate_limit`` admitted rows, the ranking is exhausted, or its
-            tail has fallen below the similarity threshold, past which nothing further
-            can qualify. A query without filters resolves its window once.
+            holds ``row_target`` admitted rows, the ranking is exhausted, or its tail
+            has fallen below the similarity threshold, past which nothing further can
+            qualify. A query without filters resolves its window once.
+
+        ``row_target`` counts rows, not chunks (#1746). Comparing admitted rows to the
+        chunk budget could never succeed for notes cut into dozens of chunks, so nearly
+        every filtered search (and every default MCP search, which filters to entities)
+        widened to the scan limit.
         """
         scan_limit = candidate_limit
         scanned = -1
+        rounds = 0
         vector_query_ms = 0.0
         hydrate_ms = 0.0
         while True:
+            rounds += 1
             vector_query_start = time.perf_counter()
             # Constraint: vector adapters may open their own session, while the SQLite
             # test/runtime pool can contain only one connection. A plain AsyncSession
@@ -896,10 +928,19 @@ class SemanticSearch:
             tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
             if (
                 not query.has_filters
-                or window.admitted >= candidate_limit
+                or window.admitted >= row_target
                 or exhausted
                 or tail_below_threshold
             ):
+                logfire.info(
+                    "search.vector_window",
+                    rounds=rounds,
+                    chunks_scanned=len(chunks),
+                    candidate_limit=candidate_limit,
+                    row_target=row_target,
+                    rows_admitted=window.admitted,
+                    has_filters=query.has_filters,
+                )
                 return replace(window, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms)
             scanned = len(chunks)
             scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
@@ -1012,7 +1053,12 @@ class SemanticSearch:
             if rerank is not None
             else self._candidate_limit(candidate_limit, 0, query_text)
         )
-        window = await self._vector_window(query, vector_candidate_limit, trace=trace)
+        window = await self._vector_window(
+            query,
+            vector_candidate_limit,
+            self._row_target(limit, offset, query_text),
+            trace=trace,
+        )
         vector_results = window.ranked_rows()[:candidate_limit]
         vector_ms = (time.perf_counter() - vector_start) * 1000
         # Trigger: with reranking disabled the vector leg expands internally and can
