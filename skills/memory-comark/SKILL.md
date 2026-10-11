@@ -68,8 +68,9 @@ Rules that matter:
   `bm-kanban`; people can tick boxes from the rendered note.
 - **Never put HTML, scripts, styles, or classes in a note**, and never wrap a
   component in a code fence (a fenced block stays literal code).
-- **Use only registered props.** An unknown attribute makes the directive
-  unparseable, and it shows as raw text.
+- **Use only registered props.** An unknown attribute produces `prop-unknown`
+  in a warning frame with the original source and registered props; it is never
+  silently dropped.
 
 A checklist and a board:
 
@@ -158,8 +159,11 @@ as a snapshot in prose and keep them in the chart's row grammar.
 - The rich editor normalizes formatting when a person edits the note: attribute
   order changes and YAML blocks come back as JSON. Values survive; do not fight
   the formatting.
-- Keep the closing `::` lines. An unclosed component swallows the rest of the
-  note into its body.
+- Keep the closing `::` lines. A block with a body but no close produces
+  `directive-unclosed`; the opener and YAML props appear in a warning while
+  following Markdown stays visible. Add the close at the intended boundary in
+  source; the editor never guesses it. Standalone leaves with no body remain
+  valid, though new components should use explicit closes.
 
 ## When a component shows an error
 
@@ -172,6 +176,8 @@ codes you will meet most:
 
 | Code | Meaning | Fix |
 | --- | --- | --- |
+| `prop-unknown` | A prop the component does not accept | Remove it or use a registered prop from the warning or reference |
+| `directive-unclosed` | A block with a body is missing its close | Add `::` at the intended boundary in Markdown source |
 | `query-measure` | The chart has no number per row | Add `group`, `count`, or `sum`, or use `search` |
 | `query-series` | A trend from one value | Use `group`, `daily`, or `search` with `limit` ≥ 2 |
 | `query-escaped-quote` | `\"` inside a query | Use single quotes inside the query |
@@ -180,8 +186,12 @@ codes you will meet most:
 | `chart-body-empty` | No rows in the body | Add `- label: value` rows |
 | `chart-body-number` | A row without a number | Every row needs a numeric value |
 
-An unknown component or attribute is not drawn at all and shows as raw text;
-check names and props against the reference.
+Unknown props preserve the original directive and data through nearby rich
+edits. Closed malformed components can use a reviewed agent replacement and
+undo; missing-close repairs require source editing. Canonical validation and
+strict export reject malformed source until repaired. Never author internal
+recovery nodes such as `bm-problem`. Check component names and props against the
+reference.
 
 ## Checklist
 

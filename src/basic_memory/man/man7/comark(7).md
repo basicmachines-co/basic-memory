@@ -103,6 +103,8 @@ message.
 | --- | --- |
 | `unknown-element` | The name is not a registered component |
 | `invalid-attribute` | An attribute the component does not accept |
+| `prop-unknown` | An unknown prop; the warning preserves source and lists registered props |
+| `directive-unclosed` | A block with a body has no closing `::`; repair its source boundary |
 | `invalid-attribute-value` | A value outside the attribute's closed set or range |
 | `missing-attribute` | A required attribute is absent |
 | `invalid-chart-body` | The body does not fit the chart; see the `chart-body-*` code |
@@ -117,6 +119,15 @@ message.
 
 Other `chart-body-*` and `query-*` codes follow the same pattern: the suffix
 names the part of the body or pipeline that is wrong.
+
+Unknown props preserve the original directive and data in their warning frame,
+including through nearby rich edits. Missing-close warnings preserve the opener
+and YAML properties while following Markdown stays visible. Add the close at
+the intended boundary in source; the editor never inserts a guessed close.
+Reviewed agent replacements and undo can repair closed malformed components;
+an unclosed block requires source editing. Canonical validation and strict
+export reject malformed source. Internal recovery nodes such as `bm-problem`
+are never authored.
 
 ## CHECKING YOUR WORK
 
@@ -146,7 +157,7 @@ The queue rewrite more than doubled steady-state throughput.
 
 ## GOTCHAS
 
-- [gotcha] An unclosed component swallows the rest of the note into its body.
+- [gotcha] An unclosed block with a body shows `directive-unclosed`; following Markdown stays visible. Standalone leaves with no body remain valid, but author new components with explicit closes.
 - [gotcha] A component inside a code fence is literal code and is not drawn.
 - [gotcha] The rich editor normalizes attribute order and formatting; values survive.
 - [gotcha] A query over a field no note has renders an empty view, not an error.
