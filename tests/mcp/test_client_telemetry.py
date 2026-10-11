@@ -41,7 +41,7 @@ async def test_knowledge_client_resolve_entity_emits_client_and_http_spans(monke
     monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
+        assert request.method == "QUERY"
         return httpx.Response(200, json={"external_id": "entity-123"})
 
     transport = httpx.MockTransport(handler)
@@ -55,7 +55,7 @@ async def test_knowledge_client_resolve_entity_emits_client_and_http_spans(monke
         "mcp.http.request",
     ]
     assert spans[1][1] == {
-        "method": "POST",
+        "method": "QUERY",
         "client_name": "knowledge",
         "operation": "resolve_entity",
         "path_template": "/v2/projects/{project_id}/knowledge/resolve",

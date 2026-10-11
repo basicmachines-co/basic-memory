@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from basic_memory.file_utils import FileError
 from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
@@ -63,10 +65,14 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_relations,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.services.read_cache_changes import resolved_relations_read_cache_change
 from basic_memory.read_cache import (
-    ReadCache,
+    ReadCacheChange,
+    ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
     invalidate_cache,
+    ReadCacheChangeRecorder,
+    invalidate_recorded_change,
 )
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.projects import ProjectRuntimeReference
@@ -155,8 +161,9 @@ class LocalInlineStorageEventResultRecorder:
     search_service: LocalIndexSearchService
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
+    session_maker: async_sessionmaker[AsyncSession]
     index_embeddings: bool
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
     async def index_file_completed(
         self,
@@ -171,11 +178,9 @@ class LocalInlineStorageEventResultRecorder:
             entity_id=result.entity_id,
         )
 
-        if result.status == IndexFileJobStatus.processed and self.read_cache is not None:
-            await finish_project_read_cache_invalidation(
-                self.read_cache,
-                self.project.project_external_id,
-            )
+        # The file indexer is wrapped in InvalidatingIndexFileExecutor, which already
+        # retired exactly what this file changed; a project-wide clear here would
+        # evict every unrelated note on each watched edit.
 
         # --- Relation repair ---
         # Back-resolve forward references now that this file is indexed.
@@ -187,19 +192,26 @@ class LocalInlineStorageEventResultRecorder:
             )
         )
         if relation_request is not None:
-            # Relation repair changes cached entity payloads after indexing.
-            # A second generation bump closes the fill window opened by the
-            # first post-index invalidation, even after partial failure.
+            # Relation repair changes cached entity payloads after indexing, so
+            # the notes it resolved are retired too, or the whole project if it
+            # fails partway.
             invalidation_scope = (
-                invalidate_cache(
+                invalidate_recorded_change(
                     self.read_cache,
                     self.project.project_external_id,
                 )
                 if self.read_cache is not None
-                else nullcontext()
+                else nullcontext(ReadCacheChangeRecorder())
             )
-            async with invalidation_scope:
+            async with invalidation_scope as relation_change:
                 relation_result = await resolve_project_relations(self.relation_runtime)
+                relation_change.record(
+                    await resolved_relations_read_cache_change(
+                        self.session_maker,
+                        project_id=relation_request.project_id,
+                        source_entity_ids=relation_result.affected_entity_ids,
+                    )
+                )
                 logger.info(
                     "Local event-index relation repair completed",
                     project_id=relation_request.project_id,
@@ -221,7 +233,16 @@ class LocalInlineStorageEventResultRecorder:
             and result.entity_id is not None
             and not result.content_superseded
         ):
-            await self.search_service.sync_entity_vectors_batch([result.entity_id])
+            # The file's index retired content before these vectors existed, so a
+            # VECTOR/HYBRID search cached meanwhile is retired again.
+            vector_scope = (
+                invalidate_recorded_change(self.read_cache, self.project.project_external_id)
+                if self.read_cache is not None
+                else nullcontext(ReadCacheChangeRecorder())
+            )
+            async with vector_scope as vector_change:
+                await self.search_service.sync_entity_vectors_batch([result.entity_id])
+                vector_change.record(ReadCacheChange.search_index())
             logger.info(
                 "Local event-index embedding completed",
                 entity_id=result.entity_id,
@@ -325,7 +346,7 @@ class LocalWatchEventIndexRuntimeFactory:
     # Semantic search is always on, so watched edits refresh their embeddings too.
     index_embeddings: bool = True
     move_batch_size: int = 100
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
         dependencies = await self.dependency_provider.dependencies_for_project(project)
@@ -417,6 +438,7 @@ class LocalWatchEventIndexRuntimeFactory:
                     target_resolver=dependencies.link_resolver,
                     entity_indexer=dependencies.search_service,
                 ),
+                session_maker=dependencies.session_maker,
                 index_embeddings=self.index_embeddings,
                 read_cache=self.read_cache,
             ),

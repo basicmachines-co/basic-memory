@@ -39,7 +39,7 @@ async def test_open_redis_read_cache_is_disabled_without_url(configured: str | N
 
 @pytest.mark.asyncio
 async def test_open_redis_read_cache_configures_pool_size(monkeypatch) -> None:
-    from basic_memory.read_cache import redis as redis_adapter
+    from basic_memory.read_cache import lifecycle
 
     configured: dict[str, object] = {}
 
@@ -55,7 +55,7 @@ async def test_open_redis_read_cache_configures_pool_size(monkeypatch) -> None:
         configured.update(url=url, max_connections=max_connections)
         return client
 
-    monkeypatch.setattr(redis_adapter, "create_redis_read_cache_client", create_client)
+    monkeypatch.setattr(lifecycle, "create_redis_read_cache_client", create_client)
 
     async with open_redis_read_cache("redis", max_connections=64) as read_cache:
         assert read_cache is not None

@@ -55,6 +55,7 @@ class RecordingRelationGenerationStore:
     generation_is_current: bool = True
     calls: list[tuple[str, int, tuple[AcceptedRelationWrite, ...]]] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
+    resolved_targets: frozenset[str] = frozenset()
 
     async def begin_relation_generation_publication(
         self,
@@ -92,6 +93,15 @@ class RecordingRelationGenerationStore:
         self.events.append("cleanup")
         self.calls.append(("cleanup", generation, ()))
         return RelationGenerationWriteResult(generation_is_current=self.generation_is_current)
+
+    async def resolved_target_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+    ) -> frozenset[str]:
+        assert session is not None
+        return self.resolved_targets
 
 
 @dataclass(slots=True)
@@ -216,13 +226,15 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
         end_offset=140,
     )
 
-    generation_is_current = await publisher.publish(
-        entity_id=42,
-        generation=7,
-        relations=relations,
-        observations=[IndexedObservation("Observed", "note", None, ["graph"])],
-        sections=[indexed_section],
-    )
+    generation_is_current = (
+        await publisher.publish(
+            entity_id=42,
+            generation=7,
+            relations=relations,
+            observations=[IndexedObservation("Observed", "note", None, ["graph"])],
+            sections=[indexed_section],
+        )
+    ).generation_is_current
 
     assert generation_is_current
     assert store.events == [
@@ -242,8 +254,8 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
     ]
     assert [call[0] for call in store.calls] == ["begin", "upsert", "upsert", "cleanup"]
     assert [len(call[2]) for call in store.calls] == [0, 250, 1, 0]
-    assert len(sessions) == 6
-    assert len({id(session) for session in sessions}) == 6
+    assert len(sessions) == 7
+    assert len({id(session) for session in sessions}) == 7
     published_names = [
         relation.target_name
         for operation, _, relation_chunk in store.calls
@@ -293,16 +305,18 @@ async def test_relation_generation_publisher_stops_when_source_fence_is_stale(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
-    generation_is_current = await publisher.publish(
-        entity_id=42,
-        generation=6,
-        relations=[IndexedRelation("links_to", "Target", None)],
-    )
+    generation_is_current = (
+        await publisher.publish(
+            entity_id=42,
+            generation=6,
+            relations=[IndexedRelation("links_to", "Target", None)],
+        )
+    ).generation_is_current
 
     assert not generation_is_current
     assert store.events == ["begin", "observations", "temporal", "sections", "upsert"]
     assert [call[0] for call in store.calls] == ["begin", "upsert"]
-    assert transaction_count == 4
+    assert transaction_count == 5
 
 
 @pytest.mark.asyncio
@@ -338,15 +352,17 @@ async def test_relation_generation_publisher_stops_when_publication_cannot_begin
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
-    assert not await publisher.publish(
-        entity_id=42,
-        generation=6,
-        relations=[IndexedRelation("links_to", "Target", None)],
-    )
+    assert not (
+        await publisher.publish(
+            entity_id=42,
+            generation=6,
+            relations=[IndexedRelation("links_to", "Target", None)],
+        )
+    ).generation_is_current
     assert [call[0] for call in store.calls] == ["begin"]
     assert observation_store.calls == []
     assert section_store.calls == []
-    assert transaction_count == 1
+    assert transaction_count == 2
 
 
 @pytest.mark.asyncio
@@ -385,17 +401,19 @@ async def test_relation_generation_publisher_stops_when_observation_fence_is_sta
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
-    assert not await publisher.publish(
-        entity_id=42,
-        generation=6,
-        relations=[IndexedRelation("links_to", "Target", None)],
-        observations=[],
-    )
+    assert not (
+        await publisher.publish(
+            entity_id=42,
+            generation=6,
+            relations=[IndexedRelation("links_to", "Target", None)],
+            observations=[],
+        )
+    ).generation_is_current
     assert store.events == ["begin", "observations"]
     assert [call[0] for call in store.calls] == ["begin"]
     assert observation_store.calls == [(6, ())]
     assert section_store.calls == []
-    assert transaction_count == 2
+    assert transaction_count == 3
 
 
 @pytest.mark.asyncio
@@ -434,16 +452,18 @@ async def test_relation_generation_publisher_stops_when_section_fence_is_stale(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
-    assert not await publisher.publish(
-        entity_id=42,
-        generation=6,
-        relations=[IndexedRelation("links_to", "Target", None)],
-        sections=[],
-    )
+    assert not (
+        await publisher.publish(
+            entity_id=42,
+            generation=6,
+            relations=[IndexedRelation("links_to", "Target", None)],
+            sections=[],
+        )
+    ).generation_is_current
     assert store.events == ["begin", "observations", "temporal", "sections"]
     assert [call[0] for call in store.calls] == ["begin"]
     assert section_store.calls == [(6, ())]
-    assert transaction_count == 3
+    assert transaction_count == 4
 
 
 @pytest.mark.asyncio
@@ -476,15 +496,17 @@ async def test_relation_generation_publisher_deduplicates_pre_resolved_aliases(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
-    generation_is_current = await publisher.publish(
-        entity_id=42,
-        generation=7,
-        relations=[
-            IndexedRelation("links_to", "source/path", "path alias", target_id=42),
-            IndexedRelation("links_to", "Source Title", "title alias", target_id=42),
-            IndexedRelation("documents", "Source Title", None, target_id=42),
-        ],
-    )
+    generation_is_current = (
+        await publisher.publish(
+            entity_id=42,
+            generation=7,
+            relations=[
+                IndexedRelation("links_to", "source/path", "path alias", target_id=42),
+                IndexedRelation("links_to", "Source Title", "title alias", target_id=42),
+                IndexedRelation("documents", "Source Title", None, target_id=42),
+            ],
+        )
+    ).generation_is_current
 
     assert generation_is_current
     assert observation_store.calls == [(7, ())]
@@ -595,6 +617,17 @@ async def test_failed_relation_publication_forces_change_detection_retry(
             del session, entity_id, generation
             raise AssertionError("failed publication cannot reach cleanup")
 
+        async def resolved_target_note_ids(
+            self,
+            session: AsyncSession,
+            *,
+            entity_id: int,
+        ) -> frozenset[str]:
+            return await relation_repository.resolved_target_note_ids(
+                session,
+                entity_id=entity_id,
+            )
+
     failing_publisher = RelationGenerationPublisher(
         relation_repository=_FailAfterPublicationBegins(),
         observation_repository=observation_repository,
@@ -632,11 +665,13 @@ async def test_failed_relation_publication_forces_change_detection_retry(
         temporal_repository=MemoryTimeIndexRepository(project_id=sample_entity.project_id),
         session_maker=session_maker,
     )
-    assert await retry_publisher.publish(
-        entity_id=sample_entity.id,
-        generation=1,
-        relations=[IndexedRelation("links_to", "Target", None)],
-    )
+    assert (
+        await retry_publisher.publish(
+            entity_id=sample_entity.id,
+            generation=1,
+            relations=[IndexedRelation("links_to", "Target", None)],
+        )
+    ).generation_is_current
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
         sample_entity.file_path: IndexedChecksums(checksum, accepted_content_checksum=checksum)
     }
@@ -703,11 +738,13 @@ async def test_generation_zero_relation_forces_generation_publication(
         temporal_repository=MemoryTimeIndexRepository(project_id=sample_entity.project_id),
         session_maker=session_maker,
     )
-    assert await publisher.publish(
-        entity_id=sample_entity.id,
-        generation=1,
-        relations=[IndexedRelation("links_to", "Target", None)],
-    )
+    assert (
+        await publisher.publish(
+            entity_id=sample_entity.id,
+            generation=1,
+            relations=[IndexedRelation("links_to", "Target", None)],
+        )
+    ).generation_is_current
 
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
         sample_entity.file_path: IndexedChecksums(checksum, accepted_content_checksum=checksum)

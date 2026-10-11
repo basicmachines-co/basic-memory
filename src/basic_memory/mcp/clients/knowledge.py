@@ -457,14 +457,14 @@ class KnowledgeClient:
         strict: bool = False,
     ) -> dict[str, Any]:
         """Request the complete entity-resolution payload."""
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_query
 
         with logfire.span(
             "mcp.client.knowledge.resolve_entity",
             client_name="knowledge",
             operation="resolve_entity",
         ):
-            response = await call_post(
+            response = await call_query(
                 self.http_client,
                 f"{self._base_path}/resolve",
                 json={"identifier": identifier, "strict": strict},
@@ -509,10 +509,10 @@ class KnowledgeClient:
         """
         from fastmcp.exceptions import ToolError
 
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_query
 
         try:
-            response = await call_post(
+            response = await call_query(
                 self.http_client,
                 f"{self._base_path}/links/resolve",
                 json={"identifier": identifier, "source_path": source_path},

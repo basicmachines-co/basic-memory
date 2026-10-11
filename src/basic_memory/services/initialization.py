@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from basic_memory.index.local_project import LocalProjectIndexRuntimeProvider
-    from basic_memory.read_cache import ReadCache, ReadCacheInvalidator
+    from basic_memory.read_cache import ReadCacheInvalidator
 
 
 async def run_initial_project_index(
@@ -222,7 +222,7 @@ async def initialize_file_indexing(
     quiet: bool = True,
     *,
     recovery_complete: asyncio.Event | None = None,
-    read_cache: "ReadCache | None" = None,
+    read_cache: "ReadCacheInvalidator | None" = None,
 ) -> None:
     """Initialize file indexing services.
 

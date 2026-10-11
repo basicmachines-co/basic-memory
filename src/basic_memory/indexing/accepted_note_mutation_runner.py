@@ -359,6 +359,9 @@ class AcceptedNoteMutationResult:
     change: AcceptedNoteMutationChange
     search_row: AcceptedNoteSearchRow | None = None
     relation_publication: RelationGenerationPublication | None = None
+    # An update changed the note's title or permalink, so name lookups and the
+    # links rendered in other notes may have changed too.
+    identity_changed: bool = False
 
 
 async def record_accepted_project_note_change(
@@ -945,6 +948,7 @@ async def _run_accepted_note_update(
             reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
 
     existing_file_path = entity.file_path if entity is not None else None
+    previous_identity = (entity.title, entity.permalink) if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
     # Trigger: the addressed entity already lives in the exact requested directory.
@@ -1145,6 +1149,7 @@ async def _run_accepted_note_update(
         ),
         search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
+        identity_changed=previous_identity != (entity.title, entity.permalink),
     )
 
 
@@ -1197,6 +1202,7 @@ async def _run_accepted_note_edit(
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
     prepared = prepared_write.prepared
+    previous_identity = (entity.title, entity.permalink)
     persisted = await persist_accepted_note_snapshot(
         session,
         entity=entity,
@@ -1236,6 +1242,7 @@ async def _run_accepted_note_edit(
         ),
         search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
+        identity_changed=previous_identity != (entity.title, entity.permalink),
     )
 
 

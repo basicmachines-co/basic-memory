@@ -46,7 +46,7 @@ async def _index_note(entity_service, search_service, title: str, content: str):
 
 
 async def _search(client: AsyncClient, v2_project_url: str, **query: Any) -> dict[str, Any]:
-    response = await client.post(f"{v2_project_url}/search/", json=query)
+    response = await client.request("QUERY", f"{v2_project_url}/search/", json=query)
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -228,7 +228,8 @@ async def test_valid_at_and_valid_overlaps_together_are_rejected(
     v2_project_url: str,
 ):
     """The schema refuses the contradictory pair, so it never reaches the service."""
-    response = await client.post(
+    response = await client.request(
+        "QUERY",
         f"{v2_project_url}/search/",
         json={"text": "cache", "valid_at": "2026-07-28", "valid_overlaps": "[2026-06-10,)"},
     )

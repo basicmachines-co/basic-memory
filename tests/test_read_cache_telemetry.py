@@ -1,323 +1,116 @@
-"""Telemetry contracts for typed semantic read-through caching."""
+"""Telemetry and policy contracts for read-cache invalidation."""
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
-from hashlib import sha256
 
 import pytest
-from pydantic import BaseModel, ValidationError
 
 from basic_memory.read_cache import (
-    ModelReadCache,
-    ReadCacheDataError,
+    ReadCacheChange,
     ReadCacheInvalidationStatus,
-    ReadCacheKey,
-    ReadCacheLookup,
-    ReadCacheOperation,
-    ReadCacheStoreStatus,
     ReadCacheUnavailable,
-    read_cache_request_digest,
+    invalidate_read_cache,
 )
-from basic_memory.read_cache import read_through
+from basic_memory.read_cache import invalidation
 from basic_memory.read_cache.policy import (
     READ_CACHE_TTL_SECONDS,
+    RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS,
     SEARCH_READ_CACHE_TTL_SECONDS,
 )
 
 PROJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-GENERATION = "1" * 32
+NOTE_ID = "11111111-1111-4111-8111-111111111111"
 
 
-class CachedValue(BaseModel):
-    title: str
-
-
-def test_production_ttls_keep_search_results_for_thirty_minutes() -> None:
-    assert READ_CACHE_TTL_SECONDS == 300
-    assert SEARCH_READ_CACHE_TTL_SECONDS == 1800
-
-
-@dataclass(slots=True)
-class RecordedSpan:
-    name: str
-    attributes: dict[str, object] = field(default_factory=dict)
-
-    def set_attribute(self, name: str, value: object) -> None:
-        self.attributes[name] = value
-
-    def set_attributes(self, attributes: dict[str, object]) -> None:
-        self.attributes.update(attributes)
+def test_ttls_bound_memory_not_freshness() -> None:
+    """Invalidation is explicit, so entries live for days; recent activity is time-relative."""
+    assert READ_CACHE_TTL_SECONDS == 7 * 24 * 3600
+    assert SEARCH_READ_CACHE_TTL_SECONDS == 24 * 3600
+    assert RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS == 15 * 60
 
 
 @dataclass(slots=True)
-class RecordingCache:
-    lookup_result: ReadCacheLookup | None = None
-    lookup_error: ReadCacheUnavailable | ReadCacheDataError | None = None
-    store_status: ReadCacheStoreStatus = ReadCacheStoreStatus.stored
-    store_error: ReadCacheUnavailable | ReadCacheDataError | None = None
-    store_ttls: list[int] = field(default_factory=list)
+class RecordingInvalidator:
+    """Records invalidations; ``unavailable`` simulates Redis being down."""
 
-    async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
-        del key
-        if self.lookup_error is not None:
-            raise self.lookup_error
-        if self.lookup_result is None:
-            raise AssertionError("test cache requires a lookup result or error")
-        return self.lookup_result
+    unavailable: bool = False
+    changes: list[ReadCacheChange] = field(default_factory=list)
 
-    async def store(
+    async def invalidate(
         self,
-        key: ReadCacheKey,
-        lookup: ReadCacheLookup,
-        payload: bytes,
-        *,
-        ttl_seconds: int,
-    ) -> ReadCacheStoreStatus:
-        del key, lookup, payload
-        self.store_ttls.append(ttl_seconds)
-        if self.store_error is not None:
-            raise self.store_error
-        return self.store_status
-
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
         del project_id
+        if self.unavailable:
+            raise ReadCacheUnavailable("redis down")
+        self.changes.append(change)
         return ReadCacheInvalidationStatus.invalidated
 
-
-def _key() -> ReadCacheKey:
-    return ReadCacheKey(
-        project_id=PROJECT_ID,
-        operation=ReadCacheOperation.entity,
-        request_digest=read_cache_request_digest("entity-1"),
-    )
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        return await self.invalidate(project_id, ReadCacheChange.whole_project())
 
 
-def _capture_telemetry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[list[RecordedSpan], list[tuple[str, dict[str, str]]]]:
-    spans: list[RecordedSpan] = []
-    events: list[tuple[str, dict[str, str]]] = []
-
-    @contextmanager
-    def fake_span(name: str, **attributes: object) -> Iterator[RecordedSpan]:
-        span = RecordedSpan(name=name, attributes=dict(attributes))
-        spans.append(span)
-        yield span
+@pytest.fixture
+def recorded_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Capture the invalidation counter's attributes (the metric is the observable)."""
+    events: list[dict[str, object]] = []
 
     class Counter:
-        def add(self, amount: int, *, attributes: dict[str, str]) -> None:
+        def add(self, amount: int, attributes: dict[str, object]) -> None:
             assert amount == 1
-            events.append(("basic_memory_read_cache_events_total", attributes))
+            events.append(attributes)
 
-    def fake_metric_counter(name: str) -> Counter:
-        assert name == "basic_memory_read_cache_events_total"
-        return Counter()
-
-    monkeypatch.setattr(read_through.logfire, "span", fake_span)
-    monkeypatch.setattr(read_through.logfire, "metric_counter", fake_metric_counter)
-    return spans, events
+    monkeypatch.setattr(invalidation.logfire, "metric_counter", lambda name: Counter())
+    return events
 
 
 @pytest.mark.asyncio
-async def test_hit_telemetry_reports_lookup_details_without_store(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("change", "scope"),
+    [
+        (ReadCacheChange.whole_project(), "project"),
+        (ReadCacheChange.note_content({NOTE_ID}), "notes"),
+        (ReadCacheChange(content=True), "content"),
+    ],
+)
+async def test_invalidation_reports_its_widest_scope(
+    recorded_events: list[dict[str, object]],
+    change: ReadCacheChange,
+    scope: str,
 ) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    payload = CachedValue(title="cached").model_dump_json().encode("utf-8")
-    backend = RecordingCache(
-        lookup_result=ReadCacheLookup(
-            generation=GENERATION,
-            payload=payload,
-            remaining_ttl_seconds=241.25,
-        )
-    )
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
-    )
+    cache = RecordingInvalidator()
 
-    async with cache.read(key=_key()) as cached:
-        assert cached.value == CachedValue(title="cached")
+    status = await invalidate_read_cache(cache, PROJECT_ID, change)
 
-    assert [span.name for span in spans] == ["read_cache.read_through"]
-    assert spans[0].attributes == {
-        "operation": "entity",
-        "cache.operation": "entity",
-        "cache.configured_ttl_seconds": 300,
-        "cache.lookup.outcome": "hit",
-        "cache.store.outcome": "not_attempted",
-        "cache.generation_digest": sha256(GENERATION.encode("utf-8")).hexdigest(),
-        "cache.payload_bytes": len(payload),
-        "cache.remaining_ttl_seconds": 241.25,
-    }
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "hit"})
-    ]
-    assert backend.store_ttls == []
+    assert status is ReadCacheInvalidationStatus.invalidated
+    assert cache.changes == [change]
+    assert recorded_events == [{"operation": "invalidate", "scope": scope, "event": "invalidated"}]
 
 
 @pytest.mark.asyncio
-async def test_miss_telemetry_keeps_lookup_and_store_outcomes_separate(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_unavailable_invalidation_is_reported_and_does_not_raise(
+    recorded_events: list[dict[str, object]],
 ) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    backend = RecordingCache(lookup_result=ReadCacheLookup(generation=GENERATION))
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
+    status = await invalidate_read_cache(
+        RecordingInvalidator(unavailable=True),
+        PROJECT_ID,
+        ReadCacheChange.note_content({NOTE_ID}),
     )
 
-    async with cache.read(key=_key()) as cached:
-        cached.value = CachedValue(title="authoritative")
-
-    payload = CachedValue(title="authoritative").model_dump_json().encode("utf-8")
-    assert [span.name for span in spans] == ["read_cache.read_through"]
-    assert spans[0].attributes == {
-        "operation": "entity",
-        "cache.operation": "entity",
-        "cache.configured_ttl_seconds": 300,
-        "cache.lookup.outcome": "miss",
-        "cache.store.outcome": "stored",
-        "cache.generation_digest": sha256(GENERATION.encode("utf-8")).hexdigest(),
-        "cache.payload_bytes": len(payload),
-    }
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "miss"}),
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "stored"}),
+    assert status is ReadCacheInvalidationStatus.unavailable
+    assert recorded_events == [
+        {"operation": "invalidate", "scope": "notes", "event": "unavailable"}
     ]
-    assert backend.store_ttls == [300]
 
 
 @pytest.mark.asyncio
-async def test_unavailable_lookup_remains_fail_open_and_reports_bypass(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_an_empty_change_touches_neither_redis_nor_telemetry(
+    recorded_events: list[dict[str, object]],
 ) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    backend = RecordingCache(lookup_error=ReadCacheUnavailable("Redis unavailable"))
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
-    )
+    cache = RecordingInvalidator()
 
-    async with cache.read(key=_key()) as cached:
-        cached.value = CachedValue(title="authoritative")
+    status = await invalidate_read_cache(cache, PROJECT_ID, ReadCacheChange())
 
-    assert spans[0].attributes["cache.lookup.outcome"] == "unavailable"
-    assert spans[0].attributes["cache.store.outcome"] == "not_attempted"
-    assert spans[0].attributes["cache.configured_ttl_seconds"] == 300
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "bypass"})
-    ]
-    assert backend.store_ttls == []
-
-
-@pytest.mark.asyncio
-async def test_corrupt_lookup_error_is_terminal_and_remains_fail_fast(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    backend = RecordingCache(lookup_error=ReadCacheDataError("invalid Redis envelope"))
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
-    )
-
-    with pytest.raises(ReadCacheDataError, match="invalid Redis envelope"):
-        async with cache.read(key=_key()):
-            raise AssertionError("a corrupt lookup must not yield")
-
-    assert spans[0].attributes["cache.lookup.outcome"] == "corrupt"
-    assert spans[0].attributes["cache.store.outcome"] == "not_attempted"
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "corrupt"})
-    ]
-    assert backend.store_ttls == []
-
-
-@pytest.mark.asyncio
-async def test_invalid_cached_model_is_terminal_and_remains_fail_fast(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    payload = b"not-json"
-    backend = RecordingCache(
-        lookup_result=ReadCacheLookup(
-            generation=GENERATION,
-            payload=payload,
-            remaining_ttl_seconds=123.5,
-        )
-    )
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
-    )
-
-    with pytest.raises(ValidationError):
-        async with cache.read(key=_key()):
-            raise AssertionError("an invalid cached model must not yield")
-
-    assert spans[0].attributes == {
-        "operation": "entity",
-        "cache.operation": "entity",
-        "cache.configured_ttl_seconds": 300,
-        "cache.lookup.outcome": "corrupt",
-        "cache.store.outcome": "not_attempted",
-        "cache.generation_digest": sha256(GENERATION.encode("utf-8")).hexdigest(),
-        "cache.payload_bytes": len(payload),
-        "cache.remaining_ttl_seconds": 123.5,
-    }
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "corrupt"})
-    ]
-    assert backend.store_ttls == []
-
-
-@pytest.mark.asyncio
-async def test_corrupt_store_error_is_terminal_and_remains_fail_fast(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spans, events = _capture_telemetry(monkeypatch)
-    backend = RecordingCache(
-        lookup_result=ReadCacheLookup(generation=GENERATION),
-        store_error=ReadCacheDataError("invalid Redis store result"),
-    )
-    cache = ModelReadCache(
-        backend=backend,
-        model_type=CachedValue,
-        ttl_seconds=300,
-        max_payload_bytes=1_024,
-    )
-
-    with pytest.raises(ReadCacheDataError, match="invalid Redis store result"):
-        async with cache.read(key=_key()) as cached:
-            cached.value = CachedValue(title="authoritative")
-
-    payload = CachedValue(title="authoritative").model_dump_json().encode("utf-8")
-    assert spans[0].attributes == {
-        "operation": "entity",
-        "cache.operation": "entity",
-        "cache.configured_ttl_seconds": 300,
-        "cache.lookup.outcome": "miss",
-        "cache.store.outcome": "corrupt",
-        "cache.generation_digest": sha256(GENERATION.encode("utf-8")).hexdigest(),
-        "cache.payload_bytes": len(payload),
-    }
-    assert events == [
-        ("basic_memory_read_cache_events_total", {"operation": "entity", "event": "miss"}),
-        (
-            "basic_memory_read_cache_events_total",
-            {"operation": "entity", "event": "store_corrupt"},
-        ),
-    ]
-    assert backend.store_ttls == [300]
+    assert status is ReadCacheInvalidationStatus.invalidated
+    assert cache.changes == []
+    assert recorded_events == []

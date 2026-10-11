@@ -10,15 +10,15 @@ from basic_memory import db
 from basic_memory.api.container import resolve_container
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.server import lifespan, mcp
-from basic_memory.read_cache import ReadCacheInvalidationStatus, ReadCacheUnavailable
+from basic_memory.read_cache import ReadCacheUnavailable
 
 
 class UnavailableStartupCache:
     def __init__(self) -> None:
-        self.project_ids: list[str] = []
+        self.reset_attempts = 0
 
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        self.project_ids.append(project_id)
+    async def reset_all(self) -> None:
+        self.reset_attempts += 1
         raise ReadCacheUnavailable("Redis unavailable during startup")
 
 
@@ -68,7 +68,7 @@ async def test_mcp_lifespan_disables_cache_when_startup_invalidation_is_unavaila
     monkeypatch.setattr(server_module, "open_redis_read_cache", open_unavailable_cache)
 
     async with lifespan(mcp):
-        assert cache.project_ids
+        assert cache.reset_attempts == 1
         assert get_container().read_cache is None
         assert resolve_container().read_cache is None
 

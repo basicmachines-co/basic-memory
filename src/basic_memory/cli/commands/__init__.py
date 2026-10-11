@@ -1,6 +1,16 @@
 """CLI commands for basic-memory."""
 
-from . import ci, status, db, doctor, import_memory_json, mcp, import_claude_conversations, orphans
+from . import (
+    cache,
+    ci,
+    status,
+    db,
+    doctor,
+    import_memory_json,
+    mcp,
+    import_claude_conversations,
+    orphans,
+)
 from . import (
     import_claude_projects,
     import_chatgpt,
@@ -19,6 +29,7 @@ from . import (
 )
 
 __all__ = [
+    "cache",
     "status",
     "ci",
     "db",

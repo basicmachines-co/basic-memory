@@ -72,6 +72,13 @@ class RelationGenerationStore(Protocol):
         generation: int,
     ) -> RelationGenerationWriteResult: ...
 
+    async def resolved_target_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+    ) -> frozenset[str]: ...
+
 
 class ObservationGenerationStore(Protocol):
     """Repository operation needed to replace one observation generation."""
@@ -125,6 +132,20 @@ class RelationGenerationPublication:
 
 
 @dataclass(frozen=True, slots=True)
+class RelationPublishOutcome:
+    """Whether a publication kept its generation, and which other notes it touched.
+
+    Publication rewrites every outgoing link of the source unresolved until the
+    resolution pass runs, so each note those links pointed to loses an incoming
+    relation now. Callers retire those notes' cached responses whatever the
+    generation outcome, since earlier statements may already have committed.
+    """
+
+    generation_is_current: bool
+    detached_note_ids: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
 class RelationGenerationPublisher:
     """Commit observations, valid time, sections, relations, and cleanup under fences."""
 
@@ -142,8 +163,8 @@ class RelationGenerationPublisher:
         relations: Sequence[IndexedRelation],
         observations: Sequence[IndexedObservation] = (),
         sections: Sequence[IndexedSection] = (),
-    ) -> bool:
-        """Return whether every statement retained ownership of ``generation``."""
+    ) -> RelationPublishOutcome:
+        """Publish one generation and report the other notes it detached links from."""
         relations_by_identity: dict[tuple[str, str], IndexedRelation] = {}
         for relation in relations:
             if relation.target_id is not None and relation.target_id != entity_id:
@@ -171,6 +192,35 @@ class RelationGenerationPublisher:
                 )
             )
 
+        # Read before writing: the upsert below clears every target this source's
+        # links resolve to, so afterwards there is no record of which notes they were.
+        async with db.scoped_session(self.session_maker) as session:
+            detached_note_ids = await self.relation_repository.resolved_target_note_ids(
+                session,
+                entity_id=entity_id,
+            )
+        generation_is_current = await self._publish_relations(
+            entity_id=entity_id,
+            generation=generation,
+            ordered_relations=ordered_relations,
+            observations=observations,
+            sections=sections,
+        )
+        return RelationPublishOutcome(
+            generation_is_current=generation_is_current,
+            detached_note_ids=detached_note_ids,
+        )
+
+    async def _publish_relations(
+        self,
+        *,
+        entity_id: int,
+        generation: int,
+        ordered_relations: Sequence[AcceptedRelationWrite],
+        observations: Sequence[IndexedObservation],
+        sections: Sequence[IndexedSection],
+    ) -> bool:
+        """Return whether every statement retained ownership of ``generation``."""
         # Commit retry intent before the first independently committed chunk. If
         # any later statement fails, change detection will re-drive this source.
         async with db.scoped_session(self.session_maker) as session:

@@ -55,6 +55,10 @@ from basic_memory.services.note_content_writes import (
 )
 
 
+# Note external ids are always UUIDs; read-cache changes name notes by them.
+NOTE_EXTERNAL_ID = "4f8c2c1e-3a51-4c2e-9d0b-7c3f2a1b5e60"
+
+
 class FakeSession:
     async def __aenter__(self) -> FakeSession:
         return self
@@ -308,7 +312,7 @@ async def test_note_content_read_repair_uses_reader_behavior(monkeypatch) -> Non
     ):
         assert received_session is session
         assert project_external_id == "project-123"
-        assert entity_external_id == "note-456"
+        assert entity_external_id == NOTE_EXTERNAL_ID
         return NoteContentReadRepairPreflight(
             status=RuntimeNoteContentReadRepairStatus.read_file,
             target=target,
@@ -352,7 +356,7 @@ async def test_note_content_read_repair_uses_reader_behavior(monkeypatch) -> Non
 
     repaired = await service.reconcile_note_content_from_file(
         project_external_id="project-123",
-        entity_external_id="note-456",
+        entity_external_id=NOTE_EXTERNAL_ID,
         source="read_repair",
     )
 
@@ -449,7 +453,7 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
     dependencies = cast(AcceptedNoteMutationDependencies, object())
     user_profile_id = uuid4()
     data = EntitySchema(title="Created", directory="notes", content="# Created")
-    returned = SimpleNamespace(status_code=201, payload={"ok": True})
+    returned = SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
     mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
     calls: list[tuple[AsyncSession, AcceptedNoteCreateMutation, object]] = []
 
@@ -493,7 +497,9 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
 @pytest.mark.asyncio
 async def test_note_content_mutation_service_publishes_graph_after_commit(monkeypatch) -> None:
     events: list[str] = []
-    returned = cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+    returned = cast(
+        Any, SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
+    )
     publication = RelationGenerationPublication(
         project_id=7,
         entity_id=42,
@@ -636,7 +642,9 @@ async def test_note_content_mutation_service_continues_after_graph_publication_f
     monkeypatch,
 ) -> None:
     """Derived graph failure cannot suppress the committed change's materialization."""
-    returned = cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+    returned = cast(
+        Any, SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
+    )
     publication = RelationGenerationPublication(
         project_id=7,
         entity_id=42,
@@ -729,7 +737,9 @@ async def test_note_content_mutation_service_uses_injected_actor_resolver(monkey
     ):
         calls.append(request)
         return AcceptedNoteMutationResult(
-            change=cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+            change=cast(
+                Any, SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
+            )
         )
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
@@ -799,7 +809,10 @@ async def test_note_content_mutation_service_resolves_delete_actor(monkeypatch) 
     ):
         calls.append(request)
         return AcceptedNoteMutationResult(
-            change=cast(Any, SimpleNamespace(status_code=200, payload={"deleted": True}))
+            change=cast(
+                Any,
+                SimpleNamespace(project_change=None, status_code=200, payload={"deleted": True}),
+            )
         )
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_delete", fake_runner)
@@ -866,7 +879,7 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
         content="# New",
         expected_replacements=1,
     )
-    returned = SimpleNamespace(status_code=200, payload={"ok": True})
+    returned = SimpleNamespace(project_change=None, status_code=200, payload={"ok": True})
     mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
     calls: list[tuple[str, AsyncSession, object, object]] = []
 
@@ -1174,7 +1187,7 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
             return RecordingSession()
 
     tenant_session_maker = cast(async_sessionmaker[AsyncSession], RecordingSessionMaker())
-    returned = SimpleNamespace(status_code=201, payload={"ok": True})
+    returned = SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
     mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
 
     async def fake_runner(_session, *, request, dependencies):
@@ -1221,7 +1234,7 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
 @pytest.mark.asyncio
 async def test_the_default_on_accepted_mutation_changes_nothing(monkeypatch) -> None:
     """Local runtimes must be unaffected: the base hook is a no-op."""
-    returned = SimpleNamespace(status_code=201, payload={"ok": True})
+    returned = SimpleNamespace(project_change=None, status_code=201, payload={"ok": True})
 
     async def fake_runner(_session, *, request, dependencies):
         return AcceptedNoteMutationResult(change=cast(Any, returned))
@@ -1258,7 +1271,9 @@ async def test_edit_note_forwards_the_base_checksum_to_the_runner(
 
     async def fake_runner(_session, *, request, dependencies):
         requests.append(request)
-        return AcceptedNoteMutationResult(change=cast(Any, SimpleNamespace(status_code=200)))
+        return AcceptedNoteMutationResult(
+            change=cast(Any, SimpleNamespace(project_change=None, status_code=200))
+        )
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", fake_runner)
 

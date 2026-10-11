@@ -1,65 +1,31 @@
-"""Redis implementation of Basic Memory semantic read caching.
+"""Redis version store for the read cache.
 
-This module is imported only when the optional ``redis`` dependency is installed.
-The caller owns the Redis client lifecycle.
+Entries themselves are read and written by fastapi-redis-sdk. This module owns the
+version tokens that go into entry keys, and replaces them to invalidate.
 """
 
 from uuid import uuid4
 
 from redis.asyncio import Redis
-from redis.exceptions import ClusterError as RedisClusterError
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import InvalidResponse as RedisInvalidResponse
-from redis.exceptions import ResponseError as RedisResponseError
-from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.exceptions import RedisError
 
 from basic_memory.read_cache.contract import (
-    ReadCacheDataError,
+    PROJECT,
+    ReadCacheChange,
+    ReadCacheGroup,
     ReadCacheInvalidationStatus,
-    ReadCacheKey,
-    ReadCacheLookup,
-    ReadCacheStoreStatus,
     ReadCacheUnavailable,
 )
 from basic_memory.read_cache.keys import (
     DEFAULT_READ_CACHE_PREFIX,
-    RedisReadCacheKeys,
-    redis_read_cache_generation_key,
-    redis_read_cache_keys,
+    global_epoch_key,
+    group_version_key,
 )
+from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 
-_ENVELOPE_SEPARATOR = b"\n"
-_DEFAULT_GENERATION_TTL_SECONDS = 60
-_REDIS_OPERATIONAL_ERRORS = (
-    RedisClusterError,
-    RedisConnectionError,
-    RedisInvalidResponse,
-    RedisResponseError,
-    RedisTimeoutError,
-)
-_LOOKUP_SCRIPT = """
-local generation = redis.call("GET", KEYS[1])
-if generation then
-    if redis.call("TTL", KEYS[1]) == -1 then
-        redis.call("EXPIRE", KEYS[1], ARGV[2])
-    end
-else
-    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
-end
-local values = redis.call("MGET", KEYS[1], KEYS[2])
-return {values[1], values[2], redis.call("PTTL", KEYS[2])}
-"""
-_STORE_IF_CURRENT_SCRIPT = """
-if redis.call("GET", KEYS[1]) ~= ARGV[1] then
-    return 0
-end
-redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
-local response_ttl_ms = tonumber(ARGV[3]) * 1000
-if redis.call("PTTL", KEYS[1]) < response_ttl_ms then
-    redis.call("PEXPIRE", KEYS[1], response_ttl_ms)
-end
-return 1
-"""
+# A version absent from Redis reads as this token. Replacement tokens are random,
+# so a later version can never collide with an earlier one.
+_INITIAL_VERSION = "0"
 
 
 def create_redis_read_cache_client(
@@ -78,50 +44,20 @@ def create_redis_read_cache_client(
     )
 
 
-def _required_bytes(value: object, *, field: str) -> bytes:
+def _token(value: object) -> str:
+    if value is None:
+        return _INITIAL_VERSION
     if isinstance(value, bytes):
-        return value
-    if isinstance(value, str):
-        return value.encode("utf-8")
-    raise ReadCacheDataError(f"Redis returned an invalid {field} value")
-
-
-def _decode_generation(value: object) -> tuple[bytes, str]:
-    encoded = _required_bytes(value, field="generation")
-    try:
-        generation = encoded.decode("ascii")
-        decoded = bytes.fromhex(generation)
-    except (UnicodeDecodeError, ValueError) as error:
-        raise ReadCacheDataError("Redis returned an invalid generation token") from error
-    if len(decoded) != 16:
-        raise ReadCacheDataError("Redis returned an invalid generation token")
-    return encoded, generation
-
-
-def _store_status(value: object) -> ReadCacheStoreStatus:
-    if value == 1:
-        return ReadCacheStoreStatus.stored
-    if value == 0:
-        return ReadCacheStoreStatus.superseded
-    raise ReadCacheDataError("Redis returned an invalid cache store result")
-
-
-def _remaining_ttl_seconds(value: object) -> float:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ReadCacheDataError("Redis returned an invalid cached payload TTL")
-    if value == -1:
-        raise ReadCacheDataError("Redis cached payload has no expiration")
-    if value < 0:
-        raise ReadCacheDataError("Redis returned an invalid cached payload TTL")
-    return value / 1_000
+        return value.decode("ascii")
+    return str(value)
 
 
 class RedisReadCache:
-    """Namespace-bound Redis cache with race-safe generation invalidation.
+    """Namespace-bound version store and invalidator.
 
-    A managed host may reuse one client and Redis deployment across tenants.
-    It must construct this lightweight adapter from trusted tenant/workspace
-    context so the mandatory namespace cannot be supplied by an API caller.
+    A managed host may reuse one client and Redis deployment across tenants. It must
+    construct this lightweight adapter from trusted tenant context so the namespace
+    cannot be supplied by an API caller.
     """
 
     def __init__(
@@ -130,96 +66,70 @@ class RedisReadCache:
         client: Redis,
         namespace: str,
         prefix: str = DEFAULT_READ_CACHE_PREFIX,
-        generation_ttl_seconds: int = _DEFAULT_GENERATION_TTL_SECONDS,
     ) -> None:
         namespace = namespace.strip()
         if not namespace:
             raise ValueError("read-cache namespace must not be empty")
-        if generation_ttl_seconds <= 0:
-            raise ValueError("read-cache generation_ttl_seconds must be positive")
-        self._client = client
-        self._namespace = namespace
-        self._prefix = prefix
-        self._generation_ttl_seconds = generation_ttl_seconds
+        self.client = client
+        self.namespace = namespace
+        self.prefix = prefix
 
-    def _keys(self, key: ReadCacheKey) -> RedisReadCacheKeys:
-        return redis_read_cache_keys(
-            prefix=self._prefix,
-            namespace=self._namespace,
-            key=key,
+    def _version_key(self, project_id: str, group: ReadCacheGroup) -> str:
+        return group_version_key(
+            prefix=self.prefix,
+            namespace=self.namespace,
+            project_id=project_id,
+            group=group,
         )
 
-    async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
-        keys = self._keys(key)
+    async def versions(self, project_id: str, group: ReadCacheGroup) -> str:
+        """The global epoch, project epoch and group version an entry key embeds."""
+        keys = [global_epoch_key(prefix=self.prefix), self._version_key(project_id, PROJECT)]
+        if group != PROJECT:
+            keys.append(self._version_key(project_id, group))
         try:
-            generation_value, cached_value, remaining_ttl_ms = await self._client.eval(
-                _LOOKUP_SCRIPT,
-                2,
-                keys.generation_key,
-                keys.data_key,
-                uuid4().hex.encode("ascii"),
-                self._generation_ttl_seconds,
-            )
-        except _REDIS_OPERATIONAL_ERRORS as error:
-            raise ReadCacheUnavailable("Redis cache lookup failed") from error
+            async with self.client.pipeline(transaction=False) as pipe:
+                for key in keys:
+                    pipe.get(key)
+                values = await pipe.execute()
+        except (RedisError, OSError) as error:
+            raise ReadCacheUnavailable("Redis read-cache version lookup failed") from error
+        return ".".join(_token(value) for value in values)
 
-        generation, generation_text = _decode_generation(generation_value)
-        if cached_value is None:
-            return ReadCacheLookup(generation=generation_text)
-
-        encoded = _required_bytes(cached_value, field="cached payload")
-        cached_generation, separator, payload = encoded.partition(_ENVELOPE_SEPARATOR)
-        if not separator or not cached_generation:
-            raise ReadCacheDataError("Redis cached payload has an invalid generation envelope")
-        if cached_generation != generation:
-            return ReadCacheLookup(generation=generation_text)
-        return ReadCacheLookup(
-            generation=generation_text,
-            payload=payload,
-            remaining_ttl_seconds=_remaining_ttl_seconds(remaining_ttl_ms),
-        )
-
-    async def store(
+    async def invalidate(
         self,
-        key: ReadCacheKey,
-        lookup: ReadCacheLookup,
-        payload: bytes,
-        *,
-        ttl_seconds: int,
-    ) -> ReadCacheStoreStatus:
-        if ttl_seconds <= 0:
-            raise ValueError("read-cache ttl_seconds must be positive")
-
-        keys = self._keys(key)
-        generation, _ = _decode_generation(lookup.generation)
-        encoded = generation + _ENVELOPE_SEPARATOR + payload
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        groups = change.groups
+        if not groups:
+            return ReadCacheInvalidationStatus.invalidated
         try:
-            stored = await self._client.eval(
-                _STORE_IF_CURRENT_SCRIPT,
-                2,
-                keys.generation_key,
-                keys.data_key,
-                generation,
-                encoded,
-                ttl_seconds,
-            )
-        except _REDIS_OPERATIONAL_ERRORS as error:
-            raise ReadCacheUnavailable("Redis cache store failed") from error
-
-        return _store_status(stored)
+            async with self.client.pipeline(transaction=False) as pipe:
+                for group in groups:
+                    # The version outlives every entry keyed under it, so when it
+                    # expires back to the initial token no entry from before its
+                    # replacement can still be read.
+                    pipe.set(
+                        self._version_key(project_id, group),
+                        uuid4().hex,
+                        ex=READ_CACHE_TTL_SECONDS,
+                    )
+                await pipe.execute()
+        except (RedisError, OSError) as error:
+            raise ReadCacheUnavailable("Redis read-cache invalidation failed") from error
+        return ReadCacheInvalidationStatus.invalidated
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        generation_key = redis_read_cache_generation_key(
-            prefix=self._prefix,
-            namespace=self._namespace,
-            project_id=project_id,
-        )
+        return await self.invalidate(project_id, ReadCacheChange.whole_project())
+
+    async def reset_all(self) -> None:
+        """Retire every entry for every tenant, e.g. after a deploy changes responses.
+
+        The global epoch has no expiry, so it can never fall back to a value an
+        older entry was keyed under.
+        """
         try:
-            await self._client.set(
-                generation_key,
-                uuid4().hex.encode("ascii"),
-                ex=self._generation_ttl_seconds,
-            )
-        except _REDIS_OPERATIONAL_ERRORS as error:
-            raise ReadCacheUnavailable("Redis project invalidation failed") from error
-        return ReadCacheInvalidationStatus.invalidated
+            await self.client.set(global_epoch_key(prefix=self.prefix), uuid4().hex)
+        except (RedisError, OSError) as error:
+            raise ReadCacheUnavailable("Redis read-cache reset failed") from error

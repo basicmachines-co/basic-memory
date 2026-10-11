@@ -31,6 +31,7 @@ from basic_memory.repository.note_content_repository import (
 )
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.read_cache import (
+    ReadCacheChange,
     ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
 )
@@ -74,12 +75,23 @@ class RecordingFileIndexer:
 
 
 class RecordingReadCache:
+    """Records every invalidation, scoped or whole-project, in call order."""
+
     def __init__(self) -> None:
         self.invalidated_project_ids: list[str] = []
+        self.changes: list[ReadCacheChange] = []
+
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        self.invalidated_project_ids.append(project_id)
+        self.changes.append(change)
+        return ReadCacheInvalidationStatus.invalidated
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        self.invalidated_project_ids.append(project_id)
-        return ReadCacheInvalidationStatus.invalidated
+        return await self.invalidate(project_id, ReadCacheChange.whole_project())
 
 
 def accepted_materialization_change() -> RuntimeAcceptedNoteChange[
@@ -448,10 +460,11 @@ async def test_local_materialization_defers_write_off_the_accept_path(
     # The write happens off the accept path via the bounded pool; drain to confirm.
     await pool.join()
     assert len(requests) == 1
-    assert read_cache.invalidated_project_ids == [
-        PROJECT_EXTERNAL_ID,
-        PROJECT_EXTERNAL_ID,
-    ]
+    # Only the status publication retired reads: no index pass ran, so the
+    # outer scope recorded nothing. Without a project change record the status
+    # change cannot name the note, so it retires the whole project.
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    assert read_cache.changes == [ReadCacheChange.whole_project()]
     await pool.aclose()
 
 

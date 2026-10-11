@@ -90,7 +90,6 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.models import Entity, Project
 from basic_memory.read_cache import (
-    ReadCache,
     ReadCacheInvalidator,
     invalidate_cache,
 )
@@ -558,7 +557,7 @@ class LocalProjectIndexRuntime:
     index_completion_recorder: ProjectIndexCompletionRecorder | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
 
 LocalProjectIndexObservation = ProjectIndexObservation
@@ -704,7 +703,7 @@ class LocalProjectIndexRuntimeFactory:
     batch_size: int = 100
     read_max_concurrent: int = 8
     index_max_concurrent: int = 8
-    read_cache: ReadCache | None = None
+    read_cache: ReadCacheInvalidator | None = None
 
     async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
         return await self.dependency_provider.dependencies_for_project(project)

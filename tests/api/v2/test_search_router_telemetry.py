@@ -48,7 +48,6 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         # This query carries no valid-time filter, so neither is touched.
         temporal_repository=object(),
         session_maker=object(),
-        read_cache=None,
         response=http_response,
         internal_project_id=1,
         project_id="11111111-1111-1111-1111-111111111111",

@@ -138,11 +138,11 @@ class TestKnowledgeClient:
         mock_response = MagicMock()
         mock_response.json.return_value = {"external_id": "entity-uuid-123"}
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -163,12 +163,12 @@ class TestKnowledgeClient:
             "resolution_method": "permalink",
         }
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             assert kwargs["json"] == {"identifier": "my-note", "strict": True}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         client = KnowledgeClient(MagicMock(), "proj-123")
         result = await client.resolve_entity_response("my-note", strict=True)

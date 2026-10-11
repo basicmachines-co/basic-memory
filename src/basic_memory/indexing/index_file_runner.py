@@ -27,7 +27,7 @@ from basic_memory.indexing.models import (
     plan_indexed_file_live_update_metadata,
 )
 from basic_memory.models import NoteContent
-from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_recorded_change
 from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
 from basic_memory.runtime.note_object_metadata import RuntimeNoteObjectMetadataMap
 from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
@@ -93,9 +93,14 @@ class InvalidatingIndexFileExecutor(IndexFileExecutor):
         source: str,
     ) -> FileIndexResult:
         # File indexing can commit entity state while its session context exits.
-        # Keep that exit inside the scope so cancellation waits for invalidation.
-        async with invalidate_cache(self.read_cache, self.project_external_id):
-            return await self.executor.index_file(file_path, source=source)
+        # Keep that exit inside the scope so cancellation waits for invalidation;
+        # a raise retires the whole project because the commit it followed is unknown.
+        async with invalidate_recorded_change(
+            self.read_cache, self.project_external_id
+        ) as recorder:
+            result = await self.executor.index_file(file_path, source=source)
+            recorder.record(result.read_cache_change)
+            return result
 
 
 class CurrentMaterializedNoteEntityRepository(Protocol):

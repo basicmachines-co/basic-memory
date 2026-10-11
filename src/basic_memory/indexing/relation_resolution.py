@@ -543,6 +543,9 @@ class ResolveRelationsResult:
     remaining: int
     passes: int
     affected_entities: int
+    # Source notes whose links this run resolved; see
+    # services.read_cache_changes.resolved_relations_read_cache_change.
+    affected_entity_ids: frozenset[int] = frozenset()
 
     @property
     def resolved(self) -> int:
@@ -583,6 +586,7 @@ async def resolve_project_relations(
         remaining=await runtime.count_unresolved_relations(),
         passes=passes,
         affected_entities=len(affected_entities),
+        affected_entity_ids=frozenset(affected_entities),
     )
     logger.info(
         "Resolved project relations",

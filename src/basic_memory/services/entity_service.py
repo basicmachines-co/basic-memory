@@ -260,7 +260,7 @@ class EntityService(BaseService[EntityModel]):
             observations=indexed_observations,
             sections=indexed_sections_from_markdown(markdown.sections),
         )
-        if not published:
+        if not published.generation_is_current:
             return entity
 
         async with db.scoped_session(self.session_maker) as session:

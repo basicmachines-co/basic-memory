@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal, Protocol, cast, override
+from typing import Protocol, cast, override
 
 import pytest
 from redis.asyncio import Redis
@@ -72,13 +72,7 @@ from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
-from basic_memory.read_cache import (
-    ReadCacheInvalidationStatus,
-    ReadCacheKey,
-    ReadCacheOperation,
-    read_cache_request_digest,
-)
-from basic_memory.read_cache.keys import redis_read_cache_generation_key
+from basic_memory.read_cache import CONTENT, PROJECT, ReadCacheChange, ReadCacheInvalidationStatus
 from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import (
     EntityRepository,
@@ -129,16 +123,9 @@ class RedisCacheHarness(Protocol):
 async def _current_generation(
     redis_cache: RedisCacheHarness,
     project_external_id: str,
-) -> bytes | str:
-    generation = await redis_cache.client.get(
-        redis_read_cache_generation_key(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            project_id=project_external_id,
-        )
-    )
-    assert generation is not None
-    return generation
+) -> str:
+    """The project epoch: it moves whenever the whole project's reads are retired."""
+    return await redis_cache.cache.versions(project_external_id, PROJECT)
 
 
 class DetectedMoveProcessor(LocalWatchMoveProcessor):
@@ -281,8 +268,8 @@ class GenerationObservingProjectIndexBatchStore:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.move_generations: list[bytes | str] = []
-        self.delete_generations: list[bytes | str] = []
+        self.move_generations: list[str] = []
+        self.delete_generations: list[str] = []
 
     async def apply_project_index_move_batch(
         self,
@@ -311,20 +298,13 @@ class GenerationObservingDirectoryDeleteEnqueuer:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.observed_generations: list[bytes | str] = []
+        self.observed_generations: list[str] = []
 
     async def enqueue_directory_file_delete(
         self,
         request: RuntimeNoteFileDeleteJobRequest,
     ) -> RuntimeFileDeleteResult:
-        generation = await self.redis_cache.client.get(
-            redis_read_cache_generation_key(
-                prefix=self.redis_cache.prefix,
-                namespace=self.redis_cache.namespace,
-                project_id=self.project_external_id,
-            )
-        )
-        assert generation is not None
+        generation = await _current_generation(self.redis_cache, self.project_external_id)
         self.observed_generations.append(generation)
         return RuntimeFileDeleteResult.already_absent(
             entity_id=request.entity_id,
@@ -350,12 +330,16 @@ class BlockingInvalidationRedisReadCache(RedisReadCache):
         self.release_invalidation = asyncio.Event()
 
     @override
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
         self.invalidation_calls += 1
         if self.invalidation_calls == self.block_on_call:
             self.invalidation_started.set()
             await self.release_invalidation.wait()
-        return await super().invalidate_project(project_id)
+        return await super().invalidate(project_id, change)
 
 
 class PartiallyFailingSearchReindexService:
@@ -368,7 +352,7 @@ class PartiallyFailingSearchReindexService:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.generation_during_reindex: bytes | str | None = None
+        self.generation_during_reindex: str | None = None
 
     async def reindex_all(self) -> None:
         self.generation_during_reindex = await _current_generation(
@@ -407,22 +391,6 @@ class CommittingIndexFileExecutor:
             )
             self.entity_id = entity.id
         raise AssertionError("test transaction-exit pause should be cancelled")
-
-
-async def _initialized_generation(
-    redis_cache: RedisCacheHarness,
-    project_external_id: str,
-    *,
-    request: str,
-) -> bytes | str:
-    await redis_cache.cache.lookup(
-        ReadCacheKey(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.entity,
-            request_digest=read_cache_request_digest(request),
-        )
-    )
-    return await _current_generation(redis_cache, project_external_id)
 
 
 async def _seed_recovery_note(
@@ -494,11 +462,7 @@ async def test_watcher_move_completion_invalidates_real_redis(
     redis_cache: RedisCacheHarness,
 ) -> None:
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="watcher-move",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     maintenance = RecordingMoveMaintenance()
     search_refresher = RecordingMovedEntitySearchRefresher()
     processor = DetectedMoveProcessor(
@@ -522,11 +486,7 @@ async def test_watcher_move_completion_invalidates_real_redis(
     assert result.processed_moves == 1
     assert maintenance.calls == [({"notes/old.md": "notes/new.md"}, 100)]
     assert search_refresher.calls == [[17]]
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="watcher-move",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -537,11 +497,7 @@ async def test_watcher_move_batches_invalidate_real_redis_before_next_batch(
 ) -> None:
     """Every committed watcher move batch advances Redis before the next batch."""
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="watcher-move-batches",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     observed_store = GenerationObservingProjectIndexBatchStore(
         redis_cache,
         project_external_id,
@@ -587,13 +543,10 @@ async def test_watcher_move_batches_invalidate_real_redis_before_next_batch(
 async def test_watcher_index_failure_invalidates_real_redis(
     test_project: Project,
     redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="watcher-index-failure",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     recorder = LocalInlineStorageEventResultRecorder(
         project=ProjectRuntimeReference.from_project(test_project),
         search_service=cast(LocalIndexSearchService, object()),
@@ -602,6 +555,7 @@ async def test_watcher_index_failure_invalidates_real_redis(
             object(),
         ),
         relation_runtime=cast(RelationResolutionRuntime, object()),
+        session_maker=engine_factory[1],
         index_embeddings=False,
         read_cache=redis_cache.cache,
     )
@@ -611,11 +565,7 @@ async def test_watcher_index_failure_invalidates_real_redis(
         RuntimeError("partial watcher index failure"),
     )
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="watcher-index-failure",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -626,11 +576,7 @@ async def test_partial_search_reindex_invalidates_real_redis(
 ) -> None:
     """A partial search rebuild cannot retain resolutions filled during the run."""
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="partial-search-reindex",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     search_service = PartiallyFailingSearchReindexService(
         redis_cache,
         project_external_id,
@@ -651,19 +597,87 @@ async def test_partial_search_reindex_invalidates_real_redis(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("completion", ["index", "delete"])
-async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
+@pytest.mark.parametrize("index_embeddings", [False, True])
+async def test_watcher_index_completion_leaves_unrelated_reads_cached(
     test_project: Project,
     redis_cache: RedisCacheHarness,
-    completion: Literal["index", "delete"],
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    index_embeddings: bool,
 ) -> None:
-    """Cancellation after a durable watcher event waits for invalidation."""
+    """A watched body edit does not clear the project on completion.
+
+    InvalidatingIndexFileExecutor already retired what the file changed, and a
+    relation pass that resolves nothing retires nothing, so the project epoch
+    that every other cached read depends on must stay put. Embedding the file
+    afterwards changes vector search results, so it retires content reads again.
+    """
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request=f"cancelled-watcher-{completion}",
+    generation_before = await _current_generation(redis_cache, project_external_id)
+    content_before = await redis_cache.cache.versions(project_external_id, CONTENT)
+    vector_sync = _RecordingVectorSync()
+    recorder = LocalInlineStorageEventResultRecorder(
+        project=ProjectRuntimeReference.from_project(test_project),
+        search_service=cast(LocalIndexSearchService, vector_sync),
+        relation_cleanup_search_refresher=cast(
+            ProjectIndexMovedEntitySearchRefresher,
+            object(),
+        ),
+        relation_runtime=cast(RelationResolutionRuntime, _NoUnresolvedRelations()),
+        session_maker=engine_factory[1],
+        index_embeddings=index_embeddings,
+        read_cache=redis_cache.cache,
     )
+
+    await recorder.index_file_completed(
+        _index_operation("notes/watched-edit.md"),
+        IndexFileJobResult(
+            status=IndexFileJobStatus.processed,
+            reason="file indexed",
+            entity_id=42,
+        ),
+    )
+
+    assert await _current_generation(redis_cache, project_external_id) == generation_before
+    content_after = await redis_cache.cache.versions(project_external_id, CONTENT)
+    assert vector_sync.batches == ([[42]] if index_embeddings else [])
+    assert (content_after != content_before) is index_embeddings
+
+
+class _RecordingVectorSync:
+    """Records the entity batches the watcher embeds."""
+
+    def __init__(self) -> None:
+        self.batches: list[list[int]] = []
+
+    async def sync_entity_vectors_batch(
+        self, entity_ids: list[int], progress_callback: object = None
+    ) -> None:
+        self.batches.append(list(entity_ids))
+
+
+class _NoUnresolvedRelations:
+    """A relation runtime with nothing left to resolve."""
+
+    async def count_unresolved_relations(self) -> int:
+        return 0
+
+    async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
+        return set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_watcher_delete_completion_finishes_real_redis_invalidation(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """Cancellation after a durable watcher delete waits for invalidation.
+
+    Index completion no longer invalidates; a cancelled index commit is covered
+    by test_cancelled_watcher_index_commit_finishes_real_redis_invalidation.
+    """
+    project_external_id = str(test_project.external_id)
+    generation_before = await _current_generation(redis_cache, project_external_id)
     blocking_cache = BlockingInvalidationRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
@@ -677,52 +691,43 @@ async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
             object(),
         ),
         relation_runtime=cast(RelationResolutionRuntime, object()),
+        session_maker=engine_factory[1],
         index_embeddings=False,
         read_cache=blocking_cache,
     )
 
-    if completion == "index":
-        completion_call = recorder.index_file_completed(
-            _index_operation("notes/cancelled-index.md"),
-            IndexFileJobResult(
-                status=IndexFileJobStatus.processed,
-                reason="file indexed",
-                entity_id=42,
+    deleted_entity = Entity(
+        id=42,
+        project_id=test_project.id,
+        external_id="cancelled-watcher-delete",
+        title="Cancelled watcher delete",
+        permalink="notes/cancelled-watcher-delete",
+        note_type="note",
+        content_type="text/markdown",
+        file_path="notes/cancelled-delete.md",
+        checksum="cancelled-watcher-delete-checksum",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    completion_call = recorder.delete_file_completed(
+        RuntimeStorageEventOperation(
+            kind=RuntimeStorageEventOperationKind.delete_file,
+            storage_event=_move_event(
+                STORAGE_OBJECT_DELETED_EVENT,
+                deleted_entity.file_path,
             ),
-        )
-    else:
-        deleted_entity = Entity(
-            id=42,
-            project_id=test_project.id,
-            external_id="cancelled-watcher-delete",
-            title="Cancelled watcher delete",
-            permalink="notes/cancelled-watcher-delete",
-            note_type="note",
-            content_type="text/markdown",
-            file_path="notes/cancelled-delete.md",
-            checksum="cancelled-watcher-delete-checksum",
-            created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC),
-        )
-        completion_call = recorder.delete_file_completed(
-            RuntimeStorageEventOperation(
-                kind=RuntimeStorageEventOperationKind.delete_file,
-                storage_event=_move_event(
-                    STORAGE_OBJECT_DELETED_EVENT,
-                    deleted_entity.file_path,
-                ),
-                relative_path=deleted_entity.file_path,
+            relative_path=deleted_entity.file_path,
+        ),
+        ExternalFileDeleteResult(
+            plan=RuntimeExternalFileDeletePlan.from_existing_entity(
+                deleted_entity,
+                file_path=deleted_entity.file_path,
+                object_exists=False,
             ),
-            ExternalFileDeleteResult(
-                plan=RuntimeExternalFileDeletePlan.from_existing_entity(
-                    deleted_entity,
-                    file_path=deleted_entity.file_path,
-                    object_exists=False,
-                ),
-                entity_deleted=True,
-                deleted_entity=deleted_entity,
-            ),
-        )
+            entity_deleted=True,
+            deleted_entity=deleted_entity,
+        ),
+    )
 
     completion_task = asyncio.create_task(completion_call)
     async with asyncio.timeout(5):
@@ -737,11 +742,7 @@ async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
     with pytest.raises(asyncio.CancelledError):
         await completion_task
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request=f"cancelled-watcher-{completion}",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -755,11 +756,7 @@ async def test_cancelled_watcher_delete_commit_finishes_real_redis_invalidation(
     """Cancellation during watcher delete transaction exit cannot skip invalidation."""
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-watcher-delete-commit",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity_repository = EntityRepository(project_id=test_project.id)
     file_path = "notes/cancelled-watcher-delete-commit.md"
     async with db.scoped_session(session_maker) as session:
@@ -850,11 +847,7 @@ async def test_cancelled_watcher_index_commit_finishes_real_redis_invalidation(
     """Cancellation during watcher index transaction exit cannot skip invalidation."""
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-watcher-index-commit",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity_repository = EntityRepository(project_id=test_project.id)
     executor = CommittingIndexFileExecutor(session_maker, entity_repository)
     blocking_cache = BlockingInvalidationRedisReadCache(
@@ -923,11 +916,7 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
 ) -> None:
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity = await _seed_recovery_note(
         session_maker,
         test_project,
@@ -944,11 +933,7 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
 
     written = Path(test_project.path) / entity.file_path
     assert written.read_text(encoding="utf-8") == "# Recovered with cache invalidation\n"
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -961,11 +946,7 @@ async def test_cancelled_startup_materialization_recovery_finishes_real_redis_in
     """Cancellation after recovery commits waits for the Redis generation bump."""
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-startup-materialization-recovery",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity = await _seed_recovery_note(
         session_maker,
         test_project,
@@ -1047,11 +1028,7 @@ async def test_cancelled_startup_move_vacate_recovery_finishes_real_redis_invali
         )
 
     project_external_id = str(test_project.external_id)
-    await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-startup-vacate-recovery",
-    )
+    await _current_generation(redis_cache, project_external_id)
     blocking_cache = BlockingInvalidationRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
@@ -1100,11 +1077,7 @@ async def test_startup_recovery_invalidates_before_later_vacate_failure_in_real_
     """A later recovery phase failure cannot retain phase-one published state."""
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery-later-failure",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity = await _seed_recovery_note(
         session_maker,
         test_project,
@@ -1136,11 +1109,7 @@ async def test_startup_recovery_invalidates_before_later_vacate_failure_in_real_
 
     written = Path(test_project.path) / entity.file_path
     assert written.read_text(encoding="utf-8") == "# Recovered before later failure\n"
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery-later-failure",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -1152,11 +1121,7 @@ async def test_startup_recovery_conflict_invalidates_published_failure_in_real_r
 ) -> None:
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery-conflict",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity = await _seed_recovery_note(
         session_maker,
         test_project,
@@ -1179,11 +1144,7 @@ async def test_startup_recovery_conflict_invalidates_published_failure_in_real_r
         row = await content_repository.get_by_entity_id(session, entity.id)
     assert row is not None
     assert row.file_write_status == "external_change_detected"
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="startup-recovery-conflict",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -1194,11 +1155,7 @@ async def test_project_index_batches_invalidate_real_redis(
 ) -> None:
     """Every inline move, delete, and file batch advances the generation."""
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="project-index-batches",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     observed_store = GenerationObservingProjectIndexBatchStore(
         redis_cache,
         project_external_id,
@@ -1276,11 +1233,7 @@ async def test_project_index_failure_invalidates_real_redis(
     redis_cache: RedisCacheHarness,
 ) -> None:
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="project-index-failure",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
 
     with pytest.raises(RuntimeError, match="partial project index failure"):
         await run_local_project_index(
@@ -1298,11 +1251,7 @@ async def test_project_index_failure_invalidates_real_redis(
             ),
         )
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="project-index-failure",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
@@ -1314,11 +1263,7 @@ async def test_directory_delete_invalidates_before_and_after_cleanup_in_real_red
 ) -> None:
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="directory-delete",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity_repository = EntityRepository(project_id=test_project.id)
     async with db.scoped_session(session_maker) as session:
         await entity_repository.add(
@@ -1356,11 +1301,7 @@ async def test_directory_delete_invalidates_before_and_after_cleanup_in_real_red
     assert len(enqueuer.observed_generations) == 1
     generation_during_cleanup = enqueuer.observed_generations[0]
     assert generation_during_cleanup != generation_before
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="directory-delete",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_during_cleanup
 
 
@@ -1374,11 +1315,7 @@ async def test_cancelled_committed_directory_delete_finishes_real_redis_invalida
     """Cancellation during transaction exit cannot skip delete invalidation."""
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-directory-delete",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     entity_repository = EntityRepository(project_id=test_project.id)
     title = "Cancelled Committed Directory Delete"
     async with db.scoped_session(session_maker) as session:
@@ -1447,11 +1384,7 @@ async def test_cancelled_committed_directory_delete_finishes_real_redis_invalida
     with pytest.raises(asyncio.CancelledError):
         await delete_task
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-directory-delete",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
     async with original_scoped_session(session_maker) as session:
@@ -1491,11 +1424,7 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
         app_config=app_config,
     )
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-directory-move",
-    )
+    generation_before = await _current_generation(redis_cache, project_external_id)
     # Notes in a directory move as accepted note moves; regular files move their stored
     # bytes, which is the path whose per-file invalidation this test pins.
     source_path = "cancelled-move-source/diagram.png"
@@ -1571,11 +1500,7 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
     with pytest.raises(asyncio.CancelledError):
         await move_task
 
-    generation_after = await _initialized_generation(
-        redis_cache,
-        project_external_id,
-        request="cancelled-committed-directory-move",
-    )
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
     async with original_scoped_session(entity_service.session_maker) as session:

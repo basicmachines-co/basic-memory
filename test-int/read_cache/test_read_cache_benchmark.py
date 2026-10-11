@@ -13,9 +13,9 @@ from redis.asyncio import Redis
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from basic_memory.deps import get_read_cache
 from basic_memory.models import Project
 from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.read_cache.routes import ReadCacheScope
 
 
 class RedisCacheHarness(Protocol):
@@ -53,7 +53,11 @@ async def test_benchmark_warmed_entity_reads_reduce_authoritative_queries(
     redis_cache: RedisCacheHarness,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
-    """Report HTTP latency and prove cache hits remove authoritative SQL work."""
+    """Report HTTP latency and prove a cache hit runs no SQL at all.
+
+    The hit is answered before any route dependency opens a database connection,
+    so a scaled-to-zero tenant database stays asleep.
+    """
     project_external_id = str(test_project.external_id)
     project_url = f"/v2/projects/{project_external_id}"
     created_response = await client.post(
@@ -76,7 +80,14 @@ async def test_benchmark_warmed_entity_reads_reduce_authoritative_queries(
     engine, _ = engine_factory
     event.listen(engine.sync_engine, "before_cursor_execute", count_query)
     try:
-        app.dependency_overrides[get_read_cache] = lambda: None
+
+        async def no_cache(request: object) -> None:
+            return None
+
+        async def harness_cache(request: object) -> ReadCacheScope:
+            return ReadCacheScope(cache=redis_cache.cache, user_key="")
+
+        app.state.read_cache_scope_resolver = no_cache
         await client.get(entity_url)
         query_count = 0
         authoritative_latencies = await _entity_read_latencies(
@@ -86,7 +97,7 @@ async def test_benchmark_warmed_entity_reads_reduce_authoritative_queries(
         )
         authoritative_queries = query_count
 
-        app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+        app.state.read_cache_scope_resolver = harness_cache
         await client.get(entity_url)
         query_count = 0
         cached_latencies = await _entity_read_latencies(
@@ -97,8 +108,10 @@ async def test_benchmark_warmed_entity_reads_reduce_authoritative_queries(
         cached_queries = query_count
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count_query)
+        app.state.read_cache_scope_resolver = None
 
-    assert cached_queries < authoritative_queries
+    assert authoritative_queries > 0
+    assert cached_queries == 0
     print(
         "\nRedis entity-read benchmark: "
         f"authoritative_median_ms={median(authoritative_latencies) * 1_000:.3f}, "

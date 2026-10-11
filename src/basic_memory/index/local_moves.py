@@ -37,7 +37,7 @@ from basic_memory.runtime.storage import (
     STORAGE_OBJECT_CREATED_EVENTS,
     STORAGE_OBJECT_DELETED_EVENT,
 )
-from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.services import FileService
 
 
@@ -180,7 +180,7 @@ class LocalWatchMoveProcessor:
     maintenance_runner: ProjectIndexMaintenanceRunner
     moved_entity_search_refresher: ProjectIndexMovedEntitySearchRefresher
     project_external_id: str
-    read_cache: ReadCache | None
+    read_cache: ReadCacheInvalidator | None
     batch_size: int = 100
 
     async def process_moves(

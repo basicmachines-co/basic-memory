@@ -59,7 +59,13 @@ from basic_memory.repository.note_file_vacate_repository import (
     NoteFileVacateRepository,
     RecoverableVacate,
 )
-from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.read_cache import (
+    ReadCacheChange,
+    ReadCacheChangeRecorder,
+    ReadCacheInvalidator,
+    invalidate_recorded_change,
+)
+from basic_memory.services.read_cache_changes import materialization_status_read_cache_change
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
@@ -758,11 +764,11 @@ class LocalNoteContentMaterializationProvider:
         # The accepted-write invalidation runs before deferred materialization.
         # The outer boundary retires reads filled during later indexing.
         final_invalidation_scope = (
-            invalidate_cache(self.read_cache, self.project_external_id)
+            invalidate_recorded_change(self.read_cache, self.project_external_id)
             if self.read_cache is not None
-            else nullcontext()
+            else nullcontext(ReadCacheChangeRecorder())
         )
-        async with final_invalidation_scope:
+        async with final_invalidation_scope as indexed_change:
             storage = LocalNoteContentStorage(self.file_service)
             cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
                 storage,
@@ -772,11 +778,14 @@ class LocalNoteContentMaterializationProvider:
             # pending/writing reads at that commit instead of holding them for the
             # potentially slow index operation.
             publication_invalidation_scope = (
-                invalidate_cache(self.read_cache, self.project_external_id)
+                invalidate_recorded_change(self.read_cache, self.project_external_id)
                 if self.read_cache is not None
-                else nullcontext()
+                else nullcontext(ReadCacheChangeRecorder())
             )
-            async with publication_invalidation_scope:
+            async with publication_invalidation_scope as status_change:
+                status_change.record(
+                    materialization_status_read_cache_change(accepted.materialization)
+                )
                 result = await run_note_materialization(
                     plan_note_materialization_job_request(accepted.materialization),
                     preflight=RepositoryNoteMaterializationPreflight(
@@ -812,10 +821,11 @@ class LocalNoteContentMaterializationProvider:
 
             file_path = note_content_payload_file_path(accepted.payload)
             if file_path is not None and self.file_indexer is not None:
-                await self.file_indexer.index_file(
+                index_result = await self.file_indexer.index_file(
                     file_path,
                     source="note-content-materialization",
                 )
+                indexed_change.record(index_result.read_cache_change)
                 # The deferred index has now inserted this note's entity/relation rows,
                 # so back-resolve inbound forward references. The router schedules an
                 # eager pass right after enqueue, but under load that pass can scan
@@ -868,14 +878,16 @@ class LocalNoteContentMaterializationProvider:
         if self.entity_vector_sync is None:  # pragma: no cover - guarded by caller
             return
         # Vector publication can change VECTOR/HYBRID results after the note's own
-        # invalidation, so retire reads cached while vectors were stale.
+        # invalidation, so retire searches cached while vectors were stale. Vectors
+        # change no note response, name lookup or listing.
         invalidation_scope = (
-            invalidate_cache(self.read_cache, self.project_external_id)
+            invalidate_recorded_change(self.read_cache, self.project_external_id)
             if self.read_cache is not None
-            else nullcontext()
+            else nullcontext(ReadCacheChangeRecorder())
         )
         try:
-            async with invalidation_scope:
+            async with invalidation_scope as vector_change:
+                vector_change.record(ReadCacheChange(content=True))
                 await self.entity_vector_sync.sync_entity_vectors(entity_id)
         except Exception:
             # Vectors are derived state: the accepted note and its file are already

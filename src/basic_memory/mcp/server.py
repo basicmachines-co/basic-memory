@@ -20,9 +20,9 @@ from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.mcp.empty_results import EmptyListResultMiddleware
-from basic_memory.read_cache import ReadCache, ReadCacheUnavailable
+from basic_memory.read_cache import ReadCacheUnavailable
+from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.read_cache.lifecycle import open_redis_read_cache
-from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import initialize_app
 import logfire
 
@@ -70,21 +70,18 @@ async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession])
         logger.debug(f"Could not check embedding status at startup: {exc}")
 
 
-async def _invalidate_persisted_read_cache(
-    read_cache: ReadCache,
-    session_maker: async_sessionmaker[AsyncSession],
-) -> ReadCache | None:
-    """Invalidate cache generations that may predate offline file changes."""
-    project_repository = ProjectRepository()
-    async with scoped_session(session_maker) as session:
-        active_projects = await project_repository.get_active_projects(session)
+async def _invalidate_persisted_read_cache(read_cache: RedisReadCache) -> RedisReadCache | None:
+    """Retire every entry that may predate this process.
 
+    Files can change while no server is running, and a project can be deleted by
+    a process that had no cache open. Advancing the global epoch retires both,
+    including entries of projects that no longer exist.
+    """
     try:
-        for project in active_projects:
-            await read_cache.invalidate_project(str(project.external_id))
+        await read_cache.reset_all()
     except ReadCacheUnavailable as error:
-        # Trigger: Redis cannot invalidate every persisted project generation at startup.
-        # Why: reusing any prior generation could hide an offline file edit until TTL expiry.
+        # Trigger: Redis cannot retire persisted entries at startup.
+        # Why: reusing any prior entry could hide an offline file edit until TTL expiry.
         # Outcome: disable caching for this lifespan and serve only authoritative reads.
         logger.error(
             "Standalone Redis read cache disabled because startup invalidation was unavailable",
@@ -180,13 +177,7 @@ async def lifespan(app: FastMCP):
                 await initialize_app(container.config)
 
                 if read_cache is not None:
-                    assert db._session_maker is not None, (
-                        "Database session maker missing after MCP initialization"
-                    )
-                    read_cache = await _invalidate_persisted_read_cache(
-                        read_cache,
-                        db._session_maker,
-                    )
+                    read_cache = await _invalidate_persisted_read_cache(read_cache)
                     container.read_cache = read_cache
                     api_container.read_cache = read_cache
 
