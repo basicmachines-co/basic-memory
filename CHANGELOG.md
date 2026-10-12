@@ -943,6 +943,12 @@
 
 ### Internal
 
+- FastMCP 4.0.3 → 4.1.0 and mcp 2.0.0 → 2.3.0, including the Claude Code and Codex
+  hook pins. FastMCP now applies its Host/Origin guard to the SSE transport, so
+  `basic-memory mcp --transport sse` uses it instead of installing its own copy.
+  Streamable HTTP sessions now expire after 30 idle minutes (the MCP SDK default);
+  clients start a new one.
+
 - **#1672**: Indexing and embedding results report the work they did. `FileIndexResult`,
   `IndexedEntity` and `SyncedMarkdownFile` carry `indexed_bytes`, the stored bytes read
   and parsed (zero for a file that was already current). Embedding results carry
