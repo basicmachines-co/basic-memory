@@ -36,7 +36,7 @@ list_workspaces()
 ### `list_memory_projects`
 **Purpose**: List all Basic Memory projects, optionally filtered by workspace
 **When to use**: When the user wants to see available projects, discover projects in a specific workspace, or before cross-project operations
-**Returns**: Project names, paths, default status, and workspace metadata
+**Returns**: Project names, `external_id`, `source` (`local`, `cloud`, or `local+cloud`), paths, default status, workspace metadata, and qualified names. Pass a project's `external_id` as `project_id` on `read_note` or `write_note` to route to that exact project.
 
 **Examples**:
 ```
@@ -70,7 +70,7 @@ search_notes(query="API endpoints", project="backend-docs")
 ### `read_note`
 **Purpose**: Read full content of specific notes
 **When to use**: When search results show relevant notes that need detailed reading, or when you have a specific note identifier
-**Returns**: Complete note content with metadata
+**Returns**: Complete note content with metadata, followed by the note's checksum (pass it as `write_note`'s `expected_checksum` to replace only the revision you read)
 
 **Examples**:
 ```
@@ -88,6 +88,9 @@ read_note(identifier="projects/api-redesign", include_frontmatter=true)
 
 # Read from another project
 read_note(identifier="decisions/auth-strategy", project="backend")
+
+# Read from an exact project by its external_id
+read_note(identifier="decisions/auth-strategy", project_id="<external_id from list_memory_projects>")
 ```
 
 ### `write_note`
@@ -99,6 +102,8 @@ read_note(identifier="decisions/auth-strategy", project="backend")
 - `tags`: A string array or comma-separated string
 - `note_type`: The note type stored as `type`; defaults to `note`
 - `metadata`: Additional frontmatter fields, including nested objects
+
+**Replacing a note**: `overwrite=true` replaces an existing note. Add `expected_checksum` (the checksum `read_note` reports) to replace it only while it is still that revision; a newer revision is reported as a conflict and left untouched.
 
 **Examples**:
 ```

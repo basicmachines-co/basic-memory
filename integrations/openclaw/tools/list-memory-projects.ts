@@ -6,6 +6,9 @@ import { log } from "../logger.ts"
 function normalizeProject(project: ProjectListResult) {
   return {
     name: project.name,
+    external_id: project.external_id ?? null,
+    qualified_name: project.qualified_name ?? null,
+    source: project.source ?? null,
     path: project.path,
     display_name: project.display_name ?? null,
     is_private: project.is_private === true,
@@ -27,9 +30,11 @@ export function registerProjectListTool(
       label: "List Projects",
       description:
         "List Basic Memory projects accessible to this agent, optionally filtered by " +
-        "workspace. Returns each project's name, path, default flag, and workspace. " +
+        "workspace. Returns each project's name, external_id, source (local, cloud, " +
+        "or local+cloud), path, default flag, workspace, and qualified name. " +
         "Call this before passing `project` to another tool when the user names a " +
-        "project that isn't the default.",
+        "project that isn't the default. Pass a project's external_id as " +
+        "`project_id` to route to that exact project.",
       parameters: Type.Object({
         workspace: Type.Optional(
           Type.String({
@@ -62,10 +67,20 @@ export function registerProjectListTool(
           const text = normalized
             .map((project, idx) => {
               const defaultSuffix = project.is_default ? " (default)" : ""
-              const displayLine = project.display_name
-                ? `\n   Display Name: ${project.display_name}`
-                : ""
-              return `${idx + 1}. **${project.name}**${defaultSuffix}\n   Path: ${project.path}\n   Private: ${project.is_private}${displayLine}`
+              const lines = [
+                `${idx + 1}. **${project.name}**${defaultSuffix}`,
+                project.external_id ? `   ID: ${project.external_id}` : null,
+                project.source ? `   Source: ${project.source}` : null,
+                `   Path: ${project.path}`,
+                `   Private: ${project.is_private}`,
+                project.display_name
+                  ? `   Display Name: ${project.display_name}`
+                  : null,
+                project.qualified_name
+                  ? `   Qualified Name: ${project.qualified_name}`
+                  : null,
+              ]
+              return lines.filter((line) => line !== null).join("\n")
             })
             .join("\n\n")
 

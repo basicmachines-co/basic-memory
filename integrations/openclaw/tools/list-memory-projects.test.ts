@@ -72,6 +72,9 @@ describe("project list tool", () => {
       projects: [
         {
           name: "alpha",
+          external_id: null,
+          qualified_name: null,
+          source: null,
           path: "/tmp/alpha",
           display_name: "Alpha Project",
           is_private: true,
@@ -83,6 +86,9 @@ describe("project list tool", () => {
         },
         {
           name: "beta",
+          external_id: null,
+          qualified_name: null,
+          source: null,
           path: "/tmp/beta",
           display_name: null,
           is_private: false,
@@ -93,6 +99,49 @@ describe("project list tool", () => {
           workspace_tenant_id: null,
         },
       ],
+    })
+  })
+
+  it("keeps source, external_id, and qualified_name for routing", async () => {
+    registerProjectListTool(mockApi, mockClient)
+    const execute = (mockApi.registerTool as jest.MockedFunction<any>).mock
+      .calls[0][0].execute
+
+    ;(mockClient.listProjects as jest.MockedFunction<any>).mockResolvedValue([
+      {
+        name: "getting-started",
+        external_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        source: "cloud",
+        qualified_name: "personal/getting-started",
+        path: "/getting-started",
+        is_default: true,
+      },
+      {
+        name: "main",
+        external_id: "d9b9ab97-c3f8-488e-9863-b9729ccc55db",
+        source: "local",
+        qualified_name: null,
+        path: "/tmp/main",
+      },
+    ])
+
+    const result = await execute("call-1", {})
+    const text = result.content[0].text
+
+    expect(text).toContain("ID: 6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55")
+    expect(text).toContain("Source: cloud")
+    expect(text).toContain("Qualified Name: personal/getting-started")
+    expect(text).toContain("ID: d9b9ab97-c3f8-488e-9863-b9729ccc55db")
+    expect(text).toContain("Source: local")
+    expect(result.details.projects[0]).toMatchObject({
+      external_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+      source: "cloud",
+      qualified_name: "personal/getting-started",
+    })
+    expect(result.details.projects[1]).toMatchObject({
+      external_id: "d9b9ab97-c3f8-488e-9863-b9729ccc55db",
+      source: "local",
+      qualified_name: null,
     })
   })
 

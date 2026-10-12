@@ -5,7 +5,11 @@ import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import { promisify } from "node:util"
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
 import { BmClient } from "../bm-client.ts"
+import { registerProjectListTool } from "../tools/list-memory-projects.ts"
+import { registerReadTool } from "../tools/read-note.ts"
+import { registerWriteTool } from "../tools/write-note.ts"
 
 const RUN_INTEGRATION = process.env.BM_INTEGRATION === "1"
 const BM_BIN = resolveCommand(process.env.BM_BIN ?? "./scripts/bm-local.sh")
@@ -129,6 +133,14 @@ if (!RUN_INTEGRATION) {
       }
       childEnv.HOME = homeDir
       childEnv.BASIC_MEMORY_HOME = join(homeDir, ".basic-memory")
+      // BM resolves its config from BASIC_MEMORY_CONFIG_DIR, then
+      // XDG_CONFIG_HOME, before HOME; pin it so the run never registers the
+      // temp project in the developer's real Basic Memory config.
+      childEnv.BASIC_MEMORY_CONFIG_DIR = join(
+        homeDir,
+        ".config",
+        "basic-memory",
+      )
       childEnv.BASIC_MEMORY_CLOUD_MODE = "false"
       delete childEnv.BASIC_MEMORY_PROJECTS
 
@@ -212,6 +224,119 @@ if (!RUN_INTEGRATION) {
       await client.deleteNote(movedIdentifier)
 
       await expect(stat(movedPath)).rejects.toBeDefined()
+    })
+
+    it("round-trips Memory Quest fields through the OpenClaw tools", async () => {
+      const { client, projectName } = getHarness()
+      type ToolResult = {
+        content: Array<{ type: "text"; text: string }>
+        details: Record<string, any>
+      }
+      const tools = new Map<
+        string,
+        (id: string, params: Record<string, unknown>) => Promise<ToolResult>
+      >()
+      const api = {
+        registerTool: (tool: { name: string; execute: any }) => {
+          tools.set(tool.name, tool.execute)
+        },
+      } as unknown as OpenClawPluginApi
+      registerProjectListTool(api, client)
+      registerWriteTool(api, client)
+      registerReadTool(api, client)
+      const call = (name: string, params: Record<string, unknown>) => {
+        const execute = tools.get(name)
+        if (!execute) throw new Error(`tool ${name} was not registered`)
+        return execute("integration", params)
+      }
+
+      // list_memory_projects keeps the routing fields the skill selects on.
+      const listed = await call("list_memory_projects", {})
+      const project = listed.details.projects.find(
+        (item: { name: string }) => item.name === projectName,
+      )
+      expect(project.source).toBe("local")
+      expect(project.external_id).toMatch(/^[0-9a-f-]{36}$/)
+      expect(listed.content[0].text).toContain(`ID: ${project.external_id}`)
+      expect(listed.content[0].text).toContain("Source: local")
+
+      const writeArgs = {
+        title: "Memory Master",
+        content: "Memory Master body.",
+        folder: "memory-quest",
+        note_type: "memory_master",
+        project_id: project.external_id,
+        metadata: {
+          memory_quest_code: "MQ-TEST-0000-0001",
+          memory_quest_guidance: "active",
+        },
+        overwrite: false,
+      }
+
+      // Files materialize asynchronously; the accepted note (what read_note
+      // returns) is the canonical state these assertions check.
+      const readBack = () =>
+        call("read_note", {
+          identifier: "memory-quest/memory-master",
+          project_id: project.external_id,
+          include_frontmatter: true,
+        })
+
+      const created = await call("write_note", writeArgs)
+      expect(created.details.error).toBeUndefined()
+
+      // overwrite=false refuses a second write instead of replacing the note.
+      const refused = await call("write_note", writeArgs)
+      expect(refused.details.error).toBe("note_already_exists")
+      expect(refused.content[0].text).toContain("Note already exists")
+
+      // read_note by project_id surfaces the metadata as frontmatter and the
+      // checksum that guards a replacement.
+      const read = await readBack()
+      expect(read.details.frontmatter).toMatchObject({
+        type: "memory_master",
+        memory_quest_code: "MQ-TEST-0000-0001",
+        memory_quest_guidance: "active",
+      })
+      expect(read.content[0].text).toContain("type: memory_master")
+      expect(read.content[0].text).toContain(
+        "memory_quest_code: MQ-TEST-0000-0001",
+      )
+      const checksum = read.details.checksum
+      expect(typeof checksum).toBe("string")
+      expect(read.content[0].text).toContain(`Checksum: ${checksum}`)
+
+      // A stale checksum is refused and nothing is replaced.
+      const stale = await call("write_note", {
+        ...writeArgs,
+        content: "Stale replacement.",
+        overwrite: true,
+        expected_checksum: "0".repeat(64),
+      })
+      expect(stale.details.error).toBe("note_revision_conflict")
+      expect(stale.details.current_checksum).toBe(checksum)
+      expect((await readBack()).content[0].text).toContain(
+        "Memory Master body.",
+      )
+
+      // The checksum that was read guards a successful replacement.
+      const replaced = await call("write_note", {
+        ...writeArgs,
+        content: "Replaced body.",
+        metadata: {
+          memory_quest_code: "MQ-TEST-0000-0002",
+          memory_quest_guidance: "active",
+        },
+        overwrite: true,
+        expected_checksum: checksum,
+      })
+      expect(replaced.details.error).toBeUndefined()
+      const after = await readBack()
+      expect(after.content[0].text).toContain("Replaced body.")
+      expect(after.details.frontmatter.memory_quest_code).toBe(
+        "MQ-TEST-0000-0002",
+      )
+      expect(after.details.checksum).not.toBe(checksum)
     })
 
     it("lists the integration project through real BM MCP", async () => {

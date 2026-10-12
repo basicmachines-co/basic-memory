@@ -14,6 +14,40 @@ export class NoteAlreadyExistsError extends Error {
   }
 }
 
+/**
+ * write_note refused a conditional overwrite: the note is no longer the
+ * revision named by expected_checksum. Nothing was written; currentChecksum is
+ * the revision to re-read and retry against (null once no note owns the path).
+ */
+export class NoteRevisionConflictError extends Error {
+  readonly permalink: string | null
+  readonly currentChecksum: string | null
+  constructor(
+    title: string,
+    permalink: string | null,
+    currentChecksum: string | null,
+  ) {
+    super(`Note revision conflict: "${title}" changed since it was read`)
+    this.name = "NoteRevisionConflictError"
+    this.permalink = permalink
+    this.currentChecksum = currentChecksum
+  }
+}
+
+/** A BM MCP tool returned isError; toolMessage is the tool's own error text. */
+export class BmToolError extends Error {
+  readonly toolName: string
+  readonly toolMessage: string
+  constructor(toolName: string, toolMessage: string) {
+    super(
+      `BM MCP tool ${toolName} failed${toolMessage ? `: ${toolMessage}` : ""}`,
+    )
+    this.name = "BmToolError"
+    this.toolName = toolName
+    this.toolMessage = toolMessage
+  }
+}
+
 const REQUIRED_TOOLS = [
   "search_notes",
   "read_note",
@@ -59,12 +93,18 @@ export interface EditNoteResult {
 
 interface ReadNoteOptions {
   includeFrontmatter?: boolean
+  /** Project external_id; routes to that exact project instead of by name. */
+  projectId?: string
 }
 
 interface WriteNoteOptions {
   metadata?: Record<string, unknown>
   tags?: string[] | string
   noteType?: string
+  /** Project external_id; routes to that exact project instead of by name. */
+  projectId?: string
+  /** Checksum of the revision read; overwrite only while it is still current. */
+  expectedChecksum?: string
 }
 
 interface EditNoteOptions {
@@ -102,6 +142,9 @@ export interface RecentResult {
 export interface ProjectListResult {
   name: string
   path: string
+  external_id?: string | null
+  source?: string | null
+  qualified_name?: string | null
   display_name?: string | null
   is_private?: boolean
   is_default?: boolean
@@ -219,6 +262,19 @@ function isNoteNotFoundError(err: unknown): boolean {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null
+}
+
+// In JSON mode BM reports a refused write as a tool error whose text is the
+// refusal payload itself ({"error": "NOTE_ALREADY_EXISTS", ...}). Any other
+// error text (plain-text failures, older servers) is not a refusal payload.
+function parseRefusalPayload(text: string): Record<string, unknown> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  return isRecord(parsed) && typeof parsed.error === "string" ? parsed : null
 }
 
 function projectMatchesWorkspace(
@@ -439,10 +495,7 @@ export class BmClient {
         })
 
         if (isRecord(result) && result.isError === true) {
-          const message = extractTextFromContent(result.content)
-          throw new Error(
-            `BM MCP tool ${name} failed${message ? `: ${message}` : ""}`,
-          )
+          throw new BmToolError(name, extractTextFromContent(result.content))
         }
 
         return result
@@ -491,6 +544,17 @@ export class BmClient {
 
   private routedProject(project?: string): string {
     return project ?? this.project
+  }
+
+  // project_id names one exact project, so it is sent alone: pairing it with
+  // a name (or the plugin's default project) would make routing depend on
+  // server-side precedence rather than on what the caller asked for.
+  private routing(
+    project?: string,
+    projectId?: string,
+  ): { project: string } | { project_id: string } {
+    if (projectId !== undefined) return { project_id: projectId }
+    return { project: this.routedProject(project) }
   }
 
   async ensureProject(projectPath: string): Promise<void> {
@@ -579,7 +643,7 @@ export class BmClient {
       identifier,
       include_frontmatter: options.includeFrontmatter === true,
       output_format: "json",
-      project: this.routedProject(project),
+      ...this.routing(project, options.projectId),
     }
 
     const payload = await this.callTool("read_note", args)
@@ -603,6 +667,7 @@ export class BmClient {
       content,
       file_path: filePath,
       frontmatter: isRecord(payload.frontmatter) ? payload.frontmatter : null,
+      checksum: asString(payload.checksum),
     }
   }
 
@@ -619,19 +684,42 @@ export class BmClient {
       content,
       directory: folder,
       output_format: "json",
-      project: this.routedProject(project),
+      ...this.routing(project, options.projectId),
     }
     if (overwrite !== undefined) args.overwrite = overwrite
     if (options.metadata !== undefined) args.metadata = options.metadata
     if (options.tags !== undefined) args.tags = options.tags
     if (options.noteType !== undefined) args.note_type = options.noteType
+    if (options.expectedChecksum !== undefined)
+      args.expected_checksum = options.expectedChecksum
 
-    const payload = await this.callTool("write_note", args)
+    let payload: unknown
+    try {
+      payload = await this.callTool("write_note", args)
+    } catch (err) {
+      const refusal =
+        err instanceof BmToolError ? parseRefusalPayload(err.toolMessage) : null
+      if (refusal?.error === "NOTE_ALREADY_EXISTS") {
+        throw new NoteAlreadyExistsError(
+          asString(refusal.title) ?? title,
+          asString(refusal.permalink) ?? "",
+        )
+      }
+      if (refusal?.error === "NOTE_REVISION_CONFLICT") {
+        throw new NoteRevisionConflictError(
+          asString(refusal.title) ?? title,
+          asString(refusal.permalink),
+          asString(refusal.currentChecksum),
+        )
+      }
+      throw err
+    }
 
     if (!isRecord(payload)) {
       throw new Error("invalid write_note response")
     }
 
+    // Older servers returned the refusal as a successful payload.
     if (payload.error === "NOTE_ALREADY_EXISTS") {
       throw new NoteAlreadyExistsError(
         asString(payload.title) ?? title,

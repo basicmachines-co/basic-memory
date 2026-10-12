@@ -325,6 +325,84 @@ def test_bm_delete_removes_note(provider, bm):
     )
 
 
+def test_memory_quest_fields_round_trip(provider, bm):
+    """The Memory Quest Mission 8 flow: pick a project by external_id/source,
+    write with metadata and overwrite=false, refuse a duplicate, read the
+    checksum, and replace only that revision."""
+    project = next(
+        p
+        for p in json.loads(provider.handle_tool_call("bm_projects", {}))["projects"]
+        if p["name"] == provider._project
+    )
+    assert project["source"] == "local"
+    assert project["external_id"]
+    assert "qualified_name" in project
+
+    title = f"Memory Master {uuid.uuid4().hex[:6]}"
+    write_args = {
+        "title": title,
+        "content": "Memory Master body.",
+        "folder": "memory-quest",
+        "note_type": "memory_master",
+        "project_id": project["external_id"],
+        "metadata": {"memory_quest_code": "MQ-TEST-0001", "memory_quest_guidance": "active"},
+        "overwrite": False,
+    }
+    created = provider.handle_tool_call("bm_write", write_args)
+    permalink = bm._extract_permalink(created, "")
+    assert permalink, created
+
+    refused = json.loads(provider.handle_tool_call("bm_write", write_args))
+    assert "already exists" in refused["error"].lower()
+
+    def read_json():
+        return json.loads(
+            provider.handle_tool_call(
+                "bm_read",
+                {
+                    "identifier": permalink,
+                    "project_id": project["external_id"],
+                    "include_frontmatter": True,
+                    "output_format": "json",
+                },
+            )
+        )
+
+    note = read_json()
+    assert note["frontmatter"]["type"] == "memory_master"
+    assert note["frontmatter"]["memory_quest_code"] == "MQ-TEST-0001"
+    assert note["frontmatter"]["memory_quest_guidance"] == "active"
+    assert "memory_quest_code: MQ-TEST-0001" in note["content"]
+    checksum = note["checksum"]
+    assert checksum
+
+    stale = json.loads(
+        provider.handle_tool_call(
+            "bm_write",
+            dict(write_args, content="Stale.", overwrite=True, expected_checksum="0" * 64),
+        )
+    )
+    assert "revision conflict" in stale["error"].lower()
+    assert checksum in stale["error"]
+    assert "Memory Master body." in read_json()["content"]
+
+    replaced = provider.handle_tool_call(
+        "bm_write",
+        dict(
+            write_args,
+            content="Replaced body.",
+            metadata={"memory_quest_code": "MQ-TEST-0002", "memory_quest_guidance": "active"},
+            overwrite=True,
+            expected_checksum=checksum,
+        ),
+    )
+    assert "error" not in json.loads(replaced), replaced
+    after = read_json()
+    assert "Replaced body." in after["content"]
+    assert after["frontmatter"]["memory_quest_code"] == "MQ-TEST-0002"
+    assert after["checksum"] != checksum
+
+
 # ---- Capture pipeline ----
 
 

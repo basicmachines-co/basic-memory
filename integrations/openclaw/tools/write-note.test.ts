@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
 import type { BmClient } from "../bm-client.ts"
-import { NoteAlreadyExistsError } from "../bm-client.ts"
+import {
+  NoteAlreadyExistsError,
+  NoteRevisionConflictError,
+} from "../bm-client.ts"
 import { registerWriteTool } from "./write-note.ts"
 
 describe("write tool", () => {
@@ -127,6 +130,7 @@ describe("write tool", () => {
           title: "Test Note",
           permalink: "test-note",
           file_path: "notes/test-note.md",
+          checksum: null,
         },
       })
     })
@@ -439,6 +443,72 @@ const code = "example";
       )
     })
 
+    it("passes project_id and expected_checksum for a guarded overwrite", async () => {
+      ;(mockClient.writeNote as jest.MockedFunction<any>).mockResolvedValue({
+        title: "Memory Master",
+        permalink: "getting-started/memory-quest/memory-master",
+        content: "content",
+        file_path: "memory-quest/Memory Master.md",
+        checksum: "new-checksum",
+        action: "updated",
+      })
+
+      const result = await executeFunction("tool-call-id", {
+        title: "Memory Master",
+        content: "content",
+        folder: "memory-quest",
+        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        overwrite: true,
+        expected_checksum: "old-checksum",
+        note_type: "memory_master",
+        metadata: { memory_quest_code: "MQ-7HX2-K9QD-4TRM" },
+      })
+
+      expect(mockClient.writeNote).toHaveBeenCalledWith(
+        "Memory Master",
+        "content",
+        "memory-quest",
+        undefined,
+        true,
+        {
+          metadata: { memory_quest_code: "MQ-7HX2-K9QD-4TRM" },
+          tags: undefined,
+          noteType: "memory_master",
+          projectId: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+          expectedChecksum: "old-checksum",
+        },
+      )
+      expect(result.content[0].text).toContain("Checksum: new-checksum")
+      expect(result.details.checksum).toBe("new-checksum")
+    })
+
+    it("explains a revision conflict with the current checksum", async () => {
+      ;(mockClient.writeNote as jest.MockedFunction<any>).mockRejectedValue(
+        new NoteRevisionConflictError(
+          "Memory Master",
+          "memory-quest/memory-master",
+          "current-checksum",
+        ),
+      )
+
+      const result = await executeFunction("tool-call-id", {
+        title: "Memory Master",
+        content: "content",
+        folder: "memory-quest",
+        overwrite: true,
+        expected_checksum: "stale-checksum",
+      })
+
+      expect(result.content[0].text).toContain("Note revision conflict")
+      expect(result.content[0].text).toContain("current-checksum")
+      expect(result.details).toEqual({
+        title: "Memory Master",
+        permalink: "memory-quest/memory-master",
+        current_checksum: "current-checksum",
+        error: "note_revision_conflict",
+      })
+    })
+
     it("should return helpful hint when note already exists", async () => {
       ;(mockClient.writeNote as jest.MockedFunction<any>).mockRejectedValue(
         new NoteAlreadyExistsError("Existing Note", "notes/existing-note"),
@@ -572,6 +642,7 @@ Normal line
         title: "Detailed Note",
         permalink: "detailed-note-permalink",
         file_path: "custom/folder/detailed-note.md",
+        checksum: null,
       })
     })
 

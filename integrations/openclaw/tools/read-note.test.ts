@@ -83,6 +83,7 @@ describe("read tool", () => {
           permalink: "test-note",
           file_path: "notes/test-note.md",
           frontmatter: { title: "Test Note", status: "active" },
+          checksum: null,
         },
       })
     })
@@ -152,6 +153,37 @@ describe("read tool", () => {
         { includeFrontmatter: false },
         "other-project",
       )
+    })
+
+    it("routes by project_id and surfaces the checksum to the model", async () => {
+      ;(mockClient.readNote as jest.MockedFunction<any>).mockResolvedValue({
+        title: "Memory Master",
+        permalink: "memory-quest/memory-master",
+        content: "---\ntype: memory_master\n---\n\nbody",
+        file_path: "memory-quest/Memory Master.md",
+        frontmatter: { type: "memory_master" },
+        checksum: "abc123",
+      })
+
+      const result = await executeFunction("tool-call-id", {
+        identifier: "memory-quest/memory-master",
+        include_frontmatter: true,
+        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+      })
+
+      expect(mockClient.readNote).toHaveBeenCalledWith(
+        "memory-quest/memory-master",
+        {
+          includeFrontmatter: true,
+          projectId: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        },
+        undefined,
+      )
+      expect(result.content[0].text).toBe(
+        "---\ntype: memory_master\n---\n\nbody\n\nChecksum: abc123",
+      )
+      expect(result.details.checksum).toBe("abc123")
+      expect(result.details.frontmatter).toEqual({ type: "memory_master" })
     })
 
     it("handles errors gracefully", async () => {

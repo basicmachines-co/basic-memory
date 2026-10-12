@@ -69,11 +69,11 @@ class FakeContent:
 
 
 class FakeCallToolResult:
-    """Stand-in for `mcp.types.CallToolResult`."""
+    """Stand-in for `mcp.types.CallToolResult` (mcp 2.x attribute names)."""
 
     def __init__(self, content_texts, is_error: bool = False):
         self.content = [FakeContent(t) for t in content_texts]
-        self.isError = is_error
+        self.is_error = is_error
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ class FakeSession:
 
     - default_response: dict serialized to JSON in the result text
     - hang: when True, call_tool sleeps long enough to force a client-side timeout
-    - is_error: when True, return value has isError=True
+    - is_error: when True, return value has is_error=True
     """
 
     def __init__(self, default_response=None, hang: bool = False, is_error: bool = False):
