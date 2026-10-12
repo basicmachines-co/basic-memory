@@ -11,4 +11,4 @@ SEARCH_READ_CACHE_TTL_SECONDS = 24 * 3600
 RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS = 15 * 60
 # Larger responses are served but not stored, so a few huge notes or listings cannot
 # crowd hot entries out of Redis for the length of these TTLs.
-READ_CACHE_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024
+READ_CACHE_MAX_PAYLOAD_BYTES = 1024 * 1024

@@ -42,6 +42,18 @@ def group_version_key(
     return f"{prefix}:{tag}:version:{group.name}"
 
 
+def entry_index_key(
+    *, prefix: str, namespace: str, project_id: str, group: ReadCacheGroup, version: str
+) -> str:
+    """The set of entry keys stored under one version of one group.
+
+    Replacing that version deletes every key in the set, so retired entries free
+    their memory at once instead of waiting out their TTL.
+    """
+    tag = project_hash_tag(namespace=namespace, project_id=project_id)
+    return f"{prefix}:{tag}:entries:{group.name}:{version}"
+
+
 def global_epoch_key(*, prefix: str) -> str:
     """One key whose replacement retires every entry, for resets after a deploy."""
     return f"{prefix}:epoch"

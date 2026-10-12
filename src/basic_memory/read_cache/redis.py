@@ -2,8 +2,16 @@
 
 Entries themselves are read and written by fastapi-redis-sdk. This module owns the
 version tokens that go into entry keys, and replaces them to invalidate.
+
+Replacing a version makes the entries under it unreadable, but Redis would keep them
+until their TTL. Each stored entry is therefore recorded in a set for the versions it
+was keyed under, and invalidation deletes the members of the replaced version's set.
+Memory then follows the entries that can still be read, not every response written
+in the last TTL.
 """
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from uuid import uuid4
 
 from redis.asyncio import Redis
@@ -18,6 +26,7 @@ from basic_memory.read_cache.contract import (
 )
 from basic_memory.read_cache.keys import (
     DEFAULT_READ_CACHE_PREFIX,
+    entry_index_key,
     global_epoch_key,
     group_version_key,
 )
@@ -26,6 +35,10 @@ from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 # A version absent from Redis reads as this token. Replacement tokens are random,
 # so a later version can never collide with an earlier one.
 _INITIAL_VERSION = "0"
+
+# Keys per UNLINK call when retiring a project's entries, so one invalidation of a
+# large project does not send Redis a single command with every key in it.
+_UNLINK_BATCH_SIZE = 500
 
 
 def create_redis_read_cache_client(
@@ -50,6 +63,22 @@ def _token(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("ascii")
     return str(value)
+
+
+@dataclass(frozen=True, slots=True)
+class EntryVersions:
+    """The versions one entry key embeds: global epoch, project epoch, group.
+
+    For a project-group read the group version is the project epoch itself.
+    """
+
+    epoch: str
+    project: str
+    group: str
+
+    @property
+    def token(self) -> str:
+        return f"{self.epoch}.{self.project}.{self.group}"
 
 
 class RedisReadCache:
@@ -82,7 +111,16 @@ class RedisReadCache:
             group=group,
         )
 
-    async def versions(self, project_id: str, group: ReadCacheGroup) -> str:
+    def _index_key(self, project_id: str, group: ReadCacheGroup, version: str) -> str:
+        return entry_index_key(
+            prefix=self.prefix,
+            namespace=self.namespace,
+            project_id=project_id,
+            group=group,
+            version=version,
+        )
+
+    async def versions(self, project_id: str, group: ReadCacheGroup) -> EntryVersions:
         """The global epoch, project epoch and group version an entry key embeds."""
         keys = [global_epoch_key(prefix=self.prefix), self._version_key(project_id, PROJECT)]
         if group != PROJECT:
@@ -94,7 +132,35 @@ class RedisReadCache:
                 values = await pipe.execute()
         except (RedisError, OSError) as error:
             raise ReadCacheUnavailable("Redis read-cache version lookup failed") from error
-        return ".".join(_token(value) for value in values)
+        epoch, project, *rest = (_token(value) for value in values)
+        return EntryVersions(epoch=epoch, project=project, group=rest[0] if rest else project)
+
+    async def track_entry(
+        self,
+        project_id: str,
+        group: ReadCacheGroup,
+        versions: EntryVersions,
+        entry_key: str,
+    ) -> None:
+        """Record an entry about to be stored, so replacing its versions deletes it.
+
+        Every entry is listed under its project epoch, because replacing that epoch
+        retires every read in the project, and under its own group's version.
+        Recording happens before the store, so a response that turns out not to be
+        cacheable leaves a key in the set that deletes nothing.
+        """
+        indexes = [self._index_key(project_id, PROJECT, versions.project)]
+        if group != PROJECT:
+            indexes.append(self._index_key(project_id, group, versions.group))
+        try:
+            async with self.client.pipeline(transaction=False) as pipe:
+                for index in indexes:
+                    pipe.sadd(index, entry_key)
+                    # The set lives as long as the longest-lived entry it lists.
+                    pipe.expire(index, READ_CACHE_TTL_SECONDS)
+                await pipe.execute()
+        except (RedisError, OSError) as error:
+            raise ReadCacheUnavailable("Redis read-cache entry tracking failed") from error
 
     async def invalidate(
         self,
@@ -105,6 +171,9 @@ class RedisReadCache:
         if not groups:
             return ReadCacheInvalidationStatus.invalidated
         try:
+            # --- Replace versions ---
+            # Readers switch to the new keys as soon as this lands, so the entries
+            # deleted below can no longer be served.
             async with self.client.pipeline(transaction=False) as pipe:
                 for group in groups:
                     # The version outlives every entry keyed under it, so when it
@@ -114,11 +183,35 @@ class RedisReadCache:
                         self._version_key(project_id, group),
                         uuid4().hex,
                         ex=READ_CACHE_TTL_SECONDS,
+                        get=True,
                     )
-                await pipe.execute()
+                replaced = await pipe.execute()
+
+            # --- Delete the retired entries ---
+            retired_indexes = [
+                self._index_key(project_id, group, _token(previous))
+                for group, previous in zip(groups, replaced, strict=True)
+            ]
+            await self._delete_indexed_entries(retired_indexes)
         except (RedisError, OSError) as error:
             raise ReadCacheUnavailable("Redis read-cache invalidation failed") from error
         return ReadCacheInvalidationStatus.invalidated
+
+    async def _delete_indexed_entries(self, indexes: Sequence[str]) -> None:
+        """Delete every entry listed in ``indexes``, then the sets themselves.
+
+        A reader that looked up the old version just before it was replaced can
+        still store its entry after this runs. That entry is never read again and
+        expires with its TTL, as every retired entry did before entries were tracked.
+        """
+        async with self.client.pipeline(transaction=False) as pipe:
+            for index in indexes:
+                pipe.smembers(index)
+            listed: list[set[bytes]] = await pipe.execute()
+        doomed: list[bytes] = [key for members in listed for key in members]
+        doomed.extend(index.encode() for index in indexes)
+        for start in range(0, len(doomed), _UNLINK_BATCH_SIZE):
+            await self.client.unlink(*doomed[start : start + _UNLINK_BATCH_SIZE])
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         return await self.invalidate(project_id, ReadCacheChange.whole_project())
@@ -127,7 +220,9 @@ class RedisReadCache:
         """Retire every entry for every tenant, e.g. after a deploy changes responses.
 
         The global epoch has no expiry, so it can never fall back to a value an
-        older entry was keyed under.
+        older entry was keyed under. Entries keyed under the old epoch are left to
+        their TTL: a reset is rare, and finding them would mean scanning every
+        tenant's keys.
         """
         try:
             await self.client.set(global_epoch_key(prefix=self.prefix), uuid4().hex)

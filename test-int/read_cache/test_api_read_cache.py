@@ -42,7 +42,7 @@ from basic_memory.read_cache import (
     ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
 )
-from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
@@ -226,7 +226,7 @@ def descendant_paths(node: DirectoryNode) -> set[str]:
     return paths
 
 
-async def _project_version(redis_cache: RedisCacheHarness, project_id: str) -> str:
+async def _project_version(redis_cache: RedisCacheHarness, project_id: str) -> EntryVersions:
     """The project epoch: it moves whenever the whole project's reads are retired."""
     return await redis_cache.cache.versions(project_id, PROJECT)
 

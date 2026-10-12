@@ -17,6 +17,7 @@ from logfire.testing import CaptureLogfire, capfire as capfire
 
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
+from basic_memory.read_cache.contract import ReadCacheUnavailable
 from basic_memory.read_cache.policy import READ_CACHE_MAX_PAYLOAD_BYTES
 from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
 
@@ -54,6 +55,15 @@ async def _create(
 
 async def _query(client: AsyncClient, url: str, body: dict[str, Any], **kwargs: Any) -> Response:
     return await client.request("QUERY", url, json=body, **kwargs)
+
+
+async def _stored_entries(cache: RedisReadCache, operation: str = "*") -> set[bytes]:
+    """Cached response keys in Redis: not version tokens or entry indexes."""
+    return {
+        key
+        async for key in cache.client.scan_iter(match=f"{cache.prefix}:*:{operation}:*")
+        if b":version:" not in key and b":entries:" not in key
+    }
 
 
 @pytest.fixture
@@ -167,6 +177,98 @@ async def test_a_rename_retires_the_whole_project(
 
     assert _status(await client.get(bystander_url)) == "MISS"
     assert _status(await _query(client, f"{project_url}/knowledge/resolve", resolve_body)) == "MISS"
+
+
+@pytest.mark.asyncio
+async def test_a_body_edit_deletes_the_retired_note_entry_from_redis(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: retired entries free their memory at once instead of waiting out the TTL."""
+    edited = await _create(client, project_url, "Edited And Deleted", "Version one.")
+    untouched = await _create(client, project_url, "Kept In Redis", "Stays cached.")
+    edited_url = f"{project_url}/knowledge/entities/{edited['external_id']}"
+    untouched_url = f"{project_url}/knowledge/entities/{untouched['external_id']}"
+
+    await client.get(edited_url)
+    edited_entries = await _stored_entries(cached_app.cache, "entity")
+    await client.get(untouched_url)
+    untouched_entries = await _stored_entries(cached_app.cache, "entity") - edited_entries
+    assert len(edited_entries) == 1 and len(untouched_entries) == 1
+
+    patch = await client.patch(
+        edited_url, json={"operation": "append", "content": "\n\nVersion two."}
+    )
+    assert patch.status_code == 202, patch.text
+    await drain_pending_materializations()
+
+    assert await _stored_entries(cached_app.cache, "entity") == untouched_entries
+    assert _status(await client.get(untouched_url)) == "HIT"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_deletes_every_entry_in_the_project_from_redis(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: retiring the whole project deletes every entry it held, of every kind."""
+    renamed = await _create(client, project_url, "Renamed Away")
+    bystander = await _create(client, project_url, "Bystander Entry")
+    await client.get(f"{project_url}/knowledge/entities/{bystander['external_id']}")
+    await _query(client, f"{project_url}/knowledge/resolve", {"identifier": bystander["permalink"]})
+    await _query(client, f"{project_url}/search/", {"text": "bystander"})
+    await client.get(f"{project_url}/directory/structure")
+    assert len(await _stored_entries(cached_app.cache)) >= 4
+
+    put = await client.put(
+        f"{project_url}/knowledge/entities/{renamed['external_id']}",
+        json={"title": "Renamed Here", "directory": "rules", "content": "# Renamed Here\n"},
+    )
+    assert put.status_code == 202, put.text
+    await drain_pending_materializations()
+
+    assert await _stored_entries(cached_app.cache) == set()
+
+
+@pytest.mark.asyncio
+async def test_a_no_store_request_is_answered_without_touching_the_cache(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: ``Cache-Control: no-store`` reads from the database and stores nothing."""
+    note = await _create(client, project_url, "Never Stored")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+
+    response = await client.get(url, headers={"cache-control": "no-store"})
+
+    assert response.status_code == 200
+    assert _status(response) is None
+    assert await _stored_entries(cached_app.cache, "entity") == set()
+
+
+@pytest.mark.asyncio
+async def test_an_entry_that_cannot_be_tracked_is_served_but_not_stored(
+    cached_app: CachedApp,
+    client: AsyncClient,
+    project_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rule: an entry invalidation could not find is never stored.
+
+    Making only the tracking write fail needs an injected edge case: the version
+    lookup and the tracking write share one real Redis.
+    """
+    note = await _create(client, project_url, "Untracked")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+
+    async def fail_tracking(*_args: object) -> None:
+        raise ReadCacheUnavailable("injected tracking failure")
+
+    monkeypatch.setattr(cached_app.cache, "track_entry", fail_tracking)
+
+    first = await client.get(url)
+    second = await client.get(url)
+
+    assert first.status_code == 200 and second.status_code == 200
+    assert _status(second) != "HIT"
+    assert await _stored_entries(cached_app.cache, "entity") == set()
 
 
 @pytest.mark.asyncio

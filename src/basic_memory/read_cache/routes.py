@@ -38,7 +38,7 @@ from basic_memory.read_cache.contract import (
     group_kind,
 )
 from basic_memory.read_cache.keys import entry_key, read_cache_request_digest
-from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 _PENDING_STATE = "redis_cache_pending"
@@ -127,14 +127,18 @@ def cached_read(
     async def key_builder(request: Request, eviction_group: str = "", prefix: str = "") -> str:
         target: _CachedTarget = request.state.basic_memory_read_cache_target
         versions = await target.scope.cache.versions(target.project_id, target.group)
-        return entry_key(
+        key = entry_key(
             prefix=target.scope.cache.prefix,
             namespace=target.scope.cache.namespace,
             project_id=target.project_id,
             operation=operation.value,
-            versions=versions,
+            versions=versions.token,
             request_digest=read_cache_request_digest(target.scope.user_key, target.identity),
         )
+        # A miss stores under this key, and invalidation can delete it only if it
+        # was recorded under the versions it embeds.
+        request.state.basic_memory_read_cache_entry = _LookedUpEntry(versions=versions, key=key)
+        return key
 
     sdk_dependency = cache(ttl=ttl_seconds, key_builder=key_builder, cache_prefix="")
 
@@ -176,7 +180,7 @@ def cached_read(
                 skip_read_cache_store(request)
                 target = None
             else:
-                span.set_attribute("cache.lookup.outcome", "miss")
+                await _track_pending_entry(request, target, span)
         # The hit is control flow, not a failure. Raise it after the span has
         # closed so Logfire does not record every cache hit as an error.
         if cache_hit is not None:
@@ -190,6 +194,37 @@ def cached_read(
             await steps.aclose()
 
     return Depends(dependency)
+
+
+async def _track_pending_entry(
+    request: Request, target: "_CachedTarget", span: logfire.LogfireSpan
+) -> None:
+    """Record the entry a miss is about to store, or keep the response uncached."""
+    # The SDK bypasses requests that send ``Cache-Control: no-store`` without
+    # building a key, so there is nothing to store and nothing to record.
+    if not hasattr(request.state, _PENDING_STATE):
+        span.set_attribute("cache.lookup.outcome", "bypass")
+        return
+    looked_up: _LookedUpEntry = request.state.basic_memory_read_cache_entry
+    try:
+        await target.scope.cache.track_entry(
+            target.project_id, target.group, looked_up.versions, looked_up.key
+        )
+    except ReadCacheUnavailable:
+        # An entry invalidation cannot find would hold its memory for the whole
+        # TTL, so an untracked response is served uncached.
+        span.set_attribute("cache.lookup.outcome", "unavailable")
+        skip_read_cache_store(request)
+        return
+    span.set_attribute("cache.lookup.outcome", "miss")
+
+
+@dataclass(frozen=True, slots=True)
+class _LookedUpEntry:
+    """The key a lookup used and the versions it embeds."""
+
+    versions: EntryVersions
+    key: str
 
 
 @dataclass(frozen=True, slots=True)

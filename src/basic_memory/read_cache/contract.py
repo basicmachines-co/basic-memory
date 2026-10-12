@@ -2,8 +2,9 @@
 
 Every cache key embeds the current version of the eviction group it belongs to, plus
 the project and global epochs. Invalidating a group replaces its version, so entries
-written under the old one are never read again and expire on their own. A read that
-races a write stores under the version it observed, which no later lookup uses.
+written under the old one are never read again, and deletes them so they stop holding
+memory. A read that races a write stores under the version it observed, which no later
+lookup uses, and that one entry expires on its own.
 
 Groups:
 

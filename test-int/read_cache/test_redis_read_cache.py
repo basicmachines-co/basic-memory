@@ -30,7 +30,11 @@ from basic_memory.read_cache import (
 )
 from basic_memory.read_cache.keys import global_epoch_key, group_version_key
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
-from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
+from basic_memory.read_cache.redis import (
+    EntryVersions,
+    RedisReadCache,
+    create_redis_read_cache_client,
+)
 
 
 class RedisCacheHarness(Protocol):
@@ -58,7 +62,9 @@ def _unreachable_cache() -> RedisReadCache:
     return RedisReadCache(client=client, namespace="unavailable")
 
 
-async def _all_versions(cache: RedisReadCache, project_id: str = PROJECT_ID) -> dict[str, str]:
+async def _all_versions(
+    cache: RedisReadCache, project_id: str = PROJECT_ID
+) -> dict[str, EntryVersions]:
     return {
         "a": await cache.versions(project_id, NoteGroup(NOTE_A)),
         "b": await cache.versions(project_id, NoteGroup(NOTE_B)),
@@ -67,7 +73,9 @@ async def _all_versions(cache: RedisReadCache, project_id: str = PROJECT_ID) -> 
     }
 
 
-def _unchanged(before: dict[str, str], after: dict[str, str], *names: str) -> bool:
+def _unchanged(
+    before: dict[str, EntryVersions], after: dict[str, EntryVersions], *names: str
+) -> bool:
     return all(after[name] == before[name] for name in names)
 
 
