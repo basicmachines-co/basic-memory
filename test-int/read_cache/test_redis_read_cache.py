@@ -28,9 +28,13 @@ from basic_memory.read_cache import (
     invalidate_read_cache,
     invalidate_recorded_change,
 )
-from basic_memory.read_cache.keys import global_epoch_key, group_version_key
+from basic_memory.read_cache.keys import entry_index_key, global_epoch_key, group_version_key
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
-from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
+from basic_memory.read_cache.redis import (
+    EntryVersions,
+    RedisReadCache,
+    create_redis_read_cache_client,
+)
 
 
 class RedisCacheHarness(Protocol):
@@ -58,7 +62,9 @@ def _unreachable_cache() -> RedisReadCache:
     return RedisReadCache(client=client, namespace="unavailable")
 
 
-async def _all_versions(cache: RedisReadCache, project_id: str = PROJECT_ID) -> dict[str, str]:
+async def _all_versions(
+    cache: RedisReadCache, project_id: str = PROJECT_ID
+) -> dict[str, EntryVersions]:
     return {
         "a": await cache.versions(project_id, NoteGroup(NOTE_A)),
         "b": await cache.versions(project_id, NoteGroup(NOTE_B)),
@@ -67,7 +73,9 @@ async def _all_versions(cache: RedisReadCache, project_id: str = PROJECT_ID) -> 
     }
 
 
-def _unchanged(before: dict[str, str], after: dict[str, str], *names: str) -> bool:
+def _unchanged(
+    before: dict[str, EntryVersions], after: dict[str, EntryVersions], *names: str
+) -> bool:
     return all(after[name] == before[name] for name in names)
 
 
@@ -164,6 +172,62 @@ async def test_versions_outlive_entries_and_the_global_epoch_never_expires(
 
     assert READ_CACHE_TTL_SECONDS - 5 <= note_ttl <= READ_CACHE_TTL_SECONDS
     assert epoch_ttl == -1
+
+
+@pytest.mark.asyncio
+async def test_an_index_lists_an_entry_only_until_its_own_ttl_ends(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Index members expire with their entries, not with the index.
+
+    Later misses keep the index alive, so a member listed for the index's lifetime
+    would outlive a short-TTL or never-stored entry indefinitely. A one-second TTL
+    stands in for the fifteen-minute recent-activity TTL.
+    """
+    cache = redis_cache.cache
+    versions = await cache.versions(PROJECT_ID, CONTENT)
+    project_index = entry_index_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+        group=PROJECT,
+        version=versions.project,
+    )
+
+    await cache.track_entry(PROJECT_ID, CONTENT, versions, "short-lived", 1)
+    await asyncio.sleep(1.1)
+    await cache.track_entry(PROJECT_ID, CONTENT, versions, "long-lived", 3600)
+
+    assert await redis_cache.client.zrange(project_index, 0, -1) == [b"long-lived"]
+
+
+@pytest.mark.asyncio
+async def test_project_invalidation_deletes_an_index_larger_than_one_batch(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Invalidation drains the whole index, a bounded batch per round trip."""
+    cache = redis_cache.cache
+    versions = await cache.versions(PROJECT_ID, CONTENT)
+    entries = [f"{redis_cache.prefix}:entry:{number}" for number in range(1201)]
+    async with redis_cache.client.pipeline(transaction=False) as pipe:
+        for entry in entries:
+            pipe.set(entry, b"cached", ex=3600)
+        await pipe.execute()
+    for entry in entries:
+        await cache.track_entry(PROJECT_ID, CONTENT, versions, entry, 3600)
+
+    await cache.invalidate_project(PROJECT_ID)
+
+    assert await redis_cache.client.exists(*entries) == 0
+    # The project index is drained; group indexes from the old epoch expire on their own.
+    project_index = entry_index_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+        group=PROJECT,
+        version=versions.project,
+    )
+    assert await redis_cache.client.exists(project_index) == 0
 
 
 @pytest.mark.asyncio

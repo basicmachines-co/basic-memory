@@ -17,10 +17,10 @@ from basic_memory.mcp.async_client import _asgi_client
 from basic_memory.mcp.server import _invalidate_persisted_read_cache
 from basic_memory.read_cache import PROJECT
 from basic_memory.read_cache.lifecycle import STANDALONE_CACHE_NAMESPACE, open_redis_read_cache
-from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 
 
-async def _project_version(cache: RedisReadCache, project_id: str) -> str:
+async def _project_version(cache: RedisReadCache, project_id: str) -> EntryVersions:
     return await cache.versions(project_id, PROJECT)
 
 

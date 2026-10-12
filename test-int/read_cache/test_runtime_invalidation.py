@@ -73,7 +73,7 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import CONTENT, PROJECT, ReadCacheChange, ReadCacheInvalidationStatus
-from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 from basic_memory.repository import (
     EntityRepository,
     ObservationRepository,
@@ -123,7 +123,7 @@ class RedisCacheHarness(Protocol):
 async def _current_generation(
     redis_cache: RedisCacheHarness,
     project_external_id: str,
-) -> str:
+) -> EntryVersions:
     """The project epoch: it moves whenever the whole project's reads are retired."""
     return await redis_cache.cache.versions(project_external_id, PROJECT)
 
@@ -268,8 +268,8 @@ class GenerationObservingProjectIndexBatchStore:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.move_generations: list[str] = []
-        self.delete_generations: list[str] = []
+        self.move_generations: list[EntryVersions] = []
+        self.delete_generations: list[EntryVersions] = []
 
     async def apply_project_index_move_batch(
         self,
@@ -298,7 +298,7 @@ class GenerationObservingDirectoryDeleteEnqueuer:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.observed_generations: list[str] = []
+        self.observed_generations: list[EntryVersions] = []
 
     async def enqueue_directory_file_delete(
         self,
@@ -352,7 +352,7 @@ class PartiallyFailingSearchReindexService:
     ) -> None:
         self.redis_cache = redis_cache
         self.project_external_id = project_external_id
-        self.generation_during_reindex: str | None = None
+        self.generation_during_reindex: EntryVersions | None = None
 
     async def reindex_all(self) -> None:
         self.generation_during_reindex = await _current_generation(
