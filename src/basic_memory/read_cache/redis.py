@@ -42,8 +42,8 @@ from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 # so a later version can never collide with an earlier one.
 _INITIAL_VERSION = "0"
 
-# Keys per UNLINK call when retiring a project's entries, so one invalidation of a
-# large project does not send Redis a single command with every key in it.
+# Entries popped and unlinked per round trip when retiring a project's entries, so
+# one invalidation of a large project never moves its whole index in one reply.
 _UNLINK_BATCH_SIZE = 500
 
 
@@ -241,7 +241,7 @@ class RedisReadCache:
     async def _delete_indexed_entries(
         self, indexes: Sequence[str], *, also_listed_in: str | None = None
     ) -> None:
-        """Delete every entry listed in ``indexes``, then the indexes themselves.
+        """Delete every entry listed in ``indexes``, emptying them (Redis drops an empty index).
 
         ``also_listed_in`` is the project index that lists the same entries. Their keys
         are removed from it too, so a project whose notes change but whose epoch
@@ -251,19 +251,24 @@ class RedisReadCache:
         still store its entry after this runs. That entry is never read again and
         expires with its TTL, as every retired entry did before entries were tracked.
         """
+        for index in indexes:
+            # Pop the index a batch at a time so no single reply carries a large
+            # project's whole index. Popped members leave the index, so an
+            # interrupted run leaves the rest listed rather than half-deleted.
+            while popped := await self._pop_index_batch(index):
+                batch = [member for member, _expires_at in popped]
+                async with self.client.pipeline(transaction=False) as pipe:
+                    pipe.unlink(*batch)
+                    if also_listed_in is not None:
+                        pipe.zrem(also_listed_in, *batch)
+                    await pipe.execute()
+
+    async def _pop_index_batch(self, index: str) -> list[tuple[bytes, float]]:
+        """Remove and return up to one batch of an index's members."""
         async with self.client.pipeline(transaction=False) as pipe:
-            for index in indexes:
-                pipe.zrange(index, 0, -1)
-            listed: list[list[bytes]] = await pipe.execute()
-        retired: list[bytes] = [key for members in listed for key in members]
-        for start in range(0, len(retired), _UNLINK_BATCH_SIZE):
-            batch = retired[start : start + _UNLINK_BATCH_SIZE]
-            async with self.client.pipeline(transaction=False) as pipe:
-                pipe.unlink(*batch)
-                if also_listed_in is not None:
-                    pipe.zrem(also_listed_in, *batch)
-                await pipe.execute()
-        await self.client.unlink(*indexes)
+            pipe.zpopmin(index, _UNLINK_BATCH_SIZE)
+            (popped,) = await pipe.execute()
+        return popped
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         return await self.invalidate(project_id, ReadCacheChange.whole_project())

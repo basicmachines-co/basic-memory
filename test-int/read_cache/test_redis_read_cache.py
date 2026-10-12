@@ -202,6 +202,35 @@ async def test_an_index_lists_an_entry_only_until_its_own_ttl_ends(
 
 
 @pytest.mark.asyncio
+async def test_project_invalidation_deletes_an_index_larger_than_one_batch(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Invalidation drains the whole index, a bounded batch per round trip."""
+    cache = redis_cache.cache
+    versions = await cache.versions(PROJECT_ID, CONTENT)
+    entries = [f"{redis_cache.prefix}:entry:{number}" for number in range(1201)]
+    async with redis_cache.client.pipeline(transaction=False) as pipe:
+        for entry in entries:
+            pipe.set(entry, b"cached", ex=3600)
+        await pipe.execute()
+    for entry in entries:
+        await cache.track_entry(PROJECT_ID, CONTENT, versions, entry, 3600)
+
+    await cache.invalidate_project(PROJECT_ID)
+
+    assert await redis_cache.client.exists(*entries) == 0
+    # The project index is drained; group indexes from the old epoch expire on their own.
+    project_index = entry_index_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+        group=PROJECT,
+        version=versions.project,
+    )
+    assert await redis_cache.client.exists(project_index) == 0
+
+
+@pytest.mark.asyncio
 async def test_invalidation_leaves_unrelated_redis_data_untouched(
     redis_cache: RedisCacheHarness,
 ) -> None:
