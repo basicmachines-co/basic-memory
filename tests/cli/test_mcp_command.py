@@ -5,7 +5,7 @@ loopback by default, warn when bound elsewhere, and install FastMCP's Host/Origi
 on both transports while honoring FastMCP's configured allowlists.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 import fastmcp
 import httpx
@@ -14,11 +14,12 @@ from fastmcp.server.http import HostOriginGuardMiddleware
 from typer.testing import CliRunner
 
 import basic_memory.cli.commands.mcp as mcp_mod
-from basic_memory.cli.commands.mcp import HttpTransport
 from basic_memory.cli.main import app as cli_app
 from basic_memory.mcp.server import mcp as live_mcp_server
 
 runner = CliRunner()
+
+type HttpTransport = Literal["streamable-http", "sse"]
 
 WARNING_TEXT = "has no authentication"
 
@@ -59,8 +60,11 @@ def test_is_loopback_host(host: str, expected: bool) -> None:
     assert mcp_mod.is_loopback_host(host) is expected
 
 
-def test_streamable_http_delegates_guard_to_fastmcp(captured_run: dict[str, Any]) -> None:
-    result = runner.invoke(cli_app, ["mcp", "--transport", "streamable-http"])
+@pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+def test_http_transports_delegate_guard_to_fastmcp(
+    transport: HttpTransport, captured_run: dict[str, Any]
+) -> None:
+    result = runner.invoke(cli_app, ["mcp", "--transport", transport])
 
     assert result.exit_code == 0, result.output
     assert captured_run["host"] == "127.0.0.1"
@@ -70,22 +74,12 @@ def test_streamable_http_delegates_guard_to_fastmcp(captured_run: dict[str, Any]
     assert WARNING_TEXT not in result.output
 
 
-def test_sse_installs_guard_middleware(captured_run: dict[str, Any]) -> None:
-    result = runner.invoke(cli_app, ["mcp", "--transport", "sse"])
-
-    assert result.exit_code == 0, result.output
-    assert captured_run["host"] == "127.0.0.1"
-    assert _guard_middleware_count(captured_run["middleware"]) == 1
-    assert "host_origin_protection" not in captured_run
-    assert WARNING_TEXT not in result.output
-
-
 def test_non_loopback_host_warns(captured_run: dict[str, Any]) -> None:
     result = runner.invoke(cli_app, ["mcp", "--transport", "sse", "--host", "0.0.0.0"])
 
     assert result.exit_code == 0, result.output
     assert captured_run["host"] == "0.0.0.0"
-    assert _guard_middleware_count(captured_run["middleware"]) == 1
+    assert captured_run["host_origin_protection"] == "auto"
     assert WARNING_TEXT in result.output
     assert "0.0.0.0" in result.output
 
@@ -99,7 +93,7 @@ def test_non_loopback_host_warns(captured_run: dict[str, Any]) -> None:
 
 
 def _loopback_client(transport: HttpTransport) -> httpx.AsyncClient:
-    app = live_mcp_server.http_app(transport=transport, **mcp_mod.http_guard_options(transport))
+    app = live_mcp_server.http_app(transport=transport, host_origin_protection="auto")
     asgi = httpx.ASGITransport(app=app, client=("127.0.0.1", 50000))
     return httpx.AsyncClient(transport=asgi, base_url="http://127.0.0.1:8000")
 
@@ -145,6 +139,6 @@ async def test_guard_honors_fastmcp_allowlists(
 
 @pytest.mark.parametrize("transport", ["streamable-http", "sse"])
 def test_guard_installed_once_per_transport(transport: HttpTransport) -> None:
-    app = live_mcp_server.http_app(transport=transport, **mcp_mod.http_guard_options(transport))
+    app = live_mcp_server.http_app(transport=transport, host_origin_protection="auto")
 
     assert _guard_middleware_count(app.user_middleware) == 1

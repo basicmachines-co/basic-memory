@@ -3,12 +3,12 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "basic-memory>=0.23.2",
-#     "fastmcp==4.0.3",
+#     "fastmcp==4.1.0",
 # ]
 # [tool.uv]
 # # The released Basic Memory runtime still pins the beta. Use the stable
 # # version tested by core until the next runtime release carries this pin.
-# override-dependencies = ["fastmcp==4.0.3"]
+# override-dependencies = ["fastmcp==4.1.0"]
 # ///
 """PreCompact hook — the entire hook. All logic (settings resolution, the
 extractive checkpoint note, lifecycle-envelope capture) lives in the released

@@ -3,7 +3,7 @@
 import ipaddress
 import os
 import threading
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import typer
 from loguru import logger
@@ -22,41 +22,6 @@ class _DeferredMcpServer:
 
 # Keep module-level attribute for tests/monkeypatching while deferring heavy import.
 mcp_server = _DeferredMcpServer()
-
-
-type HttpTransport = Literal["streamable-http", "sse"]
-
-
-def http_guard_options(transport: HttpTransport) -> dict[str, Any]:
-    """Return the `run` kwargs that install FastMCP's Host/Origin guard for a transport.
-
-    In "auto" mode the guard checks Host and Origin only for connections arriving on
-    a loopback address. That closes DNS rebinding from a browser tab and leaves
-    0.0.0.0 container binds (Docker bridge) usable.
-    """
-    # Trigger: streamable-http transport.
-    # Why: FastMCP builds its own guard there from host_origin_protection and the
-    #      configured FASTMCP_HTTP_ALLOWED_HOSTS / FASTMCP_HTTP_ALLOWED_ORIGINS.
-    # Outcome: delegate to FastMCP; adding our middleware too would guard twice.
-    if transport == "streamable-http":
-        return {"host_origin_protection": "auto"}
-
-    # SSE: FastMCP 4.0.3's create_sse_app ignores host_origin_protection, so install
-    # the same guard ourselves with the allowlists create_streamable_http_app would
-    # read from fastmcp.settings.
-    # Deferred: fastmcp/starlette are heavy and the CLI import path must stay light
-    # (tests/cli/test_cli_exit.py guards this).
-    import fastmcp
-    from fastmcp.server.http import HostOriginGuardMiddleware
-    from starlette.middleware import Middleware
-
-    guard = Middleware(
-        HostOriginGuardMiddleware,
-        allowed_hosts=fastmcp.settings.http_allowed_hosts,
-        allowed_origins=fastmcp.settings.http_allowed_origins,
-        mode="auto",
-    )
-    return {"middleware": [guard]}
 
 
 def is_loopback_host(host: str) -> bool:
@@ -192,5 +157,9 @@ def mcp(
             port=port,
             path=path,
             log_level="INFO",
-            **http_guard_options(transport),
+            # "auto" installs FastMCP's Host/Origin guard for connections arriving on
+            # a loopback address: it closes DNS rebinding from a browser tab and
+            # leaves 0.0.0.0 container binds (Docker bridge) usable. FastMCP applies
+            # it to both HTTP transports with FASTMCP_HTTP_ALLOWED_HOSTS/_ORIGINS.
+            host_origin_protection="auto",
         )
