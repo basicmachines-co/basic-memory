@@ -13,6 +13,12 @@ from typer.testing import CliRunner
 from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.config import DatabaseBackend
+from basic_memory.indexing.models import (
+    IndexFileBatchJobResult,
+    IndexFileJobResult,
+    IndexFileJobStatus,
+)
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 import basic_memory.cli.commands.db as db_cmd  # noqa: F401
 
 
@@ -77,7 +83,7 @@ def _configure_embedding_runtime(
     project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     printed_lines: list[str] = []
     project_index = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ProjectIndexCoordinatorResult(
             total_files=1,
             enqueued_files=1,
             enqueued_batches=1,
@@ -285,7 +291,7 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     app_config = _stub_app_config()
     project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     project_index = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ProjectIndexCoordinatorResult(
             total_files=3,
             enqueued_files=2,
             enqueued_batches=1,
@@ -335,7 +341,7 @@ async def test_reindex_project_full_uses_core_project_index_and_reports_summary(
     # Search-only reindex must not run the embedding provider via the project index.
     assert index_call.kwargs["embeddings"] is False
     assert any("project index" in line for line in printed_lines)
-    assert any("3 observed, 2 indexed, 1 deleted" in line for line in printed_lines)
+    assert any("3 observed, 2 indexed, 0 failed, 1 deleted" in line for line in printed_lines)
 
 
 @pytest.mark.asyncio
@@ -546,7 +552,9 @@ async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, 
 
     async def record_project_index(project, *, runtime_factory, force_full, embeddings):
         call_order.append(f"index:{project.name}")
-        return SimpleNamespace(total_files=0, enqueued_files=0, enqueued_batches=0, deleted_files=0)
+        return ProjectIndexCoordinatorResult(
+            total_files=0, enqueued_files=0, enqueued_batches=0, deleted_files=0
+        )
 
     # _reindex imports its database/index dependencies at call time (#886),
     # so stubs target the source modules instead of db_cmd attributes.
@@ -606,7 +614,7 @@ async def test_reindex_search_converges_seeded_db_fts_divergence(
             return [test_project]
 
     project_index = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ProjectIndexCoordinatorResult(
             total_files=0,
             enqueued_files=0,
             enqueued_batches=0,
@@ -671,7 +679,7 @@ async def test_reindex_search_wires_stale_row_purge(
             return [test_project]
 
     project_index = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ProjectIndexCoordinatorResult(
             total_files=0,
             enqueued_files=0,
             enqueued_batches=0,
@@ -725,7 +733,7 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     project = SimpleNamespace(id=1, name="foo", permalink="foo", path="/tmp/foo")
     vector_reindex_calls: list[dict[str, object]] = []
     project_index = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ProjectIndexCoordinatorResult(
             total_files=1, enqueued_files=1, enqueued_batches=1, deleted_files=0
         )
     )
@@ -879,6 +887,75 @@ def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
     ) in output
     assert "Representative error:" not in output
     assert "Reindex complete!" in output
+
+
+def test_reindex_on_keyword_only_host_reports_skipped_embeddings(monkeypatch, session_maker):
+    # A host that cannot load sqlite-vec returns no index or model identity (#1743).
+    stats = _vector_stats(total_entities=2, embedded=0, skipped=2, errors=0)
+    stats["vector_index"] = None
+    stats["embedding_model"] = None
+    _app_config, _project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+
+    result = runner.invoke(app, ["reindex"])
+
+    assert result.exit_code == 0, result.output
+    output = "\n".join(printed_lines)
+    assert "Embeddings skipped: semantic search is unavailable on this host" in output
+    assert "Embeddings complete" not in output
+    assert "Reindex complete!" in output
+
+
+def _failed_file(path: str) -> IndexFileJobResult:
+    return IndexFileJobResult(
+        status=IndexFileJobStatus.failed,
+        reason=f"file indexing failed: {path}: boom [x]",
+    )
+
+
+def test_reindex_reports_failed_files_and_exits_one(monkeypatch, session_maker):
+    stats = _vector_stats(total_entities=1, embedded=1, skipped=0, errors=0)
+    _app_config, project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+    failed = tuple(_failed_file(f"bad-{index}.md") for index in range(12))
+    processed = IndexFileJobResult(status=IndexFileJobStatus.processed, reason="file indexed")
+    project_index.return_value = ProjectIndexCoordinatorResult(
+        total_files=13,
+        enqueued_files=13,
+        enqueued_batches=1,
+        deleted_files=0,
+        batch_results=(
+            IndexFileBatchJobResult(
+                total_files=13,
+                processed_files=1,
+                missing_files=0,
+                failed_files=12,
+                file_results=(processed, *failed),
+                vector_targets=(),
+            ),
+        ),
+    )
+
+    result = runner.invoke(app, ["reindex"])
+
+    # Failed files have no entity or search row, so the run is not a success (#1742).
+    assert result.exit_code == 1
+    output = "\n".join(printed_lines)
+    assert "13 observed, 1 indexed, 12 failed, 0 deleted" in output
+    assert "[red]failed[/red] file indexing failed: bad-0.md: boom \\[x]" in output
+    assert "bad-9.md" in output
+    assert "bad-10.md" not in output
+    assert "...and 2 more" in output
+    assert "12 files could not be indexed" in output
+    assert "Reindex incomplete: some files could not be indexed." in output
+    assert "Full-text search index rebuilt" in output
+    assert "Reindex complete!" not in output
 
 
 def test_reindex_with_deferred_embeddings_reports_incomplete_and_exits_one(

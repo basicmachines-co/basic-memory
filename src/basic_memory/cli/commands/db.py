@@ -23,6 +23,10 @@ from basic_memory.utils import generate_permalink, shell_command
 from basic_memory.cli.markup import literal
 
 console = Console()
+
+# A reindex lists at most this many failed files per project; the count covers the rest.
+FAILED_FILES_SHOWN = 10
+
 REINDEX_ERROR_SUMMARY_MAX_LENGTH = 240
 
 
@@ -371,6 +375,7 @@ async def _reindex(
     )
     from basic_memory.repository import EntityRepository, ProjectRepository
     from basic_memory.repository.search_repository import create_search_repository
+    from basic_memory.indexing.models import IndexFileJobStatus
     from basic_memory.repository.search_repository_base import purge_stale_search_index_rows
     from basic_memory.services.initialization import (
         reconcile_projects_with_config,
@@ -417,6 +422,7 @@ async def _reindex(
         embedding_entities_total = 0
         embedding_errors_total = 0
         incomplete_projects: list[str] = []
+        failed_file_projects: list[str] = []
         for proj in projects:
             console.print(f"\n[bold]Project: [cyan]{literal(proj.name)}[/cyan][/bold]")
 
@@ -446,18 +452,40 @@ async def _reindex(
                     # rebuilding it — so callers pay the embedding cost twice.
                     embeddings=False,
                 )
+                # A local reindex runs every batch inline, so each submitted file's
+                # outcome is here; a failed file has no entity or search row (#1742).
+                failed_files = [
+                    file_result
+                    for batch_result in result.batch_results
+                    for file_result in batch_result.file_results
+                    if file_result.status is IndexFileJobStatus.failed
+                ]
                 console.print(
                     "  [dim]project index: "
                     f"{result.total_files} observed, "
-                    f"{result.enqueued_files} indexed, "
+                    f"{result.enqueued_files - len(failed_files)} indexed, "
+                    f"{len(failed_files)} failed, "
                     f"{result.deleted_files} deleted, "
                     f"{result.enqueued_batches} batches[/dim]"
                 )
+                for file_result in failed_files[:FAILED_FILES_SHOWN]:
+                    console.print(f"  [red]failed[/red] {escape(file_result.reason)}")
+                if len(failed_files) > FAILED_FILES_SHOWN:
+                    console.print(
+                        f"  [red]...and {len(failed_files) - FAILED_FILES_SHOWN} more[/red]"
+                    )
 
                 purged = await purge_stale_search_index_rows(session_maker, proj.id)
                 console.print(f"  [dim]{purged} stale search rows purged[/dim]")
 
-                console.print("  [green]done[/green] Full-text search index rebuilt")
+                if failed_files:
+                    failed_file_projects.append(proj.name)
+                    console.print(
+                        "  [yellow]incomplete[/yellow] Full-text search index rebuilt; "
+                        f"{len(failed_files)} files could not be indexed"
+                    )
+                else:
+                    console.print("  [green]done[/green] Full-text search index rebuilt")
 
             if embeddings:
                 embedding_mode_label = "full rebuild" if full else "incremental sync"
@@ -516,20 +544,30 @@ async def _reindex(
                         completed=stats["total_entities"] - stats["deferred"],
                     )
 
-                embedding_status = (
-                    "[yellow]incomplete[/yellow] Embeddings incomplete"
-                    if stats["deferred"]
-                    else "[green]done[/green] Embeddings complete"
-                )
-                console.print(
-                    f"  {embedding_status} "
-                    f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
-                    f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
-                    f"{stats['embedded']} entities embedded, "
-                    f"{stats['skipped']} skipped, "
-                    f"{stats['errors']} errors, "
-                    f"{stats['deferred']} with pending chunks"
-                )
+                # Trigger: the host cannot load sqlite-vec, so search runs keyword-only
+                #          (#711) and the vector rebuild returned without an index or model.
+                # Why: there is nothing to report as done or failed (#1743).
+                # Outcome: say embeddings were skipped; the full-text index still serves.
+                if stats["vector_index"] is None:
+                    console.print(
+                        "  [yellow]skipped[/yellow] Embeddings skipped: semantic search is "
+                        "unavailable on this host, so search is keyword-only"
+                    )
+                else:
+                    embedding_status = (
+                        "[yellow]incomplete[/yellow] Embeddings incomplete"
+                        if stats["deferred"]
+                        else "[green]done[/green] Embeddings complete"
+                    )
+                    console.print(
+                        f"  {embedding_status} "
+                        f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
+                        f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
+                        f"{stats['embedded']} entities embedded, "
+                        f"{stats['skipped']} skipped, "
+                        f"{stats['errors']} errors, "
+                        f"{stats['deferred']} with pending chunks"
+                    )
                 if stats["sample_errors"]:
                     console.print(
                         "  [yellow]Representative error:[/yellow] "
@@ -572,6 +610,16 @@ async def _reindex(
                     f"[green]{literal(shell_command('bm', 'reindex', '--embeddings', '--project', name))}[/green] "
                     "(without --full, which would start over)."
                 )
+            raise typer.Exit(code=1)
+
+        # Trigger: some files failed to index in the full-text pass.
+        # Why: those notes have no entity or search row, so reporting success would
+        #      hide notes that search cannot find (#1742).
+        # Outcome: name the projects and exit non-zero so scripts notice.
+        if failed_file_projects:
+            console.print("\n[yellow]Reindex incomplete: some files could not be indexed.[/yellow]")
+            for name in failed_file_projects:
+                console.print(f"  Fix the files listed under [cyan]{literal(name)}[/cyan].")
             raise typer.Exit(code=1)
 
         console.print("\n[green]Reindex complete![/green]")

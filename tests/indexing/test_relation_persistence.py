@@ -88,6 +88,7 @@ class RecordingRelationGenerationStore:
         *,
         entity_id: int,
         generation: int,
+        published_identities: frozenset[tuple[str, str]],
     ) -> RelationGenerationWriteResult:
         assert session is not None
         self.events.append("cleanup")
@@ -613,8 +614,9 @@ async def test_failed_relation_publication_forces_change_detection_retry(
             *,
             entity_id: int,
             generation: int,
+            published_identities: frozenset[tuple[str, str]],
         ) -> RelationGenerationWriteResult:
-            del session, entity_id, generation
+            del session, entity_id, generation, published_identities
             raise AssertionError("failed publication cannot reach cleanup")
 
         async def resolved_target_note_ids(

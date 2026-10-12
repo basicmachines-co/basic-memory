@@ -856,14 +856,15 @@ async def prepare_entity_vector_jobs_window(
                     await repository._prepare_vector_session(session)
                     await repository._lock_external_vector_write(session)
                     plans_to_apply = mutation_plans
-                    if repository._uses_external_vector_index():
-                        # Trigger: entity deletion can finish after the shared read
-                        # snapshot but before this prepare transaction gets the
-                        # project lock.
-                        # Why: applying that stale plan would recreate a manifest
-                        # for an entity the delete just removed.
-                        # Outcome: external writes re-read and re-plan under the
-                        # shared lock before making any manifest mutation.
+                    if repository._replans_prepare_under_write_lock():
+                        # Trigger: entity deletion, or a newer sync of the same entity,
+                        # can finish after the shared read snapshot but before this
+                        # prepare transaction gets the write lock.
+                        # Why: applying that stale plan would recreate a manifest for
+                        # an entity the delete just removed, or publish an obsolete
+                        # chunk as ready next to the current one (#1734).
+                        # Outcome: re-read and re-plan under the lock before making
+                        # any manifest mutation.
                         mutation_entity_ids = [plan.entity_id for _index, plan in mutation_plans]
                         locked_source_rows = await repository._fetch_prepare_window_source_rows(
                             session,
@@ -953,7 +954,7 @@ async def prepare_entity_vector_jobs_prefetched(
             await repository._prepare_vector_session(session)
             await repository._lock_external_vector_write(session)
             locked_plan = planned
-            if repository._uses_external_vector_index():
+            if repository._replans_prepare_under_write_lock():
                 locked_source_rows = await repository._fetch_prepare_window_source_rows(
                     session,
                     [entity_id],

@@ -440,6 +440,11 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             yield
 
     @override
+    def _replans_prepare_under_write_lock(self) -> bool:
+        """Re-plan under the prepare write lock, which every SQLite prepare write takes."""
+        return True
+
+    @override
     def _prepare_window_existing_rows_sql(self, placeholders: str) -> str:
         """Use the authoritative SQL manifest for adapter-independent readiness."""
         return super()._prepare_window_existing_rows_sql(placeholders)

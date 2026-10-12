@@ -122,25 +122,41 @@ def normalize_frontmatter_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return {key: normalize_frontmatter_value(value) for key, value in metadata.items()}
 
 
+def _iso_timestamp(value: Any) -> datetime | None:
+    """Return the ISO 8601 datetime a frontmatter value spells, or None if it spells none."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
 def _parse_frontmatter_timestamp(
     metadata: dict[str, Any],
     field_name: str,
     *,
     fallback: datetime,
+    file_path: Path,
 ) -> datetime:
     """Parse one canonical semantic timestamp after YAML value normalization."""
     value = metadata.get(field_name)
     if value is None:
         return fallback
-    if not isinstance(value, str):
-        raise ValueError(f"Invalid ISO 8601 value for frontmatter field '{field_name}': {value!r}")
 
-    try:
-        timestamp = datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"Invalid ISO 8601 value for frontmatter field '{field_name}': {value!r}"
-        ) from exc
+    # Trigger: the field holds something other than an ISO 8601 string, such as a
+    #          template placeholder (`{{date}}`) or freeform text from an import.
+    # Why: the timestamp is metadata about the note, not its content. Rejecting it
+    #      would leave the whole note out of the index over one unreadable field.
+    # Outcome: index the note with the file-time fallback and warn with the path so
+    #          the author can fix the value.
+    timestamp = _iso_timestamp(value)
+    if timestamp is None:
+        logger.warning(
+            f"Invalid ISO 8601 value for frontmatter field '{field_name}' in "
+            f"{file_path.as_posix()}: {value!r}. Using the file timestamp instead."
+        )
+        return fallback
 
     # ISO date-only and naive datetime values describe local wall-clock time.
     # Explicit offsets are already unambiguous and must remain unchanged.
@@ -407,11 +423,13 @@ class EntityParser:
             metadata,
             "created",
             fallback=created_fallback,
+            file_path=file_path,
         )
         modified = _parse_frontmatter_timestamp(
             metadata,
             "modified",
             fallback=modified_fallback,
+            file_path=file_path,
         )
 
         return EntityMarkdown(

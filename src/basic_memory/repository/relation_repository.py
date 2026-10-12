@@ -604,8 +604,13 @@ class RelationRepository(Repository[Relation]):
         *,
         entity_id: int,
         generation: int,
+        published_identities: frozenset[tuple[str, str]],
     ) -> RelationGenerationWriteResult:
-        """Delete superseded rows only while the cleanup generation remains current."""
+        """Delete superseded rows only while the cleanup generation remains current.
+
+        ``published_identities`` holds the ``(relation_type, to_name)`` of every
+        relation this generation's publication wrote.
+        """
         current_generation = await session.scalar(
             current_relation_generation_statement(
                 project_id=self.project_id,
@@ -628,6 +633,37 @@ class RelationRepository(Repository[Relation]):
                 ),
             )
         )
+
+        # Trigger: a row carries this generation but this publication did not write it.
+        # Why: a full reindex of unchanged bytes republishes under the same generation.
+        #      When the parser changed in between (an inline-code `[[link]]` is no longer
+        #      a link), the dropped relation keeps the current generation, so the delete
+        #      above never matches it and no later pass at this generation would (#1741).
+        # Outcome: delete same-generation rows the publication no longer produces. Two
+        #          publishers of one generation parse the same bytes, so they agree.
+        same_generation_rows = await session.execute(
+            select(Relation.id, Relation.relation_type, Relation.to_name).where(
+                Relation.project_id == self.project_id,
+                Relation.from_id == entity_id,
+                Relation.generation == generation,
+            )
+        )
+        unpublished_ids = [
+            row.id
+            for row in same_generation_rows
+            if (row.relation_type, row.to_name) not in published_identities
+        ]
+        for id_chunk in batched(unpublished_ids, RELATION_GENERATION_WRITE_STATEMENT_SIZE):
+            await session.execute(
+                delete(Relation).where(
+                    Relation.id.in_(id_chunk),
+                    current_relation_generation_predicate(
+                        project_id=self.project_id,
+                        entity_id=entity_id,
+                        generation=generation,
+                    ),
+                )
+            )
 
         # Successful cleanup converts every retry for this or an older generation
         # into search-refresh work in the same transaction. A newer generation's

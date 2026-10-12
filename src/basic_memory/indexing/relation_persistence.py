@@ -70,6 +70,7 @@ class RelationGenerationStore(Protocol):
         *,
         entity_id: int,
         generation: int,
+        published_identities: frozenset[tuple[str, str]],
     ) -> RelationGenerationWriteResult: ...
 
     async def resolved_target_note_ids(
@@ -285,6 +286,9 @@ class RelationGenerationPublisher:
                 session,
                 entity_id=entity_id,
                 generation=generation,
+                published_identities=frozenset(
+                    (relation.relation_type, relation.target_name) for relation in ordered_relations
+                ),
             )
         return cleanup.generation_is_current
 
