@@ -1,6 +1,6 @@
 ---
 name: memory-schema
-description: "Schema lifecycle management for Basic Memory: discover unschemaed notes, infer schemas, create and edit schema definitions, validate notes, and detect drift. Use when working with structured note types (Task, Person, Meeting, etc.) to maintain consistency across the knowledge graph."
+description: "Manage Basic Memory schemas: find unschemaed notes, infer and edit schemas, validate notes, detect drift. Use when structured note types (Task, Person, Meeting) need consistency across the graph."
 ---
 
 # Memory Schema

@@ -9,6 +9,7 @@ The stub is deliberately tiny. It carries only:
 1. Which Basic Memory **project** to use (always, explicitly)
 2. The instruction to **read the startup router before any knowledge-base work** and follow its dispatch table
 3. The 3–5 rules that must hold **before** the router loads (because they govern the loading itself)
+4. The **memory routine**: when to look things up and when to offer to save, in the same words Memory Quest uses
 
 Everything else — conventions, schemas, workflows, reference data — lives in the router and the notes it dispatches to. This keeps the always-loaded footprint small and means the user edits notes, not platform settings, when conventions change.
 
@@ -29,9 +30,16 @@ Rules that apply before anything else:
 3. Folder paths use exact casing as given in the instruction notes.
 4. Before overwriting any existing note, read it in full first.
 5. When unsure where something belongs, ask me instead of guessing.
+
+Memory routine:
+When a new task could benefit from prior knowledge, use Basic Memory at the start to find and read relevant context before proceeding. Choose the relevant project; ask me if the project is unclear. Use what you find during the work and make clear which prior decisions or notes informed your answer. If no relevant memory exists, say so and continue without inventing it.
+
+At the end, offer to save useful decisions, outcomes, or lessons to the relevant Basic Memory project. Follow my saving preferences and ask for approval by default. Update an existing relevant note when appropriate. Do not automatically capture every conversation or save sensitive details unnecessarily.
 ```
 
 Rules 1, 3, 4 are in the stub rather than the router because they protect the system even if the router fails to load or has been corrupted.
+
+The memory routine is the same text the Basic Memory web app's Memory Quest panel asks users to save, so keep it word for word: a user who already saved it there should find nothing new to add, only the project and router rules above it. It runs after the router loads and governs the rest of the session: when to look things up, and asking before saving. Rule 1 names the project, so "the relevant project" is "{project-name}" unless the user has others.
 
 ## Where the stub goes
 

@@ -1,6 +1,6 @@
 ---
 name: memory-comark
-description: "Write Basic Memory notes that render as charts, tables, boards, and live dashboards with `::bm-*` Comark components. Use when a note would read better as a figure, checklist, kanban board, or a live view over the knowledge base (counts, rankings, recent activity, search results), or when editing a note that already contains `::bm-*` directives."
+description: "Write Basic Memory notes that render as charts, tables, boards, and live views with `::bm-*` Comark components. Use when a note reads better as a figure or board, or already has `::bm-*` directives."
 ---
 
 # Memory Comark

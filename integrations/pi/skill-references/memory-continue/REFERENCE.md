@@ -7,7 +7,7 @@
 
 ---
 name: memory-continue
-description: "Resume prior work by rebuilding context from the Basic Memory knowledge graph — pick up where you left off using memory:// URLs, recent activity, and search. Use when starting a session or when the user says 'continue with...', 'back to...', or 'where were we?'"
+description: "Resume prior work by rebuilding context from the Basic Memory graph via memory:// URLs, recent activity, and search. Use at session start or on 'continue with...', 'back to...', 'where were we?'"
 ---
 
 # Memory Continue

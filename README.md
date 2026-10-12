@@ -237,8 +237,12 @@ Framework-agnostic `SKILL.md` files live in [`skills/`](skills). If your
 Skills CLI supports repository subdirectory sources:
 
 ```bash
-npx skills add basicmachines-co/basic-memory/skills
+npx skills add basicmachines-co/basic-memory/skills -g
 ```
+
+For Claude and ChatGPT, upload `basic-memory.zip` or `basic-memory-chatgpt.zip`
+from the [`skills-latest`](https://github.com/basicmachines-co/basic-memory/releases/tag/skills-latest)
+release; see [`skills/README.md`](skills/README.md#installation).
 
 If your installed Skills CLI cannot load that source, update the CLI or copy
 the `memory-*` directories from `skills/` into your agent's skills directory.

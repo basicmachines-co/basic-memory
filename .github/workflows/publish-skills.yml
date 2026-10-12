@@ -3,14 +3,25 @@ name: Publish Skills
 on:
   push:
     branches: [main]
+    # Only what changes the archives. The validator also reads the OpenClaw
+    # skill lists, but those never change a zip.
+    paths:
+      - "skills/**"
+      - "scripts/build_skills_dist.py"
+      - "scripts/validate_skills.py"
+      - "scripts/skill-bundle/**"
+      - "scripts/publish_skills_release.py"
+      - ".github/workflows/publish-skills.yml"
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+# Queue runs instead of cancelling one mid-publish: a cancelled swap could
+# leave a contract asset renamed aside until the next run.
 concurrency:
   group: publish-skills
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -33,25 +44,14 @@ jobs:
       - name: Package skills
         run: python scripts/build_skills_dist.py
 
-      - name: Publish rolling skill archive
+      # The Basic Memory web app links to these assets by name at
+      # https://github.com/basicmachines-co/basic-memory/releases/download/skills-latest/<asset>.
+      # The script checks the asset names, uploads under staging names, and
+      # swaps them in only after every upload succeeds.
+      - name: Publish rolling skill archives
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: skills-latest
         run: |
           set -euo pipefail
-
-          asset="dist/skills/memory-onboarding.zip"
-          test -f "$asset"
-
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$asset" --clobber
-            gh release edit "$RELEASE_TAG" \
-              --notes "Rolling skill archives built from ${GITHUB_SHA}." \
-              --latest=false
-          else
-            gh release create "$RELEASE_TAG" "$asset" \
-              --target "$GITHUB_SHA" \
-              --title "Latest Basic Memory skills" \
-              --notes "Rolling skill archives built from ${GITHUB_SHA}." \
-              --latest=false
-          fi
+          mapfile -t assets < <(find dist/skills dist/skills-openai -maxdepth 1 -type f -name '*.zip' | sort)
+          python scripts/publish_skills_release.py "${assets[@]}"

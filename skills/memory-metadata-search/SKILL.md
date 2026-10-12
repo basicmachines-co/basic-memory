@@ -1,6 +1,6 @@
 ---
 name: memory-metadata-search
-description: "Structured metadata search for Basic Memory: query notes by custom frontmatter fields using equality, range, array, and nested filters. Use when finding notes by status, priority, confidence, or any custom YAML field rather than free-text content."
+description: "Search Basic Memory notes by custom frontmatter fields with equality, range, array, and nested filters. Use when finding notes by status, priority, confidence, or any YAML field, not free text."
 ---
 
 # Memory Metadata Search

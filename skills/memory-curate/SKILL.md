@@ -1,6 +1,6 @@
 ---
 name: memory-curate
-description: "Curate the Basic Memory knowledge graph: find orphan notes and suggest links, propose typed relations, merge duplicates, audit tags and folders, and build hub notes. Use to organize, connect, and improve a knowledge base as notes accumulate."
+description: "Curate the Basic Memory graph: link orphan notes, propose typed relations, merge duplicates, audit tags and folders, build hub notes. Use to organize and connect a knowledge base as notes accumulate."
 ---
 
 # Memory Curate

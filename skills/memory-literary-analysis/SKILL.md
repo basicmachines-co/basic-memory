@@ -1,6 +1,6 @@
 ---
 name: memory-literary-analysis
-description: "Analyze a complete literary work into a structured Basic Memory knowledge graph. Covers schema design, entity seeding, chapter-by-chapter processing, cross-referencing, validation, and graph exploration."
+description: "Analyze a complete literary work into a structured Basic Memory knowledge graph: schema design, entity seeding, chapter-by-chapter processing, cross-referencing, and validation."
 ---
 
 # Memory Literary Analysis

@@ -1,6 +1,6 @@
 ---
 name: memory-ingest
-description: "Process unstructured external input (meeting transcripts, conversation logs, pasted documents) into structured Basic Memory entities. Extracts entities, searches for existing matches, proposes new entities with approval, creates notes with observations and relations, and captures action items."
+description: "Turn meeting transcripts, conversation logs, or pasted documents into structured Basic Memory notes: match existing entities, propose new ones with approval, and capture action items."
 ---
 
 # Memory Ingest

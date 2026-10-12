@@ -1,6 +1,10 @@
 ---
 name: memory-ci-capture
-description: Synthesize GitHub delivery context into a concise Basic Memory project update. Use in CI after `bm ci collect` prepares a ProjectUpdateContext; return only structured AgentSynthesis JSON for `bm ci publish`.
+description: "Internal CI skill: synthesize GitHub delivery context into a Basic Memory project update. Use after `bm ci collect`; return only AgentSynthesis JSON for `bm ci publish`."
+metadata:
+  # CI-only: hidden from `npx skills` (INSTALL_INTERNAL_SKILLS=1 shows it) and
+  # left out of the release archives by scripts/build_skills_dist.py.
+  internal: true
 ---
 
 # Memory CI Capture
