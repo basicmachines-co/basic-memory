@@ -149,6 +149,7 @@ def cached_read(
             _AsGet(request.scope, request.receive) if request.method == "QUERY" else request
         )
         steps = sdk_dependency(sdk_request, target.scope.cache.client)
+        cache_hit: CacheHitException | None = None
         with logfire.span(
             "read_cache.read_through",
             operation=operation.value,
@@ -167,7 +168,7 @@ def cached_read(
             except CacheHitException as hit:
                 span.set_attribute("cache.lookup.outcome", "hit")
                 hit.response.headers.update(hit_headers or {})
-                raise
+                cache_hit = hit
             except ReadCacheUnavailable:
                 # Version lookup failed: Redis is down, so the database answers
                 # and nothing is stored under a version we could not read.
@@ -176,6 +177,10 @@ def cached_read(
                 target = None
             else:
                 span.set_attribute("cache.lookup.outcome", "miss")
+        # The hit is control flow, not a failure. Raise it after the span has
+        # closed so Logfire does not record every cache hit as an error.
+        if cache_hit is not None:
+            raise cache_hit
         if target is None:
             yield
             return
