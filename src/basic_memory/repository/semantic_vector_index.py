@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -51,6 +52,22 @@ class VectorDeletion:
 
 
 @dataclass(frozen=True, slots=True)
+class VectorAdmission:
+    """Which chunks a filtered vector search may return, as SQL over the manifest.
+
+    ``predicate`` is a boolean expression over ``search_vector_chunks AS c``. Built-in
+    indexes share the SQL database with the manifest and the search rows, so they
+    evaluate it inside their nearest-neighbour query and return the exact top-k of the
+    admitted chunks; no candidate is fetched only to be filtered out afterwards (#1746).
+    Its bind names are its own (see ``prefixed_binds``), so they never collide with an
+    adapter's.
+    """
+
+    predicate: str
+    params: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
 class VectorMatch:
     """One nearest-neighbour match with normalized cosine similarity."""
 
@@ -92,8 +109,13 @@ class SemanticVectorIndex(Protocol):
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
-        """Return nearest matches within ``projects``, ordered by normalized similarity."""
+        """Return nearest matches within ``projects``, ordered by normalized similarity.
+
+        With ``admission``, return the nearest ``limit`` chunks among those it admits.
+        Only indexes inside the SQL database can evaluate it; an external index raises.
+        """
         ...
 
 
@@ -130,3 +152,18 @@ def validate_query_dimensions(scope: VectorIndexScope, query: Sequence[float]) -
             "Query dimensions do not match the configured index scope: "
             f"expected {scope.dimensions}, got {len(query)}."
         )
+
+
+def prefixed_binds(
+    sql: str, params: Mapping[str, object], prefix: str
+) -> tuple[str, dict[str, object]]:
+    """Rename every ``:name`` bind in ``sql`` to ``:{prefix}name``.
+
+    A compiled filter names its binds for its own statement (``scope_0``, ``after_date``
+    and so on); embedded in another statement those names could collide. Longer names
+    are replaced first so ``:scope_1`` never rewrites the head of ``:scope_10``.
+    """
+    renamed = sql
+    for name in sorted(params, key=len, reverse=True):
+        renamed = re.sub(rf"(?<![:\w]):{re.escape(name)}\b", f":{prefix}{name}", renamed)
+    return renamed, {f"{prefix}{name}": value for name, value in params.items()}

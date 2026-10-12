@@ -8,11 +8,16 @@ from redis.asyncio import Redis
 
 from basic_memory.api.container import resolve_container
 from basic_memory.mcp.container import get_container as get_mcp_container
-from basic_memory.read_cache.keys import (
-    DEFAULT_READ_CACHE_PREFIX,
-    redis_read_cache_generation_key,
-)
+from basic_memory.read_cache import PROJECT
+from basic_memory.read_cache.keys import DEFAULT_READ_CACHE_PREFIX, project_hash_tag
 from basic_memory.read_cache.lifecycle import STANDALONE_CACHE_NAMESPACE
+from basic_memory.read_cache.redis import RedisReadCache
+
+
+def _project_key_pattern(project_id: str) -> str:
+    tag = project_hash_tag(namespace=STANDALONE_CACHE_NAMESPACE, project_id=project_id)
+    # Redis glob: escape the hash-tag braces so they match literally.
+    return DEFAULT_READ_CACHE_PREFIX + ":\\{" + tag[1:-1] + "\\}:*"
 
 
 def _reset_config_cache() -> None:
@@ -38,12 +43,7 @@ async def test_mcp_uses_configured_redis_for_requests_and_invalidation(
     _reset_config_cache()
 
     redis = Redis.from_url(redis_url, decode_responses=False)
-    generation_key = redis_read_cache_generation_key(
-        prefix=DEFAULT_READ_CACHE_PREFIX,
-        namespace=STANDALONE_CACHE_NAMESPACE,
-        project_id=str(test_project.external_id),
-    )
-    project_key_pattern = f"{generation_key.removesuffix(':generation')}:*"
+    project_key_pattern = _project_key_pattern(str(test_project.external_id))
 
     try:
         existing_keys = [key async for key in redis.scan_iter(match=project_key_pattern)]
@@ -78,8 +78,7 @@ async def test_mcp_uses_configured_redis_for_requests_and_invalidation(
                 assert result.is_error is False
 
             cache_keys = [key async for key in redis.scan_iter(match=project_key_pattern)]
-            assert generation_key.encode() in cache_keys
-            assert len(cache_keys) > 1
+            assert any(b":entity:" in key for key in cache_keys)
     finally:
         cache_keys = [key async for key in redis.scan_iter(match=project_key_pattern)]
         if cache_keys:
@@ -88,7 +87,7 @@ async def test_mcp_uses_configured_redis_for_requests_and_invalidation(
 
 
 @pytest.mark.asyncio
-async def test_mcp_restart_invalidates_persisted_project_generation(
+async def test_mcp_restart_invalidates_persisted_project_entries(
     redis_url,
     mcp_server,
     test_project,
@@ -99,12 +98,7 @@ async def test_mcp_restart_invalidates_persisted_project_generation(
     _reset_config_cache()
 
     redis = Redis.from_url(redis_url, decode_responses=False)
-    generation_key = redis_read_cache_generation_key(
-        prefix=DEFAULT_READ_CACHE_PREFIX,
-        namespace=STANDALONE_CACHE_NAMESPACE,
-        project_id=str(test_project.external_id),
-    )
-    project_key_pattern = f"{generation_key.removesuffix(':generation')}:*"
+    project_key_pattern = _project_key_pattern(str(test_project.external_id))
 
     try:
         existing_keys = [key async for key in redis.scan_iter(match=project_key_pattern)]
@@ -131,8 +125,8 @@ async def test_mcp_restart_invalidates_persisted_project_generation(
                 },
             )
             assert read.is_error is False
-            generation_before_restart = await redis.get(generation_key)
-            assert generation_before_restart is not None
+            versions = RedisReadCache(client=redis, namespace=STANDALONE_CACHE_NAMESPACE)
+            project_before_restart = await versions.versions(str(test_project.external_id), PROJECT)
 
         note_path = Path(test_project.path) / "cache" / "Offline Restart.md"
         assert note_path.is_file()
@@ -141,10 +135,9 @@ async def test_mcp_restart_invalidates_persisted_project_generation(
         )
 
         async with Client(mcp_server):
-            generation_after_restart = await redis.get(generation_key)
+            project_after_restart = await versions.versions(str(test_project.external_id), PROJECT)
 
-        assert generation_after_restart is not None
-        assert generation_after_restart != generation_before_restart
+        assert project_after_restart != project_before_restart
     finally:
         cache_keys = [key async for key in redis.scan_iter(match=project_key_pattern)]
         if cache_keys:

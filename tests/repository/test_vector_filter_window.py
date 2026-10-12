@@ -8,6 +8,7 @@ the ranking is exhausted, or its tail has fallen below the similarity threshold.
 """
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any, cast, override
 from unittest.mock import AsyncMock, patch
 
@@ -23,8 +24,13 @@ from basic_memory.repository.search_reader import (
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
-from basic_memory.schemas.search import SearchRetrievalMode
-from tests.repository.test_hybrid_fusion import FakeFts, FakeRow, fake_vector_retrieval
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from tests.repository.test_hybrid_fusion import (
+    FakeFts,
+    FakeRow,
+    fake_vector_retrieval,
+    OfflineSemanticSearch,
+)
 from tests.repository.test_vector_threshold import fake_session_maker
 
 FILTERED = PreparedSearchQuery(
@@ -52,6 +58,7 @@ class AdmittingFts(FakeFts):
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         self.calls.append({"candidate_keys": list(candidate_keys or [])})
         return cast(
@@ -71,7 +78,6 @@ def _ranking(count: int, *, top: float = 0.99, step: float = 0.01) -> list[Hydra
             entity_id=row_id,
             chunk_key=f"entity:{row_id}:0",
             source_key=("entity", row_id),
-            chunk_text=f"chunk {row_id}",
             similarity=top - (row_id - 1) * step,
         )
         for row_id in range(1, count + 1)
@@ -81,7 +87,14 @@ def _ranking(count: int, *, top: float = 0.99, step: float = 0.01) -> list[Hydra
 def _adapter(ranking: list[HydratedChunk]) -> AsyncMock:
     """A neighbour stage that hands back the top ``candidate_limit`` of a fixed ranking."""
 
-    async def run(session: Any, embedding: Any, candidate_limit: int, *, trace: Any = None):
+    async def run(
+        session: Any,
+        embedding: Any,
+        candidate_limit: int,
+        *,
+        admission: Any = None,
+        trace: Any = None,
+    ):
         return ranking[:candidate_limit]
 
     return AsyncMock(side_effect=run)
@@ -97,12 +110,21 @@ def _rows() -> AsyncMock:
     return AsyncMock(side_effect=fetch)
 
 
-def _semantic(fts: FakeFts, *, vector_k: int = 4, min_similarity: float = 0.0) -> SemanticSearch:
-    return SemanticSearch(
+def _semantic(
+    fts: FakeFts,
+    *,
+    vector_k: int = 4,
+    min_similarity: float = 0.0,
+    index_name: str = "milvus",
+) -> SemanticSearch:
+    """Defaults to an external index: only external indexes filter in the reader and widen."""
+    return OfflineSemanticSearch(
         fake_session_maker(),
         ProjectScope.single(1),
         fts,
-        fake_vector_retrieval(vector_k=vector_k, min_similarity=min_similarity),
+        fake_vector_retrieval(
+            vector_k=vector_k, min_similarity=min_similarity, index_name=index_name
+        ),
     )
 
 
@@ -215,3 +237,116 @@ async def test_each_round_asks_the_filter_only_about_rows_that_exist():
 
     asked = [sorted(row_id for _type, row_id in call["candidate_keys"]) for call in fts.calls]
     assert asked == [list(range(1, 21)), list(range(1, 26))]
+
+
+def _multi_chunk_ranking(rows: int, chunks_per_row: int) -> list[HydratedChunk]:
+    """Rows 1..rows, each cut into ``chunks_per_row`` chunks, nearest row first."""
+    ranking: list[HydratedChunk] = []
+    for row_id in range(1, rows + 1):
+        for chunk in range(chunks_per_row):
+            ranking.append(
+                HydratedChunk(
+                    entity_id=row_id,
+                    chunk_key=f"entity:{row_id}:{chunk}",
+                    source_key=("entity", row_id),
+                    similarity=0.99 - len(ranking) * 0.0001,
+                )
+            )
+    return ranking
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_window_that_fills_the_page_reads_once():
+    """Large notes own dozens of chunks; admitted rows never reach a chunk-sized budget (#1746).
+
+    Every row passes the filter (as every entity passes the default entity_types filter),
+    so the first window already holds a full page and must not widen.
+    """
+    fts = AdmittingFts(admitted=set(range(1, 1001)))
+    # 52 chunks per note, as measured in production: a 100-chunk window covers two notes.
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=52))
+
+    found = await _search(_semantic(fts, vector_k=100), adapter, query=FILTERED)
+
+    assert found == [1, 2]
+    # Before #1746 this widened 100, 200, 400 ... to the 50,000-chunk scan limit.
+    assert _windows(adapter) == [100]
+
+
+@pytest.mark.asyncio
+async def test_a_filtered_window_widens_only_to_the_page_it_must_fill():
+    """Widening stops once the page is full, not when admitted rows match the chunk budget."""
+    # Only even rows pass. Each row has 10 chunks, so a 20-chunk window covers two
+    # rows and admits one; the page needs two.
+    fts = AdmittingFts(admitted=set(range(2, 1001, 2)))
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=10))
+
+    found = await _search(_semantic(fts), adapter, query=FILTERED)
+
+    assert found == [2, 4]
+    assert _windows(adapter) == [20, 40]
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_index_receives_the_filter_and_reads_once():
+    """sqlite-vec and pgvector rank only admitted chunks: one read, no filter pass (#1746)."""
+    fts = AdmittingFts(admitted=set())
+    adapter = _adapter(_ranking(25))
+
+    found = await _search(_semantic(fts, index_name="sqlite-vec"), adapter, query=FILTERED)
+
+    # The stubbed adapter ignores the admission, so every row comes back unfiltered.
+    assert found == [1, 2]
+    assert _windows(adapter) == [20]
+    assert adapter.await_args is not None
+    admission = adapter.await_args.kwargs["admission"]
+    assert admission.predicate.startswith("(c.project_id, c.source_type, c.source_row_id) IN (")
+    # The row filter got the structured filters without the text; no filter pass ran.
+    assert [query.file_path_prefix for query in fts.queries] == ["notes"]
+    assert all(query.search_text is None for query in fts.queries)
+    assert fts.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_entity_type_filter_is_a_chunk_column_predicate():
+    """The default MCP filter needs no subquery: chunks already carry their row type."""
+    fts = AdmittingFts(admitted=set())
+    semantic = _semantic(fts, index_name="sqlite-vec")
+
+    admission = await semantic._vector_admission(
+        replace(UNFILTERED, search_item_types=[SearchItemType.ENTITY])
+    )
+
+    assert admission is not None
+    assert admission.predicate == "c.source_type IN (:admit_type_0)"
+    assert dict(admission.params) == {"admit_type_0": "entity"}
+    assert fts.queries == []
+
+
+@pytest.mark.asyncio
+async def test_a_query_without_filters_has_no_admission():
+    assert (
+        await _semantic(AdmittingFts(set()), index_name="sqlite-vec")._vector_admission(UNFILTERED)
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_index_widens_until_long_notes_fill_the_page():
+    """Admitted chunks still collapse to rows: a few long notes can fill a chunk window.
+
+    With 52 chunks per note, a 100-chunk admitted read holds two notes; a five-result
+    page widens, each read still handed the admission, until five rows are admitted.
+    """
+    fts = AdmittingFts(admitted=set())
+    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=52))
+
+    found = await _search(
+        _semantic(fts, vector_k=100, index_name="sqlite-vec"), adapter, query=FILTERED, limit=5
+    )
+
+    assert found == [1, 2, 3, 4, 5]
+    assert _windows(adapter) == [100, 200, 400]
+    assert all(call.kwargs["admission"] is not None for call in adapter.await_args_list)
+    # The index admitted the chunks, so no reader-side filter pass ran.
+    assert fts.calls == []

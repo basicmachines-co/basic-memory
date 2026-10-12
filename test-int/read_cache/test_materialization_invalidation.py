@@ -18,12 +18,7 @@ from basic_memory.index.note_content_materialization import (
 )
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult
 from basic_memory.models import Entity, Project
-from basic_memory.read_cache import (
-    ReadCacheKey,
-    ReadCacheOperation,
-    read_cache_request_digest,
-)
-from basic_memory.read_cache.keys import redis_read_cache_generation_key
+from basic_memory.read_cache import CONTENT, PROJECT, NoteGroup
 from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository, NoteContentRepository
 from basic_memory.repository.note_content_repository import AcceptedNoteContentWrite
@@ -70,36 +65,9 @@ class BlockingIndexFileExecutor:
             checksum=checksum,
             content_checksum=None,
             operation=FileIndexOperation.updated,
+            # A body-only pass: its change is the note and content, not the project.
+            identity_changed=False,
         )
-
-
-async def _current_generation(
-    redis_cache: RedisCacheHarness,
-    project_external_id: str,
-) -> bytes | str:
-    generation = await redis_cache.client.get(
-        redis_read_cache_generation_key(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            project_id=project_external_id,
-        )
-    )
-    assert generation is not None
-    return generation
-
-
-async def _initialized_generation(
-    redis_cache: RedisCacheHarness,
-    project_external_id: str,
-) -> bytes | str:
-    await redis_cache.cache.lookup(
-        ReadCacheKey(
-            project_id=project_external_id,
-            operation=ReadCacheOperation.entity,
-            request_digest=read_cache_request_digest("materialization-publication"),
-        )
-    )
-    return await _current_generation(redis_cache, project_external_id)
 
 
 async def _accepted_note(
@@ -166,11 +134,17 @@ async def test_terminal_materialization_invalidates_before_index_completes(
     test_project: Project,
     redis_cache: RedisCacheHarness,
 ) -> None:
-    """A synced publication advances Redis while the following index is still blocked."""
+    """Publication retires reads while the following index is still blocked.
+
+    This accepted change carries no project change record, so publication cannot
+    name the note and retires the whole project. The index pass that follows is a
+    body-only pass and retires just that note and the content-wide reads.
+    """
     _, session_maker = engine_factory
     project_external_id = str(test_project.external_id)
-    generation_before = await _initialized_generation(redis_cache, project_external_id)
+    project_before = await redis_cache.cache.versions(project_external_id, PROJECT)
     entity, accepted = await _accepted_note(session_maker, test_project)
+    note = NoteGroup(str(entity.external_id))
     indexer = BlockingIndexFileExecutor(entity)
     provider = LocalNoteContentMaterializationProvider(
         session_maker=session_maker,
@@ -189,16 +163,20 @@ async def test_terminal_materialization_invalidates_before_index_completes(
         content_repository = NoteContentRepository(project_id=test_project.id)
         async with db.scoped_session(session_maker) as session:
             note_content = await content_repository.get_by_entity_id(session, entity.id)
-        generation_after_publication = await _current_generation(
-            redis_cache,
-            project_external_id,
-        )
+        project_after_publication = await redis_cache.cache.versions(project_external_id, PROJECT)
+        note_after_publication = await redis_cache.cache.versions(project_external_id, note)
+        content_after_publication = await redis_cache.cache.versions(project_external_id, CONTENT)
     finally:
         indexer.release.set()
         await materialization
 
     assert note_content is not None
     assert note_content.file_write_status == "synced"
-    assert generation_after_publication != generation_before
-    generation_after_index = await _current_generation(redis_cache, project_external_id)
-    assert generation_after_index != generation_after_publication
+    assert project_after_publication != project_before
+    assert await redis_cache.cache.versions(project_external_id, PROJECT) == (
+        project_after_publication
+    )
+    assert await redis_cache.cache.versions(project_external_id, note) != note_after_publication
+    assert (
+        await redis_cache.cache.versions(project_external_id, CONTENT) != content_after_publication
+    )

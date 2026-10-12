@@ -60,7 +60,8 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
             ),
         )
 
-    local_response = await client.post(
+    local_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/local-note", "strict": True},
     )
@@ -73,19 +74,23 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
         },
     )
     assert fuzzy_entity_response.status_code == 202
-    qualified_miss_response = await client.post(
+    qualified_miss_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/missing", "strict": True},
     )
-    non_strict_qualified_miss_response = await client.post(
+    non_strict_qualified_miss_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/missing"},
     )
-    aliased_qualified_miss_response = await client.post(
+    aliased_qualified_miss_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": " [[other-project/docs/missing|Missing label]] "},
     )
-    namespaced_title_response = await client.post(
+    namespaced_title_response = await client.request(
+        "QUERY",
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "C++::ABI", "strict": True},
     )

@@ -126,8 +126,8 @@ async def test_an_unhandled_request_exception_does_not_repr_frame_values(
             transport=ASGITransport(app=app, raise_app_exceptions=False),
             base_url="http://test",
         ) as client:
-            response = await client.post(
-                f"{v2_project_url}/knowledge/resolve", json={"identifier": "anything"}
+            response = await client.request(
+                "QUERY", f"{v2_project_url}/knowledge/resolve", json={"identifier": "anything"}
             )
     finally:
         app.dependency_overrides.pop(get_link_resolver_v2_external, None)

@@ -285,17 +285,36 @@
   Alembic migration** (#1381, #1382, #1396, #1433, #1434, #1436, #1484).
 
 - **#1006**: PDF ingestion. `basic-memory[pdf]` adds a pdf-inspector extraction adapter
-  that runs in a bounded worker process and turns a PDF into a `type: document` sidecar
+  that runs in a bounded worker process and turns a PDF into an extracted-text sidecar
   note plus a `type: document_ingestion_run` provenance note, under the same
   parser-neutral contract local and cloud share (#1178, #1377). Generated document
   bodies are searchable but cannot mint observations or relations from extracted text.
 
-- **#1366**: Document observations can cite the PDF page they came from. Enrichment
-  writes OKF-compatible `sources` entries and Markdown footnotes pointing at
+- **#1366**: Document observations can cite the PDF page they came from. The
+  enrichment contract (`enrich_document_markdown`) writes OKF-compatible `sources` entries and Markdown footnotes pointing at
   `file.pdf#page=N`, with an optional printed page label, and the page is checked
   against the extraction's page count. Provenance also keeps the extraction's page map,
   so a span of the raw text can be traced to its pages without re-parsing the PDF
   (#1490, #1519).
+
+- New extracted-text sidecars use `type: extracted_text`. Sidecars written earlier keep
+  `type: document`; both are accepted, the stored value is preserved, and old sidecars
+  still match their run notes and are reused on re-import. The per-page page map now
+  lives only on the ingestion-run note (`document-ingestion-runs/<run_id>.md`), and the
+  sidecar keeps a summary without it, so a 424-page PDF's sidecar frontmatter drops from
+  about 23 KB to about 1 KB.
+
+- **#1744**: An extracted-text sidecar is linked to its source file by a `derived_from`
+  relation, projected from the validated `source.entity_external_id` in its frontmatter.
+  The relation exists even while the sidecar's raw body semantics are disabled, and it
+  does not change the extracted text or its page offsets.
+
+- Non-Markdown files (PDFs, images, Office documents) store `content_type` and `format`
+  in their entity metadata at index time, and directory listings expose `format`. MIME
+  types for every supported or extracted extension (docx, pptx, xlsx, webp, canvas, ...)
+  are pinned before falling back to `mimetypes`, so slim images without
+  `/etc/mime.types` no longer record Office files as `text/plain`. Metadata filters
+  still match Markdown notes only.
 
 - **#993**: `locked: true` in a note's frontmatter makes it read-only to the note API.
   Edits, overwrites, deletes, and directory deletes that include it are refused with
@@ -356,7 +375,36 @@
 - OpenClaw's `write_note` accepts `metadata`, `tags`, and `note_type`, and `edit_note`
   accepts `metadata`, matching the core MCP tools. Thanks to @lastguru-net (#1474).
 
+- The manual gains `comark(7)`, a quick reference for the Comark `::bm-*` components
+  notes can embed (`bm man comark`, `memory://man/comark(7)`), and a new `memory-comark`
+  skill teaches agents to author them: the component vocabulary, directive and body
+  rules, live query pipelines, how to check numbers they cannot see rendered, and the
+  coded errors a broken component shows. Component problems never block a write. The
+  skill is registered in the OpenClaw manifest.
+
 ### Bug Fixes
+
+- Fixes from the v0.24.0 release live run:
+  - `build_context` refuses a `memory://` title URL that names more than one note, as
+    `read_note` does, instead of building context for one of them. Pass the permalink.
+  - `build_context` related results report `created_at` with a timezone offset, like
+    primary results.
+  - `delete_project(delete_notes=True)` on a local project reports that the files were
+    deleted, instead of "did not report a completion status".
+  - `write_note`'s "Similar existing notes" advisory skips notes the new note already
+    links to.
+  - `view_note` sets the note off with `<note>` markers instead of `---`, which ran into
+    the note's own frontmatter fence, and its instructions are no longer indented.
+  - Vector and hybrid searches report `total` as the results seen through the current
+    page, still with `total_is_exact: false`, instead of `0`.
+  - `tail` rows carry `updated_at`, the time they are ordered by, and `bm tail` shows it.
+  - `bm reindex --help` no longer says `--embeddings` requires semantic search (#1696).
+  - Tool docs, the manual and the `list_memory_projects` footer no longer promise a
+    "session's active project". MCP requests carry no session state under the current
+    protocol, so a call without `project` always uses the default project, locally and
+    in the cloud. `write_note` and `edit_note` end with `[Project: 'name']` instead of
+    `[Session: Using project 'name']`, and say when no project was given and the
+    default was used.
 
 - **#1726**: `bm reindex --embeddings` now finishes oversized notes before it reports
   success. Vector sync embeds at most 256 chunks of one note per pass and defers the
@@ -375,7 +423,15 @@
   pass did not repair it, because the file looked unchanged. Now the materialization
   job embeds the note once, right after it indexes the written file, as cloud's
   materialize job already did. Routes no longer schedule vector sync for note writes,
-  edits or moves. Reported by @beru-ant-king with a reproducer.
+  edits or moves. Embeds run in a separate bounded pool keyed by note, so a slow
+  embedding provider no longer holds up other notes' file writes; one note's embeds
+  still run in write order. Reported by @beru-ant-king with a reproducer.
+- **#1691**: Editing a note no longer re-embeds all of its observations and relations.
+  Vector chunks were keyed by the search row id they were cut from, and every rewrite
+  recreates those rows with new ids, so nothing matched the previous manifest: about 86
+  chunks per edit on large ledger notes. Chunks are now keyed by a hash of their text,
+  so unchanged text keeps its embedding. **This ships an Alembic migration** that
+  re-keys existing chunks in place; nothing is re-embedded by it.
 - **#1720**: CLI output prints project names, paths, and error messages as typed.
   Rich used to read bracketed text in them as markup: `proj [x]` printed as `proj `,
   `[bold]` restyled the line, and a value containing a closing tag such as `a[/b]c`

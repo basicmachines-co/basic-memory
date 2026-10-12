@@ -30,8 +30,8 @@ from basic_memory.schemas.search import SearchItemType
     title="Recent Activity",
     description="""Get recent activity for one project.
 
-    With no project, this uses the session's active project, then the default
-    project. It lists activity across all projects only when neither resolves.
+    With no project, this uses the configured default project. It lists activity
+    across all projects only when there is no default.
 
     Timeframe supports natural language formats like:
     - "2 days ago"
@@ -114,8 +114,8 @@ async def recent_activity(
             - Standard format: "7d", "24h"
             Aliases: since, time_range, lookback.
         project: Project name to query. Optional - when omitted, the server uses the
-                session's active project, then the configured default project, and
-                discovery mode across all projects applies only when neither resolves.
+                configured default project, and discovery mode across all projects
+                applies only when there is no default.
                 If unknown, use list_memory_projects() to discover available projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud

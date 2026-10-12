@@ -41,6 +41,7 @@ from basic_memory.indexing.relation_resolution import (
     RelationSearchRefreshResult,
     RepositoryRelationResolutionRuntime,
 )
+from basic_memory.indexing.relation_persistence import RelationPublishOutcome
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
@@ -829,7 +830,7 @@ class BatchIndexer:
         indexed: IndexedEntity,
         *,
         generation: int,
-    ) -> bool:
+    ) -> RelationPublishOutcome:
         """Publish one indexed entity's parsed graph after generation claim."""
         return await self.relation_generation_publisher.publish(
             entity_id=indexed.entity_id,
@@ -863,7 +864,7 @@ class BatchIndexer:
         resolvable_entity_ids = [
             indexed_by_path[path].entity_id
             for path in sorted(published)
-            if published[path] and indexed_by_path[path].resolve_relations
+            if published[path].generation_is_current and indexed_by_path[path].resolve_relations
         ]
         resolved_count = 0
         unresolved_count = 0
@@ -874,7 +875,7 @@ class BatchIndexer:
             )
 
         _, refresh_errors = await self._run_bounded(
-            [path for path in sorted(published) if published[path]],
+            [path for path in sorted(published) if published[path].generation_is_current],
             limit=max_concurrent,
             worker=lambda path: self.refresh_indexed_entity_search(
                 indexed_by_path[path],

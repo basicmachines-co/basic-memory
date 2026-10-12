@@ -90,7 +90,15 @@ class FtsBackend(Protocol):
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
-    ) -> list[SearchIndexRow]: ...
+        with_text: bool = True,
+    ) -> list[SearchIndexRow]:
+        """Run one full-text page.
+
+        ``with_text=False`` returns rows without note text (``content_snippet`` is None,
+        ``content_snippet_length`` set), for callers that rank first and fetch the text
+        of the rows they keep.
+        """
+        ...
 
     async def count(
         self,
@@ -99,6 +107,30 @@ class FtsBackend(Protocol):
         *,
         allow_relaxed: bool = False,
     ) -> int: ...
+
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        """Return the query's structured filters as a subquery and its binds.
+
+        The subquery selects ``project_id, type, id`` of every search row in ``scope``
+        the filters admit, for a vector index to evaluate inside its nearest-neighbour
+        query (#1746). The query carries no text: only structured filters apply.
+        """
+        ...
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only.
+
+        Vector retrieval asks this of its candidates to apply structured filters. It
+        needs a yes or no per key, so no row text leaves the database (#1746).
+        """
+        ...
 
 
 # --- Filters both backends compile identically ---

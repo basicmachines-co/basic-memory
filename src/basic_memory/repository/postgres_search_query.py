@@ -27,7 +27,12 @@ from basic_memory.repository.search_filters import (
     metadata_filter_content_type_condition,
     shared_filter_conditions,
 )
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+    snippet_length_columns,
+)
 from basic_memory.repository.search_query import (
     PreparedSearchQuery,
     relaxation_word_tokens,
@@ -44,8 +49,10 @@ _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
 
-# Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = """
+
+def _result_columns(text_columns: str) -> str:
+    """The columns every FTS statement returns, plus a score."""
+    return f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -57,7 +64,7 @@ _RESULT_COLUMNS = """
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                search_index.content_snippet,
+                {text_columns},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -708,6 +715,7 @@ class PostgresFts:
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         """Run one tsquery page, retrying a malformed or empty strict query relaxed."""
         search_text = query.search_text
@@ -717,9 +725,14 @@ class PostgresFts:
         params = compiled.params
         params["limit"] = limit
         params["offset"] = offset
+        text_columns = (
+            capped_snippet_columns("search_index")
+            if with_text
+            else snippet_length_columns("search_index")
+        )
 
         sql = f"""
-            SELECT{_RESULT_COLUMNS},
+            SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
@@ -823,6 +836,35 @@ class PostgresFts:
                 f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
             )
         return results
+
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        """Return the query's structured filters as a subquery over search rows."""
+        if query.search_text:
+            raise ValueError("A row filter applies structured filters only; it takes no text.")
+        compiled = compile_fts_filter(scope, query)
+        sql = (
+            "SELECT search_index.project_id, search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        return sql, compiled.params
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only."""
+        compiled = compile_fts_filter(scope, query, candidate_keys=candidate_keys)
+        sql = (
+            "SELECT search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        async with db.scoped_session(self._session_maker) as session:
+            result = await session.execute(text(sql), compiled.params)
+            return {(row.type, row.id) for row in result.fetchall()}
 
     async def count(
         self,

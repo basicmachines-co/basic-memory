@@ -13,7 +13,7 @@ import basic_memory.repository.sqlite_search_repository as sqlite_search_reposit
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_index_row import SearchIndexRow, SNIPPET_READ_LIMIT
 from basic_memory.repository.rerank_provider import (
     build_rerank_document,
     demote_tail_scores,
@@ -42,7 +42,7 @@ from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.services.entity_service import EntityService
-from tests.repository.test_hybrid_fusion import FakeFts, window_of
+from tests.repository.test_hybrid_fusion import FakeFts, window_of, OfflineSemanticSearch
 
 type BackendSearchRepository = SQLiteSearchRepository | PostgresSearchRepository
 
@@ -226,7 +226,9 @@ def _semantic(
         vector_k=vector_k,
         min_similarity=0.0,
     )
-    return SemanticSearch(MagicMock(), ProjectScope.single(1), fts or FakeFts(), vector, rerank)
+    return OfflineSemanticSearch(
+        MagicMock(), ProjectScope.single(1), fts or FakeFts(), vector, rerank
+    )
 
 
 # --- Pure helper behavior ---
@@ -614,10 +616,13 @@ async def test_vector_search_reads_prefix_and_tail_from_one_retrieval(
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: Any = None,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
-        return await run_vector_query(self, session, query_embedding, candidate_limit, trace=trace)
+        return await run_vector_query(
+            self, session, query_embedding, candidate_limit, admission=admission, trace=trace
+        )
 
     monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)
 
@@ -716,6 +721,10 @@ async def test_hybrid_fts_only_preview_stays_bounded_through_api_hydration(
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=5,
     )
+    # The read carried the capped text, not the 135 KB note, and still knows its length.
+    archive_row = next(row for row in rows if row.permalink == "specs/archive")
+    assert archive_row.content_snippet == content[:SNIPPET_READ_LIMIT]
+    assert archive_row.content_snippet_length == len(content)
     results = await to_search_results(entity_service, rows)
 
     lexical = next(result for result in results if result.permalink == "specs/archive")
@@ -767,10 +776,13 @@ async def test_hybrid_search_preserves_candidate_windows(
         query_embedding: list[float],
         candidate_limit: int,
         *,
+        admission: Any = None,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
-        return await run_vector_query(self, session, query_embedding, candidate_limit, trace=trace)
+        return await run_vector_query(
+            self, session, query_embedding, candidate_limit, admission=admission, trace=trace
+        )
 
     monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)
 
@@ -832,7 +844,7 @@ async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(mo
     semantic = _semantic(vector_k=2, rerank=_reranking(reranker, candidates=2), fts=fts)
 
     async def vector_window(
-        query: PreparedSearchQuery, candidate_limit: int, *, trace: Any = None
+        query: PreparedSearchQuery, candidate_limit: int, row_target: int, *, trace: Any = None
     ) -> CandidateWindow:
         return window_of(vector_stream[:candidate_limit])
 
@@ -1057,3 +1069,84 @@ def test_repository_self_resolves_reranker(
 
     resolver.assert_called_once_with(config)
     assert repository._rerank_provider is reranker
+
+
+@pytest.mark.asyncio
+async def test_unbounded_reranker_reads_a_lexical_rows_whole_text(
+    rerank_search_repository: BackendSearchRepository,
+    entity_service: EntityService,
+) -> None:
+    """``reranker_max_document_chars=0`` sends the full text, past the 4,000-char read cap.
+
+    A note only full-text search finds has no matched chunk, so its rerank document is its
+    note text. The prefix reads that text as far as the reranker's limit; the public
+    preview stays at its display limit.
+    """
+    repo = rerank_search_repository
+    await _index_two_auth_notes(repo)
+    content = "auth session token archive " * 200 + "needle-past-the-cap"
+    assert content.index("needle-past-the-cap") > 4000
+    await repo.index_item(
+        _entity_row(
+            project_id=repo.project_id,
+            row_id=404,
+            title="Auth archive",
+            permalink="specs/archive",
+            content=content,
+        )
+    )
+    reranker = _FakeReranker({"archive": 0.95, "Alpha": 0.8, "Bravo": 0.7})
+    repo._rerank_provider = reranker
+    repo._reranker_max_document_chars = 0
+
+    rows = await repo.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=5,
+    )
+    results = await to_search_results(entity_service, rows)
+
+    assert any("needle-past-the-cap" in doc for doc in reranker.document_batches[0])
+    lexical = next(result for result in results if result.permalink == "specs/archive")
+    assert lexical.content == content[:4000]
+    assert lexical.content_length == len(content)
+
+
+@pytest.mark.asyncio
+async def test_vector_rerank_prefix_keeps_the_read_cap_for_matched_rows(
+    rerank_search_repository: BackendSearchRepository,
+) -> None:
+    """A vector-matched row is reranked on its chunks, so its note text stays capped.
+
+    Only a row full-text search alone found needs its note body as a rerank document;
+    reading a large vector-matched note in full would restore the transfer #1746 removed.
+    """
+    repo = rerank_search_repository
+    await _index_two_auth_notes(repo)
+    content = "auth session token archive " * 5_000
+    await repo.index_item(
+        _entity_row(
+            project_id=repo.project_id,
+            row_id=405,
+            title="Auth archive",
+            permalink="specs/archive",
+            content=content,
+        )
+    )
+    await repo.sync_entity_vectors(405)
+    reranker = _FakeReranker({"archive": 0.95, "Alpha": 0.8, "Bravo": 0.7})
+    repo._rerank_provider = reranker
+    repo._reranker_max_document_chars = 0
+
+    rows = await repo.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=5,
+    )
+
+    archive = next(row for row in rows if row.permalink == "specs/archive")
+    assert archive.content_snippet == content[:SNIPPET_READ_LIMIT]
+    assert archive.content_snippet_length == len(content)
+    # The reranker read the archive's matched chunks, not its body.
+    assert archive.matched_chunk_text
+    assert reranker.calls == 1

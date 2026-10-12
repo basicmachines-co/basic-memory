@@ -32,7 +32,9 @@ class _PreparedLocalAsgiDatabase:
     active_count: int
     previous_engine: object
     previous_session_maker: object
-    dependency_context: AbstractAsyncContextManager[LocalDatabaseState]
+    # The database dependency and, outside an MCP or API host, the standalone
+    # read cache; the last client to exit closes both.
+    resources: AsyncExitStack
 
 
 _prepared_local_asgi_database_lock = RLock()
@@ -151,7 +153,7 @@ def _retain_prepared_local_asgi_database(app: "FastAPI") -> bool:
 def _install_prepared_local_asgi_database(
     app: "FastAPI",
     database_state: LocalDatabaseState,
-    dependency_context: AbstractAsyncContextManager[LocalDatabaseState],
+    resources: AsyncExitStack,
 ) -> None:
     """Install local ASGI database state after dependency resolution."""
     with _prepared_local_asgi_database_lock:
@@ -169,7 +171,7 @@ def _install_prepared_local_asgi_database(
             active_count=1,
             previous_engine=previous_engine,
             previous_session_maker=previous_session_maker,
-            dependency_context=dependency_context,
+            resources=resources,
         )
 
 
@@ -184,7 +186,7 @@ def _restore_local_asgi_state_attribute(app: "FastAPI", name: str, previous_valu
 
 def _release_prepared_local_asgi_database(
     app: "FastAPI",
-) -> AbstractAsyncContextManager[LocalDatabaseState] | None:
+) -> AsyncExitStack | None:
     """Release local ASGI database state after a client context exits."""
     with _prepared_local_asgi_database_lock:
         active = _prepared_local_asgi_databases.get(app)
@@ -202,7 +204,36 @@ def _release_prepared_local_asgi_database(
             "session_maker",
             active.previous_session_maker,
         )
-        return active.dependency_context
+        return active.resources
+
+
+async def _open_standalone_read_cache(resources: AsyncExitStack) -> None:
+    """Share the configured standalone read cache with a CLI process's requests.
+
+    An MCP or API host installs its own container, which already carries its
+    cache. A plain CLI process has none, so without this its writes and project
+    deletes would leave entries a running MCP server keeps serving.
+    """
+    # Imported on first local-ASGI use so CLI startup never pays for Redis (#886).
+    from basic_memory.api.container import (
+        ApiContainer,
+        has_installed_container,
+        installed_container,
+    )
+    from basic_memory.read_cache.lifecycle import open_redis_read_cache
+
+    if has_installed_container():
+        return
+    host = ApiContainer.create()
+    redis_url = None if host.mode.is_cloud else host.config.redis_url
+    read_cache = await resources.enter_async_context(
+        open_redis_read_cache(redis_url, max_connections=host.config.redis_max_connections)
+    )
+    if read_cache is None:
+        return
+    resources.enter_context(
+        installed_container(ApiContainer(config=host.config, mode=host.mode, read_cache=read_cache))
+    )
 
 
 @asynccontextmanager
@@ -211,20 +242,23 @@ async def _prepared_local_asgi_database(app: "FastAPI") -> AsyncIterator[None]:
     prepare_lock = _get_prepared_local_asgi_database_prepare_lock(app)
     async with prepare_lock:
         if not _retain_prepared_local_asgi_database(app):
-            database_context = _resolve_local_asgi_database(app)
-            database_state = await database_context.__aenter__()
+            resources = AsyncExitStack()
             try:
-                _install_prepared_local_asgi_database(app, database_state, database_context)
-            except Exception:
-                await database_context.__aexit__(None, None, None)
+                database_state = await resources.enter_async_context(
+                    _resolve_local_asgi_database(app)
+                )
+                await _open_standalone_read_cache(resources)
+                _install_prepared_local_asgi_database(app, database_state, resources)
+            except BaseException:
+                await resources.aclose()
                 raise
 
     try:
         yield
     finally:
-        database_context = _release_prepared_local_asgi_database(app)
-        if database_context is not None:
-            await database_context.__aexit__(None, None, None)
+        resources = _release_prepared_local_asgi_database(app)
+        if resources is not None:
+            await resources.aclose()
 
 
 @asynccontextmanager

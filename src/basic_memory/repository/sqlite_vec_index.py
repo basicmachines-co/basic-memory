@@ -16,6 +16,7 @@ from basic_memory.models.search import create_sqlite_search_vector_embeddings
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -359,6 +360,7 @@ class SQLiteVecIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         if not query or limit <= 0 or projects.is_empty:
             return []
@@ -375,6 +377,24 @@ class SQLiteVecIndex:
         # project is never crowded out of its own window by a larger neighbour that
         # shares the database; the outer ORDER BY merges the partitions.
         partitions_in_scope = projects.predicate("project_id", params)
+        # Trigger: the search carries structured filters.
+        # Why: vec0 accepts a rowid constraint inside its KNN, so it ranks only the
+        #     chunks the filters admit and returns their exact top k. Ranking every
+        #     chunk and filtering afterwards needed a widening loop to fill a page.
+        # Outcome: the admitted, ready manifest rows bound the scan; the outer join
+        #     still re-checks readiness and source_hash for the unfiltered path.
+        admitted_rowids = ""
+        if admission is not None:
+            params.update(admission.params)
+            chunks_in_scope = projects.predicate("c.project_id", params)
+            admitted_rowids = (
+                " AND rowid IN (SELECT c.id FROM search_vector_chunks c "
+                f"WHERE {chunks_in_scope} "
+                "AND c.vector_index = 'sqlite-vec' "
+                "AND c.embedding_status = 'ready' "
+                "AND c.embedding_model = :embedding_identity "
+                f"AND {admission.predicate})"
+            )
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(
@@ -383,6 +403,7 @@ class SQLiteVecIndex:
                     " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
                     f" WHERE {partitions_in_scope} "
                     " AND embedding MATCH :query AND k = :vector_k"
+                    f"{admitted_rowids}"
                     ") "
                     "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
                     "FROM vector_matches "

@@ -12,6 +12,7 @@ from basic_memory import db
 from basic_memory import config as config_module
 from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.project_context import routes_to_default_project
 from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
@@ -182,7 +183,7 @@ async def test_write_note(app, test_project):
     assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Try reading it back via permalink
     content = await read_note("test/test-note", project=test_project.name)
@@ -218,7 +219,7 @@ async def test_write_note_no_tags(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Simple Note.md" in result
     assert f"permalink: {test_project.name}/test/simple-note" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
     # Should be able to read it back
     content = await read_note("test/simple-note", project=test_project.name)
     expected = (
@@ -307,7 +308,7 @@ async def test_write_note_update_existing(app, test_project):
     assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     result = await write_note(
         project=test_project.name,
@@ -323,7 +324,7 @@ async def test_write_note_update_existing(app, test_project):
     assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Try reading it back
     content = await read_note("test/test-note", project=test_project.name)
@@ -378,7 +379,7 @@ async def test_issue_93_write_note_respects_custom_permalink_new_note(app, test_
     assert f"project: {test_project.name}" in result
     assert "file_path: notes/My New Note.md" in result
     assert "permalink: custom/my-desired-permalink" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -432,7 +433,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
     assert f"project: {test_project.name}" in result2
     assert "permalink: custom/new-permalink" in result2
     assert f"permalink: {initial_permalink}" not in result2
-    assert f"[Session: Using project '{test_project.name}']" in result2
+    assert f"[Project: '{test_project.name}']" in result2
 
 
 @pytest.mark.asyncio
@@ -495,7 +496,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
     assert f"permalink: {test_project.name}/folder/title" in result
     assert "Tags" in result
     assert "hipporag" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -531,7 +532,7 @@ async def test_write_note_verbose(app, test_project, engine_factory):
     assert "## Relations" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     _, session_maker = engine_factory
     relation_repository = RelationRepository(project_id=test_project.id)
@@ -790,7 +791,7 @@ async def test_write_note_with_custom_note_type(app, test_project):
     assert f"permalink: {test_project.name}/guides/test-guide" in result
     assert "## Tags" in result
     assert "- guide, documentation" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Verify the note type is correctly set in the frontmatter
     content = await read_note("guides/test-guide", project=test_project.name)
@@ -831,7 +832,7 @@ async def test_write_note_with_report_note_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: reports/Monthly Report.md" in result
     assert f"permalink: {test_project.name}/reports/monthly-report" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Verify the note type is correctly set in the frontmatter
     content = await read_note("reports/monthly-report", project=test_project.name)
@@ -855,7 +856,7 @@ async def test_write_note_with_config_note_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: config/System Config.md" in result
     assert f"permalink: {test_project.name}/config/system-config" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Verify the note type is correctly set in the frontmatter
     content = await read_note("config/system-config", project=test_project.name)
@@ -883,7 +884,7 @@ async def test_write_note_note_type_default_behavior(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Default Type Test.md" in result
     assert f"permalink: {test_project.name}/test/default-type-test" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Verify the note type defaults to "note"
     content = await read_note("test/default-type-test", project=test_project.name)
@@ -962,7 +963,7 @@ async def test_write_note_respects_frontmatter_note_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: guides/Test Guide.md" in result
     assert "permalink: guides/test-guide" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
+    assert f"[Project: '{test_project.name}']" in result
 
     # Verify the note type from frontmatter is respected (should be "guide", not "note")
     content = await read_note("guides/test-guide", project=test_project.name)
@@ -1706,13 +1707,20 @@ class TestWriteNoteOverwriteGuard:
 # ---------------------------------------------------------------------------
 
 
-def _entity_result(title: str, permalink: str | None, file_path: str, score: float) -> SearchResult:
+def _entity_result(
+    title: str,
+    permalink: str | None,
+    file_path: str,
+    score: float,
+    external_id: str | None = None,
+) -> SearchResult:
     return SearchResult(
         title=title,
         type=SearchItemType.ENTITY,
         score=score,
         permalink=permalink,
         file_path=file_path,
+        external_id=external_id,
     )
 
 
@@ -1784,7 +1792,11 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
     ]
 
     similar = _collapse_similar_notes(
-        rows, exclude_file_path="new/New.md", exclude_permalink="p/new", limit=3
+        rows,
+        exclude_file_path="new/New.md",
+        exclude_permalink="p/new",
+        linked_external_ids=frozenset(),
+        limit=3,
     )
 
     assert [note.title for note in similar] == ["A", "B", "C"]
@@ -1878,6 +1890,77 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY
     assert call["page"] == 1
     assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("link", "hidden"),
+    [
+        ("[[reference bu product mapping]]", True),  # title, any case
+        ("[[reference/reference-bu-product-mapping]]", True),  # project-relative permalink
+        ("[[reference/Reference BU Product Mapping.md]]", True),  # file path
+        ("[[../reference/Reference BU Product Mapping.md]]", True),  # relative path
+        ("[[/reference/Reference BU Product Mapping.md]]", True),  # rooted path
+        ("[[{project}/reference/reference-bu-product-mapping|the map]]", True),  # qualified
+        # A path names one exact file, so without its extension it names nothing.
+        ("[[../reference/Reference BU Product Mapping]]", False),
+        # A forward reference resolves to no note and leaves the advisory alone.
+        ("[[Not Written Yet]]", False),
+    ],
+)
+async def test_write_note_advisory_skips_notes_the_new_note_links_to(
+    app, client, test_project, stub_search_client, link: str, hidden: bool
+):
+    """The link resolver, not string matching, decides which neighbors are already linked."""
+    reference = await write_note(
+        project=test_project.name,
+        title="Reference BU Product Mapping",
+        directory="reference",
+        content="# Reference BU Product Mapping\n",
+        output_format="json",
+    )
+    catalog = await write_note(
+        project=test_project.name,
+        title="Product Catalog",
+        directory="reference",
+        content="# Product Catalog\n",
+        output_format="json",
+    )
+    assert isinstance(reference, dict) and isinstance(catalog, dict)
+    knowledge = KnowledgeClient(client, test_project.external_id)
+    for note in (reference, catalog):
+        note["external_id"] = await knowledge.resolve_entity(note["permalink"], strict=True)
+    stub_search_client.results = [
+        _entity_result(
+            "Reference BU Product Mapping",
+            reference["permalink"],
+            reference["file_path"],
+            0.86,
+            external_id=reference["external_id"],
+        ),
+        _entity_result(
+            "Product Catalog",
+            catalog["permalink"],
+            catalog["file_path"],
+            0.74,
+            external_id=catalog["external_id"],
+        ),
+    ]
+
+    result = await write_note(
+        project=test_project.name,
+        title="BU Mapping Analysis",
+        directory="analysis",
+        content=f"# BU Mapping Analysis\n\n- relates_to {link.format(project=test_project.name)}\n",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    listed = [note["title"] for note in result["similar_notes"]]
+    expected = ["Product Catalog"]
+    if not hidden:
+        expected.insert(0, "Reference BU Product Mapping")
+    assert listed == expected
 
 
 @pytest.mark.asyncio
@@ -2064,3 +2147,35 @@ async def test_write_note_surfaces_unexpected_similar_note_probe_errors(
     # The note was created before the probe ran, so it is on disk regardless.
     content = await read_note("analysis/loud-failure", project=test_project.name)
     assert "The write lands; the defect is not hidden." in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_without_project_says_it_used_the_default(app, test_project):
+    """Calls carry no session state, so the footer says a missing project meant the default."""
+    result = await write_note(title="Defaulted", directory="notes", content="# Defaulted\n")
+
+    assert isinstance(result, str)
+    assert (
+        f"[Project: '{test_project.name}' (no project was given, so this used the default "
+        "project; pass project to target another)]"
+    ) in result
+    assert "[Session:" not in result
+
+
+@pytest.mark.parametrize(
+    ("project", "project_id", "constraint", "expected"),
+    [
+        (None, None, None, True),
+        ("research", None, None, False),
+        (None, "5835960d-891b-4933-88bf-9ce0617e78d2", None, False),
+        # A constrained server serves every call from its one project, not the default.
+        (None, None, "pinned", False),
+    ],
+)
+def test_routes_to_default_project(monkeypatch, project, project_id, constraint, expected):
+    if constraint is None:
+        monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+    else:
+        monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", constraint)
+
+    assert routes_to_default_project(project, project_id) is expected

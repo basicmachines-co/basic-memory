@@ -23,6 +23,7 @@ from basic_memory.markdown.schemas import (
     Relation,
 )
 from basic_memory.markdown.sections import scan_sections
+from basic_memory.schemas.document import DocumentSourceV1
 from basic_memory.utils import parse_tags
 
 
@@ -363,6 +364,14 @@ class EntityParser:
         entity_content = (
             parse(post.content) if parse_semantics else EntityContent(content=post.content)
         )
+
+        # Extraction provenance comes from the validated source contract, not raw body syntax.
+        # Project it even before enrichment without changing extraction bytes or page offsets.
+        if metadata.get("schema") == "schema/document-extraction":
+            source = DocumentSourceV1.model_validate(post.metadata.get("source"))
+            provenance = Relation(type="derived_from", target=str(source.entity_external_id))
+            if provenance not in entity_content.relations:
+                entity_content.relations.append(provenance)
 
         # The parser reports only a qualifier the author plainly meant: an unknown kind,
         # an unterminated quote, or a date the one-token rule truncated. None of those

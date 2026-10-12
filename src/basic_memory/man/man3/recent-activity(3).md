@@ -39,8 +39,8 @@ language (`"today"`, `"2 days ago"`, `"last week"`) or compact forms
 (`"7d"`, `"24h"`).
 
 Project resolution follows the usual order: an explicit `project` /
-`project_id`, else the session's active project, else the configured
-default project. Only when none of those resolves does the tool switch to
+`project_id`, else the configured default project. Calls do not remember a
+project between them. Only when neither resolves does the tool switch to
 **cross-project discovery mode**, summarizing activity across every project
 so an agent can find where recent work happened before drilling in. On a
 normal install with a default project, omitting `project` therefore returns
@@ -53,7 +53,7 @@ that project's activity — not a cross-project view.
 - **timeframe** (string, optional, default: "7d") — Time window to search. Supports natural language: - Relative: "2 days ago", "last week", "yesterday" - Points in time: "2024-01-01", "January 1st" - Standard format: "7d", "24h" Aliases: since, time_range, lookback.
 - **page** (integer, optional, default: 1) — Page number for pagination (default 1)
 - **page_size** (integer, optional, default: 10) — Number of items per page (default 10)
-- **project** (string | null, optional, default: None) — Project name to query. Optional - when omitted, the server uses the session's active project, then the configured default project, and discovery mode across all projects applies only when neither resolves. If unknown, use list_memory_projects() to discover available projects.
+- **project** (string | null, optional, default: None) — Project name to query. Optional - when omitted, the server uses the configured default project, and discovery mode across all projects applies only when there is no default. If unknown, use list_memory_projects() to discover available projects.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
 - **output_format** (string, optional, default: "text") — "text" returns human-readable summary text. "json" returns a flat list of recent items.
 

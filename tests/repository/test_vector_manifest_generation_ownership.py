@@ -15,6 +15,7 @@ from basic_memory.repository.postgres_search_repository import PostgresSearchRep
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -96,6 +97,7 @@ class InMemoryExternalVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         return []
 

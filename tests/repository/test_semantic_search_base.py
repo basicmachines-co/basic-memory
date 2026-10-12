@@ -33,6 +33,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -42,7 +43,7 @@ from basic_memory.repository.semantic_vector_index import (
 from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.temporal import TemporalFilter
-from tests.repository.test_hybrid_fusion import FakeFts
+from tests.repository.test_hybrid_fusion import FakeFts, OfflineSemanticSearch
 
 
 # --- Helpers ---
@@ -113,6 +114,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         return []
 
@@ -173,6 +175,7 @@ class _RecordingVectorIndex:
         *,
         limit: int,
         projects: ProjectScope,
+        admission: VectorAdmission | None = None,
     ) -> list[VectorMatch]:
         return []
 
@@ -189,7 +192,7 @@ def _semantic_search(*, index_name: str, adapter: Any = None) -> SemanticSearch:
         vector_k=100,
         min_similarity=0.0,
     )
-    return SemanticSearch(cast(Any, None), ProjectScope.single(1), FakeFts(), vector)
+    return OfflineSemanticSearch(cast(Any, None), ProjectScope.single(1), FakeFts(), vector)
 
 
 @pytest.mark.asyncio
@@ -250,14 +253,12 @@ async def test_external_vector_query_overfetches_past_stale_adapter_hits(
             entity_id=2,
             chunk_key="entity:2:0",
             source_key=("entity", 2),
-            chunk_text="two",
             similarity=0.9,
         ),
         HydratedChunk(
             entity_id=3,
             chunk_key="entity:3:0",
             source_key=("entity", 3),
-            chunk_text="three",
             similarity=0.8,
         ),
     ]

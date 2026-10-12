@@ -39,7 +39,7 @@ async def test_project_constraint_override_content_tools(mcp_server, app, test_p
             assert f"project: {test_project.name}" in response_text
             assert "# Created note" in response_text
             assert "file_path: test/Constraint Test Note.md" in response_text
-            assert f"[Session: Using project '{test_project.name}']" in response_text
+            assert f"[Project: '{test_project.name}']" in response_text
 
     finally:
         # Clean up environment variable

@@ -6,8 +6,6 @@ import json
 import time
 from unittest.mock import MagicMock
 
-import pytest
-
 
 def _initialized_provider(bm):
     p = bm.BasicMemoryProvider()
@@ -186,7 +184,7 @@ def test_format_prefetch_caps_preview_length(bm):
     )
     out = _format(bm, payload)
     # Each result line includes the preview, capped to 200 chars
-    line = [l for l in out.split("\n") if l.startswith("- ")][0]
+    line = [row for row in out.split("\n") if row.startswith("- ")][0]
     # Some boilerplate around the preview, but the long preview is capped
     assert len(line) < 400
 

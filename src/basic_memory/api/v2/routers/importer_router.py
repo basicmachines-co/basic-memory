@@ -19,7 +19,7 @@ from basic_memory.deps import (
     ReadCacheDep,
 )
 from basic_memory.importers import Importer
-from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.schemas.importer import (
     ChatImportResult,
     EntityImportResult,
@@ -215,7 +215,7 @@ async def import_file[ImportResultT: ImportResult](
     destination_directory: str,
     max_bytes: int,
     *,
-    read_cache: ReadCache | None,
+    read_cache: ReadCacheInvalidator | None,
     project_external_id: str,
 ) -> ImportResultT:
     """Helper function to import a file using an importer instance.
@@ -275,7 +275,7 @@ async def run_import_with_invalidation[ImportResultT: ImportResult](
     source_data: object,
     destination_directory: str,
     *,
-    read_cache: ReadCache | None,
+    read_cache: ReadCacheInvalidator | None,
     project_external_id: str,
 ) -> ImportResultT:
     """Run one import attempt and invalidate files it may have written."""

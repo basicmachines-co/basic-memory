@@ -544,6 +544,7 @@ async def delete_project_by_id(
     project_service: ProjectServiceDep,
     session_maker: SessionMakerDep,
     project_repository: ProjectRepositoryDep,
+    read_cache: ReadCacheDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
     delete_notes: bool = Query(
         False, description="If True, delete project directory from filesystem"
@@ -590,13 +591,25 @@ async def delete_project_by_id(
                 detail += "This is the only project in your configuration."  # pragma: no cover
             raise HTTPException(status_code=400, detail=detail)
 
-        # Delete using project name (service layer still uses names internally)
-        await project_service.remove_project(old_project.name, delete_notes=delete_notes)
+        # Cached reads are answered before a route checks that its project exists,
+        # so a deleted project's entries must be retired, not left to their TTL. A
+        # removal that fails partway retires them too: what it committed is unknown.
+        invalidation_scope = (
+            invalidate_cache(read_cache, old_project.external_id)
+            if read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
+            # Delete using project name (service layer still uses names internally)
+            file_delete_status = await project_service.remove_project(
+                old_project.name, delete_notes=delete_notes
+            )
 
         return ProjectStatusResponse(
             message=f"Project '{old_project.name}' removed successfully",
             status="success",
             default=False,
+            file_delete_status=file_delete_status,
             old_project=ProjectItem(
                 id=old_project.id,
                 external_id=old_project.external_id,

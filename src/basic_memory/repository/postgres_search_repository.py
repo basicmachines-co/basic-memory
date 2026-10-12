@@ -55,11 +55,12 @@ async def _vector_chunk_tables_ready(session: AsyncSession) -> bool:
     result = await session.execute(
         text(
             """
-            SELECT count(*) = 2 FROM pg_class
+            SELECT count(*) = 3 FROM pg_class
             WHERE relnamespace = current_schema()::regnamespace
               AND relname IN (
                   'search_vector_chunks',
-                  'idx_search_vector_chunks_project_entity'
+                  'idx_search_vector_chunks_project_entity',
+                  'idx_search_vector_chunks_location'
               )
             """
         )
@@ -401,6 +402,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     """
                         CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
                         ON search_vector_chunks (project_id, entity_id)
+                        """
+                )
+            )
+            await session.execute(
+                text(
+                    """
+                        CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_location
+                        ON search_vector_chunks (project_id, source_type, source_row_id)
                         """
                 )
             )

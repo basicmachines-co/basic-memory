@@ -1,7 +1,9 @@
 """Write note tool for Basic Memory MCP server."""
 
+import asyncio
 import dataclasses
 import json
+import re
 import textwrap
 from collections.abc import Sequence
 from typing import (
@@ -23,7 +25,11 @@ from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.mcp.project_context import get_project_client, add_project_metadata
+from basic_memory.mcp.project_context import (
+    add_project_metadata,
+    get_project_client,
+    routes_to_default_project,
+)
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -54,7 +60,7 @@ from basic_memory.utils import (
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 if TYPE_CHECKING:  # pragma: no cover
-    from basic_memory.mcp.clients import SearchClient
+    from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
@@ -74,6 +80,11 @@ SIMILAR_NOTES_PROBE_CHARS = 900
 # top, a duplicate and a closely related note still share one band, so ranking decides.
 # The number holds for that model only; see similar_notes_min_similarity.
 SIMILAR_NOTES_MIN_SIMILARITY = 0.70
+# Most wikilinks the advisory resolves to recognize notes the new note already links
+# to; see _find_similar_notes.
+SIMILAR_NOTES_LINKED_ALLOWANCE = 10
+# A wikilink target, without its alias: [[Target]] or [[Target|alias]].
+_WIKILINK_TARGET = re.compile(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -89,6 +100,11 @@ def _compose_similarity_probe(title: str, content: str) -> str:
     """Build the text used to look for existing notes near a freshly written one."""
     body = remove_frontmatter(content)
     return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def _wikilink_targets(content: str) -> list[str]:
+    """Return a note's distinct wikilink targets, in the order they first appear."""
+    return list(dict.fromkeys(match.strip() for match in _WIKILINK_TARGET.findall(content)))
 
 
 def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
@@ -137,12 +153,15 @@ def _collapse_similar_notes(
     *,
     exclude_file_path: str,
     exclude_permalink: str | None,
+    linked_external_ids: frozenset[str],
     limit: int,
 ) -> list[SimilarNote]:
     """Drop the note that was just written and keep one row per remaining note.
 
     The new note's own row may or may not be indexed yet — vectors publish in the
-    background — so it is removed when present rather than expected.
+    background — so it is removed when present rather than expected. Notes the new
+    note already links to are dropped too: the caller has related them on purpose,
+    which is the advisory's "related but distinct" answer given in advance.
     """
     similar_notes: list[SimilarNote] = []
     seen_paths: set[str] = set()
@@ -150,7 +169,8 @@ def _collapse_similar_notes(
         is_new_note = result.file_path == exclude_file_path or (
             exclude_permalink is not None and result.permalink == exclude_permalink
         )
-        if is_new_note or result.file_path in seen_paths:
+        is_linked = result.external_id in linked_external_ids
+        if is_new_note or is_linked or result.file_path in seen_paths:
             continue
         seen_paths.add(result.file_path)
         similar_notes.append(
@@ -163,6 +183,7 @@ def _collapse_similar_notes(
 
 async def _find_similar_notes(
     search_client: "SearchClient",
+    knowledge_client: "KnowledgeClient",
     *,
     title: str,
     content: str,
@@ -172,14 +193,36 @@ async def _find_similar_notes(
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
     query = similar_notes_query(title, content, min_similarity=min_similarity)
-    # One extra row leaves room for the new note's own hit before collapsing.
+    # The cap keeps a hub note with hundreds of links from costing hundreds of requests;
+    # a linked note past it can still be listed, which the advisory tolerates.
+    linked_targets = _wikilink_targets(content)[:SIMILAR_NOTES_LINKED_ALLOWANCE]
+    # Extra rows leave room for the new note's own hit and for the notes it links to,
+    # which are dropped before collapsing.
     response = await search_client.search(
-        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
+        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1 + len(linked_targets)
     )
+
+    # Trigger: the search found neighbors and the new note has wikilinks.
+    # Why: a neighbor the caller already linked is the advisory's "related but distinct"
+    #   answer given in advance. Which note a link names is the link resolver's call
+    #   (titles, permalinks, relative and rooted paths, workspace-qualified forms), so
+    #   each link is resolved by the server from the new note's path, not re-derived here.
+    # Outcome: neighbors whose external_id a link resolves to are dropped.
+    linked_external_ids: frozenset[str] = frozenset()
+    if response.results and linked_targets:
+        resolved = await asyncio.gather(
+            *(
+                knowledge_client.resolve_link(target, source_path=exclude_file_path)
+                for target in linked_targets
+            )
+        )
+        linked_external_ids = frozenset(link.external_id for link in resolved if link)
+
     return _collapse_similar_notes(
         response.results,
         exclude_file_path=exclude_file_path,
         exclude_permalink=exclude_permalink,
+        linked_external_ids=linked_external_ids,
         limit=SIMILAR_NOTES_LIMIT,
     )
 
@@ -343,10 +386,9 @@ async def write_note(
                    Examples: "notes", "projects/2025", "research/ml", "/" (root).
                    MCP accepts the aliases folder, dir, and path; the CLI flag is --folder.
         project: Project name to write to. Optional. Omitting both project and project_id
-                writes to the session's active project (the last one this session
-                touched), and only falls back to the configured default project when there
-                is none — so
-                after working in another project, pass project explicitly. Use
+                writes to the configured default project. Calls do not remember a
+                project between them, so after working in another project, pass project
+                explicitly. Use
                 "workspace/project" to route to a project in a specific cloud workspace.
                 A bare name that exists in multiple workspaces resolves to the default
                 workspace, so use the qualified form (or project_id) to disambiguate. If
@@ -480,6 +522,7 @@ async def write_note(
         conditional_overwrite=expected_checksum is not None,
         output_format=output_format,
     ):
+        used_default = routes_to_default_project(project, project_id)
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
             active_project,
@@ -649,6 +692,7 @@ async def write_note(
                 try:
                     similar_notes = await _find_similar_notes(
                         SearchClient(client, active_project.external_id),
+                        knowledge_client,
                         title=title,
                         content=content,
                         exclude_file_path=result.file_path,
@@ -760,7 +804,9 @@ async def write_note(
                 }
 
             summary_result = "\n".join(summary)
-            return add_project_metadata(summary_result, active_project.name)
+            return add_project_metadata(
+                summary_result, active_project.name, used_default=used_default
+            )
 
 
 def _raise_write_refusal(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:

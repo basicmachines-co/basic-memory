@@ -1401,8 +1401,8 @@ async def search_notes(
 
         Pagination note: use `total` as a count only when `total_is_exact` is true.
         Vector and hybrid searches skip the count query (it would cost a second
-        semantic retrieval pass), report `total: 0` with `total_is_exact: false`,
-        and use `has_more` for pagination.
+        semantic retrieval pass), report the results seen through this page as
+        `total` with `total_is_exact: false`, and use `has_more` for pagination.
 
     Examples:
         # Basic text search

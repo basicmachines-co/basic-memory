@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.read_cache import ReadCache
+from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -45,7 +45,7 @@ class ApiContainer:
     # --- Optional semantic read cache ---
     # Hosts inject a namespace-bound implementation. Standalone MCP may install
     # one for its in-process ASGI path; unconfigured callers receive None.
-    read_cache: ReadCache | None = None
+    read_cache: RedisReadCache | None = None
 
     @classmethod
     def create(cls) -> "ApiContainer":  # pragma: no cover
@@ -157,6 +157,11 @@ def set_container(container: ApiContainer) -> None:
     """Set the API container (called by lifespan)."""
     global _container
     _container = container
+
+
+def has_installed_container() -> bool:
+    """Whether an MCP or API host has installed its container for this process."""
+    return _container is not None
 
 
 @contextmanager

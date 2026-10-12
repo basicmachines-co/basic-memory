@@ -131,9 +131,8 @@ async def read_note(
     Args:
         project: Project name to read from. Optional - when omitted, a project prefix
                 on a memory:// URL or permalink identifier routes the read; otherwise the
-                server uses the session's active project, then the configured default
-                project. If unknown, use list_memory_projects() to discover available
-                projects.
+                server uses the configured default project. If unknown, use
+                list_memory_projects() to discover available projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().

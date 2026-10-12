@@ -13,7 +13,7 @@ from basic_memory.index.local_schedulers import (
     LocalSearchReindexScheduler,
     drain_background_tasks,
 )
-from basic_memory.read_cache import ReadCacheInvalidationStatus
+from basic_memory.read_cache import ReadCacheChange, ReadCacheInvalidationStatus
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
@@ -47,12 +47,23 @@ class StubSearchService:
 
 
 class RecordingReadCache:
+    """Records every invalidation, scoped or whole-project, in call order."""
+
     def __init__(self) -> None:
         self.invalidated_project_ids: list[str] = []
+        self.changes: list[ReadCacheChange] = []
+
+    async def invalidate(
+        self,
+        project_id: str,
+        change: ReadCacheChange,
+    ) -> ReadCacheInvalidationStatus:
+        self.invalidated_project_ids.append(project_id)
+        self.changes.append(change)
+        return ReadCacheInvalidationStatus.invalidated
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        self.invalidated_project_ids.append(project_id)
-        return ReadCacheInvalidationStatus.invalidated
+        return await self.invalidate(project_id, ReadCacheChange.whole_project())
 
 
 @pytest.mark.asyncio
@@ -71,7 +82,8 @@ async def test_entity_vector_scheduler_maps_to_search_service():
     await asyncio.sleep(0.05)
 
     assert search_service.vector_synced == [7]
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    # Vectors change search results only, never a note's own response.
+    assert read_cache.changes == [ReadCacheChange.search_index()]
 
 
 @pytest.mark.asyncio
@@ -96,7 +108,7 @@ async def test_entity_vector_scheduler_invalidates_after_partial_failure():
     with pytest.raises(RuntimeError, match="vector publication failed"):
         await scheduler._run_entity_vector_sync(7)
 
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    assert read_cache.changes == [ReadCacheChange.whole_project()]
 
 
 def _clear_project_index_scheduler_state() -> None:
@@ -272,19 +284,22 @@ async def test_search_reindex_scheduler_maps_to_search_service():
 
 
 class StubRelationResolutionRuntime:
-    def __init__(self) -> None:
+    """Resolves the given source entity ids on its first pass, then nothing."""
+
+    def __init__(self, resolved_sources: set[int] | None = None) -> None:
         self.resolve_calls = 0
+        self._pending = [resolved_sources] if resolved_sources else []
 
     async def count_unresolved_relations(self) -> int:
         return 0
 
     async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
         self.resolve_calls += 1
-        return set()
+        return self._pending.pop(0) if self._pending else set()
 
 
 @pytest.mark.asyncio
-async def test_relation_resolution_scheduler_runs_project_resolution():
+async def test_relation_resolution_scheduler_runs_project_resolution(session_maker):
     """A single write schedules one debounced project resolution pass."""
     from basic_memory.index.local_schedulers import _pending_relation_resolution
 
@@ -294,6 +309,7 @@ async def test_relation_resolution_scheduler_runs_project_resolution():
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=read_cache,
         test_mode=False,
@@ -303,13 +319,42 @@ async def test_relation_resolution_scheduler_runs_project_resolution():
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 1
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    # A pass that resolved nothing changed nothing, so it retires nothing.
+    assert read_cache.invalidated_project_ids == []
     # The pending marker is cleared after the pass so later writes can schedule.
     assert 13 not in _pending_relation_resolution
 
 
 @pytest.mark.asyncio
-async def test_relation_resolution_scheduler_coalesces_a_burst():
+async def test_relation_resolution_scheduler_retires_the_notes_it_resolved(
+    session_maker,
+) -> None:
+    """A pass that resolves links retires content-wide reads and the resolved notes only.
+
+    The stub resolves entity 999, which has no row, so no note id maps and the
+    change is content-only; a whole-project clear would set ``project``.
+    """
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
+    runtime = StubRelationResolutionRuntime(resolved_sources={999})
+    read_cache = RecordingReadCache()
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        session_maker=session_maker,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
+        test_mode=False,
+        debounce_seconds=0.0,
+    )
+    scheduler.schedule_relation_resolution(project_id=13)
+    await asyncio.sleep(0.05)
+
+    assert read_cache.changes == [ReadCacheChange(content=True)]
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_coalesces_a_burst(session_maker):
     """A burst of writes collapses to a single project resolution pass."""
     from basic_memory.index.local_schedulers import _pending_relation_resolution
 
@@ -318,6 +363,7 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=None,
         test_mode=False,
@@ -332,7 +378,7 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
 
 
 @pytest.mark.asyncio
-async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
+async def test_relation_resolution_scheduler_reruns_for_write_during_pass(session_maker):
     """A write that commits while a pass is scanning must trigger a follow-up pass,
     not be dropped by coalescing (the scan already read the unresolved rows)."""
     from basic_memory.index.local_schedulers import (
@@ -363,6 +409,7 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     runtime = WriteDuringScanRuntime()
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=read_cache,
         test_mode=False,
@@ -374,10 +421,8 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 2
-    assert read_cache.invalidated_project_ids == [
-        PROJECT_EXTERNAL_ID,
-        PROJECT_EXTERNAL_ID,
-    ]
+    # Neither pass resolved anything, so neither retires cached reads.
+    assert read_cache.invalidated_project_ids == []
     assert 21 not in _pending_relation_resolution
     assert 21 not in _dirty_relation_resolution
 
@@ -402,7 +447,7 @@ async def test_drain_background_tasks_awaits_scheduled_work():
 
 
 @pytest.mark.asyncio
-async def test_drain_background_tasks_covers_follow_up_tasks():
+async def test_drain_background_tasks_covers_follow_up_tasks(session_maker):
     """A drained task can schedule a follow-up (the relation-resolution dirty
     re-run); the drain must wait for that wave too, not just the first snapshot."""
     from basic_memory.index.local_schedulers import (
@@ -431,6 +476,7 @@ async def test_drain_background_tasks_covers_follow_up_tasks():
     runtime = WriteDuringScanRuntime()
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=None,
         test_mode=False,
@@ -446,7 +492,7 @@ async def test_drain_background_tasks_covers_follow_up_tasks():
 
 
 @pytest.mark.asyncio
-async def test_relation_resolution_scheduler_is_noop_in_test_mode():
+async def test_relation_resolution_scheduler_is_noop_in_test_mode(session_maker):
     """Test mode should suppress the background resolution pass entirely."""
     from basic_memory.index.local_schedulers import _pending_relation_resolution
 
@@ -456,6 +502,7 @@ async def test_relation_resolution_scheduler_is_noop_in_test_mode():
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        session_maker=session_maker,
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=read_cache,
         test_mode=True,

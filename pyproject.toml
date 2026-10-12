@@ -60,6 +60,7 @@ dependencies = [
     # Serializes concurrent `bm hook flush` runs so a stale sweep can't overwrite
     # an artifact without a sibling flush's just-retired event.
     "filelock>=3.12",
+    "fastapi-redis-sdk==0.8.1",
 ]
 
 [project.optional-dependencies]

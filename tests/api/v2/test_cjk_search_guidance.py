@@ -29,12 +29,12 @@ async def test_unspaced_compound_miss_has_actionable_hint(
     # This pins the actual backend behavior, rather than assuming the issue's
     # older unicode61-only index is still the current implementation.
     for query in ("雾凇", "词库", "雾凇词库部署"):
-        response = await client.post(f"{v2_project_url}/search/", json={"text": query})
+        response = await client.request("QUERY", f"{v2_project_url}/search/", json={"text": query})
         assert response.status_code == 200
         assert len(response.json()["results"]) == 1
         assert response.json().get("query_hint") is None
 
-    response = await client.post(f"{v2_project_url}/search/", json={"text": "雾凇拼音"})
+    response = await client.request("QUERY", f"{v2_project_url}/search/", json={"text": "雾凇拼音"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["results"] == []
@@ -44,8 +44,8 @@ async def test_unspaced_compound_miss_has_actionable_hint(
     assert "shorter word" in payload["query_hint"]
     assert "spaces" in payload["query_hint"]
 
-    later_page = await client.post(
-        f"{v2_project_url}/search/", json={"text": "雾凇拼音"}, params={"page": 2}
+    later_page = await client.request(
+        "QUERY", f"{v2_project_url}/search/", json={"text": "雾凇拼音"}, params={"page": 2}
     )
     assert later_page.json().get("query_hint") is None
 
@@ -95,7 +95,7 @@ async def test_unindexed_cjk_miss_keeps_index_guidance(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("query", ["𠮷野家情報", "漢\ufe00字情報", "น้ำแข็ง", "မြန်မာစာ"])
 async def test_script_unit_miss_has_guidance(client: AsyncClient, v2_project_url: str, query: str):
-    response = await client.post(f"{v2_project_url}/search/", json={"text": query})
+    response = await client.request("QUERY", f"{v2_project_url}/search/", json={"text": query})
     assert response.status_code == 200
     assert response.json()["results"] == []
     assert "shorter word" in response.json()["query_hint"]

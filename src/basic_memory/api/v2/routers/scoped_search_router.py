@@ -28,13 +28,14 @@ from basic_memory.services.scoped_search_service import ScopedSearchService
 router = APIRouter(tags=["search"])
 
 
+# QUERY only: a search is a safe read with a body (RFC 9110 draft). OpenAPI
+# cannot describe QUERY, so the route stays out of the schema.
 @router.api_route(
     "/search/",
     methods=["QUERY"],
     response_model=SearchResponse,
     include_in_schema=False,
 )
-@router.post("/search/", response_model=SearchResponse)
 async def search_scope(
     query: ScopedSearchQuery,
     app_config: AppConfigDep,
@@ -82,11 +83,13 @@ async def search_scope(
             else:
                 # Trigger: semantic modes would need another vector or hybrid pass to count.
                 # Why: a search should not pay for a second semantic retrieval.
-                # Outcome: probe one row past the page, leave total at 0, mark it inexact.
+                # Outcome: probe one row past the page and report a lower bound, marked
+                #   inexact: rows at this offset prove offset + len(results) exist; an
+                #   empty page proves nothing about the offset it skipped, so it reports 0.
                 results = await service.search(query, limit=page_size + 1, offset=offset)
-                total = 0
                 has_more = len(results) > page_size
                 results = results[:page_size]
+                total = offset + len(results) if results else 0
 
         temporal_by_source = {}
         project_external_ids: dict[int, str] = {}

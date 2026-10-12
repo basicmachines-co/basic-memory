@@ -1,7 +1,11 @@
 """Tests for typed API clients."""
 
-import pytest
+import json
 from unittest.mock import MagicMock
+
+import httpx
+import pytest
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import (
     KnowledgeClient,
@@ -134,11 +138,11 @@ class TestKnowledgeClient:
         mock_response = MagicMock()
         mock_response.json.return_value = {"external_id": "entity-uuid-123"}
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -159,12 +163,12 @@ class TestKnowledgeClient:
             "resolution_method": "permalink",
         }
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             assert kwargs["json"] == {"identifier": "my-note", "strict": True}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         client = KnowledgeClient(MagicMock(), "proj-123")
         result = await client.resolve_entity_response("my-note", strict=True)
@@ -602,3 +606,59 @@ class TestProjectClient:
         assert len(result.projects) == 1
         assert result.projects[0].name == "test-project"
         assert result.default_project == "test-project"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (
+            200,
+            {
+                "external_id": "entity-123",
+                "entity_id": 7,
+                "target_project_external_id": "project-123",
+                "permalink": "proj/reference/x",
+                "file_path": "reference/X.md",
+                "title": "X",
+                "resolution_method": "path",
+            },
+            "entity-123",
+        ),
+        # A link to a note that does not exist yet is an answer, not a failure.
+        (404, {"detail": "Link target not found: 'Later'"}, None),
+    ],
+)
+async def test_knowledge_client_resolve_link(status, body, expected):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v2/projects/project-123/knowledge/links/resolve"
+        assert json.loads(request.content) == {
+            "identifier": "[[x]]",
+            "source_path": "notes/New.md",
+        }
+        return httpx.Response(status, json=body)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.test"
+    ) as http_client:
+        resolved = await KnowledgeClient(http_client, "project-123").resolve_link(
+            "[[x]]", source_path="notes/New.md"
+        )
+
+    assert (resolved.external_id if resolved else None) == expected
+
+
+@pytest.mark.asyncio
+async def test_knowledge_client_resolve_link_raises_other_failures():
+    """Only a 404 means "names no note"; any other refusal is still a failure."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "boom"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.test"
+    ) as http_client:
+        with pytest.raises(ToolError):
+            await KnowledgeClient(http_client, "project-123").resolve_link(
+                "[[x]]", source_path="notes/New.md"
+            )

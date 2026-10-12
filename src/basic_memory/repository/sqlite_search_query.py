@@ -26,7 +26,12 @@ from basic_memory.repository.search_filters import (
     metadata_filter_content_type_condition,
     shared_filter_conditions,
 )
-from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_index_row import (
+    SearchIndexKey,
+    SearchIndexRow,
+    capped_snippet_columns,
+    snippet_length_columns,
+)
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector, build_fts_page_stage
@@ -44,8 +49,10 @@ _SPACE_OR_SPECIAL_CHARS = frozenset(" .:;,<>?/-")
 _WORD_QUOTING_CHARS = _PROBLEMATIC_CHARS | _SPACE_OR_SPECIAL_CHARS
 _BOOLEAN_OPERATOR_PATTERN = r"(\bAND\b|\bOR\b|\bNOT\b)"
 
-# Every FTS statement returns these columns plus a score.
-_RESULT_COLUMNS = """
+
+def _result_columns(text_columns: str) -> str:
+    """The columns every FTS statement returns, plus a score."""
+    return f"""
                 search_index.project_id,
                 search_index.id,
                 search_index.title,
@@ -57,7 +64,7 @@ _RESULT_COLUMNS = """
                 search_index.to_id,
                 search_index.relation_type,
                 search_index.entity_id,
-                search_index.content_snippet,
+                {text_columns},
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at"""
@@ -503,6 +510,7 @@ class SQLiteFts:
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         """Run one FTS5 page.
 
@@ -522,6 +530,11 @@ class SQLiteFts:
         params = compiled.params
         params["limit"] = limit
         params["offset"] = offset
+        text_columns = (
+            capped_snippet_columns("search_index")
+            if with_text
+            else snippet_length_columns("search_index")
+        )
         relaxed_search_text = search_text
         if search_text and "script_text" in params:
             relaxed_search_text = analyze_script_query(search_text.strip()).word_text
@@ -530,7 +543,7 @@ class SQLiteFts:
         # Postgres does: a page, or a fixed rerank prefix read from a larger window,
         # is then the same rows a smaller query returns.
         sql = f"""
-            SELECT{_RESULT_COLUMNS},
+            SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
@@ -616,6 +629,43 @@ class SQLiteFts:
                 f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
             )
         return results
+
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        """Return the query's structured filters as a subquery over search rows."""
+        if query.search_text:
+            raise ValueError("A row filter applies structured filters only; it takes no text.")
+        entity_columns = (
+            await self._entity_column_names() if query.metadata_filters else frozenset()
+        )
+        compiled = compile_fts_filter(scope, query, entity_columns=entity_columns)
+        sql = (
+            "SELECT search_index.project_id, search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        return sql, compiled.params
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the query admits, reading keys only."""
+        entity_columns = (
+            await self._entity_column_names() if query.metadata_filters else frozenset()
+        )
+        compiled = compile_fts_filter(
+            scope, query, entity_columns=entity_columns, candidate_keys=candidate_keys
+        )
+        sql = (
+            "SELECT search_index.type, search_index.id "
+            f"FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        )
+        async with db.scoped_session(self._session_maker) as session:
+            result = await session.execute(text(sql), compiled.params)
+            return {(row.type, row.id) for row in result.fetchall()}
 
     async def count(
         self,

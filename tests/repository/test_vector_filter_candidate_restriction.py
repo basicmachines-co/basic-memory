@@ -158,6 +158,9 @@ def _semantic_repo(search_repository):
     search_repository._embedding_provider = _fake_embedding_provider()
     # The nearest-neighbour stage is stubbed below, so the adapter is never consulted.
     search_repository._semantic_vector_index = cast(SemanticVectorIndex, object())
+    # The reader's filter pass serves external indexes; a built-in index evaluates the
+    # filters inside its own nearest-neighbour query instead (#1746).
+    search_repository._semantic_vector_index_name = "milvus"
     return search_repository
 
 
@@ -168,7 +171,6 @@ def _vector_chunks(row_ids: list[int]) -> list[HydratedChunk]:
             entity_id=row_id,
             chunk_key=f"{SearchItemType.ENTITY.value}:{row_id}:0",
             source_key=(SearchItemType.ENTITY.value, row_id),
-            chunk_text=TARGET_CONTENT,
             similarity=0.99 - index * 0.001,
         )
         for index, row_id in enumerate(row_ids)
@@ -220,12 +222,11 @@ async def test_filter_pass_answers_every_candidate_within_the_bind_bound(
     assert len(candidates) > VECTOR_HYDRATION_BATCH_SIZE
 
     batched_key_counts: list[int] = []
-    original_search = repo._fts.search
+    original_admitted_keys = repo._fts.admitted_keys
 
-    async def recording_search(scope, query, **kwargs):
-        if kwargs.get("candidate_keys") is not None:
-            batched_key_counts.append(len(kwargs["candidate_keys"]))
-        return await original_search(scope, query, **kwargs)
+    async def recording_admitted_keys(scope, query, candidate_keys):
+        batched_key_counts.append(len(candidate_keys))
+        return await original_admitted_keys(scope, query, candidate_keys)
 
     with (
         patch.object(
@@ -234,7 +235,7 @@ async def test_filter_pass_answers_every_candidate_within_the_bind_bound(
             new_callable=AsyncMock,
             return_value=_vector_chunks(candidates),
         ),
-        patch.object(repo._fts, "search", recording_search),
+        patch.object(repo._fts, "admitted_keys", recording_admitted_keys),
     ):
         results = await repo._semantic_search().vector_only(
             PreparedSearchQuery(

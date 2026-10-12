@@ -8,7 +8,7 @@ Verifies that the fusion formula (max + FUSION_BONUS * min):
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, cast, override
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,6 +18,7 @@ from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_reader import (
+    TOP_CHUNKS_PER_RESULT,
     FUSION_BONUS,
     CandidateWindow,
     SemanticSearch,
@@ -26,7 +27,7 @@ from basic_memory.repository.search_reader import (
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
-from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex, VectorKey
 from basic_memory.schemas.search import SearchRetrievalMode
 
 
@@ -51,6 +52,13 @@ class FakeRow:
     updated_at: str | None = None
     project_id: int = 1
     matched_chunk_text: str | None = None
+    content_snippet_length: int | None = None
+
+    @property
+    def content_length(self) -> int | None:
+        if self.content_snippet_length is not None:
+            return self.content_snippet_length
+        return len(self.content_snippet) if self.content_snippet is not None else None
 
 
 class FakeFts:
@@ -80,6 +88,7 @@ class FakeFts:
         session: AsyncSession | None = None,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
+        with_text: bool = True,
     ) -> list[SearchIndexRow]:
         self.queries.append(query)
         self.calls.append(
@@ -101,14 +110,76 @@ class FakeFts:
     ) -> int:
         return len(self.answer(0))
 
+    async def row_filter(
+        self, scope: ProjectScope, query: PreparedSearchQuery
+    ) -> tuple[str, dict[str, Any]]:
+        self.queries.append(query)
+        return "SELECT project_id, type, id FROM search_index WHERE 1 = 1", {}
+
+    async def admitted_keys(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        candidate_keys: Sequence[SearchIndexKey],
+    ) -> set[SearchIndexKey]:
+        # The keys of whatever this fake's search answers for the same restriction,
+        # so a subclass that overrides search() defines the filter in one place.
+        rows = await self.search(
+            scope, query, limit=len(candidate_keys), offset=0, candidate_keys=candidate_keys
+        )
+        return {(row.type, row.id) for row in rows if row.id is not None}
+
+
+class OfflineSemanticSearch(SemanticSearch):
+    """A SemanticSearch whose text stages answer from memory, for unit tests without a database.
+
+    Rows keep the text the test gave them, excerpts quote the window's own chunks (best
+    first), and a chunk's text is ``"chunk text for <chunk_key>"`` (or the passage a
+    ``window_of`` key carries). Tests that need the
+    database's answers run against a real repository instead.
+    """
+
+    @override
+    async def _fetch_row_texts(self, keys, snippet_limit=None):
+        return {}
+
+    @override
+    async def _excerpt_chunk_keys(self, rows, window, position_bound):
+        excerpts = {}
+        for row in rows:
+            key = (row.type, row.id)
+            chunks = [
+                chunk
+                for chunk in window.chunks_by_key.get(key, [])
+                if position_bound is None or chunk.position < position_bound
+            ]
+            chunks.sort(key=lambda chunk: chunk.similarity, reverse=True)
+            excerpts[key] = [chunk.key for chunk in chunks[:TOP_CHUNKS_PER_RESULT]]
+        return excerpts
+
+    @override
+    async def _fetch_chunk_texts(self, keys):
+        # A key written by window_of carries its passage; any other names its text.
+        return {
+            key: key.chunk_key.removeprefix("text:")
+            if key.chunk_key.startswith("text:")
+            else f"chunk text for {key.chunk_key}"
+            for key in keys
+        }
+
 
 def fake_vector_retrieval(
     *,
     vector_k: int = 100,
     min_similarity: float = 0.0,
     embed_query: AsyncMock | None = None,
+    index_name: str = "sqlite-vec",
 ) -> VectorRetrieval:
-    """A semantic stack whose adapter is never consulted: tests stub the neighbour stage."""
+    """A semantic stack whose adapter is never consulted: tests stub the neighbour stage.
+
+    ``index_name`` picks the reader's path: a built-in name ("sqlite-vec") has its
+    filters evaluated in the index, any other name is external and filtered in the reader.
+    """
     provider = type(
         "EP",
         (),
@@ -122,7 +193,7 @@ def fake_vector_retrieval(
     )()
     return VectorRetrieval(
         index=cast(SemanticVectorIndex, object()),
-        index_name="sqlite-vec",
+        index_name=index_name,
         embedding_provider=cast(EmbeddingProvider, provider),
         embedding_model="fake:384",
         vector_k=vector_k,
@@ -142,7 +213,13 @@ def window_of(rows: Sequence[Any]) -> CandidateWindow:
     return CandidateWindow(
         similarity_by_key={(row.type, row.id): row.score for row in rows},
         chunks_by_key={
-            (row.type, row.id): [WindowChunk(position, row.score, row.matched_chunk_text or "")]
+            (row.type, row.id): [
+                WindowChunk(
+                    position,
+                    row.score,
+                    VectorKey(entity_id=row.id, chunk_key=f"text:{row.matched_chunk_text or ''}"),
+                )
+            ]
             for position, row in enumerate(rows)
         },
         rows={(row.type, row.id): row for row in rows},
@@ -162,7 +239,7 @@ async def fuse(
     query: PreparedSearchQuery = HYBRID_QUERY,
 ) -> list[SearchIndexRow]:
     """Run hybrid with both legs answering fixed rows, so only fusion is under test."""
-    semantic = SemanticSearch(
+    semantic = OfflineSemanticSearch(
         cast(Any, None), ProjectScope.single(1), FakeFts(fts_results), fake_vector_retrieval()
     )
     with patch.object(semantic, "_vector_window", vector_leg(vector_results)):
@@ -294,7 +371,9 @@ async def test_dual_source_result_keeps_vector_matched_chunk():
 async def test_hybrid_fts_leg_runs_in_fts_mode_with_relaxation():
     """The lexical leg is the same prepared query in FTS mode, allowed to relax."""
     fts = FakeFts([FakeRow(id=1, score=5.0)])
-    semantic = SemanticSearch(cast(Any, None), ProjectScope.single(1), fts, fake_vector_retrieval())
+    semantic = OfflineSemanticSearch(
+        cast(Any, None), ProjectScope.single(1), fts, fake_vector_retrieval()
+    )
 
     with patch.object(semantic, "_vector_window", vector_leg([])):
         await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)

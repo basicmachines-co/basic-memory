@@ -5,11 +5,8 @@ V1 uses string-based project names which are less efficient and less stable.
 """
 
 import asyncio
-import json
-from contextlib import nullcontext
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import APIRouter, Path, Response
 
 import logfire
 from basic_memory import db
@@ -18,24 +15,17 @@ from basic_memory.api.v2.utils import (
     search_error_boundary,
     to_search_results,
 )
+from basic_memory.read_cache import ReadCacheOperation
+from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
+from basic_memory.read_cache.routes import cached_read, content_group
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     MemoryTimeIndexRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
-    ReadCacheDep,
     SearchReindexSchedulerDep,
     SearchServiceV2ExternalDep,
     SessionMakerDep,
-    create_model_read_cache,
 )
-from basic_memory.read_cache import (
-    ModelReadCache,
-    ReadCacheKey,
-    ReadCacheOperation,
-    ReadCacheScope,
-    read_cache_request_digest,
-)
-from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
@@ -75,51 +65,28 @@ async def _search_with_exact_count(
     return results_task.result(), total_task.result()
 
 
-def get_search_read_cache(
-    read_cache: ReadCacheDep,
-) -> ModelReadCache[SearchResponse] | None:
-    """Bind search responses to the optional cache backend and short query TTL."""
-    return create_model_read_cache(
-        read_cache,
-        SearchResponse,
-        ttl_seconds=SEARCH_READ_CACHE_TTL_SECONDS,
-    )
-
-
-SearchReadCacheDep = Annotated[
-    ModelReadCache[SearchResponse] | None,
-    Depends(get_search_read_cache),
-]
-
-
-def _search_request_digest(query: SearchQuery, *, page: int, page_size: int) -> str:
-    """Return one structural identity for POST and QUERY search requests."""
-    canonical_request = json.dumps(
-        {
-            "query": query.model_dump(mode="json"),
-            "page": page,
-            "page_size": page_size,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return read_cache_request_digest(canonical_request)
-
-
+# QUERY only: a search is a safe, cacheable read with a body (RFC 9110 draft).
+# OpenAPI cannot describe QUERY, so the route stays out of the schema.
 @router.api_route(
     "/search/",
     methods=["QUERY"],
     response_model=SearchResponse,
     include_in_schema=False,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.search,
+            group=content_group,
+            ttl_seconds=SEARCH_READ_CACHE_TTL_SECONDS,
+            hit_headers={"Accept-Query": "application/json"},
+        )
+    ],
 )
-@router.post("/search/", response_model=SearchResponse)
 async def search(
     query: SearchQuery,
     search_service: SearchServiceV2ExternalDep,
     entity_service: EntityServiceV2ExternalDep,
     temporal_repository: MemoryTimeIndexRepositoryV2ExternalDep,
     session_maker: SessionMakerDep,
-    read_cache: SearchReadCacheDep,
     response: Response,
     internal_project_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external UUID"),
@@ -172,113 +139,100 @@ async def search(
         ),
         has_temporal_filter=temporal_requested,
     ):
-        cache_key = ReadCacheKey(
-            project_id=project_id,
-            operation=ReadCacheOperation.search,
-            request_digest=_search_request_digest(query, page=page, page_size=page_size),
-        )
-        cache_scope = (
-            read_cache.read(key=cache_key)
-            if read_cache is not None
-            else nullcontext(ReadCacheScope[SearchResponse]())
-        )
-        async with cache_scope as cached:
-            if cached.value is not None:
-                return cached.value
-
-            offset = (page - 1) * page_size
-            # A malformed filter is the caller's mistake, known before any query
-            # runs. Refusing it here answers 400 without scheduling the search
-            # and count queries that would each fail on the same parse.
-            if query.metadata_filters:
-                with search_error_boundary():
-                    parse_metadata_filters(query.metadata_filters)
-            exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
+        offset = (page - 1) * page_size
+        # A malformed filter is the caller's mistake, known before any query
+        # runs. Refusing it here answers 400 without scheduling the search
+        # and count queries that would each fail on the same parse.
+        if query.metadata_filters:
             with search_error_boundary():
-                with logfire.span(
-                    "api.search.search.execute_query",
-                    domain="search",
-                    action="search",
-                    phase="execute_query",
-                    page=page,
-                    page_size=page_size,
-                ):
-                    if exact_count_available:
-                        results, total = await _search_with_exact_count(
-                            search_service, query, limit=page_size, offset=offset
-                        )
-                    else:
-                        results = await search_service.search(
-                            query, limit=page_size + 1, offset=offset
-                        )
-                        total = 0
-
+                parse_metadata_filters(query.metadata_filters)
+        exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
+        with search_error_boundary():
             with logfire.span(
-                "api.search.search.paginate_results",
+                "api.search.search.execute_query",
                 domain="search",
                 action="search",
-                phase="paginate_results",
-                result_count=len(results),
+                phase="execute_query",
+                page=page,
+                page_size=page_size,
             ):
                 if exact_count_available:
-                    has_more = offset + len(results) < total
+                    results, total = await _search_with_exact_count(
+                        search_service, query, limit=page_size, offset=offset
+                    )
                 else:
-                    # Trigger: semantic modes would need another vector/hybrid retrieval to count.
-                    # Why: search requests should not pay for a second semantic pass.
-                    # Outcome: preserve probe pagination, leave total at 0, and mark it unknown.
-                    has_more = len(results) > page_size
-                    if has_more:
-                        results = results[:page_size]
+                    results = await search_service.search(query, limit=page_size + 1, offset=offset)
+                    total = 0
 
-            with logfire.span(
-                "api.search.search.hydrate_results",
-                domain="search",
-                action="search",
-                phase="hydrate_results",
-                result_count=len(results),
-            ):
-                # Trigger: the caller asked a valid-time question.
-                # Why: the assertions explain *why* each hit matched, but loading them
-                #   costs a query, and a search with no temporal filter has nothing to
-                #   explain -- so ordinary searches stay exactly as expensive as before.
-                # Outcome: temporal metadata rides along only on temporal searches.
-                temporal_by_source = {}
-                if temporal_requested:
-                    async with db.scoped_session(session_maker) as session:
-                        temporal_by_source = await load_temporal_metadata(
-                            temporal_repository, session, results
-                        )
-                search_results = await to_search_results(
-                    entity_service,
-                    results,
-                    temporal_by_source=temporal_by_source,
-                    project_external_ids={internal_project_id: project_id},
-                )
-            with logfire.span(
-                "api.search.search.build_response",
-                domain="search",
-                action="search",
-                phase="build_response",
-                result_count=len(search_results),
-            ):
-                result = SearchResponse(
-                    results=search_results,
-                    current_page=page,
-                    page_size=page_size,
-                    total=total,
-                    total_is_exact=exact_count_available,
-                    has_more=has_more,
-                    # A later empty page is pagination, not evidence of a compound miss.
-                    # Guidance adds no retrieval pass and makes no index-completeness claim.
-                    query_hint=unspaced_script_query_hint(query)
-                    if page == 1 and not search_results and total == 0
-                    else None,
-                    # None, not False, when nothing was asked: an ordinary search
-                    # payload stays exactly what it was before valid time existed.
-                    temporal_applied=True if temporal_requested else None,
-                )
-                cached.value = result
-                return result
+        with logfire.span(
+            "api.search.search.paginate_results",
+            domain="search",
+            action="search",
+            phase="paginate_results",
+            result_count=len(results),
+        ):
+            if exact_count_available:
+                has_more = offset + len(results) < total
+            else:
+                # Trigger: semantic modes would need another vector/hybrid retrieval to count.
+                # Why: search requests should not pay for a second semantic pass.
+                # Outcome: preserve probe pagination and report a lower bound, marked
+                #   inexact: a row returned at this offset proves the ranking holds at
+                #   least offset + len(results) rows. An empty page proves nothing about
+                #   the offset it skipped, so it reports 0.
+                has_more = len(results) > page_size
+                if has_more:
+                    results = results[:page_size]
+                total = offset + len(results) if results else 0
+
+        with logfire.span(
+            "api.search.search.hydrate_results",
+            domain="search",
+            action="search",
+            phase="hydrate_results",
+            result_count=len(results),
+        ):
+            # Trigger: the caller asked a valid-time question.
+            # Why: the assertions explain *why* each hit matched, but loading them
+            #   costs a query, and a search with no temporal filter has nothing to
+            #   explain -- so ordinary searches stay exactly as expensive as before.
+            # Outcome: temporal metadata rides along only on temporal searches.
+            temporal_by_source = {}
+            if temporal_requested:
+                async with db.scoped_session(session_maker) as session:
+                    temporal_by_source = await load_temporal_metadata(
+                        temporal_repository, session, results
+                    )
+            search_results = await to_search_results(
+                entity_service,
+                results,
+                temporal_by_source=temporal_by_source,
+                project_external_ids={internal_project_id: project_id},
+            )
+        with logfire.span(
+            "api.search.search.build_response",
+            domain="search",
+            action="search",
+            phase="build_response",
+            result_count=len(search_results),
+        ):
+            result = SearchResponse(
+                results=search_results,
+                current_page=page,
+                page_size=page_size,
+                total=total,
+                total_is_exact=exact_count_available,
+                has_more=has_more,
+                # A later empty page is pagination, not evidence of a compound miss.
+                # Guidance adds no retrieval pass and makes no index-completeness claim.
+                query_hint=unspaced_script_query_hint(query)
+                if page == 1 and not search_results and total == 0
+                else None,
+                # None, not False, when nothing was asked: an ordinary search
+                # payload stays exactly what it was before valid time existed.
+                temporal_applied=True if temporal_requested else None,
+            )
+            return result
 
 
 @router.post("/search/reindex")
