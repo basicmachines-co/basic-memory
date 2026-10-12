@@ -253,8 +253,11 @@ class RedisReadCache:
         """
         for index in indexes:
             # Pop the index a batch at a time so no single reply carries a large
-            # project's whole index. Popped members leave the index, so an
-            # interrupted run leaves the rest listed rather than half-deleted.
+            # project's whole index. A retired index is never read again, so a
+            # batch whose UNLINK fails expires with its TTL either way; for a group
+            # change those entries also stay in the live project index, because
+            # they leave it in the same pipeline as the UNLINK, and the next
+            # project invalidation deletes them.
             while popped := await self._pop_index_batch(index):
                 batch = [member for member, _expires_at in popped]
                 async with self.client.pipeline(transaction=False) as pipe:
