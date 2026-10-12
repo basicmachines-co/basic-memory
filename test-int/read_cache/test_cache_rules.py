@@ -295,6 +295,11 @@ async def test_each_cached_read_reports_one_span_with_its_outcome(
     assert [span["attributes"]["cache.lookup.outcome"] for span in spans] == ["miss", "hit"]
     assert {span["attributes"]["cache.group"] for span in spans} == {"note"}
     assert {span["attributes"]["cache.operation"] for span in spans} == {"entity"}
+    # The SDK signals a hit by raising CacheHitException. That is control flow,
+    # so a hit span must not record an exception or an error level.
+    for span in spans:
+        assert not [event for event in span.get("events", []) if event["name"] == "exception"]
+        assert span["attributes"].get("logfire.level_num", 9) < 17
 
 
 @pytest.mark.asyncio
