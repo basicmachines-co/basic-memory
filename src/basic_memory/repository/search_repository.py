@@ -76,7 +76,11 @@ class SearchRepository(Protocol):
         ...
 
     async def record_entity_vector_deferrals(
-        self, *, unfinished_entity_ids: set[int], completed_entity_ids: set[int]
+        self,
+        *,
+        unfinished_entity_ids: set[int],
+        completed_entity_ids: set[int],
+        pass_started_at: datetime,
     ) -> None:
         """Record which entities a vector sync pass left unfinished."""
         ...

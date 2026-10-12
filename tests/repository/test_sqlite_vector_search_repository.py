@@ -1632,6 +1632,76 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
     assert prefix_changed_result.embedding_jobs_total == prefix_changed_result.chunks_total
 
 
+@pytest.mark.asyncio
+async def test_sqlite_stale_prefetched_prepare_does_not_publish_an_obsolete_chunk(
+    search_repository, monkeypatch
+):
+    """A prepare plan read before a newer sync finished must not publish old text (#1734)."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+
+    async def write_source(body: str) -> None:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=search_repository.project_id,
+                row_id=121,
+                entity_id=121,
+                title="Prepare Race",
+                permalink="specs/prepare-race",
+                content_stems=body,
+            )
+        )
+
+    await write_source("Initial generation")
+    await search_repository.sync_entity_vectors_batch([121])
+    await write_source("Old captured generation")
+
+    # Pause the older sync after its shared read closed, before it takes the write lock.
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+    original_scope = search_repository._prepare_entity_write_scope
+    first_entry = True
+
+    @asynccontextmanager
+    async def pause_first_prepare():
+        nonlocal first_entry
+        if first_entry:
+            first_entry = False
+            paused.set()
+            await resume.wait()
+        async with original_scope():
+            yield
+
+    monkeypatch.setattr(search_repository, "_prepare_entity_write_scope", pause_first_prepare)
+    older = asyncio.create_task(search_repository.sync_entity_vectors_batch([121]))
+    await asyncio.wait_for(paused.wait(), timeout=10)
+
+    await write_source("New completed generation")
+    newer = await search_repository.sync_entity_vectors_batch([121])
+    assert newer.entities_synced == 1
+
+    resume.set()
+    await asyncio.wait_for(older, timeout=10)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        manifest_rows = (
+            await session.execute(
+                text(
+                    "SELECT id FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND entity_id = :entity_id"
+                ),
+                {"project_id": search_repository.project_id, "entity_id": 121},
+            )
+        ).fetchall()
+    # The note has one chunk of current text; the older plan's chunk is not published.
+    assert len(manifest_rows) == 1
+    unchanged = await search_repository.sync_entity_vectors_batch([121])
+    assert unchanged.embedding_jobs_total == 0
+
+
 def test_sqlite_embedding_model_key_includes_litellm_role_settings():
     """LiteLLM role changes should invalidate previously embedded document chunks."""
     repo = _make_sqlite_repo_for_unit_tests()
@@ -1778,7 +1848,8 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     prepared = await repo._prepare_entity_vector_jobs_window([1, 2])
     prepared_results = [result for result in prepared if not isinstance(result, BaseException)]
 
-    assert fetched_windows == [[1, 2]]
+    # One shared read for the window, then one re-read under the write lock (#1734).
+    assert fetched_windows == [[1, 2], [1, 2]]
     assert [result.entity_id for result in prepared_results] == [1, 2]
     assert max_active_write_scopes == 1
     assert write_scope_entries == 1

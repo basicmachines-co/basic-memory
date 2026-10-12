@@ -743,6 +743,7 @@ async def test_stale_relation_generation_cannot_reinsert_absent_key_or_cleanup_n
             session,
             entity_id=source_entity.id,
             generation=1,
+            published_identities=frozenset({("removed", "Removed Target")}),
         )
 
     assert not stale_upsert.generation_is_current
@@ -784,6 +785,7 @@ async def test_newer_relation_generation_replaces_then_cleans_older_set(
             session,
             entity_id=source_entity.id,
             generation=1,
+            published_identities=frozenset({("old", "Old Target"), ("shared", "Shared Target")}),
         )
 
     await set_note_content_generation(
@@ -807,6 +809,7 @@ async def test_newer_relation_generation_replaces_then_cleans_older_set(
             session,
             entity_id=source_entity.id,
             generation=2,
+            published_identities=frozenset({("new", "New Target"), ("shared", "Shared Target")}),
         )
 
     assert current.generation_is_current
@@ -854,11 +857,66 @@ async def test_empty_relation_generation_cleanup_removes_the_older_set(
             session,
             entity_id=source_entity.id,
             generation=2,
+            published_identities=frozenset(),
         )
 
     assert cleanup.generation_is_current
     async with db.scoped_session(session_maker) as session:
         assert await relation_repository.find_all(session) == []
+
+
+@pytest.mark.asyncio
+async def test_same_generation_republish_removes_relations_it_no_longer_writes(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """A full reindex of unchanged bytes after a parser change drops stale edges (#1741)."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=3,
+    )
+    first_parse = [
+        AcceptedRelationWrite("links_to", "Kept Target", None),
+        AcceptedRelationWrite("links_to", "Inline Code Target", None),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.upsert_relation_generation(
+            session, entity_id=source_entity.id, generation=3, relations=first_parse
+        )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=3,
+            published_identities=frozenset(
+                (relation.relation_type, relation.target_name) for relation in first_parse
+            ),
+        )
+
+    # Same bytes, same generation, new parser: the inline-code link is gone.
+    second_parse = [AcceptedRelationWrite("links_to", "Kept Target", None)]
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.upsert_relation_generation(
+            session, entity_id=source_entity.id, generation=3, relations=second_parse
+        )
+    async with db.scoped_session(session_maker) as session:
+        cleanup = await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=3,
+            published_identities=frozenset({("links_to", "Kept Target")}),
+        )
+
+    assert cleanup.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_all(session)
+    assert [(relation.to_name, relation.generation) for relation in relations] == [
+        ("Kept Target", 3)
+    ]
 
 
 @pytest.mark.asyncio

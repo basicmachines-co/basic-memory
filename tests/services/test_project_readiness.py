@@ -624,7 +624,9 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
     )
 
     await repository.record_entity_vector_deferrals(
-        unfinished_entity_ids={sample_entity.id}, completed_entity_ids=set()
+        unfinished_entity_ids={sample_entity.id},
+        completed_entity_ids=set(),
+        pass_started_at=datetime.now(UTC),
     )
     async with db.scoped_session(session_maker) as session:
         deferred_at = (
@@ -636,7 +638,9 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
     assert deferred_at is not None
 
     await repository.record_entity_vector_deferrals(
-        unfinished_entity_ids=set(), completed_entity_ids={sample_entity.id}
+        unfinished_entity_ids=set(),
+        completed_entity_ids={sample_entity.id},
+        pass_started_at=datetime.now(UTC),
     )
     async with db.scoped_session(session_maker) as session:
         cleared = (
@@ -646,6 +650,40 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
             )
         ).scalar()
     assert cleared is None
+
+
+@pytest.mark.asyncio
+async def test_an_older_pass_does_not_clear_a_newer_deferral_marker(
+    test_project, sample_entity, app_config, engine_factory
+):
+    """A pass that started before a newer one deferred keeps that marker (#1733)."""
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+    older_pass_started_at = datetime.now(UTC)
+
+    # The newer pass defers the entity while the older pass is still running.
+    await repository.record_entity_vector_deferrals(
+        unfinished_entity_ids={sample_entity.id},
+        completed_entity_ids=set(),
+        pass_started_at=datetime.now(UTC),
+    )
+    # The older pass then finishes the entity's older source.
+    await repository.record_entity_vector_deferrals(
+        unfinished_entity_ids=set(),
+        completed_entity_ids={sample_entity.id},
+        pass_started_at=older_pass_started_at,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        deferred_at = (
+            await session.execute(
+                text("SELECT vector_sync_deferred_at FROM entity WHERE id = :id"),
+                {"id": sample_entity.id},
+            )
+        ).scalar()
+    assert deferred_at is not None
 
 
 # --- Bind-parameter bounds ---
@@ -675,6 +713,7 @@ async def test_deferral_markers_survive_an_over_limit_entity_list(
     await repository.record_entity_vector_deferrals(
         unfinished_entity_ids=set(range(1, OVER_LIMIT_ENTITY_COUNT + 1)),
         completed_entity_ids=set(),
+        pass_started_at=datetime.now(UTC),
     )
 
 
@@ -697,7 +736,7 @@ async def test_no_marker_statement_exceeds_the_hydration_bound(
     real_execute = AsyncSession.execute
 
     async def counting_execute(self, statement, params=None, *args, **kwargs):
-        if isinstance(params, dict) and "deferred_at" in params:
+        if isinstance(params, dict) and "entity_id_0" in params:
             bind_counts.append(len(params))
         return await real_execute(self, statement, params, *args, **kwargs)
 
@@ -706,10 +745,12 @@ async def test_no_marker_statement_exceeds_the_hydration_bound(
     await repository.record_entity_vector_deferrals(
         unfinished_entity_ids=set(range(1, 601)),
         completed_entity_ids=set(range(601, 1001)),
+        pass_started_at=datetime.now(UTC),
     )
 
     assert bind_counts, "no marker statements were executed"
-    # Each statement also carries :project_id and :deferred_at.
+    # Each statement also carries :project_id, plus :deferred_at when marking or
+    # :pass_started_at when clearing (#1733).
     assert max(bind_counts) <= VECTOR_HYDRATION_BATCH_SIZE + 2, bind_counts
     # 600 deferred + 400 completed at 250 per statement.
     assert len(bind_counts) == 3 + 2
@@ -746,6 +787,7 @@ async def test_marker_updates_are_one_transaction(
         await repository.record_entity_vector_deferrals(
             unfinished_entity_ids=set(range(1, 601)),
             completed_entity_ids=set(),
+            pass_started_at=datetime.now(UTC),
         )
 
     monkeypatch.undo()

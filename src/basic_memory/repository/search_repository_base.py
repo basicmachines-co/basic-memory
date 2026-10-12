@@ -419,6 +419,7 @@ class SearchRepositoryBase(ABC):
         *,
         unfinished_entity_ids: set[int],
         completed_entity_ids: set[int],
+        pass_started_at: datetime,
     ) -> None:
         """Persist which entities a vector sync pass left unfinished.
 
@@ -452,25 +453,43 @@ class SearchRepositoryBase(ABC):
         # the next sync pass recomputes and rewrites them. A half-applied update
         # would not be -- readiness would report a mix of stale and current
         # markers with nothing to reconcile them.
+        #
+        # Trigger: a newer pass over the same entity can finish, and mark it deferred,
+        #          while this pass is still running.
+        # Why: clearing that marker here would drop the only signal that the newer
+        #      source still has unembedded shards (#1733).
+        # Outcome: a completed entity's marker is cleared only when it was set before
+        #          this pass started. Marking unfinished stays unconditional, because
+        #          over-marking is safe: the next pass clears it.
+        statements = (
+            (
+                sorted(unfinished_entity_ids),
+                "vector_sync_deferred_at = :deferred_at",
+                "",
+                {"deferred_at": datetime.now(timezone.utc)},
+            ),
+            (
+                sorted(completed_entity_ids),
+                "vector_sync_deferred_at = NULL",
+                " AND (vector_sync_deferred_at IS NULL"
+                " OR vector_sync_deferred_at < :pass_started_at)",
+                {"pass_started_at": pass_started_at},
+            ),
+        )
         async with db.scoped_session(self.session_maker) as session:
-            for entity_ids, deferred_at in (
-                (sorted(unfinished_entity_ids), datetime.now(timezone.utc)),
-                (sorted(completed_entity_ids), None),
-            ):
+            for entity_ids, assignment, marker_guard, marker_params in statements:
                 for start in range(0, len(entity_ids), VECTOR_HYDRATION_BATCH_SIZE):
                     chunk = entity_ids[start : start + VECTOR_HYDRATION_BATCH_SIZE]
                     placeholders = ", ".join(f":entity_id_{index}" for index in range(len(chunk)))
-                    params: dict[str, object] = {
-                        "project_id": self.project_id,
-                        "deferred_at": deferred_at,
-                    }
+                    params: dict[str, object] = {"project_id": self.project_id, **marker_params}
                     params.update(
                         {f"entity_id_{index}": entity_id for index, entity_id in enumerate(chunk)}
                     )
                     await session.execute(
                         text(
-                            "UPDATE entity SET vector_sync_deferred_at = :deferred_at "
+                            f"UPDATE entity SET {assignment} "
                             f"WHERE project_id = :project_id AND id IN ({placeholders})"
+                            f"{marker_guard}"
                         ),
                         params,
                     )
@@ -1263,6 +1282,16 @@ class SearchRepositoryBase(ABC):
             dialect_name=connection.dialect.name,
         )
 
+    def _replans_prepare_under_write_lock(self) -> bool:
+        """Return whether prepare re-reads its rows after taking a write lock.
+
+        Only a backend that holds a lock across the re-read and the write gains from
+        it: external indexes take the project lock, and SQLite overrides this for its
+        prepare write lock. Built-in Postgres takes no lock here, so a re-read would
+        add round trips without closing the window.
+        """
+        return self._uses_external_vector_index()
+
     def _uses_external_vector_index(self) -> bool:
         """Return whether this repository writes vectors outside the SQL backend."""
         return self._semantic_vector_index_name not in BUILT_IN_VECTOR_INDEX_NAMES and hasattr(
@@ -1615,6 +1644,7 @@ class SearchRepositoryBase(ABC):
         class owns a database session, and the helper is also driven by test
         doubles that have none.
         """
+        pass_started_at = datetime.now(timezone.utc)
         try:
             result = await semantic_vector_sync.sync_entity_vectors_internal(
                 self,
@@ -1638,6 +1668,7 @@ class SearchRepositoryBase(ABC):
             await self.record_entity_vector_deferrals(
                 unfinished_entity_ids=set(entity_ids),
                 completed_entity_ids=set(),
+                pass_started_at=pass_started_at,
             )
             raise
 
@@ -1648,6 +1679,7 @@ class SearchRepositoryBase(ABC):
         await self.record_entity_vector_deferrals(
             unfinished_entity_ids=set(result.deferred_entity_ids) | set(result.failed_entity_ids),
             completed_entity_ids=set(result.synced_entity_ids),
+            pass_started_at=pass_started_at,
         )
         return result
 

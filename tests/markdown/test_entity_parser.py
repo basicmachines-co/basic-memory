@@ -320,18 +320,22 @@ async def test_parse_without_file_stats_uses_one_operation_timestamp(entity_pars
         ("created", "[2024-01-15]"),
     ],
 )
-async def test_parse_invalid_canonical_timestamp_fails_for_field(
+async def test_parse_invalid_canonical_timestamp_falls_back_to_file_time(
     entity_parser,
     field_name: str,
     value: str,
 ):
-    with pytest.raises(ValueError, match=rf"frontmatter field '{field_name}'"):
-        await entity_parser.parse_markdown_content(
-            Path("invalid.md"),
-            f"---\n{field_name}: {value}\n---\nBody",
-            ctime=0,
-            mtime=1,
-        )
+    # An unreadable timestamp must not keep the note out of the index (#1742).
+    entity = await entity_parser.parse_markdown_content(
+        Path("invalid.md"),
+        f"---\ntitle: Invalid\n{field_name}: {value}\n---\nBody",
+        ctime=0,
+        mtime=1,
+    )
+
+    assert entity.created == datetime(1970, 1, 1, tzinfo=UTC).astimezone()
+    assert entity.modified == datetime(1970, 1, 1, 0, 0, 1, tzinfo=UTC).astimezone()
+    assert entity.frontmatter.title == "Invalid"
 
 
 @pytest.mark.asyncio
