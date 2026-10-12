@@ -66,6 +66,18 @@ async def _stored_entries(cache: RedisReadCache, operation: str = "*") -> set[by
     }
 
 
+async def _project_set_members(cache: RedisReadCache) -> set[bytes]:
+    """Every entry key the project-epoch entry sets list."""
+    indexes = [
+        index async for index in cache.client.scan_iter(match=f"{cache.prefix}:*:entries:project:*")
+    ]
+    async with cache.client.pipeline(transaction=False) as pipe:
+        for index in indexes:
+            pipe.smembers(index)
+        listed: list[set[bytes]] = await pipe.execute()
+    return {key for members in listed for key in members}
+
+
 @pytest.fixture
 def project_url(test_project: Project) -> str:
     return f"/v2/projects/{test_project.external_id}"
@@ -202,6 +214,9 @@ async def test_a_body_edit_deletes_the_retired_note_entry_from_redis(
     await drain_pending_materializations()
 
     assert await _stored_entries(cached_app.cache, "entity") == untouched_entries
+    # The project set lists live entries only, so a project whose epoch never
+    # changes does not collect a key for every retired response.
+    assert await _project_set_members(cached_app.cache) == untouched_entries
     assert _status(await client.get(untouched_url)) == "HIT"
 
 

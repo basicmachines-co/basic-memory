@@ -65,6 +65,15 @@ def _token(value: object) -> str:
     return str(value)
 
 
+def _group_index_version(project_epoch: str, group_version: str) -> str:
+    """Name a group's entry set by the project epoch it was filled in.
+
+    Replacing the project epoch deletes every entry, and the next reads fill new
+    sets under the new epoch, so the old sets stop growing and expire.
+    """
+    return f"{project_epoch}.{group_version}"
+
+
 @dataclass(frozen=True, slots=True)
 class EntryVersions:
     """The versions one entry key embeds: global epoch, project epoch, group.
@@ -145,13 +154,17 @@ class RedisReadCache:
         """Record an entry about to be stored, so replacing its versions deletes it.
 
         Every entry is listed under its project epoch, because replacing that epoch
-        retires every read in the project, and under its own group's version.
-        Recording happens before the store, so a response that turns out not to be
-        cacheable leaves a key in the set that deletes nothing.
+        retires every read in the project, and under its own group's version within
+        that epoch. Recording happens before the store, so a response that turns out
+        not to be cacheable leaves a key in the set that deletes nothing.
         """
         indexes = [self._index_key(project_id, PROJECT, versions.project)]
         if group != PROJECT:
-            indexes.append(self._index_key(project_id, group, versions.group))
+            indexes.append(
+                self._index_key(
+                    project_id, group, _group_index_version(versions.project, versions.group)
+                )
+            )
         try:
             async with self.client.pipeline(transaction=False) as pipe:
                 for index in indexes:
@@ -170,11 +183,15 @@ class RedisReadCache:
         groups = change.groups
         if not groups:
             return ReadCacheInvalidationStatus.invalidated
+        project_epoch_key = self._version_key(project_id, PROJECT)
         try:
             # --- Replace versions ---
             # Readers switch to the new keys as soon as this lands, so the entries
             # deleted below can no longer be served.
             async with self.client.pipeline(transaction=False) as pipe:
+                # Group sets live under the project epoch they were filled in, so a
+                # group's retired entries are found in the set for the current epoch.
+                pipe.get(project_epoch_key)
                 for group in groups:
                     # The version outlives every entry keyed under it, so when it
                     # expires back to the initial token no entry from before its
@@ -185,20 +202,39 @@ class RedisReadCache:
                         ex=READ_CACHE_TTL_SECONDS,
                         get=True,
                     )
-                replaced = await pipe.execute()
+                current_project, *replaced = await pipe.execute()
 
             # --- Delete the retired entries ---
-            retired_indexes = [
-                self._index_key(project_id, group, _token(previous))
-                for group, previous in zip(groups, replaced, strict=True)
-            ]
-            await self._delete_indexed_entries(retired_indexes)
+            if change.project:
+                # Every entry in the project is listed under its epoch. The group sets
+                # filled under that epoch are no longer added to and expire on their
+                # own, so they are not looked up.
+                await self._delete_indexed_entries(
+                    [self._index_key(project_id, PROJECT, _token(replaced[0]))]
+                )
+            else:
+                project_epoch = _token(current_project)
+                await self._delete_indexed_entries(
+                    [
+                        self._index_key(
+                            project_id, group, _group_index_version(project_epoch, _token(previous))
+                        )
+                        for group, previous in zip(groups, replaced, strict=True)
+                    ],
+                    also_listed_in=self._index_key(project_id, PROJECT, project_epoch),
+                )
         except (RedisError, OSError) as error:
             raise ReadCacheUnavailable("Redis read-cache invalidation failed") from error
         return ReadCacheInvalidationStatus.invalidated
 
-    async def _delete_indexed_entries(self, indexes: Sequence[str]) -> None:
+    async def _delete_indexed_entries(
+        self, indexes: Sequence[str], *, also_listed_in: str | None = None
+    ) -> None:
         """Delete every entry listed in ``indexes``, then the sets themselves.
+
+        ``also_listed_in`` is the project set that lists the same entries. Their keys
+        are removed from it too, so a project whose notes change but whose epoch
+        never does keeps a set the size of its live entries.
 
         A reader that looked up the old version just before it was replaced can
         still store its entry after this runs. That entry is never read again and
@@ -208,10 +244,15 @@ class RedisReadCache:
             for index in indexes:
                 pipe.smembers(index)
             listed: list[set[bytes]] = await pipe.execute()
-        doomed: list[bytes] = [key for members in listed for key in members]
-        doomed.extend(index.encode() for index in indexes)
-        for start in range(0, len(doomed), _UNLINK_BATCH_SIZE):
-            await self.client.unlink(*doomed[start : start + _UNLINK_BATCH_SIZE])
+        retired: list[bytes] = [key for members in listed for key in members]
+        for start in range(0, len(retired), _UNLINK_BATCH_SIZE):
+            batch = retired[start : start + _UNLINK_BATCH_SIZE]
+            async with self.client.pipeline(transaction=False) as pipe:
+                pipe.unlink(*batch)
+                if also_listed_in is not None:
+                    pipe.srem(also_listed_in, *batch)
+                await pipe.execute()
+        await self.client.unlink(*indexes)
 
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         return await self.invalidate(project_id, ReadCacheChange.whole_project())
