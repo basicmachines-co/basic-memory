@@ -180,7 +180,7 @@ def cached_read(
                 skip_read_cache_store(request)
                 target = None
             else:
-                await _track_pending_entry(request, target, span)
+                await _track_pending_entry(request, target, ttl_seconds, span)
         # The hit is control flow, not a failure. Raise it after the span has
         # closed so Logfire does not record every cache hit as an error.
         if cache_hit is not None:
@@ -197,7 +197,7 @@ def cached_read(
 
 
 async def _track_pending_entry(
-    request: Request, target: "_CachedTarget", span: logfire.LogfireSpan
+    request: Request, target: "_CachedTarget", ttl_seconds: int, span: logfire.LogfireSpan
 ) -> None:
     """Record the entry a miss is about to store, or keep the response uncached."""
     # The SDK bypasses requests that send ``Cache-Control: no-store`` without
@@ -208,7 +208,7 @@ async def _track_pending_entry(
     looked_up: _LookedUpEntry = request.state.basic_memory_read_cache_entry
     try:
         await target.scope.cache.track_entry(
-            target.project_id, target.group, looked_up.versions, looked_up.key
+            target.project_id, target.group, looked_up.versions, looked_up.key, ttl_seconds
         )
     except ReadCacheUnavailable:
         # An entry invalidation cannot find would hold its memory for the whole

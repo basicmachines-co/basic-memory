@@ -4,12 +4,18 @@ Entries themselves are read and written by fastapi-redis-sdk. This module owns t
 version tokens that go into entry keys, and replaces them to invalidate.
 
 Replacing a version makes the entries under it unreadable, but Redis would keep them
-until their TTL. Each stored entry is therefore recorded in a set for the versions it
-was keyed under, and invalidation deletes the members of the replaced version's set.
-Memory then follows the entries that can still be read, not every response written
-in the last TTL.
+until their TTL. Each stored entry is therefore recorded in an index for the versions
+it was keyed under, and invalidation deletes the members of the replaced version's
+index. Memory then follows the entries that can still be read, not every response
+written in the last TTL.
+
+The indexes are sorted sets scored by when each entry expires. Entries have different
+TTLs (search a day, recent activity fifteen minutes) and some are never stored, so
+each write trims the members whose entry is already gone; an index never lists more
+than the entries a TTL could still hold.
 """
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import uuid4
@@ -150,13 +156,14 @@ class RedisReadCache:
         group: ReadCacheGroup,
         versions: EntryVersions,
         entry_key: str,
+        ttl_seconds: int,
     ) -> None:
         """Record an entry about to be stored, so replacing its versions deletes it.
 
         Every entry is listed under its project epoch, because replacing that epoch
         retires every read in the project, and under its own group's version within
         that epoch. Recording happens before the store, so a response that turns out
-        not to be cacheable leaves a key in the set that deletes nothing.
+        not to be cacheable is listed until its TTL would have ended, then trimmed.
         """
         indexes = [self._index_key(project_id, PROJECT, versions.project)]
         if group != PROJECT:
@@ -165,11 +172,15 @@ class RedisReadCache:
                     project_id, group, _group_index_version(versions.project, versions.group)
                 )
             )
+        now = time.time()
         try:
             async with self.client.pipeline(transaction=False) as pipe:
                 for index in indexes:
-                    pipe.sadd(index, entry_key)
-                    # The set lives as long as the longest-lived entry it lists.
+                    pipe.zadd(index, {entry_key: now + ttl_seconds})
+                    # Members whose entry has expired would otherwise stay listed for
+                    # as long as later misses keep the index alive.
+                    pipe.zremrangebyscore(index, "-inf", now)
+                    # The index lives as long as the longest-lived entry it can list.
                     pipe.expire(index, READ_CACHE_TTL_SECONDS)
                 await pipe.execute()
         except (RedisError, OSError) as error:
@@ -230,11 +241,11 @@ class RedisReadCache:
     async def _delete_indexed_entries(
         self, indexes: Sequence[str], *, also_listed_in: str | None = None
     ) -> None:
-        """Delete every entry listed in ``indexes``, then the sets themselves.
+        """Delete every entry listed in ``indexes``, then the indexes themselves.
 
-        ``also_listed_in`` is the project set that lists the same entries. Their keys
+        ``also_listed_in`` is the project index that lists the same entries. Their keys
         are removed from it too, so a project whose notes change but whose epoch
-        never does keeps a set the size of its live entries.
+        never does keeps an index the size of its live entries.
 
         A reader that looked up the old version just before it was replaced can
         still store its entry after this runs. That entry is never read again and
@@ -242,15 +253,15 @@ class RedisReadCache:
         """
         async with self.client.pipeline(transaction=False) as pipe:
             for index in indexes:
-                pipe.smembers(index)
-            listed: list[set[bytes]] = await pipe.execute()
+                pipe.zrange(index, 0, -1)
+            listed: list[list[bytes]] = await pipe.execute()
         retired: list[bytes] = [key for members in listed for key in members]
         for start in range(0, len(retired), _UNLINK_BATCH_SIZE):
             batch = retired[start : start + _UNLINK_BATCH_SIZE]
             async with self.client.pipeline(transaction=False) as pipe:
                 pipe.unlink(*batch)
                 if also_listed_in is not None:
-                    pipe.srem(also_listed_in, *batch)
+                    pipe.zrem(also_listed_in, *batch)
                 await pipe.execute()
         await self.client.unlink(*indexes)
 

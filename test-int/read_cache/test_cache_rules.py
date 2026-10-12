@@ -67,14 +67,14 @@ async def _stored_entries(cache: RedisReadCache, operation: str = "*") -> set[by
 
 
 async def _project_set_members(cache: RedisReadCache) -> set[bytes]:
-    """Every entry key the project-epoch entry sets list."""
+    """Every entry key the project-epoch indexes list."""
     indexes = [
         index async for index in cache.client.scan_iter(match=f"{cache.prefix}:*:entries:project:*")
     ]
     async with cache.client.pipeline(transaction=False) as pipe:
         for index in indexes:
-            pipe.smembers(index)
-        listed: list[set[bytes]] = await pipe.execute()
+            pipe.zrange(index, 0, -1)
+        listed: list[list[bytes]] = await pipe.execute()
     return {key for members in listed for key in members}
 
 

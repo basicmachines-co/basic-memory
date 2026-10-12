@@ -28,7 +28,7 @@ from basic_memory.read_cache import (
     invalidate_read_cache,
     invalidate_recorded_change,
 )
-from basic_memory.read_cache.keys import global_epoch_key, group_version_key
+from basic_memory.read_cache.keys import entry_index_key, global_epoch_key, group_version_key
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 from basic_memory.read_cache.redis import (
     EntryVersions,
@@ -172,6 +172,33 @@ async def test_versions_outlive_entries_and_the_global_epoch_never_expires(
 
     assert READ_CACHE_TTL_SECONDS - 5 <= note_ttl <= READ_CACHE_TTL_SECONDS
     assert epoch_ttl == -1
+
+
+@pytest.mark.asyncio
+async def test_an_index_lists_an_entry_only_until_its_own_ttl_ends(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Index members expire with their entries, not with the index.
+
+    Later misses keep the index alive, so a member listed for the index's lifetime
+    would outlive a short-TTL or never-stored entry indefinitely. A one-second TTL
+    stands in for the fifteen-minute recent-activity TTL.
+    """
+    cache = redis_cache.cache
+    versions = await cache.versions(PROJECT_ID, CONTENT)
+    project_index = entry_index_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+        group=PROJECT,
+        version=versions.project,
+    )
+
+    await cache.track_entry(PROJECT_ID, CONTENT, versions, "short-lived", 1)
+    await asyncio.sleep(1.1)
+    await cache.track_entry(PROJECT_ID, CONTENT, versions, "long-lived", 3600)
+
+    assert await redis_cache.client.zrange(project_index, 0, -1) == [b"long-lived"]
 
 
 @pytest.mark.asyncio
