@@ -539,6 +539,33 @@ def _truncate(s: Any, n: int) -> str:
     return s[: n - 3] + "..."
 
 
+# Masks common credential forms in captured text. Mirrors integrations/tau/privacy.py;
+# the plugin is installed and loaded as a single module, so it keeps its own copy.
+_CREDENTIAL_PATTERNS = (
+    re.compile(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL),
+    re.compile(r"\b(?:sk-|bmc_|ghp_|github_pat_|hf_)[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    re.compile(r"(?i)\bBearer\s+[^\s\"']+"),
+    re.compile(
+        r"(?i)\b(?:[A-Z0-9_]*(?:API_KEY|PASSWORD|SECRET|ACCESS_TOKEN))\s*[:=]\s*"
+        r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)"""
+    ),
+)
+
+
+def _public_text(s: Any) -> str:
+    """Mask credentials before captured text is written to a note.
+
+    Call this before _truncate: truncating first can cut off a private key's END
+    line, and the rest of the key would no longer match.
+    """
+    if not isinstance(s, str):
+        s = "" if s is None else str(s)
+    for pattern in _CREDENTIAL_PATTERNS:
+        s = pattern.sub("[credential redacted]", s)
+    return s
+
+
 def _join_message_content(parts: Any) -> str:
     if isinstance(parts, str):
         return parts
@@ -1338,7 +1365,7 @@ class BasicMemoryProvider(MemoryProvider):
         ):
             return
         if self._first_user_msg is None and user_content:
-            self._first_user_msg = _truncate(user_content, 240)
+            self._first_user_msg = _truncate(_public_text(user_content), 240)
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=3.0)
 
@@ -1356,8 +1383,8 @@ class BasicMemoryProvider(MemoryProvider):
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         block = (
             f"### {ts}\n\n"
-            f"**User:** {_truncate(user, 4000)}\n\n"
-            f"**Assistant:** {_truncate(asst, 4000)}\n"
+            f"**User:** {_truncate(_public_text(user), 4000)}\n\n"
+            f"**Assistant:** {_truncate(_public_text(asst), 4000)}\n"
         )
         if not self._session_note_id:
             title = self._session_note_title()
@@ -1412,10 +1439,14 @@ class BasicMemoryProvider(MemoryProvider):
         asst_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "assistant"]
         first_user = self._first_user_msg or ""
         if not first_user and user_msgs:
-            first_user = _truncate(_join_message_content(user_msgs[0].get("content")), 240)
+            first_user = _truncate(
+                _public_text(_join_message_content(user_msgs[0].get("content"))), 240
+            )
         last_asst = ""
         if asst_msgs:
-            last_asst = _truncate(_join_message_content(asst_msgs[-1].get("content")), 600)
+            last_asst = _truncate(
+                _public_text(_join_message_content(asst_msgs[-1].get("content"))), 600
+            )
         ts = (self._session_started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H%M")
         sid = self._session_id or ""
         suffix = sid.rsplit("_", 1)[-1] if "_" in sid else sid[-6:]
