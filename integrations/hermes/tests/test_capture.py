@@ -305,6 +305,55 @@ def test_on_session_end_logs_and_swallows_errors(bm, caplog):
     p.on_session_end([{"role": "user", "content": "u"}])
 
 
+# ---- credential masking ----
+
+
+def test_capture_turn_masks_credentials(bm):
+    p, actor = _provider_with_mock_actor(bm)
+    actor.call.return_value = json.dumps({"permalink": "p/x"})
+    key = "sk-" + "a1B2" * 8
+    p._capture_turn(f"my key is {key}", "put API_KEY=hunter2hunter2 in .env")
+    content = actor.call.call_args[0][1]["content"]
+    assert key not in content
+    assert "hunter2hunter2" not in content
+    assert content.count("[credential redacted]") == 2
+
+
+def test_capture_turn_masks_private_key_longer_than_cap(bm):
+    # Masking has to run before truncation, otherwise the cap cuts off the END
+    # line and the rest of the key no longer matches.
+    p, actor = _provider_with_mock_actor(bm)
+    actor.call.return_value = json.dumps({"permalink": "p/x"})
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "Q" * 5000 + "\n-----END PRIVATE KEY-----"
+    p._capture_turn(pem, "ok")
+    content = actor.call.call_args[0][1]["content"]
+    assert "QQQQ" not in content
+    assert "[credential redacted]" in content
+
+
+def test_sync_turn_masks_first_user_message(bm):
+    p, actor = _provider_with_mock_actor(bm)
+    actor.call.return_value = json.dumps({"permalink": "p/x"})
+    p.sync_turn("auth with Bearer abc.def-ghi please", "ok")
+    _wait_for_thread(p, "_sync_thread")
+    assert p._first_user_msg == "auth with [credential redacted] please"
+
+
+def test_on_session_end_masks_credentials(bm):
+    p, actor = _provider_with_mock_actor(bm)
+    actor.call.return_value = json.dumps({"permalink": "p/x"})
+    key = "ghp_" + "x" * 36
+    p.on_session_end(
+        [
+            {"role": "user", "content": f"use {key}"},
+            {"role": "assistant", "content": f"set PASSWORD='{key}' and retry"},
+        ]
+    )
+    content = actor.call.call_args[0][1]["content"]
+    assert key not in content
+    assert content.count("[credential redacted]") == 2
+
+
 # ---- shutdown lifecycle ----
 
 

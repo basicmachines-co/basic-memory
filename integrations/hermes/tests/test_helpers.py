@@ -1,6 +1,8 @@
 """Unit tests for the pure helpers in __init__.py."""
 
+import importlib.util
 import json
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +26,45 @@ def test_truncate_non_string_coerced(bm):
 
 def test_truncate_none(bm):
     assert bm._truncate(None, 10) == ""
+
+
+# ---- _public_text ----
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-" + "a1B2" * 8,
+        "ghp_" + "x" * 36,
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
+        "Bearer abc.def-ghi",
+        "API_KEY=hunter2hunter2",
+        'PASSWORD="correct horse battery staple"',
+        "-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----",
+    ],
+)
+def test_public_text_masks_credentials(bm, secret):
+    assert bm._public_text(f"before {secret} after") == "before [credential redacted] after"
+
+
+def test_public_text_leaves_plain_text_alone(bm):
+    text = "the API is down, ask for a token in #ops"
+    assert bm._public_text(text) == text
+
+
+def test_public_text_none(bm):
+    assert bm._public_text(None) == ""
+
+
+def test_credential_patterns_match_tau(bm):
+    """The copy in this plugin stays identical to integrations/tau/privacy.py."""
+    path = Path(__file__).resolve().parents[2] / "tau" / "privacy.py"
+    spec = importlib.util.spec_from_file_location("tau_privacy", path)
+    tau = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tau)
+    assert [(p.pattern, p.flags) for p in bm._CREDENTIAL_PATTERNS] == [
+        (p.pattern, p.flags) for p in tau.PATTERNS
+    ]
 
 
 # ---- _join_message_content ----
