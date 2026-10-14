@@ -63,6 +63,16 @@ Once you've identified the relevant notes, read them in full:
 read_note(identifier="note-title-or-permalink")
 ```
 
+For long notes, pick before you pay for bodies. `compact=True` drops bodies from
+search results (and observations from `build_context`), and a line range or a
+section reads only the part you need:
+
+```python
+search_notes(query="async client refactor", compact=True)
+read_note(identifier="note-title-or-permalink", start_line=120, end_line=180)
+cat(identifier="note-title-or-permalink", section="Status")
+```
+
 ### 4. Present Context to the User
 
 Summarize what you found, incrementally:

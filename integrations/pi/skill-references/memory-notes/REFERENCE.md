@@ -108,6 +108,41 @@ A few examples to illustrate the range:
 - **Use tags for cross-cutting concerns.** `[risk] Rate limiting needed #api #security` makes this findable under both topics.
 - **Categories are queryable.** `search_notes(entity_types=["observation"], categories=["decision"])` returns every decision observation across your knowledge base.
 
+### When a Claim Holds
+
+An observation can say when it is true. Put a qualifier after the category:
+
+```
+- [decision] @effective:2026-06-10 The cache layer uses Redis
+- [event] @occurred:2026-10-14 Launch sync moved the date to Thursday
+- [deadline] @due:2026-10-20 Draft ready for review
+- [stage] @valid:2026-10 Series B, about 200 employees
+- [decision] @effective[2026-06-10,2026-10-14) Launch on Friday
+```
+
+- **Kinds**: `effective` (a decision or rule takes effect), `occurred` (an
+  event happened), `due` (a commitment), `mentioned` (when it was said), and
+  `valid`, the default (`@2026-06-10` means `@valid:2026-06-10`).
+- **Points** cover the span their precision names: `@2026` is that year,
+  `@2026-06` that month, and `@2026-06-10` from that date onward.
+- **Ranges** use `[start,end)`, and either end can be open: `@effective[2026-06-10,)`.
+- **Dates** are written out. An unquoted date is one token (`@occurred:2026-06-10`).
+  Quote anything longer: `@occurred:"June 10, 2026"`. A relative date like
+  `yesterday` is never read as a qualifier; it stays in the text.
+- **When a fact changes**, close the old one's range and start the new one,
+  instead of deleting the old one. Both stay searchable by date.
+
+Search by what notes say was true, rather than by when they were edited:
+
+```python
+search_notes(valid_at="2026-07-01")                              # true on that date
+search_notes(time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")  # due this week
+```
+
+A valid-time filter returns only dated observations; drop it to search
+everything. Day points run "from that date onward", so a due-date window also
+returns items that are already overdue.
+
 ## Relations
 
 Relations create edges in the knowledge graph, linking notes to each other. They're how you build structure beyond individual notes.
@@ -320,8 +355,23 @@ edit_note(
 )
 ```
 
-When an edit is destructive (`replace_section`, `find_replace`), it's good practice to
-read the note first and confirm the change before applying it.
+When an edit is destructive (`replace_section`, `find_replace`), read the note first
+and pass its checksum, so the edit applies only to the revision you read:
+
+```python
+note = read_note(identifier="API Design Decisions", output_format="json")
+edit_note(
+  identifier="API Design Decisions",
+  operation="replace_section",
+  section="Summary",
+  content="Concise, current summary of the decision and its rationale.",
+  expected_checksum=note["checksum"]
+)
+```
+
+A checksum conflict means someone changed the note after you read it. Read it
+again and redo the edit against the new text. `write_note(overwrite=True)` takes
+`expected_checksum` the same way.
 
 ### Moving a Note
 
