@@ -167,7 +167,9 @@ def generate_openai_yaml(source: str, title: str, description: str) -> str:
 def write_openai_yaml(skill_out: Path, source: str, title: str, description: str) -> None:
     agents_dir = skill_out / AGENTS_DIR
     agents_dir.mkdir(exist_ok=True)
-    (agents_dir / "openai.yaml").write_text(generate_openai_yaml(source, title, description))
+    (agents_dir / "openai.yaml").write_text(
+        generate_openai_yaml(source, title, description), encoding="utf-8", newline="\n"
+    )
 
 
 # --- Staging individual skills ---
@@ -284,14 +286,20 @@ def stage_combined_skill(
     references = out / "references"
     references.mkdir(parents=True)
 
-    template_text = template.read_text()
+    template_text = template.read_text(encoding="utf-8")
     if ROUTING_TABLE_MARKER not in template_text:
         raise SystemExit(f"{template}: missing {ROUTING_TABLE_MARKER} marker")
     router = out / "SKILL.md"
-    router.write_text(template_text.replace(ROUTING_TABLE_MARKER, routing_table(included)))
+    router.write_text(
+        template_text.replace(ROUTING_TABLE_MARKER, routing_table(included)),
+        encoding="utf-8",
+        newline="\n",
+    )
 
     for skill_dir in included:
-        (references / f"{skill_dir.name}.md").write_text(reference_document(skill_dir))
+        (references / f"{skill_dir.name}.md").write_text(
+            reference_document(skill_dir), encoding="utf-8", newline="\n"
+        )
         for resource in resource_files(skill_dir):
             target = references / skill_dir.name / resource
             target.parent.mkdir(parents=True, exist_ok=True)

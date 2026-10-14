@@ -56,7 +56,9 @@ def _write_skill(root: Path, dir_name: str, /, body: str = "# Skill\n", **frontm
     fields = {"name": dir_name, "description": f'"Do {dir_name} things. Use when testing."'}
     fields.update(frontmatter)
     header = "\n".join(f"{key}: {value}" for key, value in fields.items())
-    (skill_dir / "SKILL.md").write_text(f"---\n{header}\n---\n\n{body}")
+    (skill_dir / "SKILL.md").write_text(
+        f"---\n{header}\n---\n\n{body}", encoding="utf-8", newline="\n"
+    )
     return skill_dir
 
 
@@ -152,11 +154,11 @@ def test_validator_checks_linked_files(tmp_path: Path) -> None:
     )
     skill_dir = _write_skill(tmp_path, "memory-x", body=body)
     (skill_dir / "references").mkdir()
-    (skill_dir / "references/guide.md").write_text("guide")
+    (skill_dir / "references/guide.md").write_text("guide", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit, match="references/extra.md"):
         validate_skills.validate_skills(tmp_path)
 
-    (skill_dir / "references/extra.md").write_text("extra")
+    (skill_dir / "references/extra.md").write_text("extra", encoding="utf-8", newline="\n")
     validate_skills.validate_skills(tmp_path)
 
 
@@ -164,7 +166,7 @@ def test_validator_checks_titled_links(tmp_path: Path) -> None:
     body = "See [the guide](references/guide.md \"More\") and [x](references/x.md 'Why').\n"
     skill_dir = _write_skill(tmp_path, "memory-x", body=body)
     (skill_dir / "references").mkdir()
-    (skill_dir / "references/guide.md").write_text("guide")
+    (skill_dir / "references/guide.md").write_text("guide", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit, match="references/x.md"):
         validate_skills.validate_skills(tmp_path)
 
@@ -180,7 +182,7 @@ def test_combined_rewrite_keeps_link_titles() -> None:
 
 def test_validator_rejects_links_outside_the_skill(tmp_path: Path) -> None:
     # The target exists in the repo, but the zip holds only the skill folder.
-    (tmp_path / "README.md").write_text("repo readme")
+    (tmp_path / "README.md").write_text("repo readme", encoding="utf-8", newline="\n")
     _write_skill(tmp_path, "memory-x", body="See [the readme](../README.md).\n")
     with pytest.raises(SystemExit, match="outside the skill folder"):
         validate_skills.validate_skills(tmp_path)
@@ -227,15 +229,19 @@ def _list_repo(tmp_path: Path, skills: list[str], *, internal: str | None = None
     if internal:
         _write_skill(root / "skills", internal, metadata="\n  internal: true")
     table = "".join(f"| **{name}** | x | y |\n" for name in skills)
-    (root / "skills/README.md").write_text(table)
+    (root / "skills/README.md").write_text(table, encoding="utf-8", newline="\n")
     claude_names = skills + ([internal] if internal else [])
     tree = "".join(f"{name}/SKILL.md  # x\n" for name in claude_names)
-    (root / "skills/CLAUDE.md").write_text(tree)
+    (root / "skills/CLAUDE.md").write_text(tree, encoding="utf-8", newline="\n")
     openclaw = root / "integrations/openclaw"
     openclaw.mkdir(parents=True)
     manifest = {"skills": [f"skills/{name}" for name in skills]}
-    (openclaw / "openclaw.plugin.json").write_text(json.dumps(manifest))
-    (openclaw / "README.md").write_text("".join(f"- **{name}** — x\n" for name in skills))
+    (openclaw / "openclaw.plugin.json").write_text(
+        json.dumps(manifest), encoding="utf-8", newline="\n"
+    )
+    (openclaw / "README.md").write_text(
+        "".join(f"- **{name}** — x\n" for name in skills), encoding="utf-8", newline="\n"
+    )
     return root
 
 
@@ -247,11 +253,15 @@ def test_skill_lists_pass_when_in_sync(tmp_path: Path) -> None:
 def test_skill_lists_flag_missing_and_unknown(tmp_path: Path) -> None:
     root = _list_repo(tmp_path, ["memory-a", "memory-b"])
     readme = root / "skills/README.md"
-    readme.write_text("| **memory-a** | x | y |\n")
+    readme.write_text("| **memory-a** | x | y |\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit, match=r"skills/README.md: missing skills \['memory-b'\]"):
         validate_skills.validate_skill_lists(root)
 
-    readme.write_text("| **memory-a** | x |\n| **memory-b** | x |\n| **memory-gone** | x |\n")
+    readme.write_text(
+        "| **memory-a** | x |\n| **memory-b** | x |\n| **memory-gone** | x |\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     with pytest.raises(SystemExit, match="memory-gone"):
         validate_skills.validate_skill_lists(root)
 
@@ -259,7 +269,7 @@ def test_skill_lists_flag_missing_and_unknown(tmp_path: Path) -> None:
 def test_user_facing_lists_reject_internal_skills(tmp_path: Path) -> None:
     root = _list_repo(tmp_path, ["memory-a"], internal="memory-ci")
     readme = root / "skills/README.md"
-    readme.write_text(readme.read_text() + "| **memory-ci** | x | y |\n")
+    readme.write_text(readme.read_text(encoding="utf-8") + "| **memory-ci** | x | y |\n")
     with pytest.raises(SystemExit, match="internal skills"):
         validate_skills.validate_skill_lists(root)
 
@@ -269,11 +279,13 @@ def test_memory_quest_may_be_absent_from_openclaw_lists_only(tmp_path: Path) -> 
     # waits for a wrapper fix.
     root = _list_repo(tmp_path, ["memory-a", "memory-quest"])
     openclaw = root / "integrations/openclaw"
-    (openclaw / "README.md").write_text("- **memory-a** — x\n")
-    (openclaw / "openclaw.plugin.json").write_text(json.dumps({"skills": ["skills/memory-a"]}))
+    (openclaw / "README.md").write_text("- **memory-a** — x\n", encoding="utf-8", newline="\n")
+    (openclaw / "openclaw.plugin.json").write_text(
+        json.dumps({"skills": ["skills/memory-a"]}), encoding="utf-8", newline="\n"
+    )
     validate_skills.validate_skill_lists(root)
 
-    (root / "skills/CLAUDE.md").write_text("memory-a/SKILL.md\n")
+    (root / "skills/CLAUDE.md").write_text("memory-a/SKILL.md\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit, match="skills/CLAUDE.md: missing"):
         validate_skills.validate_skill_lists(root)
 
@@ -291,9 +303,9 @@ def test_repo_lists_pass_once_memory_quest_lands(tmp_path: Path) -> None:
     if not (root / "skills/memory-quest").exists():
         _write_skill(root / "skills", "memory-quest")
         readme = root / "skills/README.md"
-        readme.write_text(readme.read_text() + "\n| **memory-quest** | x | y |\n")
+        readme.write_text(readme.read_text(encoding="utf-8") + "\n| **memory-quest** | x | y |\n")
         claude = root / "skills/CLAUDE.md"
-        claude.write_text(claude.read_text() + "\nmemory-quest/SKILL.md  # x\n")
+        claude.write_text(claude.read_text(encoding="utf-8") + "\nmemory-quest/SKILL.md  # x\n")
 
     validate_skills.validate_skill_lists(root)
 
@@ -384,7 +396,7 @@ def _routing_targets(skill_md: str) -> list[str]:
 def _assert_links_resolve(skill_root: Path) -> None:
     """Markdown links resolve from their file; backticked references/ paths from the root."""
     for reference in (skill_root / "references").glob("*.md"):
-        text = reference.read_text()
+        text = reference.read_text(encoding="utf-8")
         for target in validate_skills.MARKDOWN_LINK.findall(text):
             if target.startswith(("#", "/", "http")):
                 continue
@@ -410,10 +422,10 @@ def test_combined_skill_layout_and_routing(repo_dist: Path, tmp_path: Path, asse
     # Chat apps load a skill from its description alone, and the Memory Quest panel
     # tells users to "run Memory Quest"; the routing table is read only after loading.
     assert "Memory Quest" in frontmatter["description"]
-    assert build_skills_dist.ROUTING_TABLE_MARKER not in skill_file.read_text()
+    assert build_skills_dist.ROUTING_TABLE_MARKER not in skill_file.read_text(encoding="utf-8")
 
     expected = sorted(set(_distributed()) - COMBINED_EXCLUDED)
-    targets = _routing_targets(skill_file.read_text())
+    targets = _routing_targets(skill_file.read_text(encoding="utf-8"))
     assert targets == [f"references/{name}.md" for name in expected]
     for target in targets:
         assert (skill_root / target).is_file()
@@ -429,11 +441,11 @@ def test_combined_skill_layout_and_routing(repo_dist: Path, tmp_path: Path, asse
 
 def test_combined_references_rewrite_resource_links(repo_dist: Path, tmp_path: Path) -> None:
     skill_root = _extract(repo_dist / "skills/basic-memory.zip", tmp_path)
-    comark = (skill_root / "references/memory-comark.md").read_text()
+    comark = (skill_root / "references/memory-comark.md").read_text(encoding="utf-8")
     assert not comark.startswith("---")
     assert "](memory-comark/references/components.md)" in comark
     assert (skill_root / "references/memory-comark/references/components.md").is_file()
-    onboarding = (skill_root / "references/memory-onboarding.md").read_text()
+    onboarding = (skill_root / "references/memory-onboarding.md").read_text(encoding="utf-8")
     assert "`references/memory-onboarding/references/assistant-setup.md`" in onboarding
     assert "`references/assistant-setup.md`" not in onboarding
 
@@ -463,11 +475,13 @@ def test_build_picks_up_new_skills_without_code_changes(tmp_path: Path) -> None:
         description='"Finish Memory Quest Mission 8. Use when asked to verify the assistant."',
     )
     (quest / "references").mkdir()
-    (quest / "references/codes.md").write_text("codes")
+    (quest / "references/codes.md").write_text("codes", encoding="utf-8", newline="\n")
     (quest / "agents").mkdir()
-    (quest / "agents/openai.yaml").write_text('interface:\n  display_name: "Memory Quest"\n')
+    (quest / "agents/openai.yaml").write_text(
+        'interface:\n  display_name: "Memory Quest"\n', encoding="utf-8", newline="\n"
+    )
     (quest / "evals").mkdir()
-    (quest / "evals/evals.json").write_text("[]")
+    (quest / "evals/evals.json").write_text("[]", encoding="utf-8", newline="\n")
 
     dist = tmp_path / "dist"
     names = {path.name for path in build_skills_dist.build_all(skills_root, dist)}
@@ -484,16 +498,15 @@ def test_build_picks_up_new_skills_without_code_changes(tmp_path: Path) -> None:
     assert hand_written == 'interface:\n  display_name: "Memory Quest"\n'
 
     skill_root = _extract(dist / "skills/basic-memory.zip", tmp_path / "out")
-    skill_md = (skill_root / "SKILL.md").read_text()
+    skill_md = (skill_root / "SKILL.md").read_text(encoding="utf-8")
     assert _routing_targets(skill_md) == [
         "references/memory-notes.md",
         "references/memory-quest.md",
     ]
     assert build_skills_dist.ROUTING_INTENTS["memory-quest"] in skill_md
-    assert (
-        "](memory-quest/references/codes.md)"
-        in (skill_root / "references/memory-quest.md").read_text()
-    )
+    assert "](memory-quest/references/codes.md)" in (
+        skill_root / "references/memory-quest.md"
+    ).read_text(encoding="utf-8")
     assert not (skill_root / "references/memory-quest/agents").exists()
     assert not (skill_root / "references/memory-quest/evals").exists()
     _assert_links_resolve(skill_root)
@@ -501,7 +514,9 @@ def test_build_picks_up_new_skills_without_code_changes(tmp_path: Path) -> None:
 
 def test_combined_template_needs_routing_marker(tmp_path: Path) -> None:
     template = tmp_path / "template.md"
-    template.write_text("---\nname: basic-memory\ndescription: x\n---\n")
+    template.write_text(
+        "---\nname: basic-memory\ndescription: x\n---\n", encoding="utf-8", newline="\n"
+    )
     with pytest.raises(SystemExit, match="routing-table"):
         build_skills_dist.build_all(SKILLS_ROOT, tmp_path / "dist", template)
 
@@ -509,7 +524,11 @@ def test_combined_template_needs_routing_marker(tmp_path: Path) -> None:
 def _template(tmp_path: Path, description: str) -> Path:
     template = tmp_path / "template.md"
     marker = build_skills_dist.ROUTING_TABLE_MARKER
-    template.write_text(f'---\nname: basic-memory\ndescription: "{description}"\n---\n\n{marker}\n')
+    template.write_text(
+        f'---\nname: basic-memory\ndescription: "{description}"\n---\n\n{marker}\n',
+        encoding="utf-8",
+        newline="\n",
+    )
     return template
 
 
@@ -540,7 +559,7 @@ def test_validator_rejects_reference_style_links(tmp_path: Path) -> None:
     body = "See [the guide][g].\n\n[g]: references/guide.md\n"
     skill_dir = _write_skill(tmp_path, "memory-x", body=body)
     (skill_dir / "references").mkdir()
-    (skill_dir / "references/guide.md").write_text("guide")
+    (skill_dir / "references/guide.md").write_text("guide", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit, match="reference-style"):
         validate_skills.validate_skills(tmp_path)
 
@@ -587,7 +606,7 @@ def test_wheel_ships_exactly_the_distributed_skills(tmp_path: Path) -> None:
     the resources of skills that carry evals/ or agents/) by hand. Internal skills
     and authoring fixtures must stay out, and a new skill must be added.
     """
-    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
 
     shipped: set[str] = set()
