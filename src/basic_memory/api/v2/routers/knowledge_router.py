@@ -95,6 +95,7 @@ from basic_memory.schemas.v2 import (
 from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import (
     generate_permalink,
+    nfc_path,
     normalize_project_reference,
     validate_project_path,
 )
@@ -535,13 +536,18 @@ def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
         if segment in entries:
             matched = segment
         else:
-            matches = [entry for entry in entries if entry.lower() == segment.lower()]
+            # Trigger: on macOS the request and the directory entry may spell the same
+            #     name in different Unicode forms (NFC vs NFD) as well as different case.
+            # Why: nfc_path is the identity rule the scanner and watcher use (#1275);
+            #     elsewhere it returns the name unchanged and this is a case-only match.
+            wanted = nfc_path(segment).lower()
+            matches = [entry for entry in entries if nfc_path(entry).lower() == wanted]
             if len(matches) != 1:
                 return None
             matched = matches[0]
         canonical_segments.append(matched)
         current = current / matched
-    return "/".join(canonical_segments)
+    return nfc_path("/".join(canonical_segments))
 
 
 @router.post("/index-file", response_model=EntityResponseV2)
