@@ -29,48 +29,53 @@ export converts them.
 ### 1. Find what blocks the export
 
 ```python
-# Note files must end in lowercase .md
-find(name="*.markdown")
-find(name="*.MD")
+# Every file. A note (content_type "text/markdown") must end in exactly ".md";
+# .markdown, .MD, .Markdown and other spellings are refused.
+find(name="*")
 
 # index.md and log.md belong to the wiki. A file there with note_type
 # "Index" or "Log" is a wiki page; anything else is a note of your own.
 find(name="index.md")
 find(name="log.md")
 
-# Export records relation types under `bm.okf_export`, so a note may not use it
-search_notes(metadata_filters={"bm.okf_export": {"$exists": True}})
+# Export writes its own `bm.okf_export` key, so a note's `bm` frontmatter must be
+# a mapping without that key. Skip the wiki's Index and Log pages in the results.
+search_notes(metadata_filters={"bm": {"$exists": True}}, output_format="json")
 ```
 
-Page through each `find` until `has_more` is false.
+Page through every call until `has_more` is false. For each `bm` hit, read the
+note and check its `bm` value.
 
 ### 2. Fix each one
 
 | Blocker | Fix |
 |---|---|
-| A note ends in `.markdown` or `.MD` | `move_note` to the same path ending in `.md` |
+| A note ends in anything but `.md` | `move_note` to the same path ending in `.md` |
 | A note of your own named `index.md` or `log.md` | `move_note` to a name that says what it is, e.g. `notes/overview.md` |
-| A note uses `bm.okf_export`, or `bm` is not a mapping | Rewrite its frontmatter without that key (below) |
+| A note's `bm` has `okf_export`, or is not a mapping | Remove or rename the key in place (below) |
 
 ```python
 move_note(identifier="notes/long-form.markdown", destination_path="notes/long-form.md")
 move_note(identifier="notes/index.md", destination_path="notes/overview.md")
 ```
 
-`move_note` keeps links to the note working. To rewrite frontmatter, read the
-note as JSON and overwrite only that revision:
+`move_note` keeps links to the note working. To fix frontmatter, edit the note
+where it is: read it as JSON, then replace the exact frontmatter lines, passing
+the checksum so only that revision changes:
 
 ```python
-note = read_note(identifier="notes/clash", output_format="json")
-write_note(
-    title=note["title"],
-    directory="notes",
-    content="<the note body, unchanged>",
-    metadata={...},  # the frontmatter without bm.okf_export
-    overwrite=True,
+note = read_note(identifier="notes/legacy.md", output_format="json")
+edit_note(
+    identifier="notes/legacy.md",
+    operation="find_replace",
+    find_text="bm:\n  okf_export: 1\n",
+    content="",
     expected_checksum=note["checksum"],
 )
 ```
+
+If the `bm` value holds something the user still wants, rename the key (for
+example to `legacy_bm`) instead of removing it, and say so in the report.
 
 Never edit a wiki `index.md` or `log.md` by hand. The projector rewrites them.
 
