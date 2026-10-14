@@ -1,8 +1,11 @@
 """Tests for the move_note MCP tool."""
 
+from pathlib import Path
+
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.mcp.clients.project import ProjectClient
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.read_note import read_note
@@ -562,6 +565,28 @@ async def test_move_note_missing_file_extension(client, test_project):
     content = await read_note("source/extension-test", project=test_project.name)
     assert "# Extension Test" in content
     assert "Testing extension validation" in content
+
+
+@pytest.mark.asyncio
+async def test_move_note_renames_markdown_extension_to_md(client, test_project):
+    """`.markdown` and `.md` are one file type, so the rename OKF needs is allowed."""
+    source = Path(test_project.path) / "source" / "long-form.markdown"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("# Long Form\n\nKept across the rename.\n", encoding="utf-8")
+    await ProjectClient(client).index(test_project.external_id, run_in_background=False)
+
+    result = await move_note(
+        project=test_project.name,
+        identifier="source/long-form.markdown",
+        destination_path="source/long-form.md",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["moved"] is True
+    assert result["file_path"] == "source/long-form.md"
+    assert not source.exists()
+    assert "Kept across the rename." in (source.parent / "long-form.md").read_text()
 
 
 @pytest.mark.asyncio
