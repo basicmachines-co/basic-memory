@@ -61,7 +61,7 @@ def validate_plain_scalar(path: Path, line_number: int, key: str, value: str) ->
 
 def frontmatter_lines(path: Path) -> list[str]:
     """Return the raw lines between the opening and closing `---` fences."""
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[0] != "---":
         raise SystemExit(f"{path}: missing YAML frontmatter")
     for index, line in enumerate(lines[1:], start=1):
@@ -126,7 +126,7 @@ def is_internal_skill(skill_file: Path) -> bool:
 
 def skill_body(skill_file: Path) -> str:
     """SKILL.md content after the frontmatter block."""
-    text = skill_file.read_text()
+    text = skill_file.read_text(encoding="utf-8")
     _, _, body = text.partition("\n---\n")
     return body
 
@@ -300,7 +300,7 @@ def validate_skill_lists(repo_root: Path, skill_lists: tuple[SkillList, ...] = S
     internal = all_skills - distributed
 
     for skill_list in skill_lists:
-        listed = skill_list.extract((repo_root / skill_list.path).read_text())
+        listed = skill_list.extract((repo_root / skill_list.path).read_text(encoding="utf-8"))
         missing = distributed - listed - set(skill_list.may_omit)
         allowed_extra = internal if skill_list.allows_internal else set()
         unexpected = listed - distributed - allowed_extra
