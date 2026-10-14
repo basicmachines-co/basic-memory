@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import sys
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -564,3 +565,45 @@ def test_verify_layout_rejects_bad_archives(
             zf.writestr(member, "x")
     with pytest.raises(SystemExit, match=message):
         build_skills_dist.verify_layout(archive, {"memory-x"})
+
+
+# --- Wheel: skills shipped inside the Python package ---
+
+WHEEL_SKILLS_TARGET = "basic_memory/data/skills/"
+
+
+def _files_under(root: Path) -> set[str]:
+    return {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+
+
+def test_wheel_ships_exactly_the_distributed_skills(tmp_path: Path) -> None:
+    """The wheel's skills/ must match what the release archives stage.
+
+    force-include copies a directory verbatim, so pyproject names each skill (and
+    the resources of skills that carry evals/ or agents/) by hand. Internal skills
+    and authoring fixtures must stay out, and a new skill must be added.
+    """
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    shipped: set[str] = set()
+    for source, target in force_include.items():
+        if not target.startswith(WHEEL_SKILLS_TARGET):
+            continue
+        source_path = REPO_ROOT / source
+        relative_target = target.removeprefix(WHEEL_SKILLS_TARGET)
+        if source_path.is_file():
+            shipped.add(relative_target)
+        else:
+            shipped |= {f"{relative_target}/{name}" for name in _files_under(source_path)}
+
+    staged = tmp_path / "staged"
+    for name in _distributed():
+        skill_dir = SKILLS_ROOT / name
+        shutil.copytree(
+            skill_dir,
+            staged / name,
+            ignore=build_skills_dist.resource_ignore(skill_dir, keep_agents=False),
+        )
+
+    assert shipped == _files_under(staged)
