@@ -30,7 +30,8 @@ Phase 5: Explore       → traverse the graph, write synthesis notes
 
 Writing always goes through `write_note` and `edit_note`. For *reading* — which is most of
 the work in a long analysis — prefer the POSIX read verbs where they are available
-(`enable_posix_tools` for the MCP tools; the `bm` CLI verbs are always available):
+(the MCP `cat`, `find`, `grep`, and `ls` tools are on by default; the `bm` CLI verbs are always
+available):
 
 | Need | Use | Instead of |
 |------|-----|-----------|

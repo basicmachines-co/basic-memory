@@ -52,7 +52,7 @@ Before asking the user anything:
    - **Empty** — greenfield, proceed normally.
    - **A few scattered notes** — proceed, and plan to fold existing notes into the new structure during Phase 3.
    - **Substantial existing content** — this is a restructure, not an onboarding. Still use this skill, but Phase 1 becomes "what's working and what isn't", and Phase 2 must map old → new locations before anything moves.
-4. **Check the live docs when unsure.** Basic Memory's documentation is agent-readable: fetch `https://docs.basicmemory.com/llms.txt` for an index, and any page as clean markdown via its `raw/....md` URL (e.g. `raw/reference/mcp-tools-reference.md`, `raw/concepts/schema-system.md`). Tool names and parameters evolve — when this skill and the docs disagree, the docs are canonical.
+4. **Check the live docs when unsure.** Basic Memory's documentation is agent-readable: fetch `https://docs.basicmemory.com/llms.txt` for an index, and any page as clean markdown via its `raw/....md` URL (e.g. `raw/reference/mcp-tools-reference.md`, `raw/concepts/schema-system.md`). Tool names and parameters evolve — when this skill and the docs disagree, the docs are canonical. The server's own manual (the `man` tool, or the `memory://man/<tool>(3)` resource) matches the installed version exactly; prefer it for tool parameters.
 
 ## Phase 1 — Interview
 

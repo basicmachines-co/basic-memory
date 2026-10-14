@@ -51,13 +51,13 @@ To rewrite the same note on re-capture instead of duplicating, key the note to a
      search_notes(query="<thread topic>", project="<project>")
      ```
 3. **If a match is found:**
-   - Read the existing note (use the full permalink returned by search)
+   - Read the existing note as JSON (use the full permalink returned by search) and keep its `checksum`
    - Synthesize a new version that integrates the latest understanding from the conversation
-   - Overwrite via `write_note` with `overwrite=True` (same title, same `thread_id` if used, same directory)
+   - Overwrite via `write_note` with `overwrite=True` and `expected_checksum` set to that checksum (same title, same `thread_id` if used, same directory). A `NOTE_REVISION_CONFLICT` error means another session changed the note since you read it: read it again and re-synthesize
 4. **If no match is found:**
    - Synthesize the note from the conversation
    - If you have a thread id, pass `metadata={"thread_id": "<thread-id>"}` to `write_note` (it surfaces as a custom frontmatter field)
-   - Save it
+   - Save it. If `write_note` lists similar existing notes, check whether one of them is this thread's note before keeping the new one
 
 ## Synthesis Rules
 
@@ -150,7 +150,8 @@ write_note(
     project="<project>"
 )
 
-# Overwrite an existing note (same path)
+# Overwrite an existing note (same path), only the revision you read
+existing = read_note(identifier="<full-permalink>", output_format="json", project="<project>")
 write_note(
     title="<same title>",
     content="<new content>",
@@ -158,6 +159,7 @@ write_note(
     tags=["..."],
     metadata={"thread_id": "<same thread-id>"},  # omit if no stable id
     overwrite=True,
+    expected_checksum=existing["checksum"],
     project="<project>"
 )
 ```

@@ -124,8 +124,9 @@ skills into one. Its router `SKILL.md` comes from
 a second copy of these skills); the build fills in its routing table and writes
 each skill's `SKILL.md` to `references/<name>.md`, with its resources under
 `references/<name>/` and links rewritten to match. A new `memory-*` skill joins
-it automatically. `memory-defrag`, `memory-reflect`, and
-`memory-literary-analysis` are left out because they need a local install (see
+it automatically. `memory-literary-analysis` and `memory-okf` are left out
+because they need the `bm` CLI, and `memory-defrag` and `memory-reflect` because
+they are scheduled maintenance runs installed on their own (see
 `COMBINED_EXCLUDED` in `scripts/build_skills_dist.py`).
 
 ### ChatGPT / Codex (openai.yaml)

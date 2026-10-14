@@ -84,11 +84,13 @@ against the value and a comparison with null is never true.
 | `$gt` / `$gte` | `{"field": {"$gt": N}}` | `{"confidence": {"$gt": 0.7}}` |
 | `$lt` / `$lte` | `{"field": {"$lt": N}}` | `{"score": {"$lt": 0.5}}` |
 | `$between` | `{"field": {"$between": [lo, hi]}}` | `{"score": {"$between": [0.3, 0.8]}}` |
+| `$contains` | `{"field": {"$contains": value}}` | `{"tags": {"$contains": "security"}}` |
+| `$exists` | `{"field": {"$exists": true}}` | `{"owner": {"$exists": false}}` |
 | Nested | `{"a.b": "value"}` | `{"schema.version": "2"}` |
 
 **Rules:**
 - Keys must match `[A-Za-z0-9_-]+` (dots separate nesting levels)
-- Operator dicts must contain exactly one operator
+- Several operators on one field AND together: `{"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}`
 - `$in` and array-contains require non-empty lists
 - `$between` requires exactly `[min, max]`
 - `null` is an is-null match and only valid as a plain equality value
@@ -98,7 +100,12 @@ against the value and a comparison with null is never true.
 - Metadata filters match Markdown notes only — indexed PDFs, images and other
   regular files carry no frontmatter and are never hits, not even for `null`
 
-> **Warning:** Operators MUST include the `$` prefix — write `$gte`, not `gte`. Without the prefix the filter is treated as an exact-match key and will silently return no results. Correct: `{"confidence": {"$gte": 0.7}}`. Wrong: `{"confidence": {"gte": 0.7}}`.
+> The leading `$` is optional (`gte` works), but write it for clarity.
+
+Frontmatter fields say when a note was filed or reviewed. To ask what a note
+*claims was true* on a date, use observation qualifiers (see **memory-notes**)
+and `search_notes(valid_at="2026-07-01")` or
+`search_notes(valid_overlaps="[2026-07-01,2026-08-01)")`.
 
 ## Using `search_notes` with Metadata
 

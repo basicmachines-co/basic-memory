@@ -62,9 +62,10 @@ ROUTING_TABLE_MARKER = "<!-- routing-table -->"
 
 # Skills left out of the combined skill. They still ship as individual zips.
 COMBINED_EXCLUDED = {
-    # Reorganizes MEMORY.md and memory/ files on the agent's own disk.
+    # Scheduled maintenance of a project's notes, installed on its own rather
+    # than routed to from the combined skill.
     "memory-defrag",
-    # Background consolidation of local daily notes into MEMORY.md, run by cron.
+    # Scheduled consolidation of recent activity into durable notes; same reason.
     "memory-reflect",
     # Needs the source text copied into the project directory and `bm` CLI verbs.
     "memory-literary-analysis",
