@@ -166,8 +166,14 @@ def _keep_unwritten_note_content(
     connection.execute(
         sa.text("DELETE FROM note_content WHERE entity_id = :keeper"), {"keeper": keeper}
     )
+    # external_id mirrors the owning entity and reads look note content up by it,
+    # so the adopted row takes the keeper's external_id along with its entity_id.
     connection.execute(
-        sa.text("UPDATE note_content SET entity_id = :keeper WHERE entity_id = :owner"),
+        sa.text(
+            "UPDATE note_content SET entity_id = :keeper, "
+            "external_id = (SELECT external_id FROM entity WHERE id = :keeper) "
+            "WHERE entity_id = :owner"
+        ),
         {"keeper": keeper, "owner": source},
     )
 

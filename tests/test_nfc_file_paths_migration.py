@@ -85,7 +85,7 @@ def _insert_note_content(
         "INSERT INTO note_content (entity_id, project_id, external_id, file_path, "
         "markdown_content, db_version, db_checksum, file_write_status, updated_at) "
         "VALUES (?, 1, ?, ?, ?, 1, 'sum', ?, ?)",
-        (entity_id, f"content-{entity_id}", file_path, body, status, updated_at),
+        (entity_id, f"entity-{entity_id}", file_path, body, status, updated_at),
     )
 
 
@@ -125,9 +125,10 @@ def test_upgrade_keeps_a_twins_unwritten_content(database):
 
     upgrade()
 
+    # external_id must follow the row to the keeper; reads look content up by it.
     assert connection.execute(
-        "SELECT entity_id, file_path, markdown_content FROM note_content"
-    ).fetchall() == [(1, f"notes/{NFC}", "accepted edit")]
+        "SELECT entity_id, external_id, file_path, markdown_content FROM note_content"
+    ).fetchall() == [(1, "entity-1", f"notes/{NFC}", "accepted edit")]
 
 
 def test_upgrade_prefers_unwritten_content_over_a_fresher_synced_copy(database):
