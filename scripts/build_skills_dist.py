@@ -68,6 +68,8 @@ COMBINED_EXCLUDED = {
     "memory-reflect",
     # Needs the source text copied into the project directory and `bm` CLI verbs.
     "memory-literary-analysis",
+    # Runs `bm okf export` and `bm okf check` against a local project.
+    "memory-okf",
 }
 
 # Hand-written routing intents. A skill without one routes by its description,

@@ -215,12 +215,13 @@ openclaw basic-memory status
 These skills ship with the plugin — no installation needed:
 
 - **memory-comark** — charts, tables, boards, and live views in notes with `::bm-*` components
-- **memory-defrag** — cleanup and reorganization of memory files
+- **memory-defrag** — cleanup and reorganization of a project's notes
 - **memory-ingest** — import existing material into Basic Memory
 - **memory-lifecycle** — manage note/project lifecycle workflows
 - **memory-literary-analysis** — analyze texts and reading notes
 - **memory-metadata-search** — query notes by frontmatter fields
 - **memory-notes** — guidance for writing well-structured notes
+- **memory-okf** — keep a project in OKF shape and export it as a checked bundle
 - **memory-onboarding** — guided setup of a new knowledge system
 - **memory-reflect** — periodic consolidation of recent notes into durable memory
 - **memory-research** — research synthesis into durable notes

@@ -41,7 +41,12 @@ def _load(name: str):
 validate_skills = _load("validate_skills")
 build_skills_dist = _load("build_skills_dist")
 
-COMBINED_EXCLUDED = {"memory-defrag", "memory-reflect", "memory-literary-analysis"}
+COMBINED_EXCLUDED = {
+    "memory-defrag",
+    "memory-reflect",
+    "memory-literary-analysis",
+    "memory-okf",
+}
 INTERNAL = "memory-ci-capture"
 
 

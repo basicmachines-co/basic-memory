@@ -8,6 +8,7 @@ basic-memory/skills/
 ├── memory-schema/SKILL.md          # Schema lifecycle skill
 ├── memory-reflect/SKILL.md         # Memory consolidation skill
 ├── memory-notes/SKILL.md           # Note writing patterns skill
+├── memory-okf/SKILL.md             # OKF export and check skill
 ├── memory-defrag/SKILL.md          # Memory cleanup skill
 ├── memory-metadata-search/SKILL.md # Metadata search skill
 ├── memory-lifecycle/SKILL.md       # Entity lifecycle skill
