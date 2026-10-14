@@ -41,6 +41,10 @@ Timeframes count whole days, so the window can overlap the last reflection.
 Skip notes it lists as `reviewed`, and notes you wrote in an earlier
 reflection, unless someone edited them since.
 
+`recent_activity` looks back at most a year. If the last reflection is older
+than that, use `timeframe="365d"` and record in this reflection that changes
+before that window were not reviewed.
+
 ### 2. Decide what lasts
 
 For each item, ask:
@@ -52,7 +56,7 @@ For each item, ask:
 | A **preference** or way of working | Keep |
 | **Who** owns or knows what | Keep |
 | A **commitment** with an owner and date | Keep, as a task or on the project note |
-| A **contradiction** of something already recorded | Keep, and fix the old note |
+| A **change** to something already recorded | Keep, and date the change in the old note |
 | Routine or transient detail (a check ran, a file moved) | Skip |
 | Already recorded in a durable note | Skip |
 
@@ -65,9 +69,26 @@ search_notes(query="launch checklist owner")
 build_context(url="memory://projects/launch")
 ```
 
+- **Say when it holds.** A fact with a date gets a qualifier (see
+  **memory-notes**): `@effective:` for a decision or rule, `@occurred:` for an
+  event, `@due:` for a commitment. Use the date the source gives, not today's.
+
+  ```markdown
+  - [decision] @effective:2026-10-14 Launch moves to Thursday
+  - [deadline] @due:2026-10-20 Draft ready for review
+  ```
+
+- **A fact changed**: close the old fact's range rather than deleting it, so
+  both stay searchable by date. Do this only when the source says what changed
+  and when; if it only disagrees, record both with "(needs confirmation)".
+
+  ```markdown
+  - [decision] @effective[2026-09-01,2026-10-14) Launch on Friday
+  - [decision] @effective:2026-10-14 Launch on Thursday
+  ```
+
 - **The topic has a note**: update it in place. Read it as JSON and pass its
   checksum to the edit, so the edit applies only to the revision you read.
-  Replace a superseded fact rather than adding a second version beside it.
 
   ```python
   note = read_note(identifier="Launch Plan", output_format="json")
