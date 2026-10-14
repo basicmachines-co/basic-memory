@@ -131,11 +131,13 @@ writing.
 
 Update frontmatter too, with the `metadata` parameter (empty `content` leaves the body alone):
 ```python
+task = read_note(identifier="tasks/descriptive-task-name", output_format="json")
 edit_note(
   identifier="tasks/descriptive-task-name",
   operation="append",
   content="",
-  metadata={"current_step": 3}
+  metadata={"current_step": 3},
+  expected_checksum=task["checksum"]
 )
 ```
 
