@@ -19,11 +19,6 @@ NAME = "Заметка Saarbrücken й.md"
 NFC = unicodedata.normalize("NFC", NAME)
 NFD = unicodedata.normalize("NFD", NAME)
 
-pytestmark = pytest.mark.skipif(
-    sys.platform != "darwin",
-    reason="Off macOS stored paths stay byte-exact and the migration does nothing",
-)
-
 
 @pytest.fixture
 def database(tmp_path, monkeypatch):
@@ -47,6 +42,8 @@ def database(tmp_path, monkeypatch):
 
     def upgrade() -> None:
         connection.commit()
+        # 0042 runs only on macOS; pinning the platform lets every CI runner cover it.
+        monkeypatch.setattr(sys, "platform", "darwin")
         command.upgrade(config, "head")
 
     yield connection, upgrade, project_root

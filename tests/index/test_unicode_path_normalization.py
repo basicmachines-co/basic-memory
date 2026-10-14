@@ -1,9 +1,9 @@
 """NFC and NFD spellings of one file name must produce one index key (#1275).
 
-macOS and Windows resolve both spellings to the same file but report whichever
-form is stored on disk, and Syncthing keeps NFD names on macOS. Paths are
-identity keys, so they are normalized to NFC where they enter the index:
-scanner, watcher, title -> path, move destination and permalink generation.
+macOS resolves both spellings to the same file but reports whichever form is
+stored on disk, and Syncthing keeps NFD names on macOS. Paths are identity keys,
+so on macOS they are normalized to NFC where they enter the index: scanner,
+watcher, title -> path, move destination and permalink generation.
 """
 
 import sys
@@ -24,10 +24,15 @@ TITLE = "Проверка нормализации — Saarbrücken й"
 NFC = unicodedata.normalize("NFC", TITLE)
 NFD = unicodedata.normalize("NFD", TITLE)
 
-normalizing_platform = pytest.mark.skipif(
-    sys.platform != "darwin",
-    reason="Off macOS NFC and NFD names are two distinct files, so paths stay byte-exact",
-)
+
+@pytest.fixture
+def macos(monkeypatch) -> None:
+    """Take nfc_path's macOS branch on every CI platform.
+
+    nfc_path decides by sys.platform, and Linux and Windows filesystems can hold
+    an NFD name, so pinning the platform covers the macOS path everywhere.
+    """
+    monkeypatch.setattr(sys, "platform", "darwin")
 
 
 def _write_nfd_note(project_root: Path) -> Path:
@@ -58,8 +63,7 @@ def test_generate_permalink_is_the_same_for_both_spellings() -> None:
     assert generate_permalink(f"notes/{NFD}.md") == generate_permalink(f"notes/{NFC}.md")
 
 
-@normalizing_platform
-def test_watcher_event_for_an_nfd_name_uses_the_nfc_key(tmp_path: Path) -> None:
+def test_watcher_event_for_an_nfd_name_uses_the_nfc_key(macos, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     note = _write_nfd_note(project_root)
 
@@ -75,8 +79,7 @@ def test_watcher_event_for_an_nfd_name_uses_the_nfc_key(tmp_path: Path) -> None:
     assert [event.object_key for event in events] == [f"project/notes/{NFC}.md"]
 
 
-@normalizing_platform
-def test_scanner_reports_an_nfd_name_under_the_nfc_key(tmp_path: Path) -> None:
+def test_scanner_reports_an_nfd_name_under_the_nfc_key(macos, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_nfd_note(project_root)
 
@@ -85,19 +88,16 @@ def test_scanner_reports_an_nfd_name_under_the_nfc_key(tmp_path: Path) -> None:
     assert scan.file_paths == (f"notes/{NFC}.md",)
 
 
-@normalizing_platform
-def test_move_destination_is_normalized() -> None:
+def test_move_destination_is_normalized(macos) -> None:
     assert normalize_note_move_destination_path(f"notes/{NFD}.md") == f"notes/{NFC}.md"
 
 
-@normalizing_platform
-def test_title_derived_path_is_normalized() -> None:
+def test_title_derived_path_is_normalized(macos) -> None:
     entity = EntitySchema(title=NFD, directory="notes", note_type="note")
     assert entity.file_path == f"notes/{NFC}.md"
 
 
-@normalizing_platform
-def test_title_derived_path_normalizes_the_directory_too() -> None:
+def test_title_derived_path_normalizes_the_directory_too(macos) -> None:
     from_nfd = EntitySchema(title="Plain", directory=f"notes/{NFD}", note_type="note")
     from_nfc = EntitySchema(title="Plain", directory=f"notes/{NFC}", note_type="note")
     # The sanitizer drops combining marks, so an NFD directory must be normalized
@@ -107,8 +107,7 @@ def test_title_derived_path_normalizes_the_directory_too() -> None:
     assert "ü" in from_nfd.file_path and "й" in from_nfd.file_path
 
 
-@normalizing_platform
-def test_index_file_resolves_an_nfd_name_to_the_nfc_key(tmp_path: Path) -> None:
+def test_index_file_resolves_an_nfd_name_to_the_nfc_key(macos, tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_nfd_note(project_root)
 

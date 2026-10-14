@@ -7,8 +7,8 @@ import logging
 import mimetypes
 import re
 import shlex
-import unicodedata
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import override, Any, Protocol, Union, runtime_checkable, List, Optional
