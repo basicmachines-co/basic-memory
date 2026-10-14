@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import re
 import shlex
+import unicodedata
 import sys
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -76,6 +77,24 @@ FilePath = Union[Path, str]
 WINDOWS_LOG_FILE_RETENTION = 5
 
 
+def nfc_path(path: str) -> str:
+    """Return a project-relative path in Unicode NFC form.
+
+    macOS filesystems (APFS, HFS+) resolve the NFC and NFD spellings of a name
+    to the same file but report whichever form is stored on disk, and file-sync
+    tools rewrite that form (Syncthing keeps NFD names on macOS). Paths are
+    identity keys, so on macOS every path entering the index is normalized to
+    NFC; otherwise a renamed spelling rewrites the key or mints a twin (#1275).
+
+    Linux and Windows (NTFS) filesystems keep NFC and NFD names as two distinct
+    files, so there the path is returned unchanged instead of merging two files
+    into one key.
+    """
+    if sys.platform != "darwin":
+        return path
+    return unicodedata.normalize("NFC", path)
+
+
 def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: bool = True) -> str:
     """Generate a stable permalink from a file path.
 
@@ -103,7 +122,8 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         'version-2.0.0'
     """
     # Convert Path to string if needed
-    path_str = Path(str(file_path)).as_posix()
+    # NFC so both spellings of a name produce one permalink (#1275)
+    path_str = unicodedata.normalize("NFC", Path(str(file_path)).as_posix())
 
     # Only split extension if there's a real file extension
     # Use mimetypes to detect real extensions, avoiding misinterpreting periods in version numbers
@@ -798,7 +818,6 @@ def normalize_file_path_for_comparison(file_path: str) -> str:
     Returns:
         Normalized file path for comparison purposes
     """
-    import unicodedata
     from pathlib import PureWindowsPath
 
     # Use PureWindowsPath to ensure backslashes are treated as separators

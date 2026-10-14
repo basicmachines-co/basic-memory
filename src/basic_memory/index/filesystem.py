@@ -15,6 +15,7 @@ from basic_memory.runtime.storage import StorageBucketName, StorageEventPayload,
 from basic_memory.runtime.storage_events import StorageEventInput, storage_event_payload_from_input
 from basic_memory.runtime.storage import STORAGE_OBJECT_DELETED_EVENT
 from basic_memory.runtime.storage_project_resolution import storage_object_key_from_project_prefix
+from basic_memory.utils import nfc_path
 
 LOCAL_FILESYSTEM_BUCKET_NAME: StorageBucketName = "local-filesystem"
 LOCAL_FILESYSTEM_CREATED_EVENT = "OBJECT_CREATED_PUT"
@@ -101,7 +102,7 @@ def local_storage_event_input_from_watchfiles_change(
     """Normalize one watchfiles change into a storage-event input."""
     path = path.expanduser().resolve()
     try:
-        relative_path = path.relative_to(project_root).as_posix()
+        relative_path = nfc_path(path.relative_to(project_root).as_posix())
     except ValueError:
         return None
     if local_relative_path_is_filtered(relative_path):

@@ -15,6 +15,7 @@ from basic_memory.cli.app import import_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
 from basic_memory.config import ConfigManager
+from basic_memory.utils import nfc_path
 
 if TYPE_CHECKING:
     from basic_memory.document_ingestion.raw_document import RawDocumentWriteResult
@@ -56,7 +57,7 @@ async def import_document(path: Path, project: str | None) -> tuple[str, RawDocu
                 f"{path} is not inside project {project_item.name!r} ({project_home}). "
                 "Copy the file into that project directory, then run the command again."
             )
-        relative_path = source.relative_to(project_home).as_posix()
+        relative_path = nfc_path(source.relative_to(project_home).as_posix())
 
         # The source must be an indexed file entity before it can own a document
         # note, and a fresh drop may not have been seen by the watcher yet.
