@@ -45,7 +45,6 @@ COMBINED_EXCLUDED = {
     "memory-defrag",
     "memory-reflect",
     "memory-literary-analysis",
-    "memory-okf",
 }
 INTERNAL = "memory-ci-capture"
 

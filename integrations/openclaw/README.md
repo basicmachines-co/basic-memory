@@ -221,7 +221,7 @@ These skills ship with the plugin — no installation needed:
 - **memory-literary-analysis** — analyze texts and reading notes
 - **memory-metadata-search** — query notes by frontmatter fields
 - **memory-notes** — guidance for writing well-structured notes
-- **memory-okf** — keep a project in OKF shape and export it as a checked bundle
+- **memory-okf** — make a project ready for OKF export
 - **memory-onboarding** — guided setup of a new knowledge system
 - **memory-reflect** — periodic consolidation of recent notes into durable memory
 - **memory-research** — research synthesis into durable notes

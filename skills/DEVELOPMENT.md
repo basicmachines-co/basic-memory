@@ -8,7 +8,7 @@ basic-memory/skills/
 ├── memory-schema/SKILL.md          # Schema lifecycle skill
 ├── memory-reflect/SKILL.md         # Memory consolidation skill
 ├── memory-notes/SKILL.md           # Note writing patterns skill
-├── memory-okf/SKILL.md             # OKF export and check skill
+├── memory-okf/SKILL.md             # OKF export readiness skill
 ├── memory-defrag/SKILL.md          # Memory cleanup skill
 ├── memory-metadata-search/SKILL.md # Metadata search skill
 ├── memory-lifecycle/SKILL.md       # Entity lifecycle skill
@@ -124,8 +124,8 @@ skills into one. Its router `SKILL.md` comes from
 a second copy of these skills); the build fills in its routing table and writes
 each skill's `SKILL.md` to `references/<name>.md`, with its resources under
 `references/<name>/` and links rewritten to match. A new `memory-*` skill joins
-it automatically. `memory-literary-analysis` and `memory-okf` are left out
-because they need the `bm` CLI, and `memory-defrag` and `memory-reflect` because
+it automatically. `memory-literary-analysis` is left out because it needs the
+`bm` CLI, and `memory-defrag` and `memory-reflect` because
 they are scheduled maintenance runs installed on their own (see
 `COMBINED_EXCLUDED` in `scripts/build_skills_dist.py`).
 
