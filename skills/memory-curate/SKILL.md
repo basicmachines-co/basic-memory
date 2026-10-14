@@ -7,7 +7,7 @@ description: "Curate the Basic Memory graph: link orphan notes, propose typed re
 
 Maintain a healthy, well-connected knowledge graph. As notes accumulate, it pays to periodically organize, link, and curate the knowledge base so isolated notes become a connected graph.
 
-This skill curates the **knowledge graph** — the notes, relations, and tags that make up the knowledge base. (For hygiene on an agent's own memory *files* — splitting bloated files, pruning stale entries — see **memory-defrag**.)
+This skill curates the **knowledge graph** — the notes, relations, and tags that make up the knowledge base. (For the notes' content — splitting bloated notes, consolidating scattered facts, retiring stale entries — see **memory-defrag**.)
 
 ## When to Use
 
