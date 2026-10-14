@@ -109,6 +109,7 @@ from basic_memory.schemas.v2.project_index import (
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
+from basic_memory.utils import nfc_path
 
 type LocalProjectIndexIgnorePatterns = set[str]
 
@@ -276,7 +277,7 @@ def scan_local_project_index_files(
 
         for name in filenames:
             path = root_path / name
-            relative_path = path.relative_to(project_root).as_posix()
+            relative_path = nfc_path(path.relative_to(project_root).as_posix())
             if local_relative_path_is_filtered(relative_path):
                 continue
             if should_ignore_path(path, project_root, active_ignore_patterns):

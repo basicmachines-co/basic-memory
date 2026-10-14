@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath, PureWindowsPath
 
 from basic_memory.runtime.storage import RuntimeFilePath
+from basic_memory.utils import nfc_path
 
 
 def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePath:
@@ -33,4 +34,4 @@ def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePa
     if ".." in PurePosixPath(accepted_path).parts or ".." in PureWindowsPath(accepted_path).parts:
         raise ValueError(f"Invalid destination path: {destination_path}")
 
-    return PurePosixPath(accepted_path).as_posix()
+    return nfc_path(PurePosixPath(accepted_path).as_posix())

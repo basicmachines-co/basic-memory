@@ -23,7 +23,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator, compute
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import sanitize_for_filename, sanitize_for_directory
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, nfc_path
 
 
 def has_valid_file_extension(filename: str) -> bool:
@@ -251,7 +251,9 @@ class Entity(BaseModel):
     )
 
     def __init__(self, **data):
-        data["directory"] = sanitize_for_directory(data.get("directory", ""))
+        # NFC before sanitizing: the sanitizer drops combining marks, so an NFD
+        # directory would lose its accents instead of matching the NFC spelling (#1275).
+        data["directory"] = sanitize_for_directory(nfc_path(data.get("directory", "")))
         super().__init__(**data)
 
     @property
@@ -288,7 +290,7 @@ class Entity(BaseModel):
             filename = f"{safe_title}.md"
         else:
             filename = safe_title
-        return f"{self.directory}/{filename}" if self.directory else filename
+        return nfc_path(f"{self.directory}/{filename}" if self.directory else filename)
 
     @property
     def permalink(self) -> Optional[Permalink]:
