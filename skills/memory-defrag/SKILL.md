@@ -74,7 +74,9 @@ status: proposed
 - **Apply only when told to** what removes content: deleting a note, merging one
   note into another, dropping facts. If your instructions don't say to apply
   these, leave them in the plan with `status: proposed` and stop.
-- Make one change at a time. Read each note before you edit it, and keep
+- Make one change at a time. Read each note as JSON before you edit it and pass
+  its checksum as `expected_checksum`, so the edit applies only to the revision
+  you read; on a checksum conflict, read again and recheck the plan line. Keep
   relations pointing at the right note after a split or move (`move_note` keeps
   links working; a new note needs links added).
 
