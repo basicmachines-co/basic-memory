@@ -64,7 +64,7 @@ People/
 - **Index:** optional — useful if the user wants a follow-up board (`last_contact` older than N months).
 - **Critical rule:** ALWAYS title-search (full name, then last name) before creating a person note — people are the most-duplicated entity type, and semantic search misses names.
 - **Body guidance:** this is where prose shines — how they met, what they care about, gift ideas, kids' names. Observations for the queryable bits (`- [birthday] March 12`).
-- **Expansions:** interaction log (`- [contact] July 12, 2026 — coffee, discussed job change` appended per touch); linking people to meetings, projects, gifts.
+- **Expansions:** interaction log (`- [contact] @occurred:2026-07-12 Coffee, discussed job change` appended per touch); linking people to meetings, projects, gifts.
 
 ## Research
 

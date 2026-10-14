@@ -84,7 +84,7 @@ Chat apps take skills as uploaded zips, one skill per upload. Every build of `ma
 | `<skill>-chatgpt.zip`, e.g. `memory-onboarding-chatgpt.zip` | One individual skill, for ChatGPT. |
 | `basic-memory-skills.zip`, `basic-memory-skills-chatgpt.zip` | Every individual skill in one archive, for unzipping by hand. Don't upload these. |
 
-The combined `basic-memory` skill leaves out `memory-defrag`, `memory-reflect`, and `memory-literary-analysis`, which need a local Basic Memory install; their individual zips are still published. Either way, the skills need the Basic Memory connector (or MCP server) connected in the same app.
+The combined `basic-memory` skill leaves out `memory-literary-analysis` and `memory-okf`, which need the `bm` CLI and a local project, and `memory-defrag` and `memory-reflect`, scheduled maintenance runs that are installed on their own; their individual zips are still published. Either way, the skills need the Basic Memory connector (or MCP server) connected in the same app.
 
 **Claude (claude.ai and Claude Desktop):**
 

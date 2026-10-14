@@ -78,6 +78,8 @@ If no obvious connection: "No specific connection identified."]
 **Use hedging language.** Web research is a snapshot, not ground truth:
 - "Appears to be", "Based on public information", "Estimated"
 - "As of [date]", "According to [source]"
+- Put the as-of date on the observation, so a later search by date finds it
+  (see **memory-notes**): `- [stage] @valid:2026-10 Series B, about 200 employees (public information)`
 - Never state funding amounts, employee counts, or revenue as exact unless citing a primary source
 
 **Don't fabricate.** If information isn't available, say so:
@@ -195,6 +197,9 @@ write_note(
 ```
 
 Adapt these templates freely. The key elements are: note_type/tags parameters, an overview, structured details, observations with categories, and relations.
+
+If `write_note` reports similar existing notes, check whether one of them is this
+entity before keeping the new note; merge or link instead of duplicating.
 
 ### Step 6: Store Source Context
 

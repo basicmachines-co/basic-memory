@@ -117,6 +117,11 @@ As work progresses, update the task note:
 Updated context reflecting current state...
 ```
 
+Read the task as JSON first and pass its checksum as `expected_checksum` on each
+edit. Two sessions often update the same task, for example in a pre-compaction
+flush; a revision conflict means the other one wrote first, so re-read before
+writing.
+
 Update frontmatter too, with the `metadata` parameter (empty `content` leaves the body alone):
 ```python
 edit_note(
@@ -159,8 +164,21 @@ With BM's schema system, tasks are fully queryable:
 | `search_notes(note_types=["task"], status="blocked")` | Blocked tasks |
 | `search_notes(note_types=["task"], metadata_filters={"assigned_to": "claude"})` | My tasks |
 | `search_notes("blockers", note_types=["task"])` | Tasks with blockers |
+| `search_notes(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")` | Tasks with a step due this week |
 | `schema_validate(note_type="Task")` | Validate all tasks against schema |
 | `schema_diff(note_type="Task")` | Detect drift between schema and actual task notes |
+
+### Due Dates
+
+Give a step or the task a due date with a qualifier (see **memory-notes**), so
+"what's due" is one search:
+
+```markdown
+- [deadline] @due:2026-10-20 Draft ready for review
+```
+
+A day-precision due date counts from that day onward, so a due-this-week search
+also returns overdue items.
 
 ## Guidelines
 

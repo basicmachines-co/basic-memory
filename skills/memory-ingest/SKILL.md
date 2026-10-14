@@ -38,6 +38,14 @@ Read the pasted content and identify its structure:
 
 Don't rewrite or summarize the source content. Preserve it verbatim in the note — you'll add structured observations alongside it.
 
+Give dated observations a qualifier with the date the source gives (see **memory-notes**):
+`@occurred:` for what happened in the meeting, `@due:` for action items.
+
+**A file instead of pasted text.** For a PDF, Word, PowerPoint, or CSV file in the project,
+and if the `bm` CLI is available, run `bm import document <path>`. It writes an
+extracted-text sidecar (`<file>.<ext>.md`) linked to the source by `derived_from`. Write
+your structured note separately and link it to the sidecar; don't edit the sidecar.
+
 ## Step 2: Extract Entities
 
 Scan the content for entities worth tracking in the knowledge graph:
@@ -133,9 +141,9 @@ Brief one-sentence summary of what this meeting was about.
 ## Observations
 - [opportunity] NovaTech interested in integration partnership
 - [insight] Their platform handles 10K concurrent sessions, relevant to our scale needs
-- [next_step] Send technical spec document by Friday
+- [next_step] @due:2026-02-27 Send technical spec document
 - [sentiment] Strong enthusiasm from their engineering team
-- [decision] Agreed to start with a proof-of-concept integration
+- [decision] @occurred:2026-02-22 Agreed to start with a proof-of-concept integration
 
 ## Relations
 - attended [[Jordan Rivera]]
@@ -195,6 +203,9 @@ Invent categories as needed — these are suggestions, not a fixed list.
 ## Step 7: Create Approved Entities
 
 For each entity the user approved, create a structured note. Match the entity type to an appropriate template.
+
+If `write_note` reports similar existing notes, treat that as a match Step 3 missed: merge into
+the existing note and delete the new one, or link the two.
 
 ### Person
 

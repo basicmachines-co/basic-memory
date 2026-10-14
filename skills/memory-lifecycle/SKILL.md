@@ -16,7 +16,7 @@ Manage how entities move through status stages in Basic Memory. The core princip
 
 ## Core Principle: Archive, Never Delete
 
-Deleting a note removes it from the knowledge graph — all its observations, relations, and history disappear. Archiving preserves everything while signaling the entity is no longer active.
+Deleting a note removes it from the knowledge graph — its observations and relations disappear, and links to it from other notes become unresolved links. Archiving preserves everything while signaling the entity is no longer active.
 
 ```
 # Good — entity stays in the knowledge graph
@@ -137,6 +137,12 @@ If the entity is already in an archive/completed folder, notify the user:
 ### Partial Completion
 
 Sometimes only part of an entity is done. Don't move it — instead, update observations or status notes within the entity to reflect partial progress.
+
+### Locked Notes
+
+A note with `locked: true` in its frontmatter still moves, and keeps its lock,
+but the status edit in step 3 is refused. Report that it moved and that its
+status is unchanged. Only the user can unlock it, by editing the file.
 
 ### Revert / Reactivate
 

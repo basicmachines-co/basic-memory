@@ -63,7 +63,7 @@ Every structural or long-lived note carries exactly one changelog table, immedia
 Rules:
 - **Append, never edit.** Existing rows are history; new rows record change.
 - **One table per note.** Before overwriting any existing note, read the full note first, carry the existing changelog forward verbatim, and append your row. If you ever find two tables, merge them into one at the top before writing.
-- **Consistent date format** — pick one (`Month D, YYYY` works well) and use it everywhere.
+- **Consistent date format** — `Month D, YYYY` reads well in changelog rows. Any date you will query (a due date, a renewal, a warranty end) is ISO (`2026-07-20`) in frontmatter, and an observation qualifier (`- [due] @due:2026-07-20 ...`) so "what's due this month" is one search.
 
 Why: an assistant (or the user) reading a note months later can see what changed, when, and on whose authority — without any external version control. It also forces the read-before-overwrite habit that prevents accidental content loss.
 
@@ -101,8 +101,8 @@ The habits that prevent 90% of knowledge-base corruption:
 1. **Search before create.** Always search (try 2–3 query variations: full name, abbreviation, keywords) before writing a new note. Duplicates fragment the graph. If the entity exists, `edit_note` it instead. For people and other proper nouns, use **title search** — semantic search is unreliable for names.
 2. **Exact casing, exact paths.** `Tasks/` and `tasks/` are different directories. Take folder paths from the instruction note, character for character. If a write would create a new top-level folder you didn't plan, that's a casing error — stop and fix.
 3. **Explicit project on every call.** In multi-project setups, pass the project explicitly on every read, search, and write. Writes to the wrong project are invisible until much later.
-4. **Read before overwrite.** Full-note overwrites must start from the current content — never reconstruct a note from memory of what it contained.
-5. **Watch write results.** If a write returns a permalink ending in `-1` or `-2`, you just created a duplicate: delete it and re-write the original with overwrite semantics.
+4. **Read before overwrite.** Full-note overwrites must start from the current content — never reconstruct a note from memory of what it contained. Read as JSON and pass its `checksum` as `expected_checksum`; a revision conflict means someone else edited the note, so re-read before writing.
+5. **Watch write results.** If a write returns a permalink ending in `-1` or `-2`, you just created a duplicate: delete it and re-write the original with overwrite semantics. Writing to an existing note without `overwrite=True` is refused with `NOTE_ALREADY_EXISTS`, not duplicated. If the result lists similar existing notes, check them before keeping the new one.
 6. **Prefer targeted edits.** `edit_note` (append an observation, find-and-replace a status) over full overwrites wherever possible — smaller blast radius.
 
 ## Known failure modes

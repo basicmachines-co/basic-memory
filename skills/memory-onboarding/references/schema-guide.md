@@ -32,7 +32,7 @@ Hardware store trip required — measure the downspout diameter first (looks lik
 ## Observations
 - [status] open
 - [priority] high
-- [due] July 20, 2026
+- [due] @due:2026-07-20 Downspout fixed
 - [context] home-maintenance
 
 ## Relations
@@ -69,7 +69,7 @@ Schemas are notes (conventionally in a `Schemas/` folder) whose frontmatter meta
 ```yaml
 schema:
   status(enum): "[open, in-progress, blocked, done], current state"
-  due?: string, due date if any (Month D, YYYY)
+  due?: string, due date if any (YYYY-MM-DD)
   priority?(enum): "[low, medium, high], urgency"
   project?: Project, parent project note
   steps?(array): string, ordered sub-steps
@@ -94,7 +94,7 @@ write_note(
     "version": 1,
     "schema": {
       "status(enum)": "[open, in-progress, blocked, done], current state",
-      "due?": "string, due date (Month D, YYYY)",
+      "due?": "string, due date (YYYY-MM-DD)",
       "priority?(enum)": "[low, medium, high], urgency",
       "project?": "Project, parent project"
     },
