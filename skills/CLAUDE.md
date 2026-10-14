@@ -19,7 +19,7 @@ memory-ci-capture/SKILL.md      # Internal: CI-only prompt, marked `metadata.int
 memory-schema/SKILL.md          # Schema lifecycle (discover, infer, validate, drift)
 memory-reflect/SKILL.md         # Sleep-time memory consolidation
 memory-notes/SKILL.md           # Note writing patterns and knowledge graph design
-memory-okf/SKILL.md             # Export and validate a project as an OKF bundle
+memory-okf/SKILL.md             # Prepare a project for OKF export; local export and check
 memory-defrag/SKILL.md          # Memory reorganization and cleanup
 memory-metadata-search/SKILL.md # Structured metadata filtering and queries
 memory-lifecycle/SKILL.md       # Entity status transitions and folder-based archival
