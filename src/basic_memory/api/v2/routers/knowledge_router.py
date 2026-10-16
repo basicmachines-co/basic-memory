@@ -22,6 +22,7 @@ from loguru import logger
 
 import logfire
 from basic_memory import db
+from basic_memory.file_utils import has_frontmatter
 from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.services import directory_moves
@@ -979,6 +980,13 @@ async def update_entity_by_id(
                 user_profile_id=None,
                 source="api",
                 base_checksum=base_checksum,
+                # Trigger: the PUT supplies frontmatter, in its content or as entity_metadata.
+                # Why: a writer that sends frontmatter sends all of it, so a key it omits
+                # was deleted (#1768); an empty map means every custom key was removed.
+                # A body-only PUT did not mean to touch the keys.
+                # Outcome: supplied frontmatter replaces the stored keys; otherwise merge.
+                replace_frontmatter=data.entity_metadata is not None
+                or bool(data.content and has_frontmatter(data.content)),
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

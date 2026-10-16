@@ -430,13 +430,20 @@ async def prepare_update_entity_content(
     existing_content: str,
     *,
     skip_conflict_check: bool = False,
+    replace_frontmatter: bool = False,
     session: AsyncSession | None = None,
 ) -> PreparedEntityWrite:
     schema = schema.model_copy(deep=True)
     file_path = Path(schema.file_path)
     current_file_path = Path(entity.file_path)
     existing_metadata: dict[str, object] = {}
-    if has_frontmatter(existing_content):
+    # Trigger: the caller sent the whole document (frontmatter plus body), such as an
+    # editor save through PUT.
+    # Why: a key left out of a full document was deleted; merging the old frontmatter
+    # would bring it back (#1768).
+    # Outcome: the written frontmatter is exactly the supplied metadata. Partial writers
+    # such as write_note overwrite keep the merge.
+    if not replace_frontmatter and has_frontmatter(existing_content):
         try:
             existing_metadata = parse_frontmatter(existing_content)
         except ParseError:
@@ -1126,6 +1133,7 @@ class NotePreparation:
         existing_content: str,
         *,
         skip_conflict_check: bool = False,
+        replace_frontmatter: bool = False,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         return await prepare_update_entity_content(
@@ -1134,6 +1142,7 @@ class NotePreparation:
             schema,
             existing_content,
             skip_conflict_check=skip_conflict_check,
+            replace_frontmatter=replace_frontmatter,
             session=session,
         )
 

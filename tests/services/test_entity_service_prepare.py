@@ -325,6 +325,47 @@ async def test_prepare_update_entity_content_can_repair_malformed_frontmatter(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("replace_frontmatter", "extra_kept"),
+    [(False, True), (True, False)],
+)
+async def test_prepare_update_entity_content_replace_frontmatter_drops_omitted_keys(
+    entity_service,
+    replace_frontmatter: bool,
+    extra_kept: bool,
+) -> None:
+    """A full-document replace deletes a key it omits; the default merge keeps it (#1768)."""
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Replace Frontmatter",
+            directory="notes",
+            note_type="note",
+            content="---\nextra: 1\nstatus: draft\n---\nOriginal body",
+        )
+    )
+    existing_content = await entity_service.file_service.read_file_content(created.file_path)
+    assert parse_frontmatter(existing_content)["extra"] == 1
+
+    prepared = await entity_service.prepare_update_entity_content(
+        created,
+        EntitySchema(
+            title="Replace Frontmatter",
+            directory="notes",
+            note_type="note",
+            content="---\nstatus: done\n---\nUpdated body",
+        ),
+        existing_content,
+        replace_frontmatter=replace_frontmatter,
+    )
+
+    frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert frontmatter["status"] == "done"
+    assert frontmatter["permalink"] == created.permalink
+    assert ("extra" in frontmatter) is extra_kept
+    assert remove_frontmatter(prepared.markdown_content) == "Updated body"
+
+
+@pytest.mark.asyncio
 async def test_prepare_update_entity_content_preserves_permalink_when_move_updates_disabled(
     entity_service,
     file_service,

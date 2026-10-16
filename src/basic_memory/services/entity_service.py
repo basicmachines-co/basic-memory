@@ -352,13 +352,15 @@ class EntityService(BaseService[EntityModel]):
         existing_content: str,
         *,
         skip_conflict_check: bool = False,
+        replace_frontmatter: bool = False,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         """Derive accepted markdown and entity fields for a full note replacement.
 
         This method does not read or write storage on its own. The caller must
         supply ``existing_content`` for the current note body because full updates
-        preserve unrecognized frontmatter keys from that explicit base content.
+        preserve unrecognized frontmatter keys from that explicit base content,
+        unless ``replace_frontmatter`` says the schema carries the whole frontmatter.
         No database rows are mutated here.
         """
         return await self._note_preparation.prepare_update_entity_content(
@@ -366,6 +368,7 @@ class EntityService(BaseService[EntityModel]):
             schema,
             existing_content,
             skip_conflict_check=skip_conflict_check,
+            replace_frontmatter=replace_frontmatter,
             session=session,
         )
 

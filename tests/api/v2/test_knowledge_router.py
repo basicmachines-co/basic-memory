@@ -743,6 +743,59 @@ async def test_update_entity_by_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("frontmatter_update", "expected_status"),
+    [
+        ({"content": "Body", "entity_metadata": {"status": "draft"}}, "draft"),
+        ({"content": "---\nstatus: draft\n---\nBody"}, "draft"),
+        # Removing the last custom key sends an empty map, which still replaces.
+        ({"content": "Body", "entity_metadata": {}}, None),
+    ],
+    ids=["entity_metadata", "content_frontmatter", "empty_entity_metadata"],
+)
+async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
+    client: AsyncClient,
+    file_service,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    frontmatter_update: dict[str, object],
+    expected_status: str | None,
+):
+    """A PUT that supplies frontmatter supplies all of it: an omitted key is deleted (#1768)."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Deleted Key",
+            "directory": "test",
+            "content": "Body",
+            "entity_metadata": {"extra": 1, "status": "draft"},
+        },
+    )
+    assert response.status_code == 202
+    created = EntityResponseV2.model_validate(response.json())
+    created_file, _ = await file_service.read_file(file_service.get_entity_path(created))
+    assert parse_frontmatter(created_file)["extra"] == 1
+
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created.external_id}",
+        json={"title": "Deleted Key", "directory": "test", **frontmatter_update},
+    )
+
+    assert response.status_code == 202
+    updated = EntityResponseV2.model_validate(response.json())
+    file_content, _ = await file_service.read_file(file_service.get_entity_path(updated))
+    frontmatter = parse_frontmatter(file_content)
+    assert "extra" not in frontmatter
+    assert frontmatter.get("status") == expected_status
+    assert frontmatter["permalink"] == created.permalink
+
+    note_content = await _get_note_content(session_maker, test_project.id, updated.id)
+    assert note_content is not None
+    assert "extra" not in parse_frontmatter(note_content.markdown_content)
+
+
+@pytest.mark.asyncio
 async def test_update_entity_by_id_freshens_external_file_metadata_before_accepting(
     client: AsyncClient,
     file_service,
