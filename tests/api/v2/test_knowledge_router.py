@@ -744,12 +744,14 @@ async def test_update_entity_by_id(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "frontmatter_update",
+    ("frontmatter_update", "expected_status"),
     [
-        {"content": "Body", "entity_metadata": {"status": "draft"}},
-        {"content": "---\nstatus: draft\n---\nBody"},
+        ({"content": "Body", "entity_metadata": {"status": "draft"}}, "draft"),
+        ({"content": "---\nstatus: draft\n---\nBody"}, "draft"),
+        # Removing the last custom key sends an empty map, which still replaces.
+        ({"content": "Body", "entity_metadata": {}}, None),
     ],
-    ids=["entity_metadata", "content_frontmatter"],
+    ids=["entity_metadata", "content_frontmatter", "empty_entity_metadata"],
 )
 async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
     client: AsyncClient,
@@ -758,6 +760,7 @@ async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
     v2_project_url,
     session_maker,
     frontmatter_update: dict[str, object],
+    expected_status: str | None,
 ):
     """A PUT that supplies frontmatter supplies all of it: an omitted key is deleted (#1768)."""
     response = await client.post(
@@ -784,7 +787,7 @@ async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
     file_content, _ = await file_service.read_file(file_service.get_entity_path(updated))
     frontmatter = parse_frontmatter(file_content)
     assert "extra" not in frontmatter
-    assert frontmatter["status"] == "draft"
+    assert frontmatter.get("status") == expected_status
     assert frontmatter["permalink"] == created.permalink
 
     note_content = await _get_note_content(session_maker, test_project.id, updated.id)

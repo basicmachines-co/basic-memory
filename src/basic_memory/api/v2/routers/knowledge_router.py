@@ -982,9 +982,10 @@ async def update_entity_by_id(
                 base_checksum=base_checksum,
                 # Trigger: the PUT supplies frontmatter, in its content or as entity_metadata.
                 # Why: a writer that sends frontmatter sends all of it, so a key it omits
-                # was deleted (#1768). A body-only PUT did not mean to touch the keys.
+                # was deleted (#1768); an empty map means every custom key was removed.
+                # A body-only PUT did not mean to touch the keys.
                 # Outcome: supplied frontmatter replaces the stored keys; otherwise merge.
-                replace_frontmatter=bool(data.entity_metadata)
+                replace_frontmatter=data.entity_metadata is not None
                 or bool(data.content and has_frontmatter(data.content)),
             )
         except NoteContentMutationServiceError as error:
