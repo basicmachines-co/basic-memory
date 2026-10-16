@@ -743,14 +743,23 @@ async def test_update_entity_by_id(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "frontmatter_update",
+    [
+        {"content": "Body", "entity_metadata": {"status": "draft"}},
+        {"content": "---\nstatus: draft\n---\nBody"},
+    ],
+    ids=["entity_metadata", "content_frontmatter"],
+)
 async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
     client: AsyncClient,
     file_service,
     test_project: Project,
     v2_project_url,
     session_maker,
+    frontmatter_update: dict[str, object],
 ):
-    """A PUT is the whole note: a frontmatter key it omits is deleted, not merged back (#1768)."""
+    """A PUT that supplies frontmatter supplies all of it: an omitted key is deleted (#1768)."""
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
         json={
@@ -767,12 +776,7 @@ async def test_update_entity_by_id_deletes_omitted_frontmatter_keys(
 
     response = await client.put(
         f"{v2_project_url}/knowledge/entities/{created.external_id}",
-        json={
-            "title": "Deleted Key",
-            "directory": "test",
-            "content": "Body",
-            "entity_metadata": {"status": "draft"},
-        },
+        json={"title": "Deleted Key", "directory": "test", **frontmatter_update},
     )
 
     assert response.status_code == 202
