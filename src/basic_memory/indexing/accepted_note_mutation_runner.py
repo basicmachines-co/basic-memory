@@ -180,6 +180,9 @@ class AcceptedNoteUpdateMutation:
     # and so the checksum, unchanged; only the path proves the caller's target.
     base_file_path: str | None = None
     publish_graph_facts: bool = True
+    # True when data carries the whole document, so frontmatter keys it leaves out are
+    # deleted instead of merged back from the current note (#1768).
+    replace_frontmatter: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1075,6 +1078,7 @@ async def _run_accepted_note_update(
                     request.actor.author,
                     current_markdown=str(current_note_content.markdown_content),
                 ),
+                replace_frontmatter=request.replace_frontmatter,
             )
         except (ParseError, ValueError) as error:
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))

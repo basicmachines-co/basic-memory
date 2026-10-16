@@ -601,6 +601,7 @@ class NoteContentMutationService:
         actor_kind: str | None = None,
         actor_name: str | None = None,
         base_file_path: str | None = None,
+        replace_frontmatter: bool = False,
     ) -> AcceptedNoteChange:
         """PUT a markdown note by creating or replacing accepted DB state.
 
@@ -614,6 +615,10 @@ class NoteContentMutationService:
         ``base_file_path`` pins the path the caller expected the note to own. A
         move can leave the checksum unchanged, so a path-addressed replacement
         passes both, and a moved note is rejected with the same structured 409.
+
+        ``replace_frontmatter`` says ``data`` is the whole document: the written
+        frontmatter is exactly what it supplies, so a key it leaves out is deleted.
+        By default the current note's other frontmatter keys are kept (#1768).
         """
         try:
             return await self._accept_write(
@@ -625,6 +630,7 @@ class NoteContentMutationService:
                     source=source,
                     base_checksum=base_checksum,
                     base_file_path=base_file_path,
+                    replace_frontmatter=replace_frontmatter,
                 )
             )
         except AcceptedNoteMutationRejected as error:

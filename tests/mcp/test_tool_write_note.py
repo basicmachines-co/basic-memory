@@ -616,6 +616,29 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
 
 
 @pytest.mark.asyncio
+async def test_write_note_overwrite_keeps_unset_frontmatter_keys(app, test_project):
+    """Overwrite merges frontmatter, unlike a full-document PUT (#1768)."""
+    await write_note(
+        project=test_project.name,
+        title="Merge Note",
+        directory="test",
+        content="---\nextra: 1\n---\nOriginal body",
+    )
+    await write_note(
+        project=test_project.name,
+        title="Merge Note",
+        directory="test",
+        content="Replaced body",
+        overwrite=True,
+    )
+
+    content = await read_note("test/merge-note", project=test_project.name)
+    assert "extra: 1" in content
+    assert "Replaced body" in content
+    assert "Original body" not in content
+
+
+@pytest.mark.asyncio
 async def test_write_note_preserves_content_frontmatter(app, test_project):
     """Test creating a new note."""
     await write_note(

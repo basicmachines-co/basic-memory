@@ -979,6 +979,9 @@ async def update_entity_by_id(
                 user_profile_id=None,
                 source="api",
                 base_checksum=base_checksum,
+                # A PUT carries the whole note, so a frontmatter key it omits is
+                # deleted rather than merged back from the stored note (#1768).
+                replace_frontmatter=True,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

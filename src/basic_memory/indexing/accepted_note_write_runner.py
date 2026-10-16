@@ -85,6 +85,7 @@ class AcceptedNoteReplacePreparer(Protocol):
         schema: EntitySchema,
         existing_content: str,
         *,
+        replace_frontmatter: bool = ...,
         session: AsyncSession | None = ...,
     ) -> PreparedEntityWrite: ...
 
@@ -315,12 +316,14 @@ async def prepare_accepted_note_replace(
     current_note_content: NoteContent,
     user_profile_value: str | None,
     authorship: NoteAuthorship | None = None,
+    replace_frontmatter: bool = False,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a full accepted replacement and apply its entity fields."""
     prepared = await preparer.prepare_update_entity_content(
         entity,
         data,
         str(current_note_content.markdown_content),
+        replace_frontmatter=replace_frontmatter,
         session=session,
     )
     if authorship is not None:
