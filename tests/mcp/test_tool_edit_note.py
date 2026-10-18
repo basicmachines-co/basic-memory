@@ -10,11 +10,12 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools.edit_note import (
-    _parse_identifier_to_title_and_directory,
+    AmbiguousNotePath,
     _resolve_after_disk_recovery,
     _revision_conflict_detail,
-    _strip_active_project_prefix,
+    choose_note_create_path,
     edit_note,
+    note_path_readings,
 )
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -84,70 +85,94 @@ def test_edit_note_workspace_project_route_helper_rejects_invalid_inputs(
 
 
 @pytest.mark.parametrize(
-    ("identifier", "project_permalink", "include_project", "expected"),
+    ("identifier", "workspace_slug", "expected"),
     [
-        (
-            "test-project/scratch/repro/note-c",
-            "test-project",
-            True,
-            "scratch/repro/note-c",
-        ),
-        (
-            "memory://test-project/scratch/repro/note-c",
-            "test-project",
-            True,
-            "scratch/repro/note-c",
-        ),
-        (
-            "memory://test-project/scratch/repro/note-c",
-            "test-project",
-            False,
-            "scratch/repro/note-c",
-        ),
-        (
-            # Plain path keeps a real folder named like the project when
-            # permalinks do not include the project slug.
-            "test-project/scratch/repro/note-c",
-            "test-project",
-            False,
-            "test-project/scratch/repro/note-c",
-        ),
-        (
-            "scratch/repro/note-a",
-            "test-project",
-            True,
-            "scratch/repro/note-a",
-        ),
-        (
-            "other-project/scratch/note",
-            "test-project",
-            True,
-            "other-project/scratch/note",
-        ),
+        # A plain path below this project's prefix also reads as a folder named 'demo'.
+        ("demo/scratch/note", None, ("demo/scratch/note", "scratch/note")),
+        # Prefixes match by permalink, as routing does.
+        ("Demo/scratch/note", None, ("Demo/scratch/note", "scratch/note")),
+        ("My Project/notes/x", None, ("My Project/notes/x", "notes/x")),
+        # The workspace-qualified spelling cloud permalinks carry.
+        ("team/demo/scratch/note", "team", ("team/demo/scratch/note", "scratch/note")),
+        # A memory URL's leading segment routed, so it names only the path below it.
+        ("memory://demo/scratch/note", None, ("scratch/note",)),
+        ("memory://team/demo/scratch/note", "team", ("scratch/note",)),
+        # No prefix, or another project's: the path as written.
+        ("scratch/note", None, ("scratch/note",)),
+        ("other/scratch/note", None, ("other/scratch/note",)),
     ],
 )
-def test_strip_active_project_prefix(identifier, project_permalink, include_project, expected):
-    """Project-qualified create identifiers drop only the active project slug."""
+def test_note_path_readings(identifier, workspace_slug, expected):
+    project_permalink = "my-project" if identifier.startswith("My Project") else "demo"
     assert (
-        _strip_active_project_prefix(
+        note_path_readings(
             identifier,
-            project_permalink,
-            include_project=include_project,
+            project_permalink=project_permalink,
+            workspace_slug=workspace_slug,
         )
         == expected
     )
 
 
-def test_strip_active_project_prefix_feeds_create_parser():
-    """Stripped permalinks parse into the project-relative directory/title."""
-    create_identifier = _strip_active_project_prefix(
-        "test-project/scratch/repro/note-c",
-        "test-project",
-        include_project=True,
+def _folders(*existing: str):
+    async def folder_holds_notes(folder: str) -> bool:
+        return folder in existing
+
+    return folder_holds_notes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("existing", "prefix_is_routing", "expected"),
+    [
+        # Existing folders decide, whatever the permalink convention says.
+        (("demo/scratch",), True, "demo/scratch/note"),
+        (("scratch",), False, "scratch/note"),
+        # No evidence: the permalink convention decides.
+        ((), True, "scratch/note"),
+        ((), False, "demo/scratch/note"),
+    ],
+)
+async def test_choose_note_create_path_prefers_the_existing_folder(
+    existing, prefix_is_routing, expected
+):
+    chosen = await choose_note_create_path(
+        ("demo/scratch/note", "scratch/note"),
+        folder_holds_notes=_folders(*existing),
+        prefix_is_routing=prefix_is_routing,
     )
-    title, directory = _parse_identifier_to_title_and_directory(create_identifier)
-    assert title == "note-c"
-    assert directory == "scratch/repro"
+    assert chosen == expected
+
+
+@pytest.mark.asyncio
+async def test_choose_note_create_path_refuses_when_both_folders_hold_notes():
+    chosen = await choose_note_create_path(
+        ("demo/scratch/note", "scratch/note"),
+        folder_holds_notes=_folders("demo/scratch", "scratch"),
+        prefix_is_routing=True,
+    )
+    assert chosen == AmbiguousNotePath(
+        identifier="demo/scratch/note",
+        literal="demo/scratch/note",
+        below_prefix="scratch/note",
+    )
+
+
+@pytest.mark.asyncio
+async def test_choose_note_create_path_never_counts_the_project_root_as_evidence():
+    """'demo/note' below the prefix is the root, which always exists, so it cannot
+    outweigh a folder that does not exist yet."""
+
+    async def root_is_never_asked(folder: str) -> bool:
+        assert folder, "the project root is not evidence"
+        return False
+
+    chosen = await choose_note_create_path(
+        ("demo/note", "note"),
+        folder_holds_notes=root_is_never_asked,
+        prefix_is_routing=False,
+    )
+    assert chosen == "demo/note"
 
 
 @pytest.mark.asyncio
@@ -1692,6 +1717,86 @@ async def test_edit_note_append_recovers_file_on_disk_instead_of_autocreate(clie
     final_content = note_path.read_text(encoding="utf-8")
     assert "Original disk content." in final_content
     assert "Appended line." in final_content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_recovers_unindexed_file_below_the_project_prefix(
+    client, test_project
+):
+    """Codex P1 on #1776: disk recovery probed only the prefixed path, missed the real
+    file, and the create that followed collided with it. Every reading is probed now,
+    so the note on disk is edited (#1775)."""
+    note_path = Path(test_project.path) / "notes" / "prefixed-disk.md"
+    note_path.parent.mkdir(parents=True, exist_ok=True)
+    note_path.write_text("# Prefixed Disk\n\nOriginal disk content.\n", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier=f"{test_project.permalink}/notes/prefixed-disk",
+        operation="append",
+        content="\nAppended line.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is False
+    assert result["file_path"] == "notes/prefixed-disk.md"
+    assert "Appended line." in note_path.read_text(encoding="utf-8")
+    assert not (Path(test_project.path) / test_project.permalink).exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_inside_an_existing_folder_named_like_the_project(
+    client, test_project
+):
+    """A real folder named like the project is evidence the caller meant it, even though
+    permalinks carry the project prefix and would otherwise strip it (#1775)."""
+    await write_note(
+        project=test_project.name,
+        title="Anchor",
+        directory=f"{test_project.permalink}/logs",
+        content="# Anchor",
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier=f"{test_project.permalink}/logs/today",
+        operation="append",
+        content="First entry.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is True
+    assert result["file_path"] == f"{test_project.permalink}/logs/today.md"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_refuses_when_both_folders_hold_notes(client, test_project):
+    """When the folder below the prefix and a folder named like the project both exist,
+    nothing says which one the caller meant, so append refuses instead of guessing and
+    names the spelling that picks each (#1775)."""
+    for directory in ("logs", f"{test_project.permalink}/logs"):
+        await write_note(
+            project=test_project.name,
+            title="Anchor",
+            directory=directory,
+            content="# Anchor",
+        )
+
+    with pytest.raises(ToolError) as excinfo:
+        await edit_note(
+            project=test_project.name,
+            identifier=f"{test_project.permalink}/logs/today",
+            operation="append",
+            content="First entry.",
+            output_format="json",
+        )
+
+    refusal = json.loads(str(excinfo.value))
+    assert refusal["error"] == "AMBIGUOUS_NOTE_PATH"
+    assert refusal["candidates"] == ["logs/today.md", f"{test_project.permalink}/logs/today.md"]
+    assert not (Path(test_project.path) / "logs" / "today.md").exists()
 
 
 @pytest.mark.asyncio
