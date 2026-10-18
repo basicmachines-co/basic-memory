@@ -42,6 +42,7 @@ from basic_memory.markdown.sections import (
     slice_note_content,
 )
 from basic_memory.deps import (
+    AppConfigDep,
     EntityServiceV2ExternalDep,
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -78,6 +79,19 @@ from basic_memory.runtime.note_content import (
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.request import EditEntityRequest
+from basic_memory.schemas.v2.note_placement import (
+    AmbiguousNotePlacementResponse,
+    NoteCreatePlacementResponse,
+    NotePlacementRequest,
+    NotePlacementResponse,
+)
+from basic_memory.services.note_placement import (
+    AmbiguousNotePlacement,
+    NoteCreatePlacement,
+    note_path_readings,
+    place_missing_note,
+)
+from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 from basic_memory.schemas.v2 import (
     EntityResolveRequest,
     EntityResolveResponse,
@@ -413,6 +427,58 @@ async def resolve_identifier(
         if resolution_method == "search":
             skip_read_cache_store(request)
         return result
+
+
+# QUERY only, like /resolve: a safe read with a body. Not cached: its answer depends on
+# which folders storage holds, which change without any note being written.
+@router.api_route(
+    "/placement",
+    methods=["QUERY"],
+    response_model=NotePlacementResponse,
+    include_in_schema=False,
+)
+async def place_note(
+    project_id: ProjectExternalIdPathDep,
+    data: NotePlacementRequest,
+    project_repository: ProjectRepositoryDep,
+    file_service: FileServiceV2ExternalDep,
+    app_config: AppConfigDep,
+    session: SessionDep,
+) -> NoteCreatePlacementResponse | AmbiguousNotePlacementResponse:
+    """Say where a note that resolves under none of its readings would be created.
+
+    The readings are the ones resolution tried, and the folder evidence comes from
+    storage rather than the index (#1775). A caller probes the readings for files not
+    indexed yet before it creates anything.
+    """
+    with logfire.span(
+        "api.request.knowledge.place_note",
+        entrypoint="api",
+        domain="knowledge",
+        action="place_note",
+    ):
+        project = await project_repository.get_by_id(session, project_id)
+        if project is None:  # pragma: no cover - the path dependency already found it
+            raise HTTPException(status_code=404, detail="Project not found")
+        readings = note_path_readings(
+            data.identifier,
+            project_permalink=project.permalink,
+            workspace_permalink=workspace_slug_for_canonical_permalinks(),
+        )
+        placement = await place_missing_note(
+            readings,
+            directory_has_files=file_service.directory_has_files,
+            prefix_is_routing=app_config.permalinks_include_project,
+        )
+        match placement:
+            case NoteCreatePlacement(directory=directory, title=title):
+                return NoteCreatePlacementResponse(
+                    readings=list(readings), directory=directory, title=title
+                )
+            case AmbiguousNotePlacement(literal=literal, below_prefix=below_prefix):
+                return AmbiguousNotePlacementResponse(
+                    readings=list(readings), literal=literal, below_prefix=below_prefix
+                )
 
 
 # QUERY only, like /resolve: a safe read with a body. Not cached: its answer

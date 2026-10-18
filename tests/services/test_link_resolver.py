@@ -8,6 +8,7 @@ import pytest
 
 import pytest_asyncio
 
+from basic_memory.services.note_placement import note_path_readings
 from basic_memory import db
 from basic_memory.models.knowledge import Entity as EntityModel
 from basic_memory.repository import EntityRepository
@@ -1545,5 +1546,8 @@ async def test_workspace_qualified_title_resolves_exactly(link_resolver, project
         )
     assert result is not None
     assert result.title == "Service Config"
-    assert link_resolver._own_project_remainder("anything/at-all", None) is None
-    assert link_resolver._own_project_remainder(f"{project_prefix}/", project_prefix) is None
+    # No project, or a bare prefix with nothing below it, leaves only the text as written.
+    assert note_path_readings("anything/at-all", project_permalink=None) == ("anything/at-all",)
+    assert note_path_readings(f"{project_prefix}/", project_permalink=project_prefix) == (
+        f"{project_prefix}/",
+    )

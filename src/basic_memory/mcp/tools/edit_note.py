@@ -1,8 +1,6 @@
 """Edit note tool for Basic Memory MCP server."""
 
 import json
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING, Annotated, Literal, NoReturn, Optional
 
 import frontmatter
@@ -34,11 +32,13 @@ from basic_memory.mcp.project_context import (
     routes_to_default_project,
 )
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
-from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
+from basic_memory.schemas.v2.note_placement import (
+    AmbiguousNotePlacementResponse,
+    NoteCreatePlacementResponse,
+)
 from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
@@ -46,7 +46,6 @@ from basic_memory.services.link_resolver import (
 from basic_memory.utils import (
     coerce_dict,
     normalize_project_reference,
-    own_project_remainder,
     validate_project_path,
 )
 
@@ -60,127 +59,17 @@ EDIT_OPERATIONS = (
 )
 
 
-def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]:
-    """Parse an identifier into (title, directory) for creating a new note.
-
-    Strips memory:// prefix if present, then splits on the last '/' to
-    separate the directory path from the note title.
-
-    Examples:
-        "conversations/my-note" → ("my-note", "conversations")
-        "my-note"              → ("my-note", "")
-        "a/b/c/my-note"       → ("my-note", "a/b/c")
-        "memory://a/b/note"   → ("note", "a/b")
-    """
-    cleaned = identifier
-    if cleaned.startswith("memory://"):
-        cleaned = cleaned[len("memory://") :]
-
-    if "/" in cleaned:
-        last_slash = cleaned.rfind("/")
-        directory = cleaned[:last_slash]
-        title = cleaned[last_slash + 1 :]
-    else:
-        directory = ""
-        title = cleaned
-
-    return title, directory
-
-
-# --- Where a missing note is created (#1775) ---
-#
-# A note is addressed by a path inside its project, but callers also spell it with the
-# project's own routing prefix: 'demo/scratch/note', 'team/demo/scratch/note', or
-# 'memory://demo/scratch/note'. Resolving an existing note already tries the path below
-# that prefix. Creating one has to choose, and for a plain path the choice is genuinely
-# ambiguous: 'demo/scratch/note' is also an ordinary path inside a folder named 'demo'.
-
-
-type NotePathReadings = tuple[str] | tuple[str, str]
-
-
-@dataclass(frozen=True, slots=True)
-class AmbiguousNotePath:
-    """Both readings of a plain path name folders that already hold notes."""
-
-    identifier: str
-    literal: str
-    below_prefix: str
-
-
-type NoteCreatePath = str | AmbiguousNotePath
-
-
-def note_path_readings(
-    identifier: str,
-    *,
-    project_permalink: str,
-    workspace_slug: str | None,
-) -> NotePathReadings:
-    """Every project-relative path an edit identifier can name, the literal path first.
-
-    A memory URL reaches auto-create only when its leading segments routed to this
-    project, so its one reading is the path below them. A plain path that starts with
-    this project's prefix (or its workspace-qualified form) has two: the path as
-    written, and the path below the prefix. Prefixes match by permalink, as routing
-    does, so 'Demo/...' and 'My Project/...' are recognized too.
-    """
-    stripped = identifier.strip()
-    is_memory_url = stripped.startswith("memory://")
-    path = memory_url_path(stripped) if is_memory_url else stripped
-    below_prefix = own_project_remainder(
-        path, project_permalink, workspace_permalink=workspace_slug
-    )
-    if below_prefix is None:
-        return (path,)
-    if is_memory_url:
-        return (below_prefix,)
-    return (path, below_prefix)
-
-
-async def choose_note_create_path(
-    readings: NotePathReadings,
-    *,
-    folder_holds_notes: Callable[[str], Awaitable[bool]],
-    prefix_is_routing: bool,
-) -> NoteCreatePath:
-    """Pick the path a missing note is created at, or report that it is ambiguous.
-
-    Existing folders decide first. A folder that already holds notes is evidence of
-    what the caller meant, and the project root is no evidence at all, since it always
-    exists. Without evidence, the permalink convention decides: when permalinks carry
-    the project prefix, a path that starts with it reads as routing, otherwise as a
-    folder named like the project.
-    """
-    match readings:
-        case (only,):
-            return only
-        case (literal, below_prefix):
-            literal_folder = _parse_identifier_to_title_and_directory(literal)[1]
-            below_folder = _parse_identifier_to_title_and_directory(below_prefix)[1]
-            literal_exists = bool(literal_folder) and await folder_holds_notes(literal_folder)
-            below_exists = bool(below_folder) and await folder_holds_notes(below_folder)
-            match literal_exists, below_exists:
-                case True, True:
-                    return AmbiguousNotePath(
-                        identifier=literal, literal=literal, below_prefix=below_prefix
-                    )
-                case True, False:
-                    return literal
-                case False, True:
-                    return below_prefix
-                case False, False:
-                    return below_prefix if prefix_is_routing else literal
-
-
-def _format_ambiguous_note_path_response(ambiguous: AmbiguousNotePath, project: str) -> str:
+def _format_ambiguous_note_path_response(
+    placement: AmbiguousNotePlacementResponse, project_permalink: str
+) -> str:
     """Name both notes the path could create and the spelling that picks each."""
     return (
         f"# Edit Failed - Ambiguous Note Path\n\n"
-        f"'{ambiguous.identifier}' does not exist yet, and project '{project}' has both "
-        f"folders it could name, so append/prepend will not guess where to create it.\n\n"
-        f"- `{ambiguous.below_prefix}` creates `{ambiguous.below_prefix}.md`\n"
-        f"- `{project}/{ambiguous.literal}` creates `{ambiguous.literal}.md`\n"
+        f"'{placement.literal}' does not exist yet, and project '{project_permalink}' "
+        "has both folders it could name, so append/prepend will not guess where to "
+        "create it.\n\n"
+        f"- `{placement.below_prefix}` creates `{placement.below_prefix}.md`\n"
+        f"- `{project_permalink}/{placement.literal}` creates `{placement.literal}.md`\n"
     )
 
 
@@ -939,17 +828,16 @@ async def edit_note(
                     #   would resurrect the note with the caller's own checksum,
                     #   which the precondition would then accept.
                     recovered_entity_id: str | None = None
-                    # Every path the identifier can name is probed, so an unindexed
-                    # file below the project prefix is found before a create could
-                    # collide with it (#1775).
-                    cached_workspace = await get_cached_active_workspace(context)
-                    readings = note_path_readings(
-                        identifier,
-                        project_permalink=active_project.permalink,
-                        workspace_slug=cached_workspace.slug if cached_workspace else None,
-                    )
+                    placement: (
+                        NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | None
+                    ) = None
                     if is_not_found and expected_checksum is None:
-                        for reading in readings:
+                        # The server reads the identifier the way resolution did and
+                        # judges folders from storage. Every reading is probed, so an
+                        # unindexed file below the project prefix is found before a
+                        # create could collide with it (#1775).
+                        placement = await knowledge_client.place_note(identifier)
+                        for reading in placement.readings:
                             recovered_entity_id = await _resolve_after_disk_recovery(
                                 knowledge_client, reading
                             )
@@ -983,51 +871,34 @@ async def edit_note(
                                 identifier, None, active_project.external_id
                             ),
                         )
-                    elif is_not_found and operation in ("append", "prepend"):
+                    elif placement is not None and operation in ("append", "prepend"):
                         # Trigger: entity does not exist yet (on disk or in the index)
                         # Why: append/prepend can meaningfully create a new note from the
                         #      content, while find_replace/replace_section require existing
                         #      content to modify
-                        # Outcome: note is created via the same path as write_note
-                        # Import here to avoid circular import
-                        from basic_memory.mcp.clients import DirectoryClient
-
-                        directory_client = DirectoryClient(client, active_project.external_id)
-
-                        async def folder_holds_notes(folder: str) -> bool:
-                            listing = await directory_client.list(
-                                f"/{folder}", depth=1, page_size=1
+                        # Outcome: note is created via the same path as write_note, where
+                        #      the server placed it, or refused when the path is ambiguous
+                        if isinstance(placement, AmbiguousNotePlacementResponse):
+                            _raise_edit_failure(
+                                output_format,
+                                {
+                                    "title": None,
+                                    "permalink": None,
+                                    "file_path": None,
+                                    "checksum": None,
+                                    "operation": operation,
+                                    "fileCreated": False,
+                                    "error": "AMBIGUOUS_NOTE_PATH",
+                                    "candidates": [
+                                        f"{placement.below_prefix}.md",
+                                        f"{placement.literal}.md",
+                                    ],
+                                },
+                                _format_ambiguous_note_path_response(
+                                    placement, active_project.permalink
+                                ),
                             )
-                            return bool(listing.nodes)
-
-                        create_path = await choose_note_create_path(
-                            readings,
-                            folder_holds_notes=folder_holds_notes,
-                            prefix_is_routing=ConfigManager().config.permalinks_include_project,
-                        )
-                        match create_path:
-                            case AmbiguousNotePath() as ambiguous:
-                                _raise_edit_failure(
-                                    output_format,
-                                    {
-                                        "title": None,
-                                        "permalink": None,
-                                        "file_path": None,
-                                        "checksum": None,
-                                        "operation": operation,
-                                        "fileCreated": False,
-                                        "error": "AMBIGUOUS_NOTE_PATH",
-                                        "candidates": [
-                                            f"{ambiguous.below_prefix}.md",
-                                            f"{ambiguous.literal}.md",
-                                        ],
-                                    },
-                                    _format_ambiguous_note_path_response(
-                                        ambiguous, active_project.permalink
-                                    ),
-                                )
-                            case str() as path:
-                                title, directory = _parse_identifier_to_title_and_directory(path)
+                        directory, title = placement.directory, placement.title
 
                         # Validate directory path (same security check as write_note)
                         project_path = active_project.home
