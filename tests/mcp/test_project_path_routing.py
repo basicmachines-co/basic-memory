@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import basic_memory.mcp.async_client as async_client
 import basic_memory.mcp.project_context as project_context
@@ -1356,6 +1357,8 @@ _DEFAULT_DOCS_ID = "22222222-2222-2222-2222-222222222222"
 _SESSION_RESEARCH_ID = "33333333-3333-3333-3333-333333333333"
 _SESSION_ENGINEERING_ID = "44444444-4444-4444-4444-444444444444"
 _DEFAULT_NOTES_ID = "55555555-5555-5555-5555-555555555555"
+_DEFAULT_RESEARCH_ID = "66666666-6666-6666-6666-666666666666"
+_DEFAULT_RESEARCH_2026_ID = "77777777-7777-7777-7777-777777777777"
 
 # Every (workspace, project) pair gets its own id: the same project name living
 # in two workspaces is the whole point of this section, and the id is what pins
@@ -1367,6 +1370,8 @@ _WORKSPACE_PROJECT_IDS = {
     ("session-tenant", "engineering"): _SESSION_ENGINEERING_ID,
     ("default-tenant", "docs"): _DEFAULT_DOCS_ID,
     ("default-tenant", "notes"): _DEFAULT_NOTES_ID,
+    ("default-tenant", "Research"): _DEFAULT_RESEARCH_ID,
+    ("default-tenant", "Research/2026"): _DEFAULT_RESEARCH_2026_ID,
 }
 
 
@@ -1660,7 +1665,7 @@ async def test_cloud_unqualified_first_segment_never_reaches_another_workspace(
 
     assert str(excinfo.value) == (
         "no project 'notes' — active projects: engineering/, research/. "
-        "project 'notes' is in workspace 'acme' — use 'acme/notes/<path>' or "
+        "project 'notes' is in workspace 'acme' — use 'acme/notes/foo' or "
         f"project_id='{_DEFAULT_NOTES_ID}'"
     )
 
@@ -1680,6 +1685,25 @@ async def test_cloud_hinted_spellings_reach_the_other_workspace_project(cross_wo
     assert qualified.project_id == _DEFAULT_NOTES_ID
     assert qualified.path == "foo"
     assert by_id.project_id == _DEFAULT_NOTES_ID
+
+
+@pytest.mark.asyncio
+async def test_cloud_refusal_names_the_longest_matching_project(cross_workspace_session):
+    """Routing takes the longest project permalink, so the hint must too: with
+    'Research' beside 'Research/2026', 'research/2026/foo' names 'Research/2026'.
+    Pointing at 'Research' would teach a route into the wrong project (#1780 review)."""
+    cross_workspace_session(
+        session_projects=("docs", "engineering"),
+        default_projects=("Research", "Research/2026"),
+    )
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("research/2026/foo", project=None, project_id=None)
+
+    assert str(excinfo.value).endswith(
+        "project 'Research/2026' is in workspace 'acme' — use 'acme/research/2026/foo' or "
+        f"project_id='{_DEFAULT_RESEARCH_2026_ID}'"
+    )
 
 
 @pytest.mark.asyncio
@@ -1719,6 +1743,28 @@ async def test_cloud_root_listing_names_the_other_workspaces(cross_workspace_ses
     assert mounts["workspaces"] == ["acme", "beta"]
     assert OTHER_WORKSPACES_HINT in mounts["note"]
     assert "acme, beta" in mounts["note"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_root_listing_survives_failed_workspace_discovery(
+    cross_workspace_session, monkeypatch
+):
+    """The workspace slugs only annotate `ls /`; a control-plane failure must leave
+    the session's own mounts listed (#1780 review)."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    async def failing_workspaces(context=None):
+        raise ToolError("control plane unavailable")
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", failing_workspaces)
+
+    mounts = await ls()
+
+    assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
+    assert "workspaces" not in mounts
 
 
 @pytest.mark.asyncio
