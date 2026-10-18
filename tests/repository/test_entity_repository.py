@@ -1542,3 +1542,33 @@ async def test_get_by_file_paths_repairs_only_provider_classified_notes(
             session, ["report.md"], content_types={"report.md": provider_type}
         )
     assert [(row[0], row[1]) for row in rows] == [("report.md", expected_checksum)]
+
+
+@pytest.mark.asyncio
+async def test_directory_has_entities_matches_the_folder_exactly(
+    entity_repository: EntityRepository, test_project: Project, session_maker
+):
+    """Accepted notes count as folder evidence before their files exist (#1775). The
+    prefix compares exactly: no sibling folder and no LIKE wildcard satisfies it."""
+    async with db.scoped_session(session_maker) as session:
+        for file_path in ("logs/2026/today.md", "logs-archive/old.md", "a_b/note.md"):
+            session.add(
+                Entity(
+                    project_id=test_project.id,
+                    title=file_path,
+                    note_type="note",
+                    permalink=file_path.removesuffix(".md"),
+                    file_path=file_path,
+                    content_type="text/markdown",
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+
+    async with db.scoped_session(session_maker) as session:
+        assert await entity_repository.directory_has_entities(session, "logs") is True
+        assert await entity_repository.directory_has_entities(session, "logs/2026") is True
+        assert await entity_repository.directory_has_entities(session, "logs/2025") is False
+        assert await entity_repository.directory_has_entities(session, "log") is False
+        assert await entity_repository.directory_has_entities(session, "a_b") is True
+        assert await entity_repository.directory_has_entities(session, "axb") is False

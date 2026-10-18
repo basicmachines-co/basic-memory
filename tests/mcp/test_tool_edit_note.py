@@ -1701,6 +1701,35 @@ async def test_edit_note_append_reads_folders_from_storage_not_the_index(client,
 
 
 @pytest.mark.asyncio
+async def test_edit_note_append_counts_an_accepted_note_not_yet_on_storage(client, test_project):
+    """Codex review on #1782: production accepts a write before materializing its file,
+    so a folder holding only an accepted note is not on storage yet. It still decides
+    placement, or the next note in it lands below the prefix for good (#1775)."""
+    anchor = await write_note(
+        project=test_project.name,
+        title="Anchor",
+        directory=f"{test_project.permalink}/logs",
+        content="# Anchor",
+        output_format="json",
+    )
+    assert isinstance(anchor, dict)
+    # Stand in for a materialization that has not run yet: the accepted note keeps its
+    # entity row, and storage holds no file in the folder.
+    (Path(test_project.path) / anchor["file_path"]).unlink()
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier=f"{test_project.permalink}/logs/today",
+        operation="append",
+        content="First entry.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["file_path"] == f"{test_project.permalink}/logs/today.md"
+
+
+@pytest.mark.asyncio
 async def test_edit_note_append_refuses_when_both_folders_hold_notes(client, test_project):
     """When the folder below the prefix and a folder named like the project both exist,
     nothing says which one the caller meant, so append refuses instead of guessing and

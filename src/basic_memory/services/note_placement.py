@@ -8,8 +8,9 @@ creating a missing one have to read those spellings the same way, so both use
 
 A plain path that starts with the prefix is genuinely ambiguous: 'demo/scratch/note'
 is also an ordinary path inside a folder named 'demo'. Creating a note has to pick
-one, and ``place_missing_note`` decides from the folders storage holds, never from the
-index, which can lag files written directly to storage.
+one, and ``place_missing_note`` decides from the folders that canonical note state
+establishes: accepted notes, which are not on storage yet, and files on storage, which
+are not indexed yet. The index alone can lag either.
 """
 
 from collections.abc import Awaitable, Callable
@@ -64,7 +65,7 @@ class NoteCreatePlacement:
 
 @dataclass(frozen=True, slots=True)
 class AmbiguousNotePlacement:
-    """Both readings name folders that storage already holds, so nothing says which."""
+    """Both readings name folders that already hold notes, so nothing says which."""
 
     literal: str
     below_prefix: str
@@ -89,7 +90,7 @@ async def place_missing_note(
     readings: NotePathReadings,
     *,
     within_project: Callable[[str], bool],
-    directory_has_files: Callable[[str], Awaitable[bool]],
+    folder_exists: Callable[[str], Awaitable[bool]],
     prefix_is_routing: bool,
 ) -> NotePlacement:
     """Decide where a note that exists under none of its readings is created.
@@ -98,7 +99,7 @@ async def place_missing_note(
     identifier like 'demo/../../other/secrets' or 'demo//tmp/x' would otherwise turn
     the folder check into an existence probe of directories the caller cannot reach.
 
-    Folders that storage already holds decide first. The project root is no evidence,
+    Folders that already hold notes decide first, accepted or on storage. The project root is no evidence,
     since it always exists. Without evidence, the permalink convention decides: when
     permalinks carry the project prefix, a path that starts with it reads as routing,
     otherwise as a folder named like the project.
@@ -113,8 +114,8 @@ async def place_missing_note(
         case (literal, below_prefix):
             literal_folder, _ = split_note_path(literal)
             below_folder, _ = split_note_path(below_prefix)
-            literal_exists = bool(literal_folder) and await directory_has_files(literal_folder)
-            below_exists = bool(below_folder) and await directory_has_files(below_folder)
+            literal_exists = bool(literal_folder) and await folder_exists(literal_folder)
+            below_exists = bool(below_folder) and await folder_exists(below_folder)
             match literal_exists, below_exists:
                 case True, True:
                     return AmbiguousNotePlacement(literal=literal, below_prefix=below_prefix)

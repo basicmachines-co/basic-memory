@@ -55,10 +55,10 @@ def _inside(path: str) -> bool:
 
 
 def _folders(*existing: str):
-    async def directory_has_files(folder: str) -> bool:
+    async def folder_exists(folder: str) -> bool:
         return folder in existing
 
-    return directory_has_files
+    return folder_exists
 
 
 @pytest.mark.asyncio
@@ -83,7 +83,7 @@ async def test_place_missing_note(existing, prefix_is_routing, expected):
     placement = await place_missing_note(
         ("demo/scratch/note", "scratch/note"),
         within_project=_inside,
-        directory_has_files=_folders(*existing),
+        folder_exists=_folders(*existing),
         prefix_is_routing=prefix_is_routing,
     )
     assert placement == expected
@@ -94,7 +94,7 @@ async def test_place_missing_note_with_one_reading_creates_there():
     placement = await place_missing_note(
         ("scratch/note",),
         within_project=_inside,
-        directory_has_files=_folders(),
+        folder_exists=_folders(),
         prefix_is_routing=True,
     )
     assert placement == NoteCreatePlacement(directory="scratch", title="note")
@@ -112,7 +112,7 @@ async def test_place_missing_note_never_counts_the_project_root_as_evidence():
     placement = await place_missing_note(
         ("demo/note", "note"),
         within_project=_inside,
-        directory_has_files=root_is_never_asked,
+        folder_exists=root_is_never_asked,
         prefix_is_routing=False,
     )
     assert placement == NoteCreatePlacement(directory="demo", title="note")
@@ -143,7 +143,7 @@ async def test_place_missing_note_refuses_before_probing_outside_the_project(rea
     placement = await place_missing_note(
         readings,
         within_project=within_demo,
-        directory_has_files=never_probed,
+        folder_exists=never_probed,
         prefix_is_routing=True,
     )
 

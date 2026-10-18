@@ -718,6 +718,22 @@ class EntityRepository(Repository[Entity]):
 
         return sorted(directories)
 
+    async def directory_has_entities(self, session: AsyncSession, directory: str) -> bool:
+        """Return whether any entity's file lives under ``directory``, at any depth.
+
+        An accepted note has its entity row before its file is materialized, so this
+        sees notes that storage does not hold yet. The prefix compares exactly, unlike
+        LIKE, where '_' and '%' in a folder name would act as wildcards.
+        """
+        prefix = f"{directory.strip('/')}/"
+        query = self._add_project_filter(
+            select(Entity.id)
+            .where(func.substr(Entity.file_path, 1, len(prefix)) == prefix)
+            .limit(1)
+        )
+        result = await self.execute_query(session, query, use_query_options=False)
+        return result.first() is not None
+
     async def find_by_directory_prefix(
         self, session: AsyncSession, directory_prefix: str
     ) -> Sequence[Entity]:
