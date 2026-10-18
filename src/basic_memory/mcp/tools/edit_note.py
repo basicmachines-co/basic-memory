@@ -78,6 +78,33 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
     return title, directory
 
 
+def _strip_active_project_prefix(
+    identifier: str,
+    project_permalink: str,
+    *,
+    include_project: bool,
+) -> str:
+    """Drop a leading active-project segment before deriving a file path.
+
+    Trigger: append/prepend auto-create receives a permalink-shaped identifier
+        such as 'example/notes/note' or 'memory://example/notes/note'.
+    Why: permalinks carry the project slug (permalinks_include_project) and
+        memory:// URLs route by it, but the slug is not part of the on-disk path;
+        keeping it would create a '<project>/' folder.
+    Outcome: the remainder is used as directory/title. Plain identifiers are
+        only stripped when generated permalinks include the project slug, so a
+        real folder named like the project stays reachable as 'example/example/...'.
+    """
+    is_memory_url = identifier.startswith("memory://")
+    cleaned = identifier[len("memory://") :] if is_memory_url else identifier
+    if not (is_memory_url or include_project):
+        return identifier
+    prefix = f"{project_permalink}/"
+    if cleaned.startswith(prefix):
+        return cleaned[len(prefix) :]
+    return identifier
+
+
 # Suffixes mimetypes maps to text/markdown (extension matching is case-insensitive),
 # mirroring FileService.is_markdown which gates the index-file endpoint server-side.
 _MARKDOWN_SUFFIXES = (".md", ".markdown")
@@ -871,7 +898,14 @@ async def edit_note(
                         #      content, while find_replace/replace_section require existing
                         #      content to modify
                         # Outcome: note is created via the same path as write_note
-                        title, directory = _parse_identifier_to_title_and_directory(identifier)
+                        create_identifier = _strip_active_project_prefix(
+                            identifier.strip(),
+                            active_project.permalink,
+                            include_project=ConfigManager().config.permalinks_include_project,
+                        )
+                        title, directory = _parse_identifier_to_title_and_directory(
+                            create_identifier
+                        )
 
                         # Validate directory path (same security check as write_note)
                         project_path = active_project.home
