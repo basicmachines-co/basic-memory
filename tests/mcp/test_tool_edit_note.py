@@ -1881,6 +1881,37 @@ async def test_edit_note_append_traversal_identifier_json_error(client, test_pro
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identifier_below_prefix",
+    ["../../outside-project/secrets/note", "/tmp/outside-note", "notes/../../../escape"],
+)
+async def test_edit_note_append_refuses_prefixed_paths_that_escape_the_project(
+    client, test_project, identifier_below_prefix
+):
+    """A project prefix in front of a traversal must not reach storage: placement
+    refuses before probing a folder, and nothing is recovered or created outside the
+    project (#1782 review)."""
+    outside = Path(test_project.path).parent / "outside-project" / "secrets"
+    outside.mkdir(parents=True, exist_ok=True)
+    (outside / "existing.md").write_text("# Existing", encoding="utf-8")
+
+    with pytest.raises(ToolError) as refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier=f"{test_project.permalink}/{identifier_below_prefix}",
+            operation="append",
+            content="should never be written",
+            output_format="json",
+        )
+
+    result = json.loads(str(refusal.value))
+    assert result["error"] == "SECURITY_VALIDATION_ERROR"
+    assert result["fileCreated"] is False
+    assert sorted(path.name for path in outside.iterdir()) == ["existing.md"]
+    assert not Path("/tmp/outside-note.md").exists()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("file_checksum", [None, "c" * 64])
 async def test_edit_note_reports_the_accepted_db_checksum(
     monkeypatch, app, test_project, file_checksum

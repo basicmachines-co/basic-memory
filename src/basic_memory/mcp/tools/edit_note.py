@@ -38,6 +38,7 @@ from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponse
 from basic_memory.schemas.v2.note_placement import (
     AmbiguousNotePlacementResponse,
     NoteCreatePlacementResponse,
+    OutsideProjectPlacementResponse,
 )
 from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
@@ -46,7 +47,6 @@ from basic_memory.services.link_resolver import (
 from basic_memory.utils import (
     coerce_dict,
     normalize_project_reference,
-    validate_project_path,
 )
 
 EDIT_OPERATIONS = (
@@ -829,7 +829,10 @@ async def edit_note(
                     #   which the precondition would then accept.
                     recovered_entity_id: str | None = None
                     placement: (
-                        NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | None
+                        NoteCreatePlacementResponse
+                        | AmbiguousNotePlacementResponse
+                        | OutsideProjectPlacementResponse
+                        | None
                     ) = None
                     if is_not_found and expected_checksum is None:
                         # The server reads the identifier the way resolution did and
@@ -837,6 +840,28 @@ async def edit_note(
                         # unindexed file below the project prefix is found before a
                         # create could collide with it (#1775).
                         placement = await knowledge_client.place_note(identifier)
+                        if isinstance(placement, OutsideProjectPlacementResponse):
+                            # The server refused before probing any folder; nothing
+                            # outside the project is recovered or created.
+                            logger.warning(
+                                "Attempted path traversal attack blocked",
+                                path=placement.path,
+                                project=active_project.name,
+                            )
+                            _raise_edit_failure(
+                                output_format,
+                                {
+                                    "title": None,
+                                    "permalink": None,
+                                    "file_path": None,
+                                    "checksum": None,
+                                    "operation": operation,
+                                    "fileCreated": False,
+                                    "error": "SECURITY_VALIDATION_ERROR",
+                                },
+                                f"# Error\n\nNote path '{placement.path}' is not allowed - "
+                                "paths must stay within project boundaries",
+                            )
                         for reading in placement.readings:
                             recovered_entity_id = await _resolve_after_disk_recovery(
                                 knowledge_client, reading
@@ -899,29 +924,6 @@ async def edit_note(
                                 ),
                             )
                         directory, title = placement.directory, placement.title
-
-                        # Validate directory path (same security check as write_note)
-                        project_path = active_project.home
-                        if directory and not validate_project_path(directory, project_path):
-                            logger.warning(
-                                "Attempted path traversal attack blocked",
-                                directory=directory,
-                                project=active_project.name,
-                            )
-                            _raise_edit_failure(
-                                output_format,
-                                {
-                                    "title": title,
-                                    "permalink": None,
-                                    "file_path": None,
-                                    "checksum": None,
-                                    "operation": operation,
-                                    "fileCreated": False,
-                                    "error": "SECURITY_VALIDATION_ERROR",
-                                },
-                                f"# Error\n\nDirectory path '{directory}' is not allowed - "
-                                "paths must stay within project boundaries",
-                            )
 
                         entity = Entity(
                             title=title,

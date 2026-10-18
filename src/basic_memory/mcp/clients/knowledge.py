@@ -31,6 +31,7 @@ from basic_memory.schemas.v2.note_placement import (
     AmbiguousNotePlacementResponse,
     NoteCreatePlacementResponse,
     NotePlacementResponse,
+    OutsideProjectPlacementResponse,
 )
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
@@ -41,7 +42,7 @@ from basic_memory.schemas.v2.note_write import (
 
 
 _NOTE_PLACEMENT_ADAPTER: TypeAdapter[
-    NoteCreatePlacementResponse | AmbiguousNotePlacementResponse
+    NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | OutsideProjectPlacementResponse
 ] = TypeAdapter(NotePlacementResponse)
 
 
@@ -463,7 +464,11 @@ class KnowledgeClient:
 
     async def place_note(
         self, identifier: str
-    ) -> NoteCreatePlacementResponse | AmbiguousNotePlacementResponse:
+    ) -> (
+        NoteCreatePlacementResponse
+        | AmbiguousNotePlacementResponse
+        | OutsideProjectPlacementResponse
+    ):
         """Ask where a note that resolves under none of its readings would be created."""
         from basic_memory.mcp.tools.utils import call_query
 

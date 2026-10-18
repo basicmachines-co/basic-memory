@@ -37,7 +37,17 @@ class AmbiguousNotePlacementResponse(BaseModel):
     below_prefix: str = Field(description="The path below the project's routing prefix")
 
 
+class OutsideProjectPlacementResponse(BaseModel):
+    """A reading escapes the project, so no folder was probed and nothing is created."""
+
+    kind: Literal["outside_project"] = "outside_project"
+    readings: list[str] = Field(
+        description="Every project-relative path the identifier names, the literal one first"
+    )
+    path: str = Field(description="The reading that escapes the project")
+
+
 type NotePlacementResponse = Annotated[
-    NoteCreatePlacementResponse | AmbiguousNotePlacementResponse,
+    NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | OutsideProjectPlacementResponse,
     Field(discriminator="kind"),
 ]
