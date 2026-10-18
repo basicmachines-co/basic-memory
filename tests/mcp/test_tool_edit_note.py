@@ -10,12 +10,9 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools.edit_note import (
-    AmbiguousNotePath,
     _resolve_after_disk_recovery,
     _revision_conflict_detail,
-    choose_note_create_path,
     edit_note,
-    note_path_readings,
 )
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -82,97 +79,6 @@ def test_edit_note_workspace_project_route_helper_rejects_invalid_inputs(
 
     with pytest.raises(ValueError, match=message):
         edit_note_module._compose_workspace_project_route(**route_kwargs)
-
-
-@pytest.mark.parametrize(
-    ("identifier", "workspace_slug", "expected"),
-    [
-        # A plain path below this project's prefix also reads as a folder named 'demo'.
-        ("demo/scratch/note", None, ("demo/scratch/note", "scratch/note")),
-        # Prefixes match by permalink, as routing does.
-        ("Demo/scratch/note", None, ("Demo/scratch/note", "scratch/note")),
-        ("My Project/notes/x", None, ("My Project/notes/x", "notes/x")),
-        # The workspace-qualified spelling cloud permalinks carry.
-        ("team/demo/scratch/note", "team", ("team/demo/scratch/note", "scratch/note")),
-        # A memory URL's leading segment routed, so it names only the path below it.
-        ("memory://demo/scratch/note", None, ("scratch/note",)),
-        ("memory://team/demo/scratch/note", "team", ("scratch/note",)),
-        # No prefix, or another project's: the path as written.
-        ("scratch/note", None, ("scratch/note",)),
-        ("other/scratch/note", None, ("other/scratch/note",)),
-    ],
-)
-def test_note_path_readings(identifier, workspace_slug, expected):
-    project_permalink = "my-project" if identifier.startswith("My Project") else "demo"
-    assert (
-        note_path_readings(
-            identifier,
-            project_permalink=project_permalink,
-            workspace_slug=workspace_slug,
-        )
-        == expected
-    )
-
-
-def _folders(*existing: str):
-    async def folder_holds_notes(folder: str) -> bool:
-        return folder in existing
-
-    return folder_holds_notes
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("existing", "prefix_is_routing", "expected"),
-    [
-        # Existing folders decide, whatever the permalink convention says.
-        (("demo/scratch",), True, "demo/scratch/note"),
-        (("scratch",), False, "scratch/note"),
-        # No evidence: the permalink convention decides.
-        ((), True, "scratch/note"),
-        ((), False, "demo/scratch/note"),
-    ],
-)
-async def test_choose_note_create_path_prefers_the_existing_folder(
-    existing, prefix_is_routing, expected
-):
-    chosen = await choose_note_create_path(
-        ("demo/scratch/note", "scratch/note"),
-        folder_holds_notes=_folders(*existing),
-        prefix_is_routing=prefix_is_routing,
-    )
-    assert chosen == expected
-
-
-@pytest.mark.asyncio
-async def test_choose_note_create_path_refuses_when_both_folders_hold_notes():
-    chosen = await choose_note_create_path(
-        ("demo/scratch/note", "scratch/note"),
-        folder_holds_notes=_folders("demo/scratch", "scratch"),
-        prefix_is_routing=True,
-    )
-    assert chosen == AmbiguousNotePath(
-        identifier="demo/scratch/note",
-        literal="demo/scratch/note",
-        below_prefix="scratch/note",
-    )
-
-
-@pytest.mark.asyncio
-async def test_choose_note_create_path_never_counts_the_project_root_as_evidence():
-    """'demo/note' below the prefix is the root, which always exists, so it cannot
-    outweigh a folder that does not exist yet."""
-
-    async def root_is_never_asked(folder: str) -> bool:
-        assert folder, "the project root is not evidence"
-        return False
-
-    chosen = await choose_note_create_path(
-        ("demo/note", "note"),
-        folder_holds_notes=root_is_never_asked,
-        prefix_is_routing=False,
-    )
-    assert chosen == "demo/note"
 
 
 @pytest.mark.asyncio
@@ -1769,6 +1675,29 @@ async def test_edit_note_append_creates_inside_an_existing_folder_named_like_the
     assert isinstance(result, dict)
     assert result["fileCreated"] is True
     assert result["file_path"] == f"{test_project.permalink}/logs/today.md"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_reads_folders_from_storage_not_the_index(client, test_project):
+    """Codex review on #1782: a folder whose notes exist only on disk, not yet indexed,
+    still holds files. Judging folders from the index would read it as empty, create
+    below the prefix instead, and leave a note no later reindex relocates (#1775)."""
+    on_disk = Path(test_project.path) / test_project.permalink / "logs" / "yesterday.md"
+    on_disk.parent.mkdir(parents=True)
+    on_disk.write_text("# Yesterday", encoding="utf-8")
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier=f"{test_project.permalink}/logs/today",
+        operation="append",
+        content="First entry.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is True
+    assert result["file_path"] == f"{test_project.permalink}/logs/today.md"
+    assert not (Path(test_project.path) / "logs").exists()
 
 
 @pytest.mark.asyncio

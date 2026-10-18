@@ -150,6 +150,17 @@ class FileService:
             logger.error("Failed to check file existence", path=str(path), error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
 
+    async def directory_has_files(self, path: FilePath) -> bool:
+        """Return whether a project directory holds at least one file, at any depth.
+
+        Storage is the canonical record of which folders exist; the index can lag
+        files written directly to disk. A directory with no files reads as absent,
+        which is also the only answer object storage can give, where folders exist
+        only as key prefixes.
+        """
+        directory = self.base_path / path
+        return directory.is_dir() and any(entry.is_file() for entry in directory.rglob("*"))
+
     def paths_share_storage_target(self, left: FilePath, right: FilePath) -> bool:
         """Return whether two project paths resolve to the same physical file.
 

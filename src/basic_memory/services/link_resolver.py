@@ -13,16 +13,18 @@ from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.exceptions import AmbiguousIdentifierError
+from basic_memory.services.note_placement import note_path_readings
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import (
     build_permalink_resolution_candidates,
     generate_permalink,
-    own_project_remainder,
     normalize_project_reference,
 )
-from basic_memory.workspace_context import current_workspace_permalink_context
+from basic_memory.workspace_context import (
+    workspace_slug_for_canonical_permalinks,
+)
 
 
 def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
@@ -180,34 +182,27 @@ class LinkResolver:
         resolution accept the same routed identifiers.
         """
         project_permalink = await self._get_current_project_permalink(session)
-        resolved = await self._resolve_in_project(
-            session=session,
-            entity_repository=self.entity_repository,
-            search_service=self.search_service,
-            link_text=link_text,
-            use_search=False,
-            strict=strict,
-            source_path=source_path,
-            project_permalink=project_permalink,
-            load_relations=load_relations,
-        )
-        if resolved:
-            return resolved
 
-        # Trigger: the identifier starts with this project's own routing prefix, as a
+        # Trigger: the identifier may start with this project's own routing prefix, as a
         #   routed memory:// URL does (`main/Cache Layer Design`, `main/assets/a.pdf`).
         # Why: permalink candidates strip that prefix, but the title and file-path
         #   lookups saw the prefixed text and could never match, so a title URL
         #   resolved only through fuzzy search and often landed on a neighbour that
         #   links to it (#1626), and a routed resource path (permalink NULL) missed.
-        # Outcome: the exact lookups run on the remainder before any fuzzy match.
-        own_remainder = self._own_project_remainder(link_text, project_permalink)
-        if own_remainder:
+        # Outcome: exact lookups run on every reading -- the text as written, then the
+        #   path below the prefix -- before any fuzzy match. Creating a missing note
+        #   reads identifiers through the same function (#1775).
+        readings = note_path_readings(
+            link_text,
+            project_permalink=project_permalink,
+            workspace_permalink=workspace_slug_for_canonical_permalinks(),
+        )
+        for reading in readings:
             resolved = await self._resolve_in_project(
                 session=session,
                 entity_repository=self.entity_repository,
                 search_service=self.search_service,
-                link_text=own_remainder,
+                link_text=reading,
                 use_search=False,
                 strict=strict,
                 source_path=source_path,
@@ -390,12 +385,7 @@ class LinkResolver:
         """Resolve a link within a specific project scope."""
         clean_text = link_text
         include_project = self._include_project_permalinks()
-        workspace_context = current_workspace_permalink_context()
-        workspace_permalink = (
-            workspace_context.workspace_slug
-            if workspace_context and workspace_context.should_prefix_permalinks
-            else None
-        )
+        workspace_permalink = workspace_slug_for_canonical_permalinks()
 
         # Trigger: callers can pass title, short permalink, project/path, or
         #   workspace/project/path identifiers to the same resolver.
@@ -733,21 +723,6 @@ class LinkResolver:
             self._search_service_cache[project.id] = search_service
 
         return project, entity_repository, search_service
-
-    def _own_project_remainder(
-        self, identifier: str, project_permalink: Optional[str]
-    ) -> Optional[str]:
-        """Return the identifier without this project's routing prefix, if it has one."""
-        workspace_context = current_workspace_permalink_context()
-        return own_project_remainder(
-            identifier,
-            project_permalink,
-            workspace_permalink=(
-                workspace_context.workspace_slug
-                if workspace_context and workspace_context.should_prefix_permalinks
-                else None
-            ),
-        )
 
     def _split_project_prefix(self, identifier: str) -> Tuple[Optional[str], str]:
         """Split project prefix from a path-like identifier."""
