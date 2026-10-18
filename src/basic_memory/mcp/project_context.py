@@ -1663,6 +1663,31 @@ async def other_workspace_slugs(context: Optional[Context] = None) -> tuple[str,
     return tuple(sorted(workspace.slug for workspace in workspaces))
 
 
+def _hint_for_other_workspace_project(
+    entry: WorkspaceProjectEntry,
+    path: str,
+    addressable: tuple[AddressableProject, ...],
+) -> str:
+    """Name the spellings that reach one project in another workspace.
+
+    The qualified spelling is offered only when routing would actually honor it.
+    Mounts claim leading segments first, so when a mount's permalink equals the
+    workspace slug, 'acme/docs/foo' reads 'docs/foo' inside the mount 'acme' instead
+    of project 'docs' in workspace 'acme'. The project_id cannot be shadowed, so it
+    is always offered.
+    """
+    qualified = f"{entry.workspace.slug}/{entry.project.permalink}/{path}"
+    try:
+        shadowed = _claim_mount_prefix(qualified, addressable) is not None
+    except AmbiguousMountError:
+        shadowed = True
+    by_id = f"project_id='{entry.project.external_id}'"
+    where = f"project '{entry.project.name}' is in workspace '{entry.workspace.slug}'"
+    if shadowed:
+        return f"{where} — use {by_id} with path '{path}'"
+    return f"{where} — use '{qualified}' or {by_id}"
+
+
 async def _other_workspace_hint(
     candidate: str,
     addressable: tuple[AddressableProject, ...],
@@ -1688,12 +1713,23 @@ async def _other_workspace_hint(
     """
     if not _cloud_workspace_discovery_available(config):
         return None
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
     try:
         index = await _ensure_workspace_project_index(context=context)
     except ValueError as exc:
         if any(error in str(exc).lower() for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
             return None
         raise
+    except ToolError as exc:
+        # Trigger: the control plane timed out or failed while the session's own
+        #   project listing already succeeded.
+        # Why: the hint only enriches the refusal; losing it must not replace the
+        #   refusal with an unrelated tool failure.
+        # Outcome: the refusal still lists this session's mounts, without the hint.
+        logger.warning(f"Workspace discovery failed; refusing without a hint: {exc}")
+        return None
 
     # Trigger: the refused path's leading segments spell a project in another
     #   accessible workspace.
@@ -1716,9 +1752,7 @@ async def _other_workspace_hint(
         permalink, remainder = claimed
         path = remainder or "<path>"
         return "; ".join(
-            f"project '{entry.project.name}' is in workspace '{entry.workspace.slug}' — use "
-            f"'{entry.workspace.slug}/{entry.project.permalink}/{path}' or "
-            f"project_id='{entry.project.external_id}'"
+            _hint_for_other_workspace_project(entry, path, addressable)
             for entry in other_entries[permalink]
         )
     if len(index.workspaces) > 1:
