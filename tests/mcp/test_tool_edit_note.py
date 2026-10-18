@@ -10,8 +10,10 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools.edit_note import (
+    _parse_identifier_to_title_and_directory,
     _resolve_after_disk_recovery,
     _revision_conflict_detail,
+    _strip_active_project_prefix,
     edit_note,
 )
 from basic_memory.mcp.tools.read_note import read_note
@@ -79,6 +81,73 @@ def test_edit_note_workspace_project_route_helper_rejects_invalid_inputs(
 
     with pytest.raises(ValueError, match=message):
         edit_note_module._compose_workspace_project_route(**route_kwargs)
+
+
+@pytest.mark.parametrize(
+    ("identifier", "project_permalink", "include_project", "expected"),
+    [
+        (
+            "test-project/scratch/repro/note-c",
+            "test-project",
+            True,
+            "scratch/repro/note-c",
+        ),
+        (
+            "memory://test-project/scratch/repro/note-c",
+            "test-project",
+            True,
+            "scratch/repro/note-c",
+        ),
+        (
+            "memory://test-project/scratch/repro/note-c",
+            "test-project",
+            False,
+            "scratch/repro/note-c",
+        ),
+        (
+            # Plain path keeps a real folder named like the project when
+            # permalinks do not include the project slug.
+            "test-project/scratch/repro/note-c",
+            "test-project",
+            False,
+            "test-project/scratch/repro/note-c",
+        ),
+        (
+            "scratch/repro/note-a",
+            "test-project",
+            True,
+            "scratch/repro/note-a",
+        ),
+        (
+            "other-project/scratch/note",
+            "test-project",
+            True,
+            "other-project/scratch/note",
+        ),
+    ],
+)
+def test_strip_active_project_prefix(identifier, project_permalink, include_project, expected):
+    """Project-qualified create identifiers drop only the active project slug."""
+    assert (
+        _strip_active_project_prefix(
+            identifier,
+            project_permalink,
+            include_project=include_project,
+        )
+        == expected
+    )
+
+
+def test_strip_active_project_prefix_feeds_create_parser():
+    """Stripped permalinks parse into the project-relative directory/title."""
+    create_identifier = _strip_active_project_prefix(
+        "test-project/scratch/repro/note-c",
+        "test-project",
+        include_project=True,
+    )
+    title, directory = _parse_identifier_to_title_and_directory(create_identifier)
+    assert title == "note-c"
+    assert directory == "scratch/repro"
 
 
 @pytest.mark.asyncio
@@ -386,6 +455,46 @@ async def test_edit_note_append_creates_json_format(client, test_project):
     assert result["fileCreated"] is True
     assert result["title"] is not None
     assert result["operation"] == "append"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_strips_project_prefix_on_autocreate(client, test_project):
+    """Project-prefixed identifiers must not create a nested project directory."""
+    identifier = f"{test_project.permalink}/scratch/repro/note-c"
+    result = await edit_note(
+        project=test_project.name,
+        identifier=identifier,
+        operation="append",
+        content="Disposable reproduction note.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is True
+    assert result["file_path"] == "scratch/repro/note-c.md"
+    assert (Path(test_project.path) / "scratch" / "repro" / "note-c.md").exists()
+    assert not (Path(test_project.path) / test_project.permalink / "scratch").exists()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_strips_project_prefix_memory_url_on_autocreate(
+    client, test_project
+):
+    """memory:// URLs that include the active project create at the relative path."""
+    identifier = f"memory://{test_project.permalink}/scratch/repro/note-mem"
+    result = await edit_note(
+        project=test_project.name,
+        identifier=identifier,
+        operation="append",
+        content="Disposable memory-url reproduction note.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is True
+    assert result["file_path"] == "scratch/repro/note-mem.md"
+    assert (Path(test_project.path) / "scratch" / "repro" / "note-mem.md").exists()
+    assert not (Path(test_project.path) / test_project.permalink / "scratch").exists()
 
 
 @pytest.mark.asyncio
