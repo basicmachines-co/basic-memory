@@ -18,16 +18,6 @@ class LoadedFile:
     created_at: datetime | None = None
 
 
-@dataclass(frozen=True, slots=True)
-class LoadedFileWithoutCreatedAt:
-    """Legacy loader shape that never advertised creation time."""
-
-    size: int
-    checksum: str | None
-    last_modified: datetime | None
-    content: bytes | None
-
-
 class PathContentTypeProvider:
     """Returns deterministic content types from paths."""
 
@@ -108,19 +98,3 @@ def test_build_index_input_files_preserves_index_input_file_created_at() -> None
 
     assert input_files["notes/kept.md"].created_at == created_at
     assert input_files["notes/kept.md"].last_modified == last_modified
-
-
-def test_build_index_input_files_tolerates_loaders_without_created_at() -> None:
-    input_files = build_index_input_files(
-        {
-            "legacy.md": LoadedFileWithoutCreatedAt(
-                size=4,
-                checksum="etag",
-                last_modified=None,
-                content=b"body",
-            ),
-        },
-        content_type_provider=PathContentTypeProvider(),
-    )
-
-    assert input_files["legacy.md"].created_at is None

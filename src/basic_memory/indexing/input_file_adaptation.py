@@ -26,12 +26,11 @@ class LoadedIndexFile(Protocol):
 
     @property
     def created_at(self) -> datetime | None:
-        """Current storage creation timestamp, when available.
+        """Current storage creation timestamp, or None when storage records none.
 
-        Used as the parser fallback for notes that do not declare frontmatter
-        `created`. Callers that cannot provide a creation time may omit the
-        attribute or return None; adaptation then leaves IndexInputFile.created_at
-        as None and the parser falls back to now (#1772).
+        The parser's creation time for a new note that declares no frontmatter
+        `created`. Object storage keeps no creation time, so its loaders answer
+        None and the parser falls back to now (#1772).
         """
 
     @property
@@ -44,12 +43,6 @@ class IndexContentTypeProvider(Protocol):
 
     def content_type(self, path: str) -> str | None:
         """Return the canonical content type for the file path."""
-
-
-def _loaded_created_at(file_info: LoadedIndexFile) -> datetime | None:
-    """Read creation time from a loaded payload without requiring every adapter to declare it."""
-    created_at = getattr(file_info, "created_at", None)
-    return created_at if isinstance(created_at, datetime) else None
 
 
 def build_index_input_files(
@@ -65,10 +58,9 @@ def build_index_input_files(
             checksum=file_info.checksum,
             content_type=content_type_provider.content_type(path),
             last_modified=file_info.last_modified,
-            # Preserve storage creation time when the loader supplied it. Hardcoding
-            # None forced the markdown parser's ctime fallback to datetime.now() on
-            # every full reindex for notes without frontmatter `created` (#1772).
-            created_at=_loaded_created_at(file_info),
+            # Hardcoding None here made the parser stamp every new note without a
+            # frontmatter `created` with the time of the index run (#1772).
+            created_at=file_info.created_at,
             content=file_info.content,
         )
         for path, file_info in files.items()
