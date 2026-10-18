@@ -1628,6 +1628,84 @@ def _agreed_route_project(
     return None
 
 
+OTHER_WORKSPACES_HINT = (
+    "projects in other workspaces are addressed as '<workspace-slug>/<project>/<path>' "
+    "or by project_id; list_memory_projects lists them"
+)
+
+
+async def other_workspace_slugs(context: Optional[Context] = None) -> tuple[str, ...]:
+    """Slugs of the accessible workspaces, for a cloud session that can see several.
+
+    The ``ls /`` mount view lists this session's own projects only, so without this
+    an agent reading the root takes it for the whole world (#1778). Every slug
+    returned is a working '<workspace-slug>/<project>/' prefix, the session's own
+    included. Empty for a session that does not route to the cloud, so a local
+    root listing never calls the control plane, and for a single-workspace account.
+    """
+    if not _cloud_workspace_discovery_available(ConfigManager().config):
+        return ()
+    workspaces = await get_available_workspaces(context=context)
+    if len(workspaces) < 2:
+        return ()
+    return tuple(sorted(workspace.slug for workspace in workspaces))
+
+
+async def _other_workspace_hint(
+    first_segment: str,
+    addressable: tuple[AddressableProject, ...],
+    config: BasicMemoryConfig,
+    context: Optional[Context] = None,
+) -> str | None:
+    """Teach the spelling that reaches a project the refusal could not route to (#1778).
+
+    The refusal lists this session's mounts, and a project in another accessible
+    workspace is never one of them, so an agent retrying from the message alone
+    could not find the spelling that works. This names it instead.
+
+    It only reads the workspace index; it never routes. An unqualified first segment
+    must not reach another workspace on its own, or an ordinary project-relative
+    path reads another workspace's same-named project (#1421). The caller has to
+    choose the qualified spelling or the project_id this hint gives.
+
+    Returns None for a session that does not route to the cloud, or for an account
+    with a single workspace, so a local refusal reads as it always has. A local
+    session holding cloud credentials is left out on purpose: the hint would add a
+    control-plane call to its refusal path, and an unreachable control plane would
+    then replace the refusal with a network error.
+    """
+    if not _cloud_workspace_discovery_available(config):
+        return None
+    try:
+        index = await _ensure_workspace_project_index(context=context)
+    except ValueError as exc:
+        if any(error in str(exc).lower() for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
+            return None
+        raise
+
+    # Trigger: the refused segment spells a project in another accessible workspace.
+    # Why: that project is reachable, only not by this spelling; the session's own
+    #   mounts are excluded because the mount table already declined the segment.
+    # Outcome: name each match with both spellings that reach it.
+    own_project_ids = {project.external_id for project in addressable if project.external_id}
+    permalink = generate_permalink(first_segment) if first_segment else ""
+    matches = [
+        entry
+        for entry in index.entries_by_permalink.get(permalink, ())
+        if entry.project.external_id not in own_project_ids
+    ]
+    if matches:
+        return "; ".join(
+            f"project '{first_segment}' is in workspace '{entry.workspace.slug}' — use "
+            f"'{entry.workspace.slug}/{entry.project.permalink}/<path>' or "
+            f"project_id='{entry.project.external_id}'"
+            for entry in matches
+        )
+    if len(index.workspaces) > 1:
+        return OTHER_WORKSPACES_HINT
+    return None
+
+
 async def resolve_project_path_route(
     path: str,
     *,
@@ -1797,9 +1875,9 @@ async def resolve_project_path_route(
     if len(addressable) > 1:
         first_segment = candidate.split("/", 1)[0] if candidate else ""
         subject = f"no project '{first_segment}'" if first_segment else "no project specified"
-        raise UnqualifiedPathRefusedError(
-            f"{subject} — active projects: {_addressable_project_prefixes(addressable)}"
-        )
+        message = f"{subject} — active projects: {_addressable_project_prefixes(addressable)}"
+        hint = await _other_workspace_hint(first_segment, addressable, config, context=context)
+        raise UnqualifiedPathRefusedError(f"{message}. {hint}" if hint else message)
 
     # A session that addresses at most one project has no ambiguity to protect
     # against, so unqualified input keeps today's default resolution.

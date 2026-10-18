@@ -28,6 +28,7 @@ from basic_memory.mcp.project_context import (
     ProjectPathRoute,
     ProjectPrefixConflictError,
     AmbiguousMountError,
+    OTHER_WORKSPACES_HINT,
     UnqualifiedPathRefusedError,
     _agreed_route_project,
     detect_project_from_identifier_prefix,
@@ -1644,8 +1645,11 @@ async def test_cloud_unqualified_first_segment_never_reaches_another_workspace(
     """The leak: this session's workspace has no 'notes', another accessible
     workspace does, and `cat("notes/foo")` is an ordinary project-relative path.
     Resolving the bare first segment against every accessible workspace found
-    the other tenant's 'notes' and read it. It must refuse instead, naming only
-    the mounts this session can actually address."""
+    the other tenant's 'notes' and read it. It must refuse instead (#1421).
+
+    The refusal still teaches the way there (#1778): it names the workspace that
+    holds 'notes' and the two spellings that reach it on purpose. It never offers
+    the bare 'notes/' prefix, which is the spelling that just refused."""
     cross_workspace_session(
         session_projects=("research", "engineering"),
         default_projects=("notes",),
@@ -1654,9 +1658,89 @@ async def test_cloud_unqualified_first_segment_never_reaches_another_workspace(
     with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
         await resolve_project_path_route("notes/foo", project=None, project_id=None)
 
-    # The other workspace's project is named nowhere in the refusal — it was
-    # never addressable from here, so advertising it would teach a wrong route.
-    assert str(excinfo.value) == ("no project 'notes' — active projects: engineering/, research/")
+    assert str(excinfo.value) == (
+        "no project 'notes' — active projects: engineering/, research/. "
+        "project 'notes' is in workspace 'acme' — use 'acme/notes/<path>' or "
+        f"project_id='{_DEFAULT_NOTES_ID}'"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_hinted_spellings_reach_the_other_workspace_project(cross_workspace_session):
+    """Both spellings the refusal teaches have to route to the project it named,
+    or the hint would trade one dead end for another (#1778)."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    qualified = await resolve_project_path_route("acme/notes/foo", project=None, project_id=None)
+    by_id = await resolve_project_path_route("foo", project=None, project_id=_DEFAULT_NOTES_ID)
+
+    assert qualified.project_id == _DEFAULT_NOTES_ID
+    assert qualified.path == "foo"
+    assert by_id.project_id == _DEFAULT_NOTES_ID
+
+
+@pytest.mark.asyncio
+async def test_cloud_refusal_points_to_other_workspaces_when_no_project_matches(
+    cross_workspace_session,
+):
+    """A first segment that names no project anywhere still learns that other
+    workspaces exist and how to address them, since the mounts listed are only
+    this workspace's (#1778)."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("My Workspace/notes/foo", project=None, project_id=None)
+
+    assert str(excinfo.value) == (
+        "no project 'My Workspace' — active projects: engineering/, research/. "
+        + OTHER_WORKSPACES_HINT
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_root_listing_names_the_other_workspaces(cross_workspace_session):
+    """`ls /` lists only this workspace's projects, so it also says that other
+    workspaces exist and how to reach them (#1778). They are not rows: a bare
+    slug is not a routable path, and every row must be one."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    mounts = await ls()
+
+    assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
+    assert mounts["workspaces"] == ["acme", "beta"]
+    assert OTHER_WORKSPACES_HINT in mounts["note"]
+    assert "acme, beta" in mounts["note"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_single_workspace_root_listing_adds_nothing(cloud_session):
+    cloud_session("research", "engineering")
+
+    mounts = await ls()
+
+    assert "workspaces" not in mounts
+    assert "note" not in mounts
+
+
+@pytest.mark.asyncio
+async def test_cloud_single_workspace_refusal_adds_no_hint(cloud_session):
+    """With one workspace there is nowhere else to point, so the refusal reads as
+    it always has."""
+    cloud_session("research", "engineering")
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("notes/foo", project=None, project_id=None)
+
+    assert str(excinfo.value) == "no project 'notes' — active projects: engineering/, research/"
 
 
 @pytest.mark.asyncio
@@ -1687,7 +1771,9 @@ async def test_cloud_empty_route_segment_is_not_a_workspace_route(cross_workspac
     with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
         await resolve_project_path_route("acme//notes", project=None, project_id=None)
 
-    assert str(excinfo.value) == ("no project 'acme' — active projects: engineering/, research/")
+    assert str(excinfo.value) == (
+        "no project 'acme' — active projects: engineering/, research/. " + OTHER_WORKSPACES_HINT
+    )
 
 
 @pytest.mark.asyncio

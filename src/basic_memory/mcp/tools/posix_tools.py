@@ -48,9 +48,11 @@ from basic_memory.markdown.sections import document_lines, line_range_past_end
 from basic_memory.mcp.async_client import is_factory_mode
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
+    OTHER_WORKSPACES_HINT,
     ProjectPathRoute,
     addressable_projects,
     get_project_client,
+    other_workspace_slugs,
     resolve_project_path_route,
 )
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
@@ -472,6 +474,10 @@ async def _project_mount_listing(
     — so every mount advertised here is reachable as '<project>/path' (#1421).
     Each row's ``directory_path`` is the copyable '/<project>' prefix form, and
     the set already arrives sorted by project name.
+
+    A cloud session that can see several workspaces also gets their slugs and a
+    note on reaching them (#1778). They are not listed as rows: a bare slug is not
+    a routable path, and every row here must be one.
     """
     rows = [
         DirectoryNode(
@@ -489,8 +495,16 @@ async def _project_mount_listing(
         page_size=page_size,
         total=len(rows),
         has_more=start + page_size < len(rows),
-    )
-    return listing.model_dump(mode="json")
+    ).model_dump(mode="json")
+    workspaces = await other_workspace_slugs(context=context)
+    if workspaces:
+        listing["workspaces"] = list(workspaces)
+        listing["note"] = (
+            "the projects above are this session's workspace; "
+            + OTHER_WORKSPACES_HINT
+            + f" (workspace slugs: {', '.join(workspaces)})"
+        )
+    return listing
 
 
 @mcp.tool(

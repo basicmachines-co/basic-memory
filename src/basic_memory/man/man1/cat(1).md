@@ -33,6 +33,13 @@ duplicate), or truncated to an approximate token budget (`--max-tokens`).
 `--lines` and `--section` cannot be combined. A section response includes
 start_line and end_line for follow-up `--lines` reads.
 
+Projects in another cloud workspace are not among the session's own
+projects. Address them as `<workspace-slug>/<project>/<path>`, or pass
+`--project-id` (the MCP tool's `project_id`). A bare `<project>/<path>` never
+reaches another workspace; when its first segment names a project there, the
+refusal names the workspace and both spellings that work.
+`list_memory_projects` (`bm project list`) lists every workspace's projects.
+
 On a TTY the note renders as formatted Markdown; `--plain` writes the raw
 content to stdout (slice details go to stderr); `--json`, or piped output,
 emits the structured payload with slice metadata (start_line, end_line,
