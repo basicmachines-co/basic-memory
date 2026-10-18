@@ -40,6 +40,7 @@ class FakeFileInfo:
     checksum: str
     last_modified: datetime | None
     content: bytes | None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +174,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observed_at = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+    created_at = datetime(2026, 1, 5, 9, 30, tzinfo=UTC)
     session = cast(AsyncSession, object())
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     repository = FakeEntityRepository(entities=[FakeEntity(id=10), FakeEntity(id=20)])
@@ -240,6 +242,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
             checksum="etag-ok",
             last_modified=observed_at,
             content=b"# OK\n",
+            created_at=created_at,
         ),
         "bad.md": FakeFileInfo(
             size=6,
@@ -271,7 +274,9 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
         checksum="etag-ok",
         content_type="text/markdown",
         last_modified=observed_at,
-        created_at=None,
+        # The loader's creation time reaches the indexer, so a new note without a
+        # frontmatter `created` keeps it instead of the index-run time (#1772).
+        created_at=created_at,
         content=b"# OK\n",
     )
     assert batch_indexer.calls[0]["image.png"].content_type == "application/octet-stream"
