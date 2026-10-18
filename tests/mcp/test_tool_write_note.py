@@ -1908,6 +1908,8 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     [call] = stub_search_client.calls
     assert call["payload"]["retrieval_mode"] == "vector"
     assert call["payload"]["entity_types"] == ["entity"]
+    # Generated notes (indexes, logs) are never what a writer meant to edit.
+    assert call["payload"]["metadata_filters"] == {"generated": None}
     assert call["payload"]["text"].startswith("BU Mapping Analysis\n\n# BU Mapping Analysis")
     # The advisory asks a stricter question than search relevance (#1718).
     assert call["payload"]["min_similarity"] == SIMILAR_NOTES_MIN_SIMILARITY

@@ -63,6 +63,16 @@ EXISTING_NOTES = {
     ),
 }
 
+# A generated note (folder index, log) restates the notes it covers, so it sits right next
+# to them in embedding space. Its generator rewrites it, so it is never a write target.
+GENERATED_NOTES = {
+    "notes/index": (
+        "Coffee Brewing Index",
+        "Coffee Brewing Methods: pour over gives clarity and a clean cup, French press makes "
+        "a heavier body, water around 205F, a 1:16 ratio of coffee to water.",
+    ),
+}
+
 
 def _note(title: str, body: str) -> str:
     return f"# {title}\n\n{body}\n"
@@ -74,14 +84,18 @@ async def advisory_search(sqlite_engine_factory, tmp_path):
     search_service = await create_search_service(
         sqlite_engine_factory, COMBO, tmp_path, embedding_provider=_create_fastembed_provider()
     )
-    for permalink, (title, body) in EXISTING_NOTES.items():
+    notes = [(permalink, note, {}) for permalink, note in EXISTING_NOTES.items()] + [
+        (permalink, note, {"generated": {"by": "Basic Memory Wiki Projector"}})
+        for permalink, note in GENERATED_NOTES.items()
+    ]
+    for permalink, (title, body), metadata in notes:
         async with db.scoped_session(search_service.session_maker) as session:
             entity = await search_service.entity_repository.create(
                 session,
                 {
                     "title": title,
                     "note_type": "note",
-                    "entity_metadata": {},
+                    "entity_metadata": metadata,
                     "content_type": "text/markdown",
                     "permalink": permalink,
                     "file_path": f"{permalink}.md",
@@ -122,6 +136,7 @@ async def test_rewrite_of_an_existing_note_is_still_suggested(
 
     assert results, "a rewrite of an existing note must clear the advisory floor"
     assert results[0].permalink == original
+    assert not set(GENERATED_NOTES) & {row.permalink for row in results}
 
 
 @pytest.mark.asyncio
