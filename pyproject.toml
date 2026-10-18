@@ -178,6 +178,7 @@ source = "uv-dynamic-versioning"
 # (Cloud agents). Same set as the release archives: internal skills, evals/ and
 # agents/ stay out. tests/test_skills_dist.py fails when this list drifts.
 # Skills the Tau mapping below also copies are keyed by SKILL.md: TOML keys are unique.
+"skills/memory-agents" = "basic_memory/data/skills/memory-agents"
 "skills/memory-capture" = "basic_memory/data/skills/memory-capture"
 "skills/memory-comark" = "basic_memory/data/skills/memory-comark"
 "skills/memory-continue/SKILL.md" = "basic_memory/data/skills/memory-continue/SKILL.md"

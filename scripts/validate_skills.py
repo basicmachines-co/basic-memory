@@ -276,6 +276,8 @@ SKILL_LISTS = (
             "memory-capture": "needs a query-less search_notes",
             "memory-continue": "needs recent_activity",
             "memory-curate": "needs list_directory",
+            # Agents run in Basic Memory Cloud; OpenClaw registers no agent tools.
+            "memory-agents": "needs the Cloud agent tools",
         },
     ),
     SkillList(
@@ -288,6 +290,7 @@ SKILL_LISTS = (
             "memory-capture": "not shipped for OpenClaw yet",
             "memory-continue": "not shipped for OpenClaw yet",
             "memory-curate": "not shipped for OpenClaw yet",
+            "memory-agents": "not shipped for OpenClaw yet",
         },
     ),
 )
