@@ -1645,14 +1645,26 @@ async def other_workspace_slugs(context: Optional[Context] = None) -> tuple[str,
     """
     if not _cloud_workspace_discovery_available(ConfigManager().config):
         return ()
-    workspaces = await get_available_workspaces(context=context)
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
+    try:
+        workspaces = await get_available_workspaces(context=context)
+    except ToolError as exc:
+        # Trigger: the control plane timed out or failed while the session's own
+        #   project listing already succeeded.
+        # Why: the slugs only annotate the root listing; losing them must not turn a
+        #   working `ls /` into an error.
+        # Outcome: the root lists its mounts without the workspace note.
+        logger.warning(f"Workspace discovery failed; listing mounts without it: {exc}")
+        return ()
     if len(workspaces) < 2:
         return ()
     return tuple(sorted(workspace.slug for workspace in workspaces))
 
 
 async def _other_workspace_hint(
-    first_segment: str,
+    candidate: str,
     addressable: tuple[AddressableProject, ...],
     config: BasicMemoryConfig,
     context: Optional[Context] = None,
@@ -1683,23 +1695,31 @@ async def _other_workspace_hint(
             return None
         raise
 
-    # Trigger: the refused segment spells a project in another accessible workspace.
-    # Why: that project is reachable, only not by this spelling; the session's own
-    #   mounts are excluded because the mount table already declined the segment.
+    # Trigger: the refused path's leading segments spell a project in another
+    #   accessible workspace.
+    # Why: that project is reachable, only not by this spelling. The match uses the
+    #   same longest-prefix splitter as routing, so 'research/2026/foo' names
+    #   'Research/2026', not a shorter 'Research' beside it. The session's own mounts
+    #   are excluded because the mount table already declined these segments.
     # Outcome: name each match with both spellings that reach it.
     own_project_ids = {project.external_id for project in addressable if project.external_id}
-    permalink = generate_permalink(first_segment) if first_segment else ""
-    matches = [
-        entry
-        for entry in index.entries_by_permalink.get(permalink, ())
-        if entry.project.external_id not in own_project_ids
-    ]
-    if matches:
+    other_entries = {
+        permalink: tuple(
+            entry for entry in entries if entry.project.external_id not in own_project_ids
+        )
+        for permalink, entries in index.entries_by_permalink.items()
+    }
+    claimed = _split_project_permalink_prefix(
+        candidate, [permalink for permalink, entries in other_entries.items() if entries]
+    )
+    if claimed is not None:
+        permalink, remainder = claimed
+        path = remainder or "<path>"
         return "; ".join(
-            f"project '{first_segment}' is in workspace '{entry.workspace.slug}' — use "
-            f"'{entry.workspace.slug}/{entry.project.permalink}/<path>' or "
+            f"project '{entry.project.name}' is in workspace '{entry.workspace.slug}' — use "
+            f"'{entry.workspace.slug}/{entry.project.permalink}/{path}' or "
             f"project_id='{entry.project.external_id}'"
-            for entry in matches
+            for entry in other_entries[permalink]
         )
     if len(index.workspaces) > 1:
         return OTHER_WORKSPACES_HINT
@@ -1876,7 +1896,7 @@ async def resolve_project_path_route(
         first_segment = candidate.split("/", 1)[0] if candidate else ""
         subject = f"no project '{first_segment}'" if first_segment else "no project specified"
         message = f"{subject} — active projects: {_addressable_project_prefixes(addressable)}"
-        hint = await _other_workspace_hint(first_segment, addressable, config, context=context)
+        hint = await _other_workspace_hint(candidate, addressable, config, context=context)
         raise UnqualifiedPathRefusedError(f"{message}. {hint}" if hint else message)
 
     # A session that addresses at most one project has no ambiguity to protect
