@@ -32,6 +32,17 @@ project and how to get started as a developer.
    source .venv/bin/activate
    ```
 
+   **Keep dev state out of your everyday config.** The repo's `.envrc` sets
+   `BASIC_MEMORY_CONFIG_DIR` to `~/.config/basic-memory-dev` for this checkout, so dev
+   settings such as a Postgres backend never land in `~/.config/basic-memory`. With
+   [direnv](https://direnv.net) installed, run `direnv allow` once per checkout or
+   worktree. Without direnv, export the variable yourself before running `bm`:
+   ```bash
+   export BASIC_MEMORY_CONFIG_DIR=~/.config/basic-memory-dev
+   ```
+   direnv only acts in an interactive shell, so agents and scripts that run `bm` in a
+   checkout should set the variable explicitly.
+
 4. **Run the Tests**:
    ```bash
    # Run all tests with unified coverage (unit + integration)
