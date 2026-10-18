@@ -1359,6 +1359,7 @@ _SESSION_ENGINEERING_ID = "44444444-4444-4444-4444-444444444444"
 _DEFAULT_NOTES_ID = "55555555-5555-5555-5555-555555555555"
 _DEFAULT_RESEARCH_ID = "66666666-6666-6666-6666-666666666666"
 _DEFAULT_RESEARCH_2026_ID = "77777777-7777-7777-7777-777777777777"
+_SESSION_ACME_ID = "88888888-8888-8888-8888-888888888888"
 
 # Every (workspace, project) pair gets its own id: the same project name living
 # in two workspaces is the whole point of this section, and the id is what pins
@@ -1368,6 +1369,7 @@ _WORKSPACE_PROJECT_IDS = {
     ("session-tenant", "docs"): _SESSION_DOCS_ID,
     ("session-tenant", "research"): _SESSION_RESEARCH_ID,
     ("session-tenant", "engineering"): _SESSION_ENGINEERING_ID,
+    ("session-tenant", "acme"): _SESSION_ACME_ID,
     ("default-tenant", "docs"): _DEFAULT_DOCS_ID,
     ("default-tenant", "notes"): _DEFAULT_NOTES_ID,
     ("default-tenant", "Research"): _DEFAULT_RESEARCH_ID,
@@ -1704,6 +1706,53 @@ async def test_cloud_refusal_names_the_longest_matching_project(cross_workspace_
         "project 'Research/2026' is in workspace 'acme' — use 'acme/research/2026/foo' or "
         f"project_id='{_DEFAULT_RESEARCH_2026_ID}'"
     )
+
+
+@pytest.mark.asyncio
+async def test_cloud_refusal_omits_a_qualified_spelling_a_mount_would_claim(
+    cross_workspace_session,
+):
+    """A mount named like the other workspace's slug claims the qualified spelling
+    first: 'acme/notes/foo' reads 'notes/foo' inside mount 'acme'. The hint then
+    offers only the project_id, which no mount can shadow (#1780 review)."""
+    cross_workspace_session(
+        session_projects=("acme", "engineering"),
+        default_projects=("notes",),
+    )
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("notes/foo", project=None, project_id=None)
+
+    assert str(excinfo.value).endswith(
+        f"project 'notes' is in workspace 'acme' — use project_id='{_DEFAULT_NOTES_ID}' "
+        "with path 'foo'"
+    )
+    by_id = await resolve_project_path_route("foo", project=None, project_id=_DEFAULT_NOTES_ID)
+    assert by_id.project_id == _DEFAULT_NOTES_ID
+
+
+@pytest.mark.asyncio
+async def test_cloud_refusal_survives_failed_workspace_discovery(
+    cross_workspace_session, monkeypatch
+):
+    """The hint only enriches the refusal; a control-plane failure must still
+    refuse with this session's mounts, not surface an unrelated error (#1780 review).
+    A single segment never reaches the workspace-qualified rule, so the hint is
+    its only discovery call."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    async def failing_workspaces(context=None):
+        raise ToolError("control plane unavailable")
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", failing_workspaces)
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("notes", project=None, project_id=None)
+
+    assert str(excinfo.value) == "no project 'notes' — active projects: engineering/, research/"
 
 
 @pytest.mark.asyncio
