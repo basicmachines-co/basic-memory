@@ -138,12 +138,15 @@ def similar_notes_query(title: str, content: str, *, min_similarity: float | Non
     """Build the search that asks which existing notes might be the one just written.
 
     Vector-only retrieval keeps the probe out of the FTS query parser, which would read
-    parentheses and boolean words in ordinary prose as operators.
+    parentheses and boolean words in ordinary prose as operators. Notes that declare
+    `generated:` in frontmatter (folder indexes, logs, run logs) are rewritten by their
+    generator, so nobody means to write to them; they are left out of the candidates.
     """
     return SearchQuery(
         text=_compose_similarity_probe(title, content),
         retrieval_mode=SearchRetrievalMode.VECTOR,
         entity_types=[SearchItemType.ENTITY],
+        metadata_filters={"generated": None},
         min_similarity=min_similarity,
     )
 
