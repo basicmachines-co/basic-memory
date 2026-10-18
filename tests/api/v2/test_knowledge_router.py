@@ -2899,6 +2899,14 @@ async def test_placement_refuses_paths_outside_the_project_without_probing(
         "basic_memory.services.file_service.FileService.directory_has_files", never_probed
     )
 
+    async def never_queried(self, session, directory) -> bool:
+        raise AssertionError(f"queried {directory!r} for a path outside the project")
+
+    monkeypatch.setattr(
+        "basic_memory.repository.entity_repository.EntityRepository.directory_has_entities",
+        never_queried,
+    )
+
     response = await client.request(
         "QUERY",
         f"{v2_project_url}/knowledge/placement",

@@ -443,6 +443,7 @@ async def place_note(
     project_id: ProjectExternalIdPathDep,
     data: NotePlacementRequest,
     project_repository: ProjectRepositoryDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     app_config: AppConfigDep,
     session: SessionDep,
@@ -450,7 +451,7 @@ async def place_note(
     """Say where a note that resolves under none of its readings would be created.
 
     The readings are the ones resolution tried, and the folder evidence comes from
-    storage rather than the index (#1775). A caller probes the readings for files not
+    canonical note state -- accepted notes and storage -- rather than the index (#1775). A caller probes the readings for files not
     indexed yet before it creates anything.
     """
     with logfire.span(
@@ -468,10 +469,19 @@ async def place_note(
             workspace_permalink=workspace_slug_for_canonical_permalinks(),
         )
         project_home = pathlib.Path(project.path)
+
+        async def folder_exists(folder: str) -> bool:
+            # Canonical note state is the accepted notes plus the files on storage.
+            # An accepted note is not materialized yet, and a file on storage is not
+            # indexed yet, so either one alone can miss a folder that exists.
+            return await entity_repository.directory_has_entities(
+                session, folder
+            ) or await file_service.directory_has_files(folder)
+
         placement = await place_missing_note(
             readings,
             within_project=lambda path: validate_project_path(path, project_home),
-            directory_has_files=file_service.directory_has_files,
+            folder_exists=folder_exists,
             prefix_is_routing=app_config.permalinks_include_project,
         )
         match placement:
