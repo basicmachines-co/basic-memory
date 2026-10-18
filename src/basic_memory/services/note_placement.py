@@ -70,7 +70,14 @@ class AmbiguousNotePlacement:
     below_prefix: str
 
 
-type NotePlacement = NoteCreatePlacement | AmbiguousNotePlacement
+@dataclass(frozen=True, slots=True)
+class OutsideProjectPlacement:
+    """A reading escapes the project, so no folder was probed and nothing is created."""
+
+    path: str
+
+
+type NotePlacement = NoteCreatePlacement | AmbiguousNotePlacement | OutsideProjectPlacement
 
 
 def _create_at(path: str) -> NoteCreatePlacement:
@@ -81,16 +88,25 @@ def _create_at(path: str) -> NoteCreatePlacement:
 async def place_missing_note(
     readings: NotePathReadings,
     *,
+    within_project: Callable[[str], bool],
     directory_has_files: Callable[[str], Awaitable[bool]],
     prefix_is_routing: bool,
 ) -> NotePlacement:
     """Decide where a note that exists under none of its readings is created.
+
+    Every reading must stay inside the project before any folder is probed: an
+    identifier like 'demo/../../other/secrets' or 'demo//tmp/x' would otherwise turn
+    the folder check into an existence probe of directories the caller cannot reach.
 
     Folders that storage already holds decide first. The project root is no evidence,
     since it always exists. Without evidence, the permalink convention decides: when
     permalinks carry the project prefix, a path that starts with it reads as routing,
     otherwise as a folder named like the project.
     """
+    escaping = next((reading for reading in readings if not within_project(reading)), None)
+    if escaping is not None:
+        return OutsideProjectPlacement(path=escaping)
+
     match readings:
         case (only,):
             return _create_at(only)

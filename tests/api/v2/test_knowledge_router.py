@@ -2851,3 +2851,63 @@ async def test_get_entity_slice_without_content_404(
 
     assert response.status_code == 404
     assert "no markdown content to slice" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_placement_names_where_a_missing_note_goes(
+    client: AsyncClient, test_project: Project, v2_project_url: str
+):
+    """The endpoint returns every reading and the folder storage evidence picked (#1775)."""
+    logs = Path(test_project.path) / test_project.permalink / "logs"
+    logs.mkdir(parents=True)
+    (logs / "yesterday.md").write_text("# Yesterday", encoding="utf-8")
+
+    response = await client.request(
+        "QUERY",
+        f"{v2_project_url}/knowledge/placement",
+        json={"identifier": f"{test_project.permalink}/logs/today"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "create",
+        "readings": [f"{test_project.permalink}/logs/today", "logs/today"],
+        "directory": f"{test_project.permalink}/logs",
+        "title": "today",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "below_prefix",
+    ["../../outside-project/secrets/note", "/tmp/outside-note", "notes/../../../escape"],
+)
+async def test_placement_refuses_paths_outside_the_project_without_probing(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    below_prefix: str,
+):
+    """Called directly, the endpoint never probes a folder outside the project, so it
+    cannot serve as an existence oracle for other projects (#1782 review)."""
+
+    async def never_probed(self, path) -> bool:
+        raise AssertionError(f"probed {path!r} for a path outside the project")
+
+    monkeypatch.setattr(
+        "basic_memory.services.file_service.FileService.directory_has_files", never_probed
+    )
+
+    response = await client.request(
+        "QUERY",
+        f"{v2_project_url}/knowledge/placement",
+        json={"identifier": f"{test_project.permalink}/{below_prefix}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "outside_project"
+    # The first reading that escapes is reported; with a traversal the literal one can
+    # escape too, so either reading may be the one named.
+    assert body["path"] in body["readings"]

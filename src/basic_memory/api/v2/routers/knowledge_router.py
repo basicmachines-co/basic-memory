@@ -84,10 +84,12 @@ from basic_memory.schemas.v2.note_placement import (
     NoteCreatePlacementResponse,
     NotePlacementRequest,
     NotePlacementResponse,
+    OutsideProjectPlacementResponse,
 )
 from basic_memory.services.note_placement import (
     AmbiguousNotePlacement,
     NoteCreatePlacement,
+    OutsideProjectPlacement,
     note_path_readings,
     place_missing_note,
 )
@@ -444,7 +446,7 @@ async def place_note(
     file_service: FileServiceV2ExternalDep,
     app_config: AppConfigDep,
     session: SessionDep,
-) -> NoteCreatePlacementResponse | AmbiguousNotePlacementResponse:
+) -> NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | OutsideProjectPlacementResponse:
     """Say where a note that resolves under none of its readings would be created.
 
     The readings are the ones resolution tried, and the folder evidence comes from
@@ -465,8 +467,10 @@ async def place_note(
             project_permalink=project.permalink,
             workspace_permalink=workspace_slug_for_canonical_permalinks(),
         )
+        project_home = pathlib.Path(project.path)
         placement = await place_missing_note(
             readings,
+            within_project=lambda path: validate_project_path(path, project_home),
             directory_has_files=file_service.directory_has_files,
             prefix_is_routing=app_config.permalinks_include_project,
         )
@@ -479,6 +483,8 @@ async def place_note(
                 return AmbiguousNotePlacementResponse(
                     readings=list(readings), literal=literal, below_prefix=below_prefix
                 )
+            case OutsideProjectPlacement(path=path):
+                return OutsideProjectPlacementResponse(readings=list(readings), path=path)
 
 
 # QUERY only, like /resolve: a safe read with a body. Not cached: its answer
