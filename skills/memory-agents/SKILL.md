@@ -39,7 +39,6 @@ agent tool for that.
 title: Meeting follow-up
 type: agent
 enabled: true
-access: write
 watch:
   paths:
     - meetings/
@@ -64,7 +63,6 @@ Frontmatter:
 | `type` | yes | `agent` |
 | `title` | yes | The agent's name |
 | `enabled` | yes | `false` keeps it from running, by hand or by watch |
-| `access` | yes | `read` or `write`. A read agent can only answer; it changes nothing and leaves no run log |
 | `watch` | no | Starts the agent when a person creates a note under these paths |
 | `description` | no | One line shown with the agent |
 
@@ -73,9 +71,11 @@ Frontmatter:
 to `[create]`, the only event so far. Do not write `on:` for events: YAML reads
 that key as `true`.
 
-The agent's access is never more than the access of the person who last edited
-the agent note, or of the person the run is for. An agent note last edited by
-another agent cannot run.
+Agents always write: their output is notes, and every change they make is a
+note version you can revert. An agent changes notes only in its own project, and
+it runs only if both the person who last edited the agent note and the person the
+run is for can edit that project. An agent note last edited by another agent
+cannot run. An old `access` key in an agent note is ignored.
 
 ### Instructions that work
 
@@ -118,8 +118,8 @@ run_agent(agent="Curator", note="projects/Launch", project="work")
 get_agent_run(run_id="<run id>", project="work")
 ```
 
-A write agent changes the user's notes. Ask before running one, unless the user
-has just asked for that run.
+An agent changes the user's notes. Ask before running one, unless the user has
+just asked for that run.
 
 A `watch` agent also starts on its own when a person creates a note under its
 paths. It waits until the note has had no saves for about a minute, then runs
@@ -129,8 +129,7 @@ on the version the person ended with. Notes written by agents, imports, or
 ## Check a Run
 
 `get_agent_run` shows the status, the notes the run created, edited, moved, or
-deleted, and the agent's last reply. A write agent also keeps every reply in a
-run log note, `agents/runs/<agent> run <id>`. Read it for the whole
+deleted, and the agent's last reply. Every reply is also kept in a run log note, `agents/runs/<agent> run <id>`. Read it for the whole
 conversation; do not edit it.
 
 A queued run may be waiting: for the target note to settle, for a free slot
@@ -146,6 +145,7 @@ When a run is skipped, its reason says why:
 | `agent_not_by_a_person` | A person, or an assistant acting for one, saves the agent note again |
 | `agent_removed`, `trigger_changed` | The agent note or the target note was deleted |
 | `instruction_author_has_no_access`, `requester_has_no_access` | That person needs access to the project |
+| `instruction_author_cannot_edit`, `requester_cannot_edit` | That person can only view the project; agents write, so they need edit access |
 | `plan_has_no_agents`, `runtime_disabled` | The workspace's plan does not include agents |
 
 A failed run says why as well: `timeout` (the run ran out of time; give it a
@@ -153,9 +153,11 @@ smaller job) or a model error (run it again).
 
 ## Guidelines
 
-- **Start read-only.** Write a new agent with `access: read`, run it on one note,
-  read its reply, then switch to `write`.
-- **Test on one note** before adding a `watch`.
+- **Test on one note** before adding a `watch`. Read its reply and the notes it
+  changed; revert a note from its versions if the agent got it wrong.
+- **Keep agents that read untrusted input in their own project.** An agent that
+  processes pasted transcripts or imported pages can be steered by their text;
+  its project is the limit on what it can change.
 - **Turn off, don't delete.** Set `enabled: false` to stop an agent and keep its
   instructions and run history.
 - **The agent note is instructions; notes are material.** Text inside a target
