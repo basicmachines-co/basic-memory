@@ -92,6 +92,27 @@ async def test_cloud_mode_projects_are_skipped_not_reported(
     assert [project["name"] for project in output["projects"]] == [test_project.name]
 
 
+def test_config_only_cloud_projects_are_skipped_without_a_local_lookup(
+    app, app_config, test_project, config_manager, tmp_path_factory
+):
+    """`add --cloud` and `set-cloud` leave no local database row to resolve."""
+    config = config_manager.load_config()
+    config.projects["remote"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("remote")), mode=ProjectMode.CLOUD
+    )
+    config_manager.save_config(config)
+
+    every_project = _invoke("--skip-self-test", "--json")
+    named = _invoke("--project", "remote", "--skip-self-test", "--json")
+
+    assert every_project.exit_code == 0, every_project.output
+    assert json.loads(every_project.stdout)["skipped_cloud_projects"] == ["remote"]
+    assert named.exit_code == 0, named.output
+    named_output = json.loads(named.stdout)
+    assert named_output["projects"] == []
+    assert named_output["skipped_cloud_projects"] == ["remote"]
+
+
 def test_self_test_flow_writes_indexes_and_searches(
     app, app_config, test_project, config_manager, monkeypatch, tmp_path_factory
 ):

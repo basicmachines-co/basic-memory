@@ -112,8 +112,30 @@ def action_command(action: DoctorAction, project_name: str) -> str:
 async def inspect_projects(
     project: str | None,
 ) -> tuple[tuple[DoctorProjectOutput, ...], tuple[str, ...]]:
-    """Report every local project, or only the named one, without changing any."""
+    """Report every local project, or only the named one, without changing any.
+
+    Returns the reports and the cloud projects that were skipped.
+    """
     config = ConfigManager().config
+
+    def is_cloud(name: str) -> bool:
+        entry = config.project_entry(name)
+        return entry is not None and entry.mode is ProjectMode.CLOUD
+
+    # Trigger: a project routes through the cloud.
+    # Why: its files and index live on the server, so the local commands doctor
+    #   suggests cannot repair it. A cloud-only project also has no local database
+    #   row (project sync removes it), so it must come from config, before any
+    #   local API lookup that would not find it.
+    # Outcome: cloud projects are listed as skipped and never reported.
+    if project is not None and is_cloud(project):
+        return (), (project,)
+    skipped_cloud = (
+        ()
+        if project is not None
+        else tuple(sorted(name for name in config.projects if is_cloud(name)))
+    )
+
     async with get_client() as client:
         project_client = ProjectClient(client)
         if project is not None:
@@ -126,15 +148,9 @@ async def inspect_projects(
             ]
 
         reports: list[DoctorProjectOutput] = []
-        skipped_cloud: list[str] = []
         for name, external_id in selected:
-            # Trigger: the project routes through the cloud.
-            # Why: its files and index live on the server, and the local commands
-            #   doctor suggests cannot repair it.
-            # Outcome: list it as skipped instead of reporting stale local state.
-            entry = config.project_entry(name)
-            if entry is not None and entry.mode is ProjectMode.CLOUD:
-                skipped_cloud.append(name)
+            # A cloud project that still has a local row is already in skipped_cloud.
+            if is_cloud(name):
                 continue
             report = await project_client.get_doctor_report(external_id)
             reports.append(
@@ -154,7 +170,7 @@ async def inspect_projects(
                     has_errors=report.has_errors,
                 )
             )
-    return tuple(reports), tuple(skipped_cloud)
+    return tuple(reports), skipped_cloud
 
 
 # --- Sandboxed self-test ---

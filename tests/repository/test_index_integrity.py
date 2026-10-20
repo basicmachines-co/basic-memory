@@ -248,3 +248,33 @@ async def test_children_must_match_owner_and_project(session_maker, sample_entit
     assert report.orphan_examples == ()
     other = await inspect_index_integrity(session_maker, other_project.id)
     assert other.orphaned_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_reindexing_a_note_clears_its_duplicates_whatever_their_permalink(
+    session_maker, full_entity, search_service, db_backend
+):
+    """Doctor's repair for duplicates is a full search reindex; this pins that it works.
+
+    Re-indexing a note deletes all of its search rows by entity_id before writing
+    them again, so a duplicate is removed even when its permalink is stale or null.
+    """
+    if db_backend != "sqlite":
+        pytest.skip("PostgreSQL prevents duplicate primary keys")
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "INSERT INTO search_index (project_id, id, entity_id, type, permalink) "
+                "VALUES (:project, :id, :id, 'entity', 'stale/permalink')"
+            ),
+            {"project": full_entity.project_id, "id": full_entity.id},
+        )
+        await insert_index_row(session, full_entity.project_id, full_entity.id, full_entity.id)
+    before = await inspect_index_integrity(session_maker, full_entity.project_id)
+    assert before.duplicate_keys == 1
+
+    await search_service.index_entity(full_entity)
+
+    after = await inspect_index_integrity(session_maker, full_entity.project_id)
+    assert after.duplicate_keys == after.duplicate_rows == 0
+    assert after.entity_rows == 1
