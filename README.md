@@ -584,7 +584,7 @@ basic-memory config unset cli_output_style      # revert to default
 
 # Health & maintenance
 basic-memory status
-basic-memory doctor              # file <-> DB consistency check
+basic-memory doctor              # file <-> DB and index integrity checks
 basic-memory tool edit-note ...  # CLI access to MCP tools
 basic-memory update              # check for and install updates
 

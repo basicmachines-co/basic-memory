@@ -108,7 +108,71 @@ async def _read_materialized_api_note(api_file: Path, file_path: str) -> str:
     return api_file.read_text(encoding="utf-8")
 
 
-async def run_doctor() -> None:
+async def _check_existing_projects(project_client: ProjectClient, project: str | None) -> bool:
+    """Report integrity for the selected projects and return whether any is damaged.
+
+    Reporting must not raise: doctor's disposable smoke test is the only end-to-end
+    file <-> database check, so an observed anomaly is surfaced as a warning here and
+    turned into a nonzero exit only after that smoke test has run.
+    """
+    if project is not None:
+        # Trigger: the user scoped the inspection to one project.
+        # Why: resolving first avoids listing every project just to filter it, and the
+        #   caller routes the client with project_name so cloud mode picks that
+        #   project's workspace instead of the configured default workspace.
+        # Outcome: only the requested project is inspected.
+        resolved = await project_client.resolve_project(project)
+        selected = [(resolved.name, resolved.external_id)]
+    else:
+        selected = [
+            (item.name, item.external_id)
+            for item in (await project_client.list_projects()).projects
+        ]
+
+    anomalies = False
+    for name, external_id in selected:
+        report = await project_client.get_integrity(external_id)
+        console.print(
+            f"Project {literal(name)}: {report.entities} entities, "
+            f"{report.search_rows} search rows "
+            f"(entities={report.entity_rows}, observations={report.observation_rows}, "
+            f"relations={report.relation_rows})"
+        )
+        console.print(
+            f"  Duplicate keys: {report.duplicate_keys} ({report.duplicate_rows} extra rows); "
+            f"orphaned rows: {report.orphaned_rows}; "
+            f"inverted timestamps (informational): {report.inverted_timestamps}"
+        )
+        for example in report.examples:
+            console.print(f"  {literal(example)}")
+        anomalies = anomalies or report.has_anomalies
+    if anomalies:
+        console.print(
+            "[yellow]WARN[/yellow] Existing project integrity anomalies observed; "
+            "the disposable doctor checks will still run."
+        )
+    else:
+        console.print("[green]OK[/green] Existing project integrity checks passed")
+    return anomalies
+
+
+def _fail_on_observed_anomalies(anomalies: bool) -> None:
+    """Turn an observed integrity anomaly into doctor's failure, after the smoke test.
+
+    Trigger: the preflight saw duplicate/orphaned/missing search rows.
+    Why: those rows may be transient while indexing runs, and the disposable smoke
+      test still proves the file <-> database pipeline works; failing before it would
+      hide that result.
+    Outcome: the command exits nonzero with the wait-and-rerun guidance.
+    """
+    if anomalies:
+        raise ValueError(
+            "Existing project integrity anomalies observed. Indexing may be in progress; "
+            "wait for indexing to finish and run doctor again. No repairs were performed."
+        )
+
+
+async def run_doctor(project: str | None = None) -> None:
     """Run local consistency checks for file <-> database flows."""
     # Deferred: the markdown parsing stack is only needed while the checks run,
     # and importing it at module level slows every CLI invocation (#886).
@@ -117,6 +181,13 @@ async def run_doctor() -> None:
     from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 
     console.print("[blue]Running Basic Memory doctor checks...[/blue]")
+
+    # Route with project_name when the user named a project: explicit --cloud routing
+    # otherwise resolves the workspace from config.default_workspace, which can point
+    # at a different workspace than the project being inspected.
+    client_context = get_client(project_name=project) if project is not None else get_client()
+    async with client_context as client:
+        anomalies = await _check_existing_projects(ProjectClient(client), project)
 
     project_name = f"doctor-{uuid.uuid4().hex[:8]}"
     api_note_title = "Doctor API Note"
@@ -223,11 +294,21 @@ async def run_doctor() -> None:
                 if project_id:
                     await _delete_doctor_project(project_client, project_name, project_id)
 
+    # The preflight ran before the disposable project existed; by now the smoke test
+    # has finished, so an observed anomaly can fail the command without hiding it.
+    _fail_on_observed_anomalies(anomalies)
+
     console.print("[green]Doctor checks passed.[/green]")
 
 
 @app.command()
 def doctor(
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Limit the integrity inspection to one existing project (name or external ID)",
+    ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -243,7 +324,7 @@ def doctor(
         if not local and not cloud:
             local = True
         with force_routing(local=local, cloud=cloud):
-            run_with_cleanup(run_doctor())
+            run_with_cleanup(run_doctor(project))
     except (ToolError, ValueError) as e:
         # str() of a message-less exception (e.g. httpx.ReadTimeout) is empty;
         # fall back to repr so the failure line always names the error (#1027).
