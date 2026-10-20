@@ -149,14 +149,11 @@ def test_healthy_search_index_has_no_findings() -> None:
     assert search_index_findings(_integrity(), ProjectIndexPhase.IDLE) == ()
 
 
-@pytest.mark.parametrize("files_phase", list(ProjectIndexPhase))
-def test_duplicates_are_errors_even_while_indexing(files_phase: ProjectIndexPhase) -> None:
-    """Nothing in an index pass removes an FTS5 duplicate, so waiting cannot help."""
+def test_duplicates_suggest_a_full_reindex() -> None:
     (finding,) = search_index_findings(
         _integrity(duplicate_keys=1, duplicate_rows=2, duplicate_examples=("entity id=1: 3",)),
-        files_phase,
+        ProjectIndexPhase.IDLE,
     )
-    assert finding.severity is DoctorSeverity.ERROR
     assert finding.summary == (
         "1 indexed item is stored more than once (2 extra rows), so search results can repeat."
     )
@@ -172,11 +169,13 @@ def test_duplicates_are_errors_even_while_indexing(files_phase: ProjectIndexPhas
         (ProjectIndexPhase.NEVER_INDEXED, DoctorSeverity.INFO),
     ],
 )
-def test_missing_and_orphaned_rows_are_errors_only_once_indexing_settles(
+def test_search_row_anomalies_are_errors_only_once_file_indexing_settles(
     files_phase: ProjectIndexPhase, severity: DoctorSeverity
 ) -> None:
-    missing, orphaned = search_index_findings(
+    duplicate, missing, orphaned = search_index_findings(
         _integrity(
+            duplicate_keys=1,
+            duplicate_rows=1,
             missing_entity_rows=2,
             missing_examples=("a.md", "b.md"),
             orphaned_rows=1,
@@ -184,7 +183,8 @@ def test_missing_and_orphaned_rows_are_errors_only_once_indexing_settles(
         ),
         files_phase,
     )
-    assert missing.severity is orphaned.severity is severity
+    # Indexing a note rewrites all of its rows, so an owed pass may clear any of them.
+    assert duplicate.severity is missing.severity is orphaned.severity is severity
     assert missing.summary == "2 notes have no search row and cannot be found by search."
     assert missing.action == ReindexSearchAction(full=True)
     assert orphaned.summary == (

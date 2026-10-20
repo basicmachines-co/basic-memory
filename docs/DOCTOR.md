@@ -38,9 +38,10 @@ background, so doctor grades findings by whether they will go away on their own:
 - **error**: will not go away without the fix, such as a duplicated search row,
   or a missing or orphaned row once indexing has settled.
 
-Duplicate rows are always errors: SQLite FTS5 enforces no uniqueness, and nothing
-but a full reindex rewrites them. A missing or orphaned row is info while file
-indexing still has work owed, and an error after it settles.
+Duplicate, missing and orphaned search rows are info while file indexing still has
+work owed, because indexing a note rewrites all of its rows, and errors once it
+settles. Once settled, a plain reindex skips unchanged notes, so the fix is a full
+search reindex.
 
 Search rows normally outnumber notes, because observations and relations have
 their own rows. An unresolved relation target is valid and is not an orphan.
