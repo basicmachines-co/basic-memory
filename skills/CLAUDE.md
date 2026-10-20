@@ -32,6 +32,7 @@ memory-capture/SKILL.md         # Capture a thread's current state into one cohe
 memory-quest/SKILL.md           # Finish Memory Quest Mission 8 with a verified Memory Master note
 memory-comark/SKILL.md          # ::bm-* charts, boards, and live views in notes (references/components.md)
 memory-agents/SKILL.md          # Create, run, and check Basic Memory Cloud agents
+memory-doctor/SKILL.md          # Run bm doctor, explain findings, and apply fixes with consent
 ```
 
 There is no code to compile — this is a pure markdown project. Run `just check`

@@ -278,6 +278,8 @@ SKILL_LISTS = (
             "memory-curate": "needs list_directory",
             # Agents run in Basic Memory Cloud; OpenClaw registers no agent tools.
             "memory-agents": "needs the Cloud agent tools",
+            # Doctor is a CLI command; OpenClaw agents have no `bm` shell.
+            "memory-doctor": "needs the bm CLI",
         },
     ),
     SkillList(
@@ -291,6 +293,7 @@ SKILL_LISTS = (
             "memory-continue": "not shipped for OpenClaw yet",
             "memory-curate": "not shipped for OpenClaw yet",
             "memory-agents": "not shipped for OpenClaw yet",
+            "memory-doctor": "not shipped for OpenClaw yet",
         },
     ),
 )
