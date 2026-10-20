@@ -58,6 +58,25 @@ def hnsw_ef_search_for(limit: int) -> int:
     return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
 
 
+def admission_count_sql(chunks_in_scope: str, admission: VectorAdmission) -> str:
+    """Count a filter's admitted chunks, up to ``:exact_cap``, from the manifest alone.
+
+    The count only chooses the plan, so it reads just what the admission names: scope and
+    the chunk columns in ``search_vector_chunks AS c``. Joining the embeddings to apply
+    the full manifest filter made Postgres hash-join both tables whole, which LIMIT cannot
+    stop; on a 480k-chunk project that read 2.5 GB per filtered search (#1791). Without
+    the join it is an index-only scan of the chunk location index that stops at the cap.
+    Pending or stale chunks are counted too; that can only tip a search near the cap
+    toward the HNSW scan, which is correct for any count.
+    """
+    return (
+        "SELECT count(*) FROM ("
+        "SELECT 1 FROM search_vector_chunks c "
+        f"WHERE {chunks_in_scope} AND {admission.predicate} "
+        "LIMIT :exact_cap) admitted"
+    )
+
+
 # Initializations of one database can run at once: a cloud API pre-warm and a worker
 # touching the same tenant, or several workers starting together. CREATE ... IF NOT
 # EXISTS is not safe under concurrency (the loser fails on a catalog unique index), so
@@ -455,13 +474,7 @@ class PgVectorIndex:
             exact = False
             if admission is not None:
                 counted = await session.execute(
-                    text(
-                        "SELECT count(*) FROM ("
-                        "SELECT 1 FROM search_vector_chunks c "
-                        "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                        f"WHERE {manifest}{admitted} "
-                        "LIMIT :exact_cap) admitted"
-                    ),
+                    text(admission_count_sql(chunks_in_scope, admission)),
                     {**params, "exact_cap": EXACT_ADMISSION_CHUNK_LIMIT + 1},
                 )
                 exact = int(counted.scalar_one()) <= EXACT_ADMISSION_CHUNK_LIMIT
