@@ -490,9 +490,10 @@ def compile_fts_filter(
     operands too, so the strict statement and its relaxed retry read the same rows.
     """
     params: dict[str, Any] = {}
-    conditions = shared_filter_conditions(
+    shared_conditions = shared_filter_conditions(
         scope, params, dialect=POSTGRES_FILTER_DIALECT, query=query, candidate_keys=candidate_keys
     )
+    conditions: list[str] = []
     from_clause = "search_index"
     document_vector: str | None = None
     script_tsqueries: list[str] = []
@@ -548,6 +549,24 @@ def compile_fts_filter(
                 f"@@ to_tsquery('simple', :script_text_{index})))"
                 for index in range(len(script_tsqueries))
             )
+
+    # --- Fence the text candidates (#1791) ---
+    # Trigger: a GIN candidate join narrows the rows text conditions must check.
+    # Why: the planner estimates one row from the candidate UNION, so it applied the
+    #   text conditions, a per-operand EXISTS into the chunk table, to every row in
+    #   scope before joining the candidates. On an 8k-note project that was about
+    #   17k chunk probes and 700k buffer touches per query.
+    # Outcome: OFFSET 0 keeps the joined candidates, already narrowed by the cheap
+    #   scope, type and key filters, as their own subquery, so the text conditions
+    #   run only on the candidates. The alias keeps every later reference to
+    #   ``search_index`` unchanged.
+    if from_clause != "search_index":
+        from_clause = (
+            f"(SELECT search_index.* FROM {from_clause} "
+            f"WHERE {' AND '.join(shared_conditions)} OFFSET 0) AS search_index"
+        )
+    else:
+        conditions = [*shared_conditions, *conditions]
 
     if query.title:
         params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)

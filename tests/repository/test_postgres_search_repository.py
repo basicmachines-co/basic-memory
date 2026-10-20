@@ -1969,3 +1969,44 @@ async def test_postgres_admission_count_reads_only_the_chunk_manifest(session_ma
 
     assert _plan_relations(plan) == {"search_vector_chunks"}
     assert counted == manifest_rows > 0
+
+
+def _filter_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every plan node, depth first."""
+    nodes = [plan]
+    for child in plan.get("Plans", []):
+        nodes.extend(_filter_nodes(child))
+    return nodes
+
+
+@pytest.mark.asyncio
+async def test_postgres_text_conditions_run_only_on_candidates(session_maker, test_project):
+    """The costly text conditions apply to the GIN candidates, not the whole scope (#1791).
+
+    The document-vector condition probes the chunk table once per query operand. Postgres
+    pushes any condition on a plain table down into that table's scan, so without a fence
+    it ran for every row in scope before the candidate join: about 17k chunk probes per
+    query on an 8k-note project. Behind the fence it can only run above the join.
+    """
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    await repo.init_search_index()
+    query = PreparedSearchQuery(
+        search_text="meeting budget review", search_item_types=[SearchItemType.ENTITY]
+    )
+    compiled = postgres_search_query_module.compile_fts_filter(
+        ProjectScope.single(test_project.id), query, allow_relaxed=True
+    )
+    sql = (
+        f"SELECT search_index.id, {compiled.score_expression} AS score "
+        f"FROM {compiled.from_clause} WHERE {compiled.where_clause} "
+        "ORDER BY score DESC LIMIT 10"
+    )
+    async with db.scoped_session(session_maker) as session:
+        explained = await session.execute(text(f"EXPLAIN (FORMAT JSON) {sql}"), compiled.params)
+        plan = explained.scalar_one()[0]["Plan"]
+
+    text_filtered = [
+        node for node in _filter_nodes(plan) if "to_tsvector" in node.get("Filter", "")
+    ]
+    assert text_filtered
+    assert {node["Node Type"] for node in text_filtered} == {"Subquery Scan"}
