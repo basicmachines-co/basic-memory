@@ -7,9 +7,8 @@ description: "Check local Basic Memory projects with bm doctor, explain the find
 
 `bm doctor` checks the user's local Basic Memory projects and reports what is
 wrong. Each problem comes with the command that fixes it, when one exists.
-Doctor only reads: running it never changes a project, the config, or the
-database. The fixes it suggests do change things, so run them only after the
-user agrees.
+Doctor's checks only read; they never change a project's notes or index. The
+fixes it suggests do change things, so run them only after the user agrees.
 
 This skill needs a shell with the `bm` (or `basic-memory`) command.
 

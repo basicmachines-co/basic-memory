@@ -1,8 +1,10 @@
 # bm doctor
 
 `bm doctor` reports problems in your local Basic Memory projects and, for each one
-it can fix, the command that fixes it. It only reads: it never changes a project,
-your config, or the database. See #1798 for the design.
+it can fix, the command that fixes it. Its checks only read: they never change a
+project's notes or index, and the self-test runs in a throwaway sandbox. Like every
+local `bm` command, opening the database first reconciles the projects in your
+config with the database (#1334). See #1798 for the design.
 
 ```bash
 bm doctor                      # every local project, then the sandboxed self-test

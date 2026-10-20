@@ -1,6 +1,8 @@
 """`bm doctor`: report problems in the user's projects and how to fix them (#1798).
 
-Doctor does two things, and neither writes to the user's projects, config or database:
+Doctor does two things. Its checks and its self-test write nothing to the user's
+projects, config or database. (Opening the local database first runs the same
+config-to-database project reconciliation every local `bm` command runs, #1334.)
 
 1. It asks the API for a report on each local project. The report lists findings and,
    for each one it can repair, a typed action that this module turns into a command.
@@ -271,7 +273,7 @@ async def run_self_test() -> None:
     # Trigger: `bm doctor --self-test` was run by hand, outside the sandbox.
     # Why: the self-test creates a project and never removes it, which is only
     #   safe in a throwaway config. Run against the real one, it would leave a
-    #   project behind and break doctor's promise to change nothing.
+    #   project behind in the user's real install.
     # Outcome: refuse unless the parent's marker names a sandbox that holds the
     #   config directory this process would write to.
     sandbox = os.environ.get(SANDBOX_MARKER)
