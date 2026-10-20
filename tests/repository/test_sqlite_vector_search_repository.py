@@ -1155,6 +1155,101 @@ async def test_sqlite_chunk_upsert_and_delete_lifecycle(search_repository):
 
 
 @pytest.mark.asyncio
+async def test_sqlite_rewrite_moves_reused_chunks_in_one_statement(search_repository):
+    """A note rewrite moves every reused chunk's fingerprint and location set-based (#1786)."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    project_id = search_repository.project_id
+    entity_id = 121
+
+    def note_rows(relation_id_base: int, edited: str) -> list[SearchIndexRow]:
+        content = "\n\n".join(
+            [
+                _vector_chunk_section("Auth"),
+                _vector_chunk_section("Schema"),
+                _vector_chunk_section("Queue", edited),
+            ]
+        )
+        rows = [
+            _entity_row(
+                project_id=project_id,
+                row_id=entity_id,
+                entity_id=entity_id,
+                title="Rewritten Note",
+                permalink="specs/rewritten-note",
+                content_stems=content,
+            )
+        ]
+        rows.extend(
+            _relation_row(
+                project_id=project_id,
+                row_id=relation_id_base + index,
+                entity_id=entity_id,
+                title=f"Rewritten Note links Target {index}",
+                permalink=f"specs/rewritten-note/links/target-{index}",
+                relation_type="links",
+            )
+            for index in range(3)
+        )
+        return rows
+
+    async def manifest() -> dict[str, Any]:
+        async with db.scoped_session(search_repository.session_maker) as session:
+            result = await session.execute(
+                text(
+                    "SELECT chunk_key, id, source_type, source_row_id, entity_fingerprint "
+                    "FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND entity_id = :entity_id"
+                ),
+                {"project_id": project_id, "entity_id": entity_id},
+            )
+            return {row.chunk_key: row for row in result.fetchall()}
+
+    await search_repository.bulk_index_items(note_rows(500, "vector sync section body content."))
+    await search_repository.sync_entity_vectors(entity_id)
+    before = await manifest()
+
+    # Rewrite: the relation rows are recreated with new ids and one section changes.
+    await search_repository.delete_by_entity_id(entity_id)
+    await search_repository.bulk_index_items(note_rows(600, "revised section body content."))
+
+    metadata_statements: list[str] = []
+    sync_engine = search_repository.session_maker.kw["bind"].sync_engine
+
+    def record_statement(conn, cursor, statement, parameters, context, executemany):
+        if "SET entity_fingerprint =" in statement:
+            metadata_statements.append(statement)
+
+    event.listen(sync_engine, "before_cursor_execute", record_statement)
+    try:
+        result = await search_repository.sync_entity_vectors_batch([entity_id])
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record_statement)
+
+    assert result.entities_synced == 1
+    assert result.embedding_jobs_total == 1
+    assert len(metadata_statements) == 1
+
+    after = await manifest()
+    reused_keys = set(before) & set(after)
+    assert len(reused_keys) == len(after) - 1
+    for chunk_key in reused_keys:
+        assert after[chunk_key].id == before[chunk_key].id
+    assert len({row.entity_fingerprint for row in after.values()}) == 1
+    assert {row.source_row_id for row in after.values() if row.source_type == "relation"} == {
+        600,
+        601,
+        602,
+    }
+
+    unchanged = await search_repository.sync_entity_vectors_batch([entity_id])
+    assert unchanged.entities_skipped == 1
+
+
+@pytest.mark.asyncio
 async def test_adapter_write_failure_stays_pending_and_retries_idempotently(search_repository):
     """A partial external write must never make an uncommitted vector searchable."""
     if not isinstance(search_repository, SQLiteSearchRepository):
