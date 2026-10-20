@@ -60,7 +60,8 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             for chat in conversations:
                 created_at, modified_at = self._resolve_timestamps(chat)
                 date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
-                clean_title = clean_filename(chat["title"])
+                title = self._resolve_title(chat)
+                clean_title = clean_filename(title)
                 relative_path = (
                     f"{destination_folder}/{date_prefix}-{clean_title}"
                     if destination_folder
@@ -69,7 +70,9 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 permalink, file_path = self.build_import_paths(relative_path)
 
                 # Convert to entity
-                entity = self._format_chat_content(chat, permalink, created_at, modified_at)
+                entity = self._format_chat_content(
+                    chat, title, permalink, created_at, modified_at
+                )
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)
@@ -136,13 +139,58 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             modified_at = created_at
         return created_at, modified_at
 
+    def _resolve_title(self, conversation: Dict[str, Any]) -> str:
+        """Resolve the conversation title, tolerating an absent or empty one.
+
+        OpenAI's export can carry a conversation with no `title`, or a null or
+        blank one, for example a chat that was never named. Like the date in
+        `_resolve_timestamps`, the title names the output file, so the
+        fallback must be unique and stay the same across re-exports. It uses
+        the full conversation id, or the root message id when the export has
+        none; both are fixed when the conversation starts. Two conversations
+        with the same fallback would write the same file, so a conversation
+        with neither id is rejected rather than named generically.
+
+        Args:
+            conversation: ChatGPT conversation data.
+
+        Returns:
+            The title to use for the note and its file name.
+        """
+        title = conversation.get("title")
+        if isinstance(title, str) and title.strip():
+            return title
+        stable_id = (
+            conversation.get("conversation_id")
+            or conversation.get("id")
+            or self._root_message_id(conversation)
+        )
+        if not stable_id:
+            raise ValueError(
+                "ChatGPT conversation has no title, conversation id, or root message id"
+            )
+        return f"Untitled conversation {stable_id}"
+
+    def _root_message_id(self, conversation: Dict[str, Any]) -> str | None:
+        """The id of the conversation's root node, which later messages never change."""
+        for node_id, node in conversation.get("mapping", {}).items():
+            if node.get("parent") is None:
+                return node_id
+        return None
+
     def _format_chat_content(
-        self, conversation: Dict[str, Any], permalink: str, created_at: float, modified_at: float
+        self,
+        conversation: Dict[str, Any],
+        title: str,
+        permalink: str,
+        created_at: float,
+        modified_at: float,
     ) -> EntityMarkdown:  # pragma: no cover
         """Convert chat conversation to Basic Memory entity.
 
         Args:
             conversation: ChatGPT conversation data.
+            title: Resolved conversation title.
             permalink: Permalink for the entity.
             created_at: Resolved creation timestamp.
             modified_at: Resolved modification timestamp.
@@ -159,7 +207,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
         # Format content
         content = self._format_chat_markdown(
-            title=conversation["title"],
+            title=title,
             mapping=conversation["mapping"],
             root_id=root_id,
             created_at=created_at,
@@ -171,7 +219,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             frontmatter=EntityFrontmatter(
                 metadata={
                     "type": "conversation",
-                    "title": conversation["title"],
+                    "title": title,
                     "created": format_timestamp(created_at),
                     "modified": format_timestamp(modified_at),
                     "permalink": permalink,
