@@ -11,7 +11,9 @@ from typer.testing import CliRunner
 
 from basic_memory import db
 from basic_memory.cli.main import app as cli_app
+from basic_memory.config_models import ProjectEntry, ProjectMode
 from basic_memory.models import Project
+from basic_memory.repository.project_repository import ProjectRepository
 
 
 def _invoke(*args: str):
@@ -65,6 +67,29 @@ async def test_doctor_exits_nonzero_and_prints_the_fix_for_an_orphaned_row(
     human = await asyncio.to_thread(_invoke, "--skip-self-test")
     assert human.exit_code == 1
     assert f"fix: bm reindex --search --project {test_project.name}" in human.stdout
+
+
+@pytest.mark.asyncio
+async def test_cloud_mode_projects_are_skipped_not_reported(
+    app, app_config, test_project, config_manager, engine_factory, tmp_path_factory
+):
+    """Local remedies cannot fix a cloud project, so doctor must never report one."""
+    cloud_path = tmp_path_factory.mktemp("cloud-copy")
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        await ProjectRepository().create(
+            session,
+            {"name": "research", "path": str(cloud_path), "is_active": True, "is_default": False},
+        )
+    config = config_manager.load_config()
+    config.projects["research"] = ProjectEntry(path=str(cloud_path), mode=ProjectMode.CLOUD)
+    config_manager.save_config(config)
+
+    result = await asyncio.to_thread(_invoke, "--skip-self-test", "--json")
+
+    output = json.loads(result.stdout)
+    assert output["skipped_cloud_projects"] == ["research"]
+    assert [project["name"] for project in output["projects"]] == [test_project.name]
 
 
 def test_self_test_flow_writes_indexes_and_searches(
