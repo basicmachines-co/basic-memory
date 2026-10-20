@@ -145,9 +145,11 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         OpenAI's export can carry a conversation with no `title`, or a null or
         blank one, for example a chat that was never named. Like the date in
         `_resolve_timestamps`, the title names the output file, so the
-        fallback must stay the same across re-exports: it is built from the
-        conversation id, which never changes, not from import order. Without
-        an id, a fixed "Untitled conversation" is the last resort.
+        fallback must be unique and stay the same across re-exports. It uses
+        the full conversation id, or the root message id when the export has
+        none; both are fixed when the conversation starts. Two conversations
+        with the same fallback would write the same file, so a conversation
+        with neither id is rejected rather than named generically.
 
         Args:
             conversation: ChatGPT conversation data.
@@ -158,10 +160,23 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         title = conversation.get("title")
         if isinstance(title, str) and title.strip():
             return title
-        conversation_id = conversation.get("conversation_id") or conversation.get("id")
-        if conversation_id:
-            return f"Untitled conversation {str(conversation_id)[:8]}"
-        return "Untitled conversation"
+        stable_id = (
+            conversation.get("conversation_id")
+            or conversation.get("id")
+            or self._root_message_id(conversation)
+        )
+        if not stable_id:
+            raise ValueError(
+                "ChatGPT conversation has no title, conversation id, or root message id"
+            )
+        return f"Untitled conversation {stable_id}"
+
+    def _root_message_id(self, conversation: Dict[str, Any]) -> str | None:
+        """The id of the conversation's root node, which later messages never change."""
+        for node_id, node in conversation.get("mapping", {}).items():
+            if node.get("parent") is None:
+                return node_id
+        return None
 
     def _format_chat_content(
         self,
