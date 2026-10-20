@@ -287,3 +287,33 @@ def test_import_chatgpt_no_timestamps_anywhere_is_deterministic(tmp_path, sample
     epoch_prefix = datetime.fromtimestamp(UNKNOWN_DATE_SENTINEL).astimezone().strftime("%Y%m%d")
     conv_path = tmp_path / "chats" / f"{epoch_prefix}-Test_Conversation.md"
     assert conv_path.exists()
+
+
+@pytest.mark.parametrize("title_shape", ["missing", "null", "blank"])
+def test_import_chatgpt_untitled_conversation_uses_its_id(
+    tmp_path, sample_conversation, title_shape
+):
+    """A conversation without a usable title still imports, named from its id.
+
+    The export can omit `title` or leave it null or blank. The import used to
+    fail on the first such conversation. The fallback comes from the
+    conversation id, so a later re-export writes to the same file.
+    """
+    config = get_project_config()
+    config.home = tmp_path
+    if title_shape == "missing":
+        del sample_conversation["title"]
+    else:
+        sample_conversation["title"] = None if title_shape == "null" else "   "
+    sample_conversation["conversation_id"] = "6789abcd-0000-4000-8000-000000000000"
+    json_file = tmp_path / "conversations.json"
+    json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
+
+    for _ in range(2):
+        result = runner.invoke(app, ["import", "chatgpt", str(json_file), "--folder", "chats"])
+        assert result.exit_code == 0
+        assert "Imported 1 conversations" in result.output
+
+    [conv_path] = (tmp_path / "chats").glob("*.md")
+    assert conv_path.name == "20250111-Untitled_conversation_6789abcd.md"
+    assert "title: Untitled conversation 6789abcd" in conv_path.read_text(encoding="utf-8")
