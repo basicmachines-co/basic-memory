@@ -68,6 +68,9 @@ class CompiledFilter:
     params: dict[str, Any]
     order_by_clause: str
     score_expression: str
+    # Postgres only: the statement joins GIN text candidates, and every table it reads
+    # has an index that serves it better than a sequential scan.
+    prefer_index_scans: bool = False
 
 
 class FtsBackend(Protocol):
