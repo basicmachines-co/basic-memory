@@ -234,7 +234,14 @@ def materialization_findings(health: NoteMaterializationHealth) -> tuple[DoctorF
             DoctorFinding(
                 check=DoctorCheck.MATERIALIZATION,
                 severity=DoctorSeverity.INFO,
-                summary=f"{_plural(health.in_flight, 'note')} still being saved to disk.",
+                summary=(
+                    f"{_plural(health.in_flight, 'note')} still being saved to disk. A running "
+                    "Basic Memory server finishes this on its own."
+                ),
+                # A save is left pending or writing when the process that accepted it
+                # exits first, and only startup recovery or a search reindex re-drives
+                # it. Offered for an install with no server running, where nothing will.
+                action=ReindexSearchAction(full=False),
             )
         )
     return tuple(findings)
