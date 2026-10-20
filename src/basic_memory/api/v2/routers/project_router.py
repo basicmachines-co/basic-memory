@@ -34,6 +34,8 @@ from basic_memory.index.local_project import ProjectIndexRouteRequest
 from basic_memory.read_cache import invalidate_cache
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
+from basic_memory.repository.index_integrity import inspect_index_integrity
+from basic_memory.schemas.index_integrity import IndexIntegrityResponse
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.project_info import (
     ProjectItem,
@@ -278,6 +280,16 @@ async def index_project(
             run_in_background=run_in_background,
         )
     )
+
+
+@router.get("/{project_id}/integrity", response_model=IndexIntegrityResponse)
+async def get_project_integrity(
+    project_internal_id: ProjectExternalIdPathDep,
+    session_maker: SessionMakerDep,
+) -> IndexIntegrityResponse:
+    """Inspect existing project data without indexing, repairing, or acquiring locks."""
+    report = await inspect_index_integrity(session_maker, project_internal_id)
+    return IndexIntegrityResponse.model_validate(report)
 
 
 # Status only reads: it walks the project files and reports index readiness. It was a

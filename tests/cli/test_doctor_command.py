@@ -16,8 +16,8 @@ from basic_memory.index import note_content_materialization
 runner = CliRunner()
 
 
-def _raise(exc: Exception) -> Callable[[], NoReturn]:
-    def raiser() -> NoReturn:
+def _raise(exc: Exception) -> Callable[..., NoReturn]:
+    def raiser(*_args: object, **_kwargs: object) -> NoReturn:
         raise exc
 
     return raiser
