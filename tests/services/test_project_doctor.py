@@ -252,7 +252,9 @@ def test_failed_writes_are_warnings_retried_by_a_search_reindex(total: int, phra
 def test_writes_in_flight_are_info() -> None:
     (finding,) = materialization_findings(_health(in_flight=3))
     assert finding.severity is DoctorSeverity.INFO
-    assert finding.summary == "3 notes still being saved to disk."
+    assert finding.summary.startswith("3 notes still being saved to disk.")
+    # An abandoned save has no worker left to finish it; the reindex re-drives it.
+    assert finding.action == ReindexSearchAction(full=False)
 
 
 # --- Report ---
