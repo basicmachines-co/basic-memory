@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from unittest.mock import patch
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from basic_memory import db
@@ -31,8 +31,9 @@ from basic_memory.repository.postgres_search_repository import (
     _strip_nul_from_row,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-from typing import override
+from typing import Any, override
 
 
 pytestmark = pytest.mark.postgres
@@ -1141,6 +1142,253 @@ async def test_postgres_vector_sync_shards_oversized_entity_and_resumes(
         )
         assert int(chunk_count.scalar_one()) == 6
         assert int(embedding_count.scalar_one()) == 6
+
+
+OVERSIZED_NOTE_ENTITY_ID = 440
+OVERSIZED_NOTE_SECTIONS = 40
+OVERSIZED_NOTE_OBSERVATIONS = 30
+OVERSIZED_NOTE_CHUNKS = OVERSIZED_NOTE_SECTIONS + 1 + OVERSIZED_NOTE_OBSERVATIONS
+OVERSIZED_NOTE_SHARD_SIZE = 16
+
+
+def _oversized_note_rows(
+    project_id: int, *, observation_id_base: int, edited_section: int | None = None
+) -> list[SearchIndexRow]:
+    """Build an oversized note's search rows: one entity row plus observation rows.
+
+    A note rewrite deletes and recreates its observation rows, so callers pass a new
+    observation_id_base to model one. The edited section gets different text.
+    """
+    now = datetime.now(timezone.utc)
+    content = "\n\n".join(
+        f"## Part {index}\n" + ("y" if index == edited_section else "x") * 860
+        for index in range(1, OVERSIZED_NOTE_SECTIONS + 1)
+    )
+    rows = [
+        SearchIndexRow(
+            project_id=project_id,
+            id=OVERSIZED_NOTE_ENTITY_ID,
+            title="Oversized Edited Note",
+            content_stems=content,
+            content_snippet=content,
+            permalink="specs/oversized-edited-note",
+            file_path="specs/oversized-edited-note.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=OVERSIZED_NOTE_ENTITY_ID,
+            metadata={"note_type": "spec"},
+            created_at=now,
+            updated_at=now,
+        )
+    ]
+    for index in range(OVERSIZED_NOTE_OBSERVATIONS):
+        snippet = f"observation {index} about the oversized edited note"
+        rows.append(
+            SearchIndexRow(
+                project_id=project_id,
+                id=observation_id_base + index,
+                title=f"fact: observation {index}",
+                content_stems=snippet,
+                content_snippet=snippet,
+                permalink=f"specs/oversized-edited-note/observations/fact/{index}",
+                file_path="specs/oversized-edited-note.md",
+                type=SearchItemType.OBSERVATION.value,
+                entity_id=OVERSIZED_NOTE_ENTITY_ID,
+                category="fact",
+                metadata={"note_type": "spec"},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    return rows
+
+
+async def _write_oversized_note(
+    repo: PostgresSearchRepository,
+    *,
+    observation_id_base: int,
+    edited_section: int | None = None,
+) -> None:
+    """Replace the note's search rows the way a note rewrite does."""
+    await repo.delete_by_entity_id(OVERSIZED_NOTE_ENTITY_ID)
+    await repo.bulk_index_items(
+        _oversized_note_rows(
+            repo.project_id,
+            observation_id_base=observation_id_base,
+            edited_section=edited_section,
+        )
+    )
+
+
+async def _sync_until_complete(repo: PostgresSearchRepository) -> list[VectorSyncBatchResult]:
+    """Run shard passes until the note is fully embedded; return every pass result."""
+    results: list[VectorSyncBatchResult] = []
+    for _ in range(OVERSIZED_NOTE_CHUNKS):
+        result = await repo.sync_entity_vectors_batch([OVERSIZED_NOTE_ENTITY_ID])
+        assert result.entities_failed == 0
+        results.append(result)
+        if result.entities_synced == 1:
+            return results
+    raise AssertionError("oversized note never finished syncing")
+
+
+async def _oversized_note_manifest(session_maker, project_id: int) -> dict[str, Any]:
+    """Map each chunk_key to its manifest row and whether it has a stored vector."""
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            text(
+                "SELECT c.chunk_key, c.id, c.source_type, c.source_row_id, "
+                "c.entity_fingerprint, c.embedding_status, e.chunk_id IS NOT NULL AS has_vector "
+                "FROM search_vector_chunks c "
+                "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
+                "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
+            ),
+            {"project_id": project_id, "entity_id": OVERSIZED_NOTE_ENTITY_ID},
+        )
+        return {row.chunk_key: row for row in result.fetchall()}
+
+
+async def _oversized_note_repo(session_maker, test_project, provider) -> PostgresSearchRepository:
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=provider,
+    )
+    await repo.init_search_index()
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_postgres_edit_to_oversized_note_prepares_only_what_changed(
+    session_maker, test_project, monkeypatch
+):
+    """One edited section of an oversized note must not cost one statement per chunk (#1786).
+
+    Any edit changes the note fingerprint, so every reused chunk needs its fingerprint
+    and (after a rewrite recreates observation rows) its location moved. Doing that
+    one row at a time made each pass cost the whole note in database round trips.
+    """
+    await _skip_if_pgvector_unavailable(session_maker)
+    monkeypatch.setattr(
+        search_repository_base_module,
+        "OVERSIZED_ENTITY_VECTOR_SHARD_SIZE",
+        OVERSIZED_NOTE_SHARD_SIZE,
+    )
+    repo = await _oversized_note_repo(session_maker, test_project, StubEmbeddingProvider())
+
+    await _write_oversized_note(repo, observation_id_base=10_000)
+    seed_results = await _sync_until_complete(repo)
+    assert len(seed_results) > 1, "fixture must be oversized enough to need several shards"
+    before = await _oversized_note_manifest(session_maker, test_project.id)
+    assert len(before) == OVERSIZED_NOTE_CHUNKS
+
+    # Rewrite the note: one section changes, every observation row gets a new id.
+    await _write_oversized_note(repo, observation_id_base=20_000, edited_section=7)
+
+    metadata_statements: list[str] = []
+    statements: list[str] = []
+    sync_engine = session_maker.kw["bind"].sync_engine
+
+    def record_statement(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+        if "SET entity_fingerprint =" in statement:
+            metadata_statements.append(statement)
+
+    event.listen(sync_engine, "before_cursor_execute", record_statement)
+    try:
+        edit_result = await repo.sync_entity_vectors_batch([OVERSIZED_NOTE_ENTITY_ID])
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record_statement)
+
+    reused_chunks = OVERSIZED_NOTE_CHUNKS - 1
+    assert edit_result.entities_synced == 1
+    assert edit_result.embedding_jobs_total == 1
+    assert edit_result.chunks_total == OVERSIZED_NOTE_CHUNKS
+    assert edit_result.chunks_skipped == reused_chunks
+    # The reused chunks' metadata moves in one statement, not one per chunk.
+    assert len(metadata_statements) == 1
+    assert len(statements) < reused_chunks
+
+    after = await _oversized_note_manifest(session_maker, test_project.id)
+    assert len(after) == OVERSIZED_NOTE_CHUNKS
+    removed_keys = set(before) - set(after)
+    added_keys = set(after) - set(before)
+    # Stale deletion: the edited section's old chunk is gone, its new chunk is embedded.
+    assert len(removed_keys) == 1 and len(added_keys) == 1
+    (added_key,) = added_keys
+    assert after[added_key].embedding_status == "ready" and after[added_key].has_vector
+
+    # Reused chunks keep their manifest row and their vector.
+    for chunk_key in set(before) & set(after):
+        assert after[chunk_key].id == before[chunk_key].id
+        assert after[chunk_key].embedding_status == "ready" and after[chunk_key].has_vector
+
+    # Every chunk carries the new fingerprint and points at the recreated rows.
+    fingerprints_after = {row.entity_fingerprint for row in after.values()}
+    assert len(fingerprints_after) == 1
+    assert fingerprints_after != {row.entity_fingerprint for row in before.values()}
+    observation_row_ids = {
+        row.source_row_id for row in after.values() if row.source_type == "observation"
+    }
+    assert observation_row_ids == set(range(20_000, 20_000 + OVERSIZED_NOTE_OBSERVATIONS))
+
+    unchanged_result = await repo.sync_entity_vectors_batch([OVERSIZED_NOTE_ENTITY_ID])
+    assert unchanged_result.entities_skipped == 1
+    assert unchanged_result.embedding_jobs_total == 0
+
+
+@pytest.mark.asyncio
+async def test_postgres_oversized_note_repairs_orphans_and_reembeds_on_model_change(
+    session_maker, test_project, monkeypatch
+):
+    """Orphan repair and model-change re-embedding still hold for an oversized note."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    monkeypatch.setattr(
+        search_repository_base_module,
+        "OVERSIZED_ENTITY_VECTOR_SHARD_SIZE",
+        OVERSIZED_NOTE_SHARD_SIZE,
+    )
+    repo = await _oversized_note_repo(session_maker, test_project, StubEmbeddingProvider())
+    await _write_oversized_note(repo, observation_id_base=10_000)
+    await _sync_until_complete(repo)
+
+    # Orphan repair: chunks whose vectors went missing are embedded again.
+    manifest = await _oversized_note_manifest(session_maker, test_project.id)
+    orphan_ids = sorted(row.id for row in manifest.values())[:3]
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks SET embedding_status = 'pending' WHERE id = ANY(:ids)"
+            ),
+            {"ids": orphan_ids},
+        )
+        await session.commit()
+
+    orphan_result = await repo.sync_entity_vectors_batch([OVERSIZED_NOTE_ENTITY_ID])
+    assert orphan_result.entities_synced == 1
+    assert orphan_result.embedding_jobs_total == len(orphan_ids)
+    repaired = await _oversized_note_manifest(session_maker, test_project.id)
+    assert all(row.embedding_status == "ready" and row.has_vector for row in repaired.values())
+
+    # Model change: every chunk is re-embedded, one deferred shard at a time.
+    repo_v2 = await _oversized_note_repo(session_maker, test_project, StubEmbeddingProviderV2())
+    model_results = await _sync_until_complete(repo_v2)
+    expected_passes = -(-OVERSIZED_NOTE_CHUNKS // OVERSIZED_NOTE_SHARD_SIZE)
+    assert len(model_results) == expected_passes
+    assert [result.entities_deferred for result in model_results] == [1] * (expected_passes - 1) + [
+        0
+    ]
+    assert sum(result.embedding_jobs_total for result in model_results) == OVERSIZED_NOTE_CHUNKS
+    assert all(result.embedding_jobs_total <= OVERSIZED_NOTE_SHARD_SIZE for result in model_results)
+
+    unchanged_result = await repo_v2.sync_entity_vectors_batch([OVERSIZED_NOTE_ENTITY_ID])
+    assert unchanged_result.entities_skipped == 1
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,9 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle exists only for static anal
 
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 SQLITE_MAX_PREPARE_WINDOW = 8
+# Three binds per row keeps one batch far under both drivers' bind caps
+# (asyncpg 32767, SQLite 32766).
+CHUNK_METADATA_UPDATE_BATCH_SIZE = 2000
 
 
 @dataclass(slots=True)
@@ -1176,7 +1179,6 @@ async def apply_entity_vector_prepare_plan(
             staged_deletions=staged_deletions,
         )
 
-    timestamp_expr = repository._timestamp_now_expr()
     staged_deletions: list[StagedVectorDeletion] = []
     if plan.stale_ids:
         staged_deletions = await repository._delete_stale_chunks(
@@ -1185,25 +1187,13 @@ async def apply_entity_vector_prepare_plan(
             plan.entity_id,
             expected_deletions=plan.stale_deletions,
         )
-    for update in plan.metadata_updates:
-        await session.execute(
-            text(
-                "UPDATE search_vector_chunks "
-                "SET entity_fingerprint = :entity_fingerprint, "
-                "embedding_model = :embedding_model, "
-                "source_row_id = :source_row_id, "
-                "chunk_index = :chunk_index, "
-                f"updated_at = {timestamp_expr} "
-                "WHERE id = :id"
-            ),
-            {
-                "id": update.row_id,
-                "entity_fingerprint": plan.entity_fingerprint,
-                "embedding_model": plan.embedding_model,
-                "source_row_id": update.source_row_id,
-                "chunk_index": update.chunk_index,
-            },
-        )
+    await apply_chunk_metadata_updates(
+        repository,
+        session,
+        metadata_updates=plan.metadata_updates,
+        entity_fingerprint=plan.entity_fingerprint,
+        embedding_model=plan.embedding_model,
+    )
 
     embedding_jobs: list[PendingEmbeddingJob] = []
     if plan.scheduled_records:
@@ -1235,6 +1225,60 @@ async def apply_entity_vector_prepare_plan(
         stale_chunk_ids=[deletion.row_id for deletion in staged_deletions],
         staged_deletions=staged_deletions,
     )
+
+
+async def apply_chunk_metadata_updates(
+    repository: SearchRepositoryBase,
+    session: AsyncSession,
+    *,
+    metadata_updates: list[ChunkMetadataUpdate],
+    entity_fingerprint: str,
+    embedding_model: str,
+) -> None:
+    """Move reused chunks to the current fingerprint and location, set-based.
+
+    Any edit changes the entity fingerprint, so every reused chunk of the note gets
+    an update. One statement per row made an edit to an 8k-chunk note cost 8k
+    database round trips before a single chunk was embedded (#1786). Each batch is
+    one statement, so the round trips scale with the batch count instead.
+    """
+    timestamp_expr = repository._timestamp_now_expr()
+    for start in range(0, len(metadata_updates), CHUNK_METADATA_UPDATE_BATCH_SIZE):
+        batch = metadata_updates[start : start + CHUNK_METADATA_UPDATE_BATCH_SIZE]
+        params: dict[str, object] = {
+            "project_id": repository.project_id,
+            "entity_fingerprint": entity_fingerprint,
+            "embedding_model": embedding_model,
+        }
+        values: list[str] = []
+        # The SQL template is built from integer enumerate() indices only.
+        for index, update in enumerate(batch):
+            params[f"id_{index}"] = update.row_id
+            params[f"source_row_id_{index}"] = update.source_row_id
+            params[f"chunk_index_{index}"] = update.chunk_index
+            # Constraint: Postgres cannot infer bind types inside a bare VALUES list,
+            # so each value is cast; SQLite accepts the same casts.
+            values.append(
+                f"(CAST(:id_{index} AS BIGINT), "
+                f"CAST(:source_row_id_{index} AS INTEGER), "
+                f"CAST(:chunk_index_{index} AS INTEGER))"
+            )
+        await session.execute(
+            text(
+                "WITH moved (id, source_row_id, chunk_index) AS "
+                f"(VALUES {', '.join(values)}) "
+                "UPDATE search_vector_chunks "
+                "SET entity_fingerprint = :entity_fingerprint, "
+                "embedding_model = :embedding_model, "
+                "source_row_id = moved.source_row_id, "
+                "chunk_index = moved.chunk_index, "
+                f"updated_at = {timestamp_expr} "
+                "FROM moved "
+                "WHERE search_vector_chunks.id = moved.id "
+                "AND search_vector_chunks.project_id = :project_id"
+            ),
+            params,
+        )
 
 
 async def upsert_scheduled_chunk_records(
