@@ -115,9 +115,9 @@ def search_index_findings(
     rows. Pending relations or embeddings do not touch them.
     """
     # Trigger: file indexing still has work owed (or never ran).
-    # Why: orphaned and missing search rows are derived state; a pass that is
-    #   still running removes or writes them, so reporting them as damage would be
-    #   a false alarm.
+    # Why: duplicate, orphaned and missing search rows are derived state. Indexing
+    #   a note deletes all of its rows and writes them again, so a pass that is
+    #   still owed may clear them; reporting them as damage would be a false alarm.
     # Outcome: they are info until file indexing settles, and errors after it,
     #   because then nothing will repair them without a reindex.
     lag_severity = (
@@ -125,12 +125,10 @@ def search_index_findings(
     )
     findings: list[DoctorFinding] = []
     if integrity.duplicate_keys:
-        # SQLite FTS5 enforces no uniqueness, so a duplicate stays until the note's
-        # search rows are rewritten. Indexing in progress does not change that.
         findings.append(
             DoctorFinding(
                 check=DoctorCheck.SEARCH_INDEX,
-                severity=DoctorSeverity.ERROR,
+                severity=lag_severity,
                 summary=(
                     f"{_plural(integrity.duplicate_keys, 'indexed item')} "
                     f"{'is' if integrity.duplicate_keys == 1 else 'are'} stored more than once "
