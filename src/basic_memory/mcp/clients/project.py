@@ -13,7 +13,7 @@ from httpx import AsyncClient
 from basic_memory.schemas import ProjectIndexStatusResponse, ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
-from basic_memory.schemas.index_integrity import IndexIntegrityResponse
+from basic_memory.schemas.doctor import ProjectDoctorReport
 
 
 class ProjectClient:
@@ -77,13 +77,6 @@ class ProjectClient:
             "/v2/projects/",
             json=project_data,
         )
-        return ProjectStatusResponse.model_validate(response.json())
-
-    async def create_doctor_project(self) -> ProjectStatusResponse:
-        """Create the server-generated disposable project used by doctor."""
-        from basic_memory.mcp.tools.utils import call_post
-
-        response = await call_post(self.http_client, "/v2/projects/doctor")
         return ProjectStatusResponse.model_validate(response.json())
 
     async def delete_project(
@@ -230,12 +223,12 @@ class ProjectClient:
         )
         return ProjectIndexStatusResponse.model_validate(response.json())
 
-    async def get_integrity(self, project_external_id: str) -> IndexIntegrityResponse:
-        """Inspect existing project data without changing its index."""
+    async def get_doctor_report(self, project_external_id: str) -> ProjectDoctorReport:
+        """Report a project's problems and their repairs without changing the project."""
         from basic_memory.mcp.tools.utils import call_get
 
-        response = await call_get(self.http_client, f"/v2/projects/{project_external_id}/integrity")
-        return IndexIntegrityResponse.model_validate(response.json())
+        response = await call_get(self.http_client, f"/v2/projects/{project_external_id}/doctor")
+        return ProjectDoctorReport.model_validate(response.json())
 
     async def get_info(self, project_external_id: str) -> ProjectInfoResponse:
         """Get detailed project information and statistics.

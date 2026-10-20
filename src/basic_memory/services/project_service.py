@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import shutil
-import uuid
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -261,9 +260,7 @@ class ProjectService:
                 # Not nested in either direction
                 return False
 
-    async def add_project(
-        self, name: str, path: str, set_default: bool = False, *, allow_nested: bool = False
-    ) -> None:
+    async def add_project(self, name: str, path: str, set_default: bool = False) -> None:
         """Add a new project to the configuration and database.
 
         Args:
@@ -340,25 +337,22 @@ class ProjectService:
                             f"In cloud mode, paths are normalized to lowercase to prevent case-sensitivity issues."
                         )  # pragma: no cover
 
-            # Doctor creates a disposable project inside the configured project root.
-            # It must be allowed to coexist with the existing root project.
-            if not allow_nested:
-                for existing in existing_projects:
-                    if self._check_nested_paths(resolved_path, existing.path):
-                        p_new = Path(resolved_path).resolve()
-                        p_existing = Path(existing.path).resolve()
-                        if p_new.is_relative_to(p_existing):
-                            raise ValueError(
-                                f"Cannot create project at '{resolved_path}': "
-                                f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
-                                f"Projects cannot share directory trees."
-                            )
-                        else:
-                            raise ValueError(
-                                f"Cannot create project at '{resolved_path}': "
-                                f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
-                                f"Projects cannot share directory trees."
-                            )
+            for existing in existing_projects:
+                if self._check_nested_paths(resolved_path, existing.path):
+                    p_new = Path(resolved_path).resolve()
+                    p_existing = Path(existing.path).resolve()
+                    if p_new.is_relative_to(p_existing):
+                        raise ValueError(
+                            f"Cannot create project at '{resolved_path}': "
+                            f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
+                            f"Projects cannot share directory trees."
+                        )
+                    else:
+                        raise ValueError(
+                            f"Cannot create project at '{resolved_path}': "
+                            f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
+                            f"Projects cannot share directory trees."
+                        )
 
             # Ensure the project directory exists on disk.
             # Trigger: project_root not set means local filesystem mode (not S3/cloud)
@@ -429,19 +423,6 @@ class ProjectService:
                             )
 
         logger.info(f"Project '{name}' added at {resolved_path}")
-
-    async def add_doctor_project(self) -> Project:
-        """Create a server-generated disposable project under the configured root."""
-        project_root = self.config_manager.config.project_root
-        if not project_root:
-            raise ValueError("Doctor projects require BASIC_MEMORY_PROJECT_ROOT")
-
-        project_name = f"doctor-{uuid.uuid4().hex[:8]}"
-        await self.add_project(project_name, project_root, allow_nested=True)
-        project = await self.get_project(project_name)
-        if project is None:  # pragma: no cover
-            raise ValueError("Failed to retrieve doctor project")
-        return project
 
     async def remove_project(
         self, name: str, delete_notes: bool = False

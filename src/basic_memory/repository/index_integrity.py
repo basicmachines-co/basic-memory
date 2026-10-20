@@ -19,12 +19,17 @@ class IndexIntegrityReport:
     relation_rows: int
     duplicate_keys: int
     duplicate_rows: int
+    duplicate_examples: tuple[str, ...]
     orphaned_rows: int
+    orphan_examples: tuple[str, ...]
+    # Counted directly rather than as entities minus entity rows: a duplicated
+    # entity row would otherwise hide a missing one.
+    missing_entity_rows: int
+    missing_examples: tuple[str, ...]
     # Informational only: entity timestamps fall back to file ctime/mtime or authored
     # frontmatter, where updated_at < created_at is a valid state (see the report
     # docstring). It never marks the index as corrupt.
     inverted_timestamps: int
-    examples: tuple[str, ...]
 
 
 _DUPLICATES = """
@@ -51,6 +56,13 @@ _ORPHANS = """
     )
 """
 
+_MISSING_ENTITY_ROWS = """
+    FROM entity e WHERE e.project_id = :project_id AND NOT EXISTS (
+        SELECT 1 FROM search_index s
+        WHERE s.project_id = e.project_id AND s.type = 'entity' AND s.id = e.id
+    )
+"""
+
 
 async def inspect_index_integrity(
     session_maker: async_sessionmaker[AsyncSession],
@@ -61,7 +73,8 @@ async def inspect_index_integrity(
     """Inspect existing state on SQLite or PostgreSQL; never initialize or repair it.
 
     Indexing may run concurrently, so these are observations, not a permanent
-    corruption verdict. Counts cover all rows; examples are bounded separately.
+    corruption verdict. Counts cover all rows; each kind's examples are bounded by
+    ``sample_limit``.
     Missing tables and database failures propagate instead of reporting success.
 
     ``inverted_timestamps`` is informational, not an anomaly: when frontmatter does
@@ -110,21 +123,36 @@ async def inspect_index_integrity(
                 await session.execute(select(func.count()).select_from(inverted.subquery()))
             ).scalar_one()
         )
-        examples = [
-            f"Duplicate {row.type} id={row.id}: {row.copies} copies"
+        duplicate_examples = tuple(
+            f"{row.type} id={row.id}: {row.copies} copies"
             for row in (
                 await session.execute(text(f"{_DUPLICATES} ORDER BY type, id LIMIT :limit"), params)
             ).all()
-        ]
-        remaining = sample_limit - len(examples)
-        examples.extend(
-            f"Orphan {row.type} id={row.id}, entity_id={row.entity_id}"
+        )
+        orphan_examples = tuple(
+            f"{row.type} id={row.id}, entity_id={row.entity_id}"
             for row in (
                 await session.execute(
                     text(
                         f"SELECT s.type, s.id, s.entity_id {_ORPHANS} ORDER BY s.type, s.id LIMIT :limit"
                     ),
-                    {**params, "limit": remaining},
+                    params,
+                )
+            ).all()
+        )
+        missing_entity_rows = int(
+            (
+                await session.execute(text(f"SELECT COUNT(*) {_MISSING_ENTITY_ROWS}"), params)
+            ).scalar_one()
+        )
+        missing_examples = tuple(
+            str(row.file_path)
+            for row in (
+                await session.execute(
+                    text(
+                        f"SELECT e.file_path {_MISSING_ENTITY_ROWS} ORDER BY e.file_path LIMIT :limit"
+                    ),
+                    params,
                 )
             ).all()
         )
@@ -136,7 +164,10 @@ async def inspect_index_integrity(
             relation_rows=counts.get("relation", 0),
             duplicate_keys=int(duplicates[0]),
             duplicate_rows=int(duplicates[1]),
+            duplicate_examples=duplicate_examples,
             orphaned_rows=orphans,
+            orphan_examples=orphan_examples,
+            missing_entity_rows=missing_entity_rows,
+            missing_examples=missing_examples,
             inverted_timestamps=inverted_count,
-            examples=tuple(examples),
         )

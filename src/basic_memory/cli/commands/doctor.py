@@ -1,94 +1,216 @@
-"""Doctor command for local consistency checks."""
+"""`bm doctor`: report problems in the user's projects and how to fix them (#1798).
+
+Doctor does two things, and neither writes to the user's projects, config or database:
+
+1. It asks the API for a report on each local project. The report lists findings and,
+   for each one it can repair, a typed action that this module turns into a command.
+2. It runs a write -> file -> index -> search self-test in a child process with its own
+   temporary home, config and database. The earlier self-test registered a throwaway
+   project in the user's real install and had to work around every policy a real
+   project is subject to (#665, #1315, #1323, #1666). A sandbox avoids all of them.
+"""
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tempfile
-import uuid
 from pathlib import Path
-from typing import Protocol
+from typing import Annotated, Literal, assert_never
 
 from loguru import logger
+from pydantic import BaseModel, Field
 from rich.console import Console
 import typer
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
+from basic_memory.cli.markup import literal
+from basic_memory.config import ConfigManager
+from basic_memory.config_models import ProjectMode, default_fastembed_cache_dir
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SearchClient
+from basic_memory.schemas import ProjectIndexRunResponse
 from basic_memory.schemas.base import Entity
+from basic_memory.schemas.doctor import (
+    DoctorAction,
+    DoctorFinding,
+    DoctorSeverity,
+    IndexProjectAction,
+    ReindexSearchAction,
+)
 from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.schemas.search import SearchQuery
-from basic_memory.schemas import ProjectIndexRunResponse
-from basic_memory.cli.markup import literal
+from basic_memory.utils import shell_command
 
 console = Console()
 
-
-class DoctorProjectClient(Protocol):
-    """Project-client capability required to clean up doctor state."""
-
-    async def delete_project(
-        self, project_external_id: str, delete_notes: bool = False
-    ) -> object: ...
+SELF_TEST_TIMEOUT_SECONDS = 300
+EVIDENCE_LINES_SHOWN = 5
 
 
-def _is_default_project_delete_error(error: Exception) -> bool:
-    """Return True only for the API guard that blocks deleting the default project."""
-    error_text = str(error)
-    return "Cannot delete default project" in error_text
+# --- Report model ---
 
 
-async def _delete_doctor_project_locally(project_name: str, project_id: str) -> None:
-    """Remove the generated doctor project when the public API guard blocks cleanup."""
-    from basic_memory import db
-    from basic_memory.config import ConfigManager
-    from basic_memory.repository import ProjectRepository
+class DoctorFindingOutput(DoctorFinding):
+    """A finding plus the command that carries out its action, ready to paste."""
 
-    config_manager = ConfigManager()
-    repository = ProjectRepository()
-    _, session_maker = await db.get_or_create_db(
-        db_path=config_manager.config.database_path,
-        db_type=db.DatabaseType.FILESYSTEM,
-    )
+    command: str | None
 
-    async with db.scoped_session(session_maker) as session:
-        project = await repository.get_by_external_id(session, project_id)
-        if project is None:
-            raise ValueError(f"Doctor cleanup project '{project_id}' not found")
-        if project.name != project_name:
-            raise ValueError(
-                f"Doctor cleanup expected project '{project_name}', found '{project.name}'"
+
+class DoctorProjectOutput(BaseModel):
+    name: str
+    findings: tuple[DoctorFindingOutput, ...]
+    has_errors: bool
+
+
+class SelfTestPassed(BaseModel):
+    outcome: Literal["passed"] = "passed"
+
+
+class SelfTestFailed(BaseModel):
+    outcome: Literal["failed"] = "failed"
+    output: str = Field(description="The end of the self-test's output")
+
+
+class SelfTestSkipped(BaseModel):
+    outcome: Literal["skipped"] = "skipped"
+
+
+type SelfTestResult = Annotated[
+    SelfTestPassed | SelfTestFailed | SelfTestSkipped,
+    Field(discriminator="outcome"),
+]
+
+
+class DoctorOutput(BaseModel):
+    """Everything `bm doctor --json` prints."""
+
+    projects: tuple[DoctorProjectOutput, ...]
+    skipped_cloud_projects: tuple[str, ...]
+    self_test: SelfTestResult
+    has_errors: bool
+
+
+def action_command(action: DoctorAction, project_name: str) -> str:
+    """Render the local command that carries out an action for one project."""
+    match action:
+        case IndexProjectAction():
+            return shell_command("bm", "project", "index", project_name)
+        case ReindexSearchAction(full=full):
+            full_flag = ("--full",) if full else ()
+            return shell_command("bm", "reindex", "--search", *full_flag, "--project", project_name)
+        case _ as unreachable:  # pragma: no cover - exhaustiveness proof
+            assert_never(unreachable)
+
+
+# --- Project inspection ---
+
+
+async def inspect_projects(
+    project: str | None,
+) -> tuple[tuple[DoctorProjectOutput, ...], tuple[str, ...]]:
+    """Report every local project, or only the named one, without changing any."""
+    config = ConfigManager().config
+    async with get_client() as client:
+        project_client = ProjectClient(client)
+        if project is not None:
+            resolved = await project_client.resolve_project(project)
+            selected = [(resolved.name, resolved.external_id)]
+        else:
+            selected = [
+                (item.name, item.external_id)
+                for item in (await project_client.list_projects()).projects
+            ]
+
+        reports: list[DoctorProjectOutput] = []
+        skipped_cloud: list[str] = []
+        for name, external_id in selected:
+            # Trigger: the project routes through the cloud.
+            # Why: its files and index live on the server, and the local commands
+            #   doctor suggests cannot repair it.
+            # Outcome: list it as skipped instead of reporting stale local state.
+            entry = config.project_entry(name)
+            if entry is not None and entry.mode is ProjectMode.CLOUD:
+                skipped_cloud.append(name)
+                continue
+            report = await project_client.get_doctor_report(external_id)
+            reports.append(
+                DoctorProjectOutput(
+                    name=name,
+                    findings=tuple(
+                        DoctorFindingOutput(
+                            **finding.model_dump(),
+                            command=(
+                                action_command(finding.action, name)
+                                if finding.action is not None
+                                else None
+                            ),
+                        )
+                        for finding in report.findings
+                    ),
+                    has_errors=report.has_errors,
+                )
             )
-        await repository.delete(session, project.id)
-
-    config = config_manager.load_config()
-    if project_name in config.projects:
-        del config.projects[project_name]
-        if config.default_project == project_name:
-            config.default_project = next(iter(config.projects), None)
-        config_manager.save_config(config)
+    return tuple(reports), tuple(skipped_cloud)
 
 
-async def _delete_doctor_project(
-    project_client: DoctorProjectClient, project_name: str, project_id: str
-) -> None:
-    """Delete the generated doctor project without weakening the public API guard."""
-    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
-    from fastmcp.exceptions import ToolError
+# --- Sandboxed self-test ---
 
-    try:
-        await project_client.delete_project(project_id, delete_notes=True)
-    except ToolError as exc:
-        if not _is_default_project_delete_error(exc):
-            raise
 
-        # Trigger: fresh local configs can promote the generated doctor project
-        # to default because the placeholder default has no DB row.
-        # Why: the project is disposable doctor-owned state, while the public API
-        # must keep rejecting default-project deletion for normal callers.
-        # Outcome: cleanup removes only the exact doctor project it created.
-        await _delete_doctor_project_locally(project_name, project_id)
+def sandbox_environment(sandbox: Path, fastembed_cache: str) -> dict[str, str]:
+    """Build an environment that cannot reach the user's config, database or projects.
+
+    Every BASIC_MEMORY_* variable is dropped, so a project root, cloud mode, database
+    URL or default project set in the user's shell cannot leak into the sandbox. The
+    FastEmbed cache is the one thing shared: it holds a large downloaded model, and
+    reading it changes nothing.
+    """
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")
+    }
+    sandbox_tmp = str(sandbox / "tmp")
+    environment.update(
+        {
+            # Temp files the self-test creates (its project directory) stay inside
+            # the sandbox and are removed with it. TEMP and TMP are the Windows names.
+            "TMPDIR": sandbox_tmp,
+            "TEMP": sandbox_tmp,
+            "TMP": sandbox_tmp,
+            "HOME": str(sandbox / "home"),
+            "BASIC_MEMORY_HOME": str(sandbox / "home" / "basic-memory"),
+            "BASIC_MEMORY_CONFIG_DIR": str(sandbox / "config"),
+            "BASIC_MEMORY_NO_PROMOS": "1",
+            "FASTEMBED_CACHE_PATH": fastembed_cache,
+        }
+    )
+    return environment
+
+
+def run_sandboxed_self_test() -> SelfTestPassed | SelfTestFailed:
+    """Run `bm doctor --self-test` in a child process inside a throwaway sandbox."""
+    config = ConfigManager().config
+    fastembed_cache = config.semantic_embedding_cache_dir or default_fastembed_cache_dir()
+    with tempfile.TemporaryDirectory(prefix="bm-doctor-") as sandbox_dir:
+        sandbox = Path(sandbox_dir)
+        for directory in ("home/basic-memory", "config", "tmp"):
+            (sandbox / directory).mkdir(parents=True)
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "basic_memory.cli.main", "doctor", "--self-test"],
+                env=sandbox_environment(sandbox, fastembed_cache),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=SELF_TEST_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return SelfTestFailed(output=f"timed out after {SELF_TEST_TIMEOUT_SECONDS}s")
+    if completed.returncode == 0:
+        return SelfTestPassed()
+    return SelfTestFailed(output="\n".join(completed.stdout.strip().splitlines()[-20:]))
 
 
 async def _read_materialized_api_note(api_file: Path, file_path: str) -> str:
@@ -108,223 +230,185 @@ async def _read_materialized_api_note(api_file: Path, file_path: str) -> str:
     return api_file.read_text(encoding="utf-8")
 
 
-async def _check_existing_projects(project_client: ProjectClient, project: str | None) -> bool:
-    """Report integrity for the selected projects and return whether any is damaged.
+async def run_self_test() -> None:
+    """Exercise API -> file and file -> index -> search in the current (sandboxed) install.
 
-    Reporting must not raise: doctor's disposable smoke test is the only end-to-end
-    file <-> database check, so an observed anomaly is surfaced as a warning here and
-    turned into a nonzero exit only after that smoke test has run.
+    Only `bm doctor --self-test` calls this, and only inside the sandbox built by
+    `run_sandboxed_self_test`, so the project it creates is thrown away with the
+    sandbox and needs no cleanup.
     """
-    if project is not None:
-        # Trigger: the user scoped the inspection to one project.
-        # Why: resolving first avoids listing every project just to filter it, and the
-        #   caller routes the client with project_name so cloud mode picks that
-        #   project's workspace instead of the configured default workspace.
-        # Outcome: only the requested project is inspected.
-        resolved = await project_client.resolve_project(project)
-        selected = [(resolved.name, resolved.external_id)]
-    else:
-        selected = [
-            (item.name, item.external_id)
-            for item in (await project_client.list_projects()).projects
-        ]
-
-    anomalies = False
-    for name, external_id in selected:
-        report = await project_client.get_integrity(external_id)
-        console.print(
-            f"Project {literal(name)}: {report.entities} entities, "
-            f"{report.search_rows} search rows "
-            f"(entities={report.entity_rows}, observations={report.observation_rows}, "
-            f"relations={report.relation_rows})"
-        )
-        console.print(
-            f"  Duplicate keys: {report.duplicate_keys} ({report.duplicate_rows} extra rows); "
-            f"orphaned rows: {report.orphaned_rows}; "
-            f"inverted timestamps (informational): {report.inverted_timestamps}"
-        )
-        for example in report.examples:
-            console.print(f"  {literal(example)}")
-        anomalies = anomalies or report.has_anomalies
-    if anomalies:
-        console.print(
-            "[yellow]WARN[/yellow] Existing project integrity anomalies observed; "
-            "the disposable doctor checks will still run."
-        )
-    else:
-        console.print("[green]OK[/green] Existing project integrity checks passed")
-    return anomalies
-
-
-def _fail_on_observed_anomalies(anomalies: bool) -> None:
-    """Turn an observed integrity anomaly into doctor's failure, after the smoke test.
-
-    Trigger: the preflight saw duplicate/orphaned/missing search rows.
-    Why: those rows may be transient while indexing runs, and the disposable smoke
-      test still proves the file <-> database pipeline works; failing before it would
-      hide that result.
-    Outcome: the command exits nonzero with the wait-and-rerun guidance.
-    """
-    if anomalies:
-        raise ValueError(
-            "Existing project integrity anomalies observed. Indexing may be in progress; "
-            "wait for indexing to finish and run doctor again. No repairs were performed."
-        )
-
-
-async def run_doctor(project: str | None = None) -> None:
-    """Run local consistency checks for file <-> database flows."""
     # Deferred: the markdown parsing stack is only needed while the checks run,
     # and importing it at module level slows every CLI invocation (#886).
     from basic_memory.markdown.entity_parser import EntityParser
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 
-    console.print("[blue]Running Basic Memory doctor checks...[/blue]")
-
-    # Route with project_name when the user named a project: explicit --cloud routing
-    # otherwise resolves the workspace from config.default_workspace, which can point
-    # at a different workspace than the project being inspected.
-    client_context = get_client(project_name=project) if project is not None else get_client()
-    async with client_context as client:
-        anomalies = await _check_existing_projects(ProjectClient(client), project)
-
-    project_name = f"doctor-{uuid.uuid4().hex[:8]}"
     api_note_title = "Doctor API Note"
     manual_note_title = "Doctor Manual Note"
-    manual_permalink = "doctor/manual-note"
+    project_path = Path(tempfile.mkdtemp(prefix="doctor-project-"))
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
+    async with get_client() as client:
+        project_client = ProjectClient(client)
+        status = await project_client.create_project(
+            ProjectInfoRequest(
+                name="doctor", path=str(project_path), set_default=False
+            ).model_dump()
+        )
+        if not status.new_project:
+            raise ValueError("Failed to create the self-test project")
+        project_id = status.new_project.external_id
+        project_path = Path(status.new_project.path)
+        print("OK created self-test project")
 
-        async with get_client() as client:
-            project_client = ProjectClient(client)
-            project_request = ProjectInfoRequest(
-                name=project_name,
-                path=str(temp_path),
-                set_default=False,
-            )
+        # --- DB -> File: create an entity via API ---
+        knowledge_client = KnowledgeClient(client, project_id)
+        api_note = Entity(
+            title=api_note_title,
+            directory="doctor",
+            note_type="note",
+            content_type="text/markdown",
+            content=f"# {api_note_title}\n\n- [note] API to file check",
+            entity_metadata={"tags": ["doctor"]},
+        )
+        api_result = await knowledge_client.create_entity(api_note.model_dump())
+        api_text = await _read_materialized_api_note(
+            project_path / api_result.file_path, api_result.file_path
+        )
+        if api_note_title not in api_text:
+            raise ValueError("API note content missing from file")
+        print("OK API write created file")
 
-            project_id: str | None = None
-
-            try:
-                from basic_memory.config import ConfigManager
-
-                status = (
-                    await project_client.create_doctor_project()
-                    if ConfigManager().config.project_root
-                    else await project_client.create_project(project_request.model_dump())
-                )
-                if not status.new_project:
-                    raise ValueError("Failed to create doctor project")
-                project_name = status.new_project.name
-                project_id = status.new_project.external_id
-                # Use the resolved path from the server — when project_root is configured,
-                # the actual project directory differs from the requested temp_path
-                project_path = Path(status.new_project.path)
-                console.print(f"[green]OK[/green] Created doctor project: {literal(project_name)}")
-
-                # --- DB -> File: create an entity via API ---
-                knowledge_client = KnowledgeClient(client, project_id)
-                api_note = Entity(
-                    title=api_note_title,
-                    directory="doctor",
-                    note_type="note",
-                    content_type="text/markdown",
-                    content=f"# {api_note_title}\n\n- [note] API to file check",
-                    entity_metadata={"tags": ["doctor"]},
-                )
-                api_result = await knowledge_client.create_entity(api_note.model_dump())
-
-                api_file = project_path / api_result.file_path
-                api_text = await _read_materialized_api_note(api_file, api_result.file_path)
-                if api_note_title not in api_text:
-                    raise ValueError("API note content missing from file")
-
-                console.print("[green]OK[/green] API write created file")
-
-                # --- File -> DB: write markdown file directly, then index ---
-                parser = EntityParser(project_path)
-                processor = MarkdownProcessor(parser)
-                manual_markdown = EntityMarkdown(
-                    frontmatter=EntityFrontmatter(
-                        metadata={
-                            "title": manual_note_title,
-                            "type": "note",
-                            "permalink": manual_permalink,
-                            "tags": ["doctor"],
-                        }
-                    ),
-                    content=f"# {manual_note_title}\n\n- [note] File to DB check",
-                )
-
-                manual_path = project_path / "doctor" / "manual-note.md"
-                await processor.write_file(manual_path, manual_markdown)
-                console.print("[green]OK[/green] Manual file written")
-
-                index_data = await project_client.index(
-                    project_id, force_full=False, run_in_background=False
-                )
-                project_index_run = ProjectIndexRunResponse.model_validate(index_data)
-                if project_index_run.enqueued_files == 0:
-                    raise ValueError("Project index did not enqueue any files")
-
-                console.print("[green]OK[/green] Project index processed manual file")
-
-                search_client = SearchClient(client, project_id)
-                search_query = SearchQuery(title=manual_note_title)
-                search_results = await search_client.search(
-                    search_query.model_dump(), page=1, page_size=5
-                )
-                if not any(result.title == manual_note_title for result in search_results.results):
-                    raise ValueError("Manual note not found in search index")
-
-                console.print("[green]OK[/green] Search confirmed manual file")
-
-                status_report = await project_client.get_status(project_id)
-                observed_paths = {
-                    observed_file.path for observed_file in status_report.observed_files
+        # --- File -> DB: write markdown file directly, then index ---
+        processor = MarkdownProcessor(EntityParser(project_path))
+        manual_markdown = EntityMarkdown(
+            frontmatter=EntityFrontmatter(
+                metadata={
+                    "title": manual_note_title,
+                    "type": "note",
+                    "permalink": "doctor/manual-note",
+                    "tags": ["doctor"],
                 }
-                if "doctor/manual-note.md" not in observed_paths:
-                    raise ValueError("Project index status did not observe manual note")
+            ),
+            content=f"# {manual_note_title}\n\n- [note] File to DB check",
+        )
+        await processor.write_file(project_path / "doctor" / "manual-note.md", manual_markdown)
+        print("OK manual file written")
 
-                console.print("[green]OK[/green] Status observed indexed file")
+        index_data = await project_client.index(
+            project_id, force_full=False, run_in_background=False
+        )
+        if ProjectIndexRunResponse.model_validate(index_data).enqueued_files == 0:
+            raise ValueError("Project index did not enqueue any files")
+        print("OK project index processed manual file")
 
-            finally:
-                if project_id:
-                    await _delete_doctor_project(project_client, project_name, project_id)
+        search_results = await SearchClient(client, project_id).search(
+            SearchQuery(title=manual_note_title).model_dump(), page=1, page_size=5
+        )
+        if not any(result.title == manual_note_title for result in search_results.results):
+            raise ValueError("Manual note not found in search index")
+        print("OK search confirmed manual file")
 
-    # The preflight ran before the disposable project existed; by now the smoke test
-    # has finished, so an observed anomaly can fail the command without hiding it.
-    _fail_on_observed_anomalies(anomalies)
+        status_report = await project_client.get_status(project_id)
+        if "doctor/manual-note.md" not in {file.path for file in status_report.observed_files}:
+            raise ValueError("Project index status did not observe manual note")
+        print("OK status observed indexed file")
 
-    console.print("[green]Doctor checks passed.[/green]")
+
+# --- Output ---
+
+_SEVERITY_STYLE = {
+    DoctorSeverity.ERROR: "red",
+    DoctorSeverity.WARNING: "yellow",
+    DoctorSeverity.INFO: "blue",
+}
+_SEVERITY_ORDER = (DoctorSeverity.ERROR, DoctorSeverity.WARNING, DoctorSeverity.INFO)
+
+
+def render_output(output: DoctorOutput) -> None:
+    """Print the report for a person: problems first, each with its fix."""
+    for project in output.projects:
+        if not project.findings:
+            console.print(f"[green]OK[/green] {literal(project.name)}: no problems found")
+            continue
+        console.print(f"[bold]{literal(project.name)}[/bold]")
+        findings = sorted(
+            project.findings, key=lambda finding: _SEVERITY_ORDER.index(finding.severity)
+        )
+        for finding in findings:
+            style = _SEVERITY_STYLE[finding.severity]
+            console.print(
+                f"  [{style}]{finding.severity.value.upper()}[/{style}] {literal(finding.summary)}"
+            )
+            for line in finding.evidence[:EVIDENCE_LINES_SHOWN]:
+                console.print(f"      {literal(line)}")
+            if len(finding.evidence) > EVIDENCE_LINES_SHOWN:
+                console.print(f"      ...and {len(finding.evidence) - EVIDENCE_LINES_SHOWN} more")
+            if finding.command is not None:
+                console.print(f"      fix: [cyan]{literal(finding.command)}[/cyan]")
+    if output.skipped_cloud_projects:
+        console.print(
+            "[dim]Skipped cloud projects (indexed on the server): "
+            f"{literal(', '.join(output.skipped_cloud_projects))}[/dim]"
+        )
+    match output.self_test:
+        case SelfTestPassed():
+            console.print("[green]OK[/green] Self-test passed (sandboxed write, index and search)")
+        case SelfTestFailed(output=failure_output):
+            console.print("[red]FAILED[/red] Self-test (sandboxed write, index and search)")
+            console.print(literal(failure_output))
+        case SelfTestSkipped():
+            console.print("[dim]Self-test skipped[/dim]")
+        case _ as unreachable:  # pragma: no cover - exhaustiveness proof
+            assert_never(unreachable)
+    if output.has_errors:
+        console.print("[red]Doctor found problems that need a fix.[/red]")
+    else:
+        console.print("[green]Doctor checks passed.[/green]")
+
+
+# --- Command ---
 
 
 @app.command()
 def doctor(
     project: str | None = typer.Option(
-        None,
-        "--project",
-        "-p",
-        help="Limit the integrity inspection to one existing project (name or external ID)",
+        None, "--project", "-p", help="Check one project (name or external ID) instead of all"
     ),
+    json_output: bool = typer.Option(False, "--json", help="Print the report as JSON"),
+    skip_self_test: bool = typer.Option(
+        False, "--skip-self-test", help="Only report on projects; skip the sandboxed self-test"
+    ),
+    self_test: bool = typer.Option(False, "--self-test", hidden=True),
     local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
+        False, "--local", help="Check local projects (the default; kept for compatibility)"
     ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+    cloud: bool = typer.Option(False, "--cloud", help="Not supported yet (#1798)"),
 ) -> None:
-    """Run local consistency checks to verify file/database indexing."""
+    """Report problems in your projects and the commands that fix them."""
     # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
     from fastmcp.exceptions import ToolError
 
     try:
         validate_routing_flags(local, cloud)
-        # Doctor runs local filesystem checks — always default to local routing
-        if not local and not cloud:
-            local = True
-        with force_routing(local=local, cloud=cloud):
-            run_with_cleanup(run_doctor(project))
+        if cloud:
+            raise ValueError("bm doctor checks local projects; cloud support is tracked in #1798")
+        with force_routing(local=True, cloud=False):
+            if self_test:
+                run_with_cleanup(run_self_test())
+                return
+            projects, skipped_cloud = run_with_cleanup(inspect_projects(project))
+        self_test_result: SelfTestResult = (
+            SelfTestSkipped() if skip_self_test else run_sandboxed_self_test()
+        )
+        output = DoctorOutput(
+            projects=projects,
+            skipped_cloud_projects=skipped_cloud,
+            self_test=self_test_result,
+            has_errors=(
+                any(report.has_errors for report in projects)
+                or isinstance(self_test_result, SelfTestFailed)
+            ),
+        )
     except (ToolError, ValueError) as e:
         # str() of a message-less exception (e.g. httpx.ReadTimeout) is empty;
         # fall back to repr so the failure line always names the error (#1027).
@@ -336,3 +420,10 @@ def doctor(
         logger.error(f"Doctor failed: {error_detail}")
         typer.echo(f"Doctor failed: {error_detail}", err=True)
         raise typer.Exit(code=1)  # pragma: no cover
+
+    if json_output:
+        typer.echo(output.model_dump_json(indent=2))
+    else:
+        render_output(output)
+    if output.has_errors:
+        raise typer.Exit(code=1)

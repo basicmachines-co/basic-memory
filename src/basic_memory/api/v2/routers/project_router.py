@@ -34,8 +34,8 @@ from basic_memory.index.local_project import ProjectIndexRouteRequest
 from basic_memory.read_cache import invalidate_cache
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
-from basic_memory.repository.index_integrity import inspect_index_integrity
-from basic_memory.schemas.index_integrity import IndexIntegrityResponse
+from basic_memory.schemas.doctor import ProjectDoctorReport
+from basic_memory.services.project_doctor import diagnose_project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.project_info import (
     ProjectItem,
@@ -224,28 +224,6 @@ async def add_project(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/doctor", response_model=ProjectStatusResponse, status_code=201)
-async def add_doctor_project(project_service: ProjectServiceDep) -> ProjectStatusResponse:
-    """Create a server-generated disposable project for the local doctor check."""
-    try:
-        new_project = await project_service.add_doctor_project()
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return ProjectStatusResponse(
-        message=f"Project '{new_project.name}' added successfully",
-        status="success",
-        default=new_project.is_default or False,
-        new_project=ProjectItem(
-            id=new_project.id,
-            external_id=new_project.external_id,
-            name=new_project.name,
-            path=new_project.path,
-            is_default=new_project.is_default or False,
-        ),
-    )
-
-
 @router.post("/config/sync", response_model=ProjectStatusResponse)
 async def synchronize_projects(
     project_service: ProjectServiceDep,
@@ -282,14 +260,24 @@ async def index_project(
     )
 
 
-@router.get("/{project_id}/integrity", response_model=IndexIntegrityResponse)
-async def get_project_integrity(
+# Doctor only reads, so it is a GET for the same reason as status below: read-only
+# gates (viewers, read-only API keys) treat POSTs as writes.
+@router.get("/{project_id}/doctor", response_model=ProjectDoctorReport)
+async def get_project_doctor_report(
+    project_config: ProjectConfigV2ExternalDep,
+    project_index_observer: ProjectIndexObserverDep,
+    project_readiness: ProjectReadinessServiceDep,
     project_internal_id: ProjectExternalIdPathDep,
     session_maker: SessionMakerDep,
-) -> IndexIntegrityResponse:
-    """Inspect existing project data without indexing, repairing, or acquiring locks."""
-    report = await inspect_index_integrity(session_maker, project_internal_id)
-    return IndexIntegrityResponse.model_validate(report)
+) -> ProjectDoctorReport:
+    """Report a project's problems and their repairs without indexing or repairing."""
+    return await diagnose_project(
+        project_id=project_internal_id,
+        project_path=project_config.home,
+        session_maker=session_maker,
+        index_observer=project_index_observer,
+        readiness_service=project_readiness,
+    )
 
 
 # Status only reads: it walks the project files and reports index readiness. It was a

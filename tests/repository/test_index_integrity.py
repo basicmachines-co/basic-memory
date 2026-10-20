@@ -8,7 +8,6 @@ from sqlalchemy import text, update
 from basic_memory import db
 from basic_memory.models import Entity, Observation, Project, Relation
 from basic_memory.repository.index_integrity import inspect_index_integrity
-from basic_memory.schemas.index_integrity import IndexIntegrityResponse
 
 
 async def insert_index_row(session, project_id, row_id, entity_id, kind="entity"):
@@ -26,7 +25,8 @@ async def test_empty_project(session_maker, test_project):
     report = await inspect_index_integrity(session_maker, test_project.id)
     assert report.entities == report.search_rows == 0
     assert report.duplicate_keys == report.orphaned_rows == report.inverted_timestamps == 0
-    assert report.examples == ()
+    assert report.missing_entity_rows == 0
+    assert report.duplicate_examples == report.orphan_examples == report.missing_examples == ()
 
 
 @pytest.mark.asyncio
@@ -58,7 +58,8 @@ async def test_reports_orphans_timestamps_and_does_not_repair(session_maker, sam
     assert report.observation_rows == report.relation_rows == 1
     assert report.orphaned_rows == 4
     assert report.inverted_timestamps == 1
-    assert len(report.examples) == 4
+    assert len(report.orphan_examples) == 4
+    assert report.duplicate_examples == ()
     assert await inspect_index_integrity(session_maker, sample_entity.project_id) == report
 
 
@@ -77,8 +78,7 @@ async def test_sqlite_duplicate_counts_and_bounded_examples(
     assert report.duplicate_keys == 1
     assert report.duplicate_rows == 2
     assert report.orphaned_rows == 0
-    assert len(report.examples) == 1
-    assert "3 copies" in report.examples[0]
+    assert report.duplicate_examples == (f"entity id={sample_entity.id}: 3 copies",)
 
 
 @pytest.mark.asyncio
@@ -142,19 +142,44 @@ async def test_inverted_timestamps_are_informational_not_anomalies(session_maker
             session, sample_entity.project_id, sample_entity.id, sample_entity.id
         )
     report = await inspect_index_integrity(session_maker, sample_entity.project_id)
-    response = IndexIntegrityResponse.model_validate(report)
-    assert response.inverted_timestamps == 1
-    assert response.entity_rows == response.entities == 1
-    assert response.has_anomalies is False
+    assert report.inverted_timestamps == 1
+    assert report.entity_rows == report.entities == 1
+    assert report.missing_entity_rows == report.orphaned_rows == report.duplicate_keys == 0
 
 
 @pytest.mark.asyncio
-async def test_entity_without_its_search_row_is_an_anomaly(session_maker, sample_entity):
+async def test_entity_without_its_search_row_is_reported_missing(session_maker, sample_entity):
     report = await inspect_index_integrity(session_maker, sample_entity.project_id)
-    response = IndexIntegrityResponse.model_validate(report)
-    assert response.entities == 1
-    assert response.entity_rows == 0
-    assert response.has_anomalies is True
+    assert report.entities == 1
+    assert report.entity_rows == 0
+    assert report.missing_entity_rows == 1
+    assert report.missing_examples == (sample_entity.file_path,)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_entity_row_cannot_hide_a_missing_one(
+    session_maker, sample_entity, db_backend
+):
+    """Counting entities minus entity rows would call this project complete."""
+    if db_backend != "sqlite":
+        pytest.skip("PostgreSQL prevents duplicate primary keys")
+    async with db.scoped_session(session_maker) as session:
+        missing = Entity(
+            project_id=sample_entity.project_id,
+            title="Missing",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="missing.md",
+        )
+        session.add(missing)
+        for _ in range(2):
+            await insert_index_row(
+                session, sample_entity.project_id, sample_entity.id, sample_entity.id
+            )
+    report = await inspect_index_integrity(session_maker, sample_entity.project_id)
+    assert report.entity_rows == report.entities == 2
+    assert report.missing_entity_rows == 1
+    assert report.missing_examples == ("missing.md",)
 
 
 @pytest.mark.asyncio
@@ -220,6 +245,6 @@ async def test_children_must_match_owner_and_project(session_maker, sample_entit
         await insert_index_row(session, other_project.id, sample_entity.id, sample_entity.id)
     report = await inspect_index_integrity(session_maker, sample_entity.project_id, sample_limit=0)
     assert report.orphaned_rows == 3
-    assert report.examples == ()
+    assert report.orphan_examples == ()
     other = await inspect_index_integrity(session_maker, other_project.id)
     assert other.orphaned_rows == 1
