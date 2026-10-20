@@ -31,6 +31,8 @@ from basic_memory.repository.postgres_search_repository import (
     _strip_nul_from_row,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_scope import ProjectScope
+from basic_memory.repository.semantic_vector_index import VectorAdmission
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from typing import Any, override
@@ -1890,3 +1892,80 @@ async def test_postgres_filtered_vector_search_ranks_only_admitted_chunks(
     [call] = calls
     assert call["admission"] is not None
     assert call["entities"] == notes
+
+
+def _plan_relations(plan: dict[str, Any]) -> set[str]:
+    """Every table an EXPLAIN (FORMAT JSON) plan node reads."""
+    relations = {plan["Relation Name"]} if "Relation Name" in plan else set()
+    for child in plan.get("Plans", []):
+        relations |= _plan_relations(child)
+    return relations
+
+
+@pytest.mark.asyncio
+async def test_postgres_admission_count_reads_only_the_chunk_manifest(session_maker, test_project):
+    """The filtered-search admission count must not touch the embeddings (#1791).
+
+    It only chooses between exact ranking and the HNSW scan. Joining the embeddings made
+    Postgres hash-join both tables whole, which LIMIT cannot stop, so every filtered
+    search on a 480k-chunk project read 2.5 GB. The count still counts the admitted
+    chunks, and only them.
+    """
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo.init_search_index()
+    now = datetime.now(timezone.utc)
+    await repo.bulk_index_items(
+        [
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=row_id,
+                title=f"Admission {row_id}",
+                content_stems="auth token archive",
+                content_snippet="auth token archive",
+                permalink=f"admission/entry-{row_id}",
+                file_path=f"admission/entry-{row_id}.md",
+                type=SearchItemType.ENTITY.value,
+                entity_id=row_id,
+                metadata={"note_type": "note"},
+                created_at=now,
+                updated_at=now,
+            )
+            for row_id in (601, 602, 603)
+        ]
+    )
+    for row_id in (601, 602, 603):
+        await repo.sync_entity_vectors(row_id)
+
+    params: dict[str, object] = {
+        "admit_type_0": SearchItemType.ENTITY.value,
+        "exact_cap": 10,
+    }
+    sql = pgvector_index_module.admission_count_sql(
+        ProjectScope.single(test_project.id).predicate("c.project_id", params),
+        VectorAdmission(predicate="c.source_type IN (:admit_type_0)", params={}),
+    )
+    async with db.scoped_session(session_maker) as session:
+        explained = await session.execute(text(f"EXPLAIN (FORMAT JSON) {sql}"), params)
+        plan = explained.scalar_one()[0]["Plan"]
+        counted = (await session.execute(text(sql), params)).scalar_one()
+        manifest_rows = (
+            await session.execute(
+                text("SELECT count(*) FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": test_project.id},
+            )
+        ).scalar_one()
+
+    assert _plan_relations(plan) == {"search_vector_chunks"}
+    assert counted == manifest_rows > 0
