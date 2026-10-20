@@ -115,25 +115,31 @@ def search_index_findings(
     rows. Pending relations or embeddings do not touch them.
     """
     # Trigger: file indexing still has work owed (or never ran).
-    # Why: duplicate, orphaned and missing search rows are derived state. Indexing
-    #   a note deletes all of its rows and writes them again, so a pass that is
-    #   still owed may clear them; reporting them as damage would be a false alarm.
-    # Outcome: they are info until file indexing settles, and errors after it,
-    #   because then nothing will repair them without a reindex.
-    lag_severity = (
-        DoctorSeverity.ERROR if files_phase is ProjectIndexPhase.IDLE else DoctorSeverity.INFO
+    # Why: indexing a note deletes all of its search rows and writes them again, so
+    #   the owed pass clears an anomaly on a note it rewrites. It rewrites only the
+    #   files it owes, so an anomaly on an unchanged note survives it. Doctor cannot
+    #   tell the two apart without tracking every affected note, so it does not
+    #   claim either outcome.
+    # Outcome: a warning that may clear while indexing runs, and an error once it
+    #   settles, when nothing repairs the row without a reindex.
+    indexing_settled = files_phase is ProjectIndexPhase.IDLE
+    severity = DoctorSeverity.ERROR if indexing_settled else DoctorSeverity.WARNING
+    still_indexing = (
+        ""
+        if indexing_settled
+        else " File indexing is still running and may clear this; if it remains, run the fix."
     )
     findings: list[DoctorFinding] = []
     if integrity.duplicate_keys:
         findings.append(
             DoctorFinding(
                 check=DoctorCheck.SEARCH_INDEX,
-                severity=lag_severity,
+                severity=severity,
                 summary=(
                     f"{_plural(integrity.duplicate_keys, 'indexed item')} "
                     f"{'is' if integrity.duplicate_keys == 1 else 'are'} stored more than once "
                     f"({_plural(integrity.duplicate_rows, 'extra row')}), so search results "
-                    "can repeat."
+                    f"can repeat.{still_indexing}"
                 ),
                 evidence=integrity.duplicate_examples,
                 action=ReindexSearchAction(full=True),
@@ -143,11 +149,11 @@ def search_index_findings(
         findings.append(
             DoctorFinding(
                 check=DoctorCheck.SEARCH_INDEX,
-                severity=lag_severity,
+                severity=severity,
                 summary=(
                     f"{_plural(integrity.missing_entity_rows, 'note')} "
                     f"{'has' if integrity.missing_entity_rows == 1 else 'have'} no search "
-                    "row and cannot be found by search."
+                    f"row and cannot be found by search.{still_indexing}"
                 ),
                 evidence=integrity.missing_examples,
                 action=ReindexSearchAction(full=True),
@@ -157,11 +163,11 @@ def search_index_findings(
         findings.append(
             DoctorFinding(
                 check=DoctorCheck.SEARCH_INDEX,
-                severity=lag_severity,
+                severity=severity,
                 summary=(
                     f"{_plural(integrity.orphaned_rows, 'search row')} "
                     f"{'does' if integrity.orphaned_rows == 1 else 'do'} not match a current "
-                    "note, observation or relation."
+                    f"note, observation or relation.{still_indexing}"
                 ),
                 evidence=integrity.orphan_examples,
                 # A plain reindex only purges rows whose note is gone. A row filed

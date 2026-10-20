@@ -64,9 +64,9 @@ when the report is clean but something still seems broken.
 | `warning` | Needs attention, may recover on its own | Offer the `command` if there is one |
 | `info` | Expected while work is in progress | Mention it; a running server finishes it, and the `command` finishes it now |
 
-Indexing catches up in the background. A missing or extra search row is `info`
-while indexing is still running and becomes an `error` only once indexing has
-settled. If the report has only `info` findings, nothing is wrong. When no
+Indexing catches up in the background. A duplicate, missing or extra search row
+is a `warning` while file indexing is still running, because the pass may clear
+it, and becomes an `error` once indexing has settled. If the report has only `info` findings, nothing is wrong. When no
 Basic Memory server is running, nothing indexes in the background, so offer the
 `command` on an `info` finding too.
 

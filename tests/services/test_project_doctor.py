@@ -165,8 +165,8 @@ def test_duplicates_suggest_a_full_reindex() -> None:
     ("files_phase", "severity"),
     [
         (ProjectIndexPhase.IDLE, DoctorSeverity.ERROR),
-        (ProjectIndexPhase.PENDING, DoctorSeverity.INFO),
-        (ProjectIndexPhase.NEVER_INDEXED, DoctorSeverity.INFO),
+        (ProjectIndexPhase.PENDING, DoctorSeverity.WARNING),
+        (ProjectIndexPhase.NEVER_INDEXED, DoctorSeverity.WARNING),
     ],
 )
 def test_search_row_anomalies_are_errors_only_once_file_indexing_settles(
@@ -183,11 +183,14 @@ def test_search_row_anomalies_are_errors_only_once_file_indexing_settles(
         ),
         files_phase,
     )
-    # Indexing a note rewrites all of its rows, so an owed pass may clear any of them.
+    # An owed pass may or may not rewrite the affected note, so doctor claims neither.
     assert duplicate.severity is missing.severity is orphaned.severity is severity
-    assert missing.summary == "2 notes have no search row and cannot be found by search."
+    still_running = files_phase is not ProjectIndexPhase.IDLE
+    for finding in (duplicate, missing, orphaned):
+        assert ("may clear this; if it remains, run the fix" in finding.summary) is still_running
+    assert missing.summary.startswith("2 notes have no search row and cannot be found by search.")
     assert missing.action == ReindexSearchAction(full=True)
-    assert orphaned.summary == (
+    assert orphaned.summary.startswith(
         "1 search row does not match a current note, observation or relation."
     )
     assert orphaned.action == ReindexSearchAction(full=True)
