@@ -1894,7 +1894,7 @@ async def test_postgres_filtered_vector_search_ranks_only_admitted_chunks(
     assert call["entities"] == notes
 
 
-def _plan_relations(plan: dict) -> set[str]:
+def _plan_relations(plan: dict[str, Any]) -> set[str]:
     """Every table an EXPLAIN (FORMAT JSON) plan node reads."""
     relations = {plan["Relation Name"]} if "Relation Name" in plan else set()
     for child in plan.get("Plans", []):
