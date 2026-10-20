@@ -151,8 +151,14 @@ async def inspect_projects(
 
         reports: list[DoctorProjectOutput] = []
         for name, external_id in selected:
-            # A cloud project that still has a local row is already in skipped_cloud.
             if is_cloud(name):
+                # Trigger: a named project was given by external ID, which config
+                #   cannot match before resolution, and it is a cloud project.
+                # Why: reporting nothing would read as a clean bill of health.
+                # Outcome: the resolved name is reported as skipped. In an
+                #   all-project run it is already listed from config.
+                if project is not None:
+                    skipped_cloud = (name,)
                 continue
             report = await project_client.get_doctor_report(external_id)
             reports.append(

@@ -78,7 +78,7 @@ async def test_cloud_mode_projects_are_skipped_not_reported(
     cloud_path = tmp_path_factory.mktemp("cloud-copy")
     _, session_maker = engine_factory
     async with db.scoped_session(session_maker) as session:
-        await ProjectRepository().create(
+        research = await ProjectRepository().create(
             session,
             {"name": "research", "path": str(cloud_path), "is_active": True, "is_default": False},
         )
@@ -91,6 +91,15 @@ async def test_cloud_mode_projects_are_skipped_not_reported(
     output = json.loads(result.stdout)
     assert output["skipped_cloud_projects"] == ["research"]
     assert [project["name"] for project in output["projects"]] == [test_project.name]
+
+    # By external ID, config cannot recognize it before resolution; it must still
+    # be reported as skipped rather than silently dropped.
+    by_id = await asyncio.to_thread(
+        _invoke, "--project", research.external_id, "--skip-self-test", "--json"
+    )
+    by_id_output = json.loads(by_id.stdout)
+    assert by_id_output["projects"] == []
+    assert by_id_output["skipped_cloud_projects"] == ["research"]
 
 
 def test_config_only_cloud_projects_are_skipped_without_a_local_lookup(
