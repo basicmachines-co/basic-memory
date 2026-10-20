@@ -29,7 +29,7 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.cli.markup import literal
 from basic_memory.config import ConfigManager
-from basic_memory.config_models import ProjectMode, default_fastembed_cache_dir
+from basic_memory.config_models import ProjectMode, default_fastembed_cache_dir, resolve_data_dir
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SearchClient
 from basic_memory.schemas import ProjectIndexRunResponse
@@ -48,6 +48,8 @@ from basic_memory.utils import shell_command
 console = Console()
 
 SELF_TEST_TIMEOUT_SECONDS = 300
+# Set only by run_sandboxed_self_test, naming the sandbox the child must run inside.
+SANDBOX_MARKER = "BASIC_MEMORY_DOCTOR_SANDBOX"
 EVIDENCE_LINES_SHOWN = 5
 
 
@@ -199,6 +201,7 @@ def sandbox_environment(sandbox: Path, fastembed_cache: str) -> dict[str, str]:
             "BASIC_MEMORY_HOME": str(sandbox / "home" / "basic-memory"),
             "BASIC_MEMORY_CONFIG_DIR": str(sandbox / "config"),
             "BASIC_MEMORY_NO_PROMOS": "1",
+            SANDBOX_MARKER: str(sandbox),
             "FASTEMBED_CACHE_PATH": fastembed_cache,
         }
     )
@@ -258,6 +261,18 @@ async def run_self_test() -> None:
     from basic_memory.markdown.entity_parser import EntityParser
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
+
+    # Trigger: `bm doctor --self-test` was run by hand, outside the sandbox.
+    # Why: the self-test creates a project and never removes it, which is only
+    #   safe in a throwaway config. Run against the real one, it would leave a
+    #   project behind and break doctor's promise to change nothing.
+    # Outcome: refuse unless the parent's marker names a sandbox that holds the
+    #   config directory this process would write to.
+    sandbox = os.environ.get(SANDBOX_MARKER)
+    if sandbox is None or not resolve_data_dir().resolve().is_relative_to(Path(sandbox).resolve()):
+        raise ValueError(
+            "--self-test only runs inside the sandbox bm doctor creates; run bm doctor"
+        )
 
     api_note_title = "Doctor API Note"
     manual_note_title = "Doctor Manual Note"

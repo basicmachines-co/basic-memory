@@ -188,9 +188,9 @@ def test_missing_and_orphaned_rows_are_errors_only_once_indexing_settles(
     assert missing.summary == "2 notes have no search row and cannot be found by search."
     assert missing.action == ReindexSearchAction(full=True)
     assert orphaned.summary == (
-        "1 search row points at a note, observation or relation that no longer exists."
+        "1 search row does not match a current note, observation or relation."
     )
-    assert orphaned.action == ReindexSearchAction(full=False)
+    assert orphaned.action == ReindexSearchAction(full=True)
 
 
 def test_singular_and_plural_wording() -> None:
@@ -198,7 +198,7 @@ def test_singular_and_plural_wording() -> None:
         _integrity(missing_entity_rows=1, orphaned_rows=2), ProjectIndexPhase.IDLE
     )
     assert missing.summary.startswith("1 note has no search row")
-    assert orphaned.summary.startswith("2 search rows point at")
+    assert orphaned.summary.startswith("2 search rows do not match")
 
 
 @pytest.mark.parametrize(("count", "verb"), [(1, "has"), (4, "have")])
