@@ -162,11 +162,14 @@ def search_index_findings(
                 severity=lag_severity,
                 summary=(
                     f"{_plural(integrity.orphaned_rows, 'search row')} "
-                    f"{'points' if integrity.orphaned_rows == 1 else 'point'} at a note, "
-                    "observation or relation that no longer exists."
+                    f"{'does' if integrity.orphaned_rows == 1 else 'do'} not match a current "
+                    "note, observation or relation."
                 ),
                 evidence=integrity.orphan_examples,
-                action=ReindexSearchAction(full=False),
+                # A plain reindex only purges rows whose note is gone. A row filed
+                # under the wrong live note, or of an unknown kind, survives it; the
+                # full pass rewrites every live note's rows and so removes both.
+                action=ReindexSearchAction(full=True),
             )
         )
     if integrity.inverted_timestamps:

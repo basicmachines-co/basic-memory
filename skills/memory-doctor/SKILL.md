@@ -44,10 +44,10 @@ when the report is clean but something still seems broken.
         {
           "check": "search_index",
           "severity": "error",
-          "summary": "1 search row points at a note, observation or relation that no longer exists.",
+          "summary": "1 search row does not match a current note, observation or relation.",
           "evidence": ["entity id=99, entity_id=99"],
-          "action": {"kind": "reindex_search", "full": false},
-          "command": "bm reindex --search --project work"
+          "action": {"kind": "reindex_search", "full": true},
+          "command": "bm reindex --search --full --project work"
         }
       ],
       "has_errors": true

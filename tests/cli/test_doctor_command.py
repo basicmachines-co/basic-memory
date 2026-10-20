@@ -90,6 +90,8 @@ def test_sandbox_environment_drops_every_basic_memory_setting(monkeypatch, tmp_p
     assert Path(environment["TMPDIR"]).is_relative_to(tmp_path)
     # The model cache is shared so the sandbox never re-downloads it.
     assert environment["FASTEMBED_CACHE_PATH"] == "/real/fastembed"
+    # The marker that lets the child self-test run names this sandbox.
+    assert environment[doctor_cmd.SANDBOX_MARKER] == str(tmp_path)
 
 
 type RecordedRun = tuple[list[str], dict[str, str]]

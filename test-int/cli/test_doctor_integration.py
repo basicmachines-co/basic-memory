@@ -10,8 +10,9 @@ from sqlalchemy import text, update
 from typer.testing import CliRunner
 
 from basic_memory import db
+import basic_memory.cli.commands.doctor as doctor_cmd
 from basic_memory.cli.main import app as cli_app
-from basic_memory.config_models import ProjectEntry, ProjectMode
+from basic_memory.config_models import ProjectEntry, ProjectMode, resolve_data_dir
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 
@@ -62,11 +63,11 @@ async def test_doctor_exits_nonzero_and_prints_the_fix_for_an_orphaned_row(
     (project,) = json.loads(result.stdout)["projects"]
     (finding,) = project["findings"]
     assert finding["severity"] == "error"
-    assert finding["command"] == f"bm reindex --search --project {test_project.name}"
+    assert finding["command"] == f"bm reindex --search --full --project {test_project.name}"
 
     human = await asyncio.to_thread(_invoke, "--skip-self-test")
     assert human.exit_code == 1
-    assert f"fix: bm reindex --search --project {test_project.name}" in human.stdout
+    assert f"fix: bm reindex --search --full --project {test_project.name}" in human.stdout
 
 
 @pytest.mark.asyncio
@@ -120,6 +121,8 @@ def test_self_test_flow_writes_indexes_and_searches(
     # The test project owns tmp_path, and projects cannot nest, so the self-test's
     # project directory goes in a sibling temp directory.
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path_factory.mktemp("doctor-sandbox")))
+    # The test config directory stands in for the sandbox the parent would create.
+    monkeypatch.setenv(doctor_cmd.SANDBOX_MARKER, str(resolve_data_dir()))
 
     result = _invoke("--self-test")
 
@@ -131,3 +134,21 @@ def test_self_test_flow_writes_indexes_and_searches(
         "OK status observed indexed file",
     ):
         assert step in result.stdout
+
+
+@pytest.mark.parametrize("marker", [None, "elsewhere"])
+def test_self_test_refuses_to_run_outside_its_sandbox(
+    app, app_config, test_project, config_manager, monkeypatch, tmp_path_factory, marker
+):
+    """Run by hand, --self-test would leave a project in the user's real config."""
+    if marker is None:
+        monkeypatch.delenv(doctor_cmd.SANDBOX_MARKER, raising=False)
+    else:
+        monkeypatch.setenv(doctor_cmd.SANDBOX_MARKER, str(tmp_path_factory.mktemp(marker)))
+    projects_before = set(config_manager.load_config().projects)
+
+    result = _invoke("--self-test")
+
+    assert result.exit_code == 1
+    assert "only runs inside the sandbox" in " ".join(result.output.split())
+    assert set(config_manager.load_config().projects) == projects_before

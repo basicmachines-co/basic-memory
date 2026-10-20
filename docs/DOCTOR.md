@@ -21,7 +21,7 @@ run the fixes once the user agrees.
 |---|---|---|
 | `project_path` | The project directory no longer exists | Restore it, or point the project at its new location |
 | `index_readiness` | A project that was never indexed, or indexing still catching up (new, changed or deleted files not yet indexed) | `bm project index NAME` |
-| `search_index` | Duplicate search rows, rows whose note is gone, notes with no search row | `bm reindex --search [--full] --project NAME` |
+| `search_index` | Duplicate search rows, rows that match no current note, notes with no search row | `bm reindex --search --full --project NAME` |
 | `materialization` | Accepted note writes that failed to save, or that were held back because the file changed on disk | `bm reindex --search --project NAME` retries failed saves |
 
 ## Severity
