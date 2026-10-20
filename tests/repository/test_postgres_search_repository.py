@@ -2010,3 +2010,60 @@ async def test_postgres_text_conditions_run_only_on_candidates(session_maker, te
     ]
     assert text_filtered
     assert {node["Node Type"] for node in text_filtered} == {"Subquery Scan"}
+
+
+@pytest.mark.asyncio
+async def test_postgres_chunk_candidates_use_the_gin_index(session_maker, test_project):
+    """Text candidates come from the chunk GIN index, never a chunk table scan (#1791).
+
+    Chunk tsvectors live in TOAST, which the planner does not cost, so it chose a
+    sequential scan that detoasted every chunk: 375 MB per query on a 95k-chunk project.
+    """
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    await repo.init_search_index()
+    query = PreparedSearchQuery(
+        search_text="meeting budget review", search_item_types=[SearchItemType.ENTITY]
+    )
+    compiled = postgres_search_query_module.compile_fts_filter(
+        ProjectScope.single(test_project.id), query, allow_relaxed=True
+    )
+    assert compiled.prefer_index_scans
+    sql = f"SELECT search_index.id FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+    async with db.scoped_session(session_maker) as session:
+        rows = await postgres_search_query_module.execute_fts_statement(
+            session,
+            f"EXPLAIN (FORMAT JSON) {sql}",
+            compiled.params,
+            prefer_index_scans=compiled.prefer_index_scans,
+            use_savepoint=True,
+        )
+    chunk_scans = {
+        node["Node Type"]
+        for node in _filter_nodes(rows[0][0][0]["Plan"])
+        if node.get("Relation Name") == "search_index_fts_chunks"
+    }
+    assert chunk_scans
+    assert "Seq Scan" not in chunk_scans
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_text", ["meeting budget", "broken ( query"])
+async def test_postgres_fts_leaves_the_callers_session_planning_normally(
+    session_maker, test_project, search_text
+):
+    """Turning sequential scans off is local to the FTS statement, so a caller's session
+    plans normally afterwards, whether the statement succeeded or hit a tsquery error."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    await repo.init_search_index()
+    fts = postgres_search_query_module.PostgresFts(session_maker)
+    async with db.scoped_session(session_maker) as session:
+        await fts.search(
+            ProjectScope.single(test_project.id),
+            PreparedSearchQuery(search_text=search_text),
+            limit=5,
+            offset=0,
+            allow_relaxed=True,
+            session=session,
+        )
+        setting = (await session.execute(text("SHOW enable_seqscan"))).scalar_one()
+    assert setting == "on"

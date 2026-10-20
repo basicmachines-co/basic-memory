@@ -13,7 +13,7 @@ from typing import Any
 
 import logfire
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import Row, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -560,7 +560,8 @@ def compile_fts_filter(
     #   scope, type and key filters, as their own subquery, so the text conditions
     #   run only on the candidates. The alias keeps every later reference to
     #   ``search_index`` unchanged.
-    if from_clause != "search_index":
+    candidate_join = from_clause != "search_index"
+    if candidate_join:
         from_clause = (
             f"(SELECT search_index.* FROM {from_clause} "
             f"WHERE {' AND '.join(shared_conditions)} OFFSET 0) AS search_index"
@@ -711,10 +712,55 @@ def compile_fts_filter(
         params=params,
         order_by_clause=AFTER_DATE_ORDER_BY if query.after_date else "",
         score_expression=score_expression,
+        prefer_index_scans=candidate_join,
     )
 
 
 # --- Execution ---
+
+
+async def execute_fts_statement(
+    session: AsyncSession,
+    statement: str,
+    params: dict[str, Any],
+    *,
+    prefer_index_scans: bool,
+    use_savepoint: bool,
+) -> Sequence[Row[Any]]:
+    """Run one FTS statement and fetch its rows, steering text candidates to GIN (#1791).
+
+    Trigger: the statement joins GIN text candidates (``prefer_index_scans``).
+    Why: chunk ``tsvector``s live in TOAST, which the planner does not cost. It priced
+      a sequential scan of ``search_index_fts_chunks`` at the heap's size and chose it
+      over the GIN index, then detoasted every chunk to test it: 375 MB per query on
+      a 95k-chunk project. A GIN bitmap reads only matching rows and never detoasts;
+      it won at every selectivity measured, even with all chunks matching (921
+      buffers against 481k).
+    Outcome: sequential scans are off for this statement only. Inside a savepoint the
+      prior value is restored before the savepoint is released, and a rolled-back
+      savepoint reverts it on its own, so a caller's session plans normally afterwards.
+      Without a savepoint the session is FTS's own, and the setting ends with its
+      transaction.
+    """
+
+    async def run() -> Sequence[Row[Any]]:
+        if not prefer_index_scans:
+            return (await session.execute(text(statement), params)).fetchall()
+        previous = (
+            await session.execute(text("SELECT current_setting('enable_seqscan')"))
+        ).scalar_one()
+        await session.execute(text("SELECT set_config('enable_seqscan', 'off', true)"))
+        rows = (await session.execute(text(statement), params)).fetchall()
+        await session.execute(
+            text("SELECT set_config('enable_seqscan', :previous, true)"),
+            {"previous": previous},
+        )
+        return rows
+
+    if use_savepoint:
+        async with session.begin_nested():
+            return await run()
+    return await run()
 
 
 class PostgresFts:
@@ -769,12 +815,13 @@ class PostgresFts:
             # PostgreSQL leaves a transaction unusable after invalid tsquery syntax.
             # Scope retryable or caller-owned attempts to a savepoint so a relaxed
             # retry, and any caller continuing to use its session, starts healthy.
-            if use_savepoint:
-                async with active_session.begin_nested():
-                    result = await active_session.execute(text(sql), query_params)
-                    return result.fetchall()
-            result = await active_session.execute(text(sql), query_params)
-            return result.fetchall()
+            return await execute_fts_statement(
+                active_session,
+                sql,
+                query_params,
+                prefer_index_scans=compiled.prefer_index_scans,
+                use_savepoint=use_savepoint,
+            )
 
         async def run_search(active_session: AsyncSession):
             relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
@@ -900,12 +947,14 @@ class PostgresFts:
         logger.trace(f"Count {sql} params: {params}")
 
         async def execute_count(active_session: AsyncSession, query_params: dict[str, Any]) -> int:
-            if allow_relaxed:
-                async with active_session.begin_nested():
-                    result = await active_session.execute(text(sql), query_params)
-                    return int(result.scalar_one())
-            result = await active_session.execute(text(sql), query_params)
-            return int(result.scalar_one())
+            rows = await execute_fts_statement(
+                active_session,
+                sql,
+                query_params,
+                prefer_index_scans=compiled.prefer_index_scans,
+                use_savepoint=allow_relaxed,
+            )
+            return int(rows[0][0])
 
         try:
             async with db.scoped_session(self._session_maker) as session:
