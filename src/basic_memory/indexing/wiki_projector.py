@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -206,6 +207,24 @@ class WikiProjectionConflict:
 
 
 @dataclass(frozen=True, slots=True)
+class WikiScopeCollision:
+    """Folders whose names differ only by letter case or Unicode normalization.
+
+    Their index.md and log.md would be one file on a case-insensitive filesystem,
+    so none of the spellings is projected until the user renames one of them.
+    """
+
+    scopes: tuple[str, ...]
+
+    @property
+    def message(self) -> str:
+        return (
+            "Wiki skipped folders whose names differ only by case or Unicode "
+            "normalization; rename one so each has its own index: " + ", ".join(self.scopes)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class WikiProjectionResult:
     """Portable outcome recorded by local and Cloud run ledgers."""
 
@@ -217,6 +236,7 @@ class WikiProjectionResult:
     conflicts: tuple[WikiProjectionConflict, ...]
     warnings: tuple[str, ...]
     pending_materialization: tuple[int, ...]
+    scope_collisions: tuple[WikiScopeCollision, ...] = ()
 
     @property
     def state(self) -> WikiProjectionState:
@@ -397,57 +417,30 @@ def _plan_wiki_projection(
                 "Wiki source change permalink collides with a generated document identity: "
                 f"{change.permalink}"
             )
-    scope_by_portable_path: dict[str, str] = {}
-    for scope in scopes:
-        portable_scope = _portable_path_key(scope)
-        if existing_note := note_by_path.get(portable_scope):
+    for scope in (*scopes, *retained_scope_ancestors):
+        if existing_note := note_by_path.get(_portable_path_key(scope)):
             raise ValueError(
                 "Wiki projection scope collides with an existing source note path: "
                 f"{scope}, {existing_note.path}"
             )
-        if existing_scope := scope_by_portable_path.get(portable_scope):
-            raise ValueError(
-                "Wiki projection scopes must be unique when compared as portable paths: "
-                f"{existing_scope}, {scope}"
-            )
-        scope_by_portable_path[portable_scope] = scope
+    note_scopes = affected_wiki_scopes(*(note.path for note in notes))
+    scope_collisions = _scope_collisions((*note_scopes, *scopes, *retained_scope_ancestors))
+    colliding_scopes = {scope for collision in scope_collisions for scope in collision.scopes}
+    # Trigger: two folders differ only by case or Unicode normalization
+    #   (`marketing/Teams` and `marketing/teams`).
+    # Why: their generated index.md and log.md would be one file on a
+    #   case-insensitive sync target, so neither spelling can be projected safely.
+    #   Raising here failed every later run and froze the whole project's Wiki (#1787).
+    # Outcome: every spelling is left out of this plan and reported on the result;
+    #   all other scopes still project and the watermark advances.
+    scopes = tuple(scope for scope in scopes if scope not in colliding_scopes)
+    projected_scopes = tuple(
+        sorted({*note_scopes, *scopes, *retained_scope_ancestors} - colliding_scopes)
+    )
     existing_by_path = {
         _portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
-    projected_scope_by_portable_path: dict[str, str] = {}
-    note_scopes = affected_wiki_scopes(*(note.path for note in notes))
-    for projected_scope in (*note_scopes, *scopes):
-        portable_scope = _portable_path_key(projected_scope)
-        if (
-            existing_scope := projected_scope_by_portable_path.get(portable_scope)
-        ) is not None and existing_scope != projected_scope:
-            raise ValueError(
-                "Wiki projected scopes must be unique when compared as portable paths: "
-                f"{existing_scope}, {projected_scope}"
-            )
-        projected_scope_by_portable_path[portable_scope] = projected_scope
-    for document in snapshot.reserved_documents:
-        if (
-            not document.projector_owned
-            or PurePosixPath(document.path).name.casefold() != "index.md"
-        ):
-            continue
-        for projected_scope in affected_wiki_scopes(document.path):
-            portable_scope = _portable_path_key(projected_scope)
-            if existing_note := note_by_path.get(portable_scope):
-                raise ValueError(
-                    "Wiki projection scope collides with an existing source note path: "
-                    f"{projected_scope}, {existing_note.path}"
-                )
-            if (
-                existing_scope := projected_scope_by_portable_path.get(portable_scope)
-            ) is not None and existing_scope != projected_scope:
-                raise ValueError(
-                    "Wiki projected scopes must be unique when compared as portable paths: "
-                    f"{existing_scope}, {projected_scope}"
-                )
-            projected_scope_by_portable_path[portable_scope] = projected_scope
-    projected_scopes = tuple(sorted(projected_scope_by_portable_path.values()))
+    collision_warnings = tuple(collision.message for collision in scope_collisions)
     rendered: dict[str, bytes] = {}
     for scope in scopes:
         rendered[_reserved_path(scope, "index.md")] = _render_index(
@@ -488,8 +481,9 @@ def _plan_wiki_projection(
                 updated=0,
                 unchanged=0,
                 conflicts=conflicts,
-                warnings=(),
+                warnings=collision_warnings,
                 pending_materialization=(),
+                scope_collisions=scope_collisions,
             ),
         )
 
@@ -533,8 +527,9 @@ def _plan_wiki_projection(
             updated=updated,
             unchanged=len(unchanged_paths),
             conflicts=(),
-            warnings=(),
+            warnings=collision_warnings,
             pending_materialization=(),
+            scope_collisions=scope_collisions,
         ),
     )
 
@@ -573,6 +568,18 @@ def _projection_scopes(
             current_scopes.add(scope.as_posix())
             scope = scope.parent
     return tuple(sorted(scopes & current_scopes))
+
+
+def _scope_collisions(scopes: Iterable[str]) -> tuple[WikiScopeCollision, ...]:
+    """Group distinct scope spellings that share one portable path."""
+    spellings_by_portable_path: dict[str, set[str]] = {}
+    for scope in scopes:
+        spellings_by_portable_path.setdefault(_portable_path_key(scope), set()).add(scope)
+    return tuple(
+        WikiScopeCollision(scopes=tuple(sorted(spellings)))
+        for _portable_path, spellings in sorted(spellings_by_portable_path.items())
+        if len(spellings) > 1
+    )
 
 
 def _without_projection_metadata(content: bytes) -> bytes:
@@ -616,7 +623,8 @@ def _render_index(
         child_scope = _direct_child_projected_scope(scope, projected_scope)
         if child_scope is not None:
             child_scope_set.add(child_scope)
-    child_scopes = sorted(child_scope_set)
+    # A folder left out of the plan has no index to link to.
+    child_scopes = sorted(child_scope_set.intersection(projected_scopes))
     title = snapshot.project_name if not scope else _display_name(PurePosixPath(scope).name)
     body: list[str] = [f"# {_escape_generated_markdown_text(title)}", ""]
     if child_scopes:
