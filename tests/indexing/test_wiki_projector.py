@@ -14,11 +14,13 @@ from basic_memory.indexing.wiki_projector import (
     WikiChangeOperation,
     WikiProjectionReason,
     WikiProjectionRequest,
+    WikiProjectionPlan,
     WikiProjectionResult,
     WikiProjectionSnapshot,
     WikiProjectionState,
     WIKI_PROJECTOR_VERSION,
     WikiReservedDocument,
+    WikiScopeCollision,
     WikiSourceChange,
     WikiSourceNote,
     WIKI_LOG_ENTRY_LIMIT,
@@ -104,6 +106,19 @@ def _reserved(path: str, content: bytes, *, owned: bool = True) -> WikiReservedD
         content=content,
         projector_owned=owned,
     )
+
+
+def _assert_scope_collision_skipped(plan: WikiProjectionPlan, spellings: tuple[str, ...]) -> None:
+    """A portable-path collision is reported on the result and never projected."""
+    assert plan.result.scope_collisions == (WikiScopeCollision(scopes=spellings),)
+    assert plan.result.warnings == (WikiScopeCollision(scopes=spellings).message,)
+    assert plan.result.state is WikiProjectionState.current
+    assert plan.result.output_watermark == plan.request.through_partition_position
+    written = {write.path: write.content.decode() for write in plan.writes}
+    assert "index.md" in written
+    for spelling in spellings:
+        assert not any(path.startswith(f"{spelling}/") for path in written)
+        assert not any(f"[[{spelling}/index|" in content for content in written.values())
 
 
 def test_affected_scopes_include_root_and_move_ancestors() -> None:
@@ -312,7 +327,7 @@ def test_snapshot_rejects_case_folded_duplicate_reserved_paths() -> None:
     ("first_scope", "second_scope"),
     (("Foo", "foo"), ("caf\u00e9", "cafe\u0301")),
 )
-def test_projection_rejects_nonportable_duplicate_scopes(
+def test_projection_skips_nonportable_duplicate_scopes(
     first_scope: str,
     second_scope: str,
 ) -> None:
@@ -336,11 +351,12 @@ def test_projection_rejects_nonportable_duplicate_scopes(
         ),
     )
 
-    with pytest.raises(ValueError, match="unique when compared as portable paths"):
-        plan_wiki_projection(
-            _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
-            snapshot,
-        )
+    plan = plan_wiki_projection(
+        _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
+        snapshot,
+    )
+
+    _assert_scope_collision_skipped(plan, tuple(sorted((first_scope, second_scope))))
 
 
 def test_snapshot_rejects_unicode_normalized_duplicate_reserved_paths() -> None:
@@ -530,7 +546,7 @@ def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
     assert "[[guides/index|Guides]]" in rendered["index.md"]
 
 
-def test_incremental_projection_rejects_case_folded_existing_empty_scope() -> None:
+def test_incremental_projection_skips_case_folded_existing_empty_scope() -> None:
     note = WikiSourceNote(
         path="foo/note.md",
         permalink="foo/note",
@@ -559,11 +575,12 @@ def test_incremental_projection_rejects_case_folded_existing_empty_scope() -> No
         reserved_documents=(_reserved("Foo/index.md", b"# Foo\n"),),
     )
 
-    with pytest.raises(ValueError, match="projected scopes must be unique"):
-        plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+
+    _assert_scope_collision_skipped(plan, ("Foo", "foo"))
 
 
-def test_incremental_projection_validates_existing_scope_against_unchanged_notes() -> None:
+def test_incremental_projection_skips_existing_scope_colliding_with_unchanged_notes() -> None:
     historical_note = WikiSourceNote(
         path="foo/historical.md",
         permalink="foo/historical",
@@ -599,8 +616,9 @@ def test_incremental_projection_validates_existing_scope_against_unchanged_notes
         reserved_documents=(_reserved("Foo/index.md", b"# Foo\n"),),
     )
 
-    with pytest.raises(ValueError, match="projected scopes must be unique"):
-        plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+
+    _assert_scope_collision_skipped(plan, ("Foo", "foo"))
 
 
 def test_incremental_projection_rejects_existing_scope_at_source_note_path() -> None:
@@ -636,7 +654,7 @@ def test_incremental_projection_rejects_existing_scope_at_source_note_path() -> 
         plan_wiki_projection(_request(position=1, scopes=()), snapshot)
 
 
-def test_incremental_projection_validates_retained_scope_ancestors() -> None:
+def test_incremental_projection_skips_retained_scope_ancestor_collisions() -> None:
     historical_note = WikiSourceNote(
         path="foo/historical.md",
         permalink="foo/historical",
@@ -672,8 +690,9 @@ def test_incremental_projection_validates_retained_scope_ancestors() -> None:
         reserved_documents=(_reserved("Foo/deep/index.md", b"# Deep\n"),),
     )
 
-    with pytest.raises(ValueError, match="projected scopes must be unique"):
-        plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+
+    _assert_scope_collision_skipped(plan, ("Foo", "foo"))
 
 
 def test_incremental_projection_materializes_missing_retained_scope_ancestors() -> None:
@@ -1583,3 +1602,89 @@ def test_projection_preserves_literal_entity_looking_titles(
     rendered = {write.path: write.content.decode() for write in plan.writes}
 
     assert f"[[entity-title|{escaped_title}]]" in rendered["index.md"]
+
+
+def _marketing_note(folder: str, name: str) -> WikiSourceNote:
+    return WikiSourceNote(
+        path=f"marketing/{folder}/{name}.md",
+        permalink=f"marketing/{folder.lower()}-{name}",
+        title=name.title(),
+        note_type="Note",
+        checksum=f"{folder}-{name}-checksum",
+    )
+
+
+def test_case_only_folder_collision_does_not_fail_the_rebuild() -> None:
+    """`marketing/Teams` and `marketing/teams` must not freeze the project's Wiki (#1787)."""
+    base = _snapshot()
+    snapshot = replace(
+        base,
+        notes=(
+            *base.notes,
+            _marketing_note("Teams", "roster"),
+            _marketing_note("teams", "offsite"),
+            WikiSourceNote(
+                path="marketing/plan.md",
+                permalink="marketing/plan",
+                title="Plan",
+                note_type="Note",
+                checksum="plan-checksum",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(
+        _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
+        snapshot,
+    )
+
+    _assert_scope_collision_skipped(plan, ("marketing/Teams", "marketing/teams"))
+    written = {write.path: write.content.decode() for write in plan.writes}
+    # Every other scope still projects, including the colliding folders' parent.
+    assert set(written) == {
+        "index.md",
+        "log.md",
+        "guides/index.md",
+        "guides/log.md",
+        "guides/deep/index.md",
+        "guides/deep/log.md",
+        "marketing/index.md",
+        "marketing/log.md",
+    }
+    assert "[[marketing/plan|Plan]]" in written["marketing/index.md"]
+    assert "[[marketing/index|Marketing]]" in written["index.md"]
+
+
+def test_case_only_folder_collision_does_not_fail_an_incremental_run() -> None:
+    """An accepted edit inside one colliding folder still projects its other ancestors."""
+    roster = _marketing_note("Teams", "roster")
+    offsite = _marketing_note("teams", "offsite")
+    change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.updated,
+        path=offsite.path,
+        permalink=offsite.permalink,
+        title=offsite.title,
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=1,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(roster, offsite),
+        changes=(change,),
+    )
+
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+
+    _assert_scope_collision_skipped(plan, ("marketing/Teams", "marketing/teams"))
+    assert {write.path for write in plan.writes} == {
+        "index.md",
+        "log.md",
+        "marketing/index.md",
+        "marketing/log.md",
+    }
