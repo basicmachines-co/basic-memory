@@ -32,16 +32,17 @@ Search rows, embeddings and note saves are derived state that catches up in the
 background, so doctor grades findings by whether they will go away on their own:
 
 - **info**: expected while work is in progress, such as indexing still catching
-  up. No action.
+  up.
 - **warning**: needs attention but may recover, such as a failed save that the
   next start retries.
 - **error**: will not go away without the fix, such as a duplicated search row,
   or a missing or orphaned row once indexing has settled.
 
-Duplicate, missing and orphaned search rows are info while file indexing still has
-work owed, because indexing a note rewrites all of its rows, and errors once it
-settles. Once settled, a plain reindex skips unchanged notes, so the fix is a full
-search reindex.
+Duplicate, missing and orphaned search rows are warnings while file indexing still
+has work owed: indexing a note rewrites all of its rows, so the pass clears an
+anomaly on a note it rewrites, but not one on a note it does not. Once indexing
+settles they are errors. The fix is a full search reindex, because a plain one
+skips unchanged notes.
 
 Search rows normally outnumber notes, because observations and relations have
 their own rows. An unresolved relation target is valid and is not an orphan.
