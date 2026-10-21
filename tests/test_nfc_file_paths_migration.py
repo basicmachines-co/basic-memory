@@ -207,3 +207,36 @@ def test_upgrade_keeps_the_lowest_marker_when_no_guard_matches(database):
     assert connection.execute(
         "SELECT id, file_path, file_checksum FROM note_file_vacate"
     ).fetchall() == [(1, f"old/{NFC}", "first")]
+
+
+def test_upgrade_with_vector_table_without_extension_on_migration_connection(database):
+    """Path migration must not inspect vector tables on its extension-free connection."""
+    import sqlite_vec
+
+    connection, upgrade, project_root = database
+    connection.enable_load_extension(True)
+    try:
+        sqlite_vec.load(connection)
+    finally:
+        connection.enable_load_extension(False)
+    connection.execute(
+        "CREATE VIRTUAL TABLE search_vector_embeddings USING vec0(embedding float[3])"
+    )
+    connection.execute(
+        "INSERT INTO search_vector_embeddings(rowid, embedding) VALUES (1, '[1, 2, 3]')"
+    )
+    _insert_entity(connection, 1, "notes/zametka", f"notes/{NFC}")
+    _insert_entity(connection, 2, "notes/zametka-1", f"notes/{NFD}")
+    _insert_note_content(connection, 2, f"notes/{NFD}", "accepted edit", "2026-02-01 00:00:00")
+
+    upgrade()
+
+    assert connection.execute("SELECT id, file_path FROM entity").fetchall() == [
+        (1, f"notes/{NFC}")
+    ]
+    assert connection.execute(
+        "SELECT entity_id, markdown_content FROM note_content"
+    ).fetchall() == [(1, "accepted edit")]
+    assert connection.execute(
+        "SELECT rowid, vec_to_json(embedding) FROM search_vector_embeddings"
+    ).fetchall() == [(1, "[1.000000,2.000000,3.000000]")]
