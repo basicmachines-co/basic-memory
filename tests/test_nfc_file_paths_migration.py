@@ -9,6 +9,7 @@ from importlib import import_module
 import pytest
 from alembic import command
 
+from basic_memory.repository.semantic_runtime import sqlite_vector_runtime_available
 from tests.test_note_content_migration import sqlite_alembic_config
 
 migration = import_module("basic_memory.alembic.versions.0042_nfc_file_paths")
@@ -209,6 +210,9 @@ def test_upgrade_keeps_the_lowest_marker_when_no_guard_matches(database):
     ).fetchall() == [(1, f"old/{NFC}", "first")]
 
 
+@pytest.mark.skipif(
+    not sqlite_vector_runtime_available(), reason="SQLite extension loading is unavailable"
+)
 def test_upgrade_with_vector_table_without_extension_on_migration_connection(database):
     """Path migration must not inspect vector tables on its extension-free connection."""
     import sqlite_vec
