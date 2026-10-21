@@ -44,6 +44,7 @@ from basic_memory.repository.search_trace import SearchTraceCollector, build_fts
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 _QUOTED_QUERY_PATTERN = re.compile(r'"([^"]*)"')
+_MAX_INDEXED_OPERANDS = 128
 _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
@@ -569,7 +570,13 @@ def compile_fts_filter(
             # per operand, again for ranking, and again for count. Collect presence
             # from GIN instead. Single-word and mixed-script queries keep their
             # existing candidate path and parent short-circuit behavior.
-            if len(candidate_operands) > 1 and not script_query.gram_phrases:
+            # Each indexed operand adds a projected column and two UNION branches.
+            # Bound query width well below PostgreSQL's 1664-column limit; longer
+            # pasted queries retain the existing single-vector candidate path.
+            if (
+                1 < len(candidate_operands) <= _MAX_INDEXED_OPERANDS
+                and not script_query.gram_phrases
+            ):
                 from_clause = _word_operand_from_clause(scope, params, list(candidate_operands))
                 indexed_document_vector = document_fts_vector_sql(
                     probe_texts, params, indexed_operands=True

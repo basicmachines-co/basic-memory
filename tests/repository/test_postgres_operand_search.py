@@ -123,3 +123,21 @@ async def test_operand_count_uses_gin_without_correlated_chunk_probes(
     assert chunk_scans
     assert all(node["Actual Loops"] <= 1 for node in chunk_scans)
     assert all(node["Node Type"] == "Bitmap Heap Scan" for node in chunk_scans)
+
+
+@pytest.mark.asyncio
+async def test_long_query_keeps_existing_vector_path(
+    session_maker: async_sessionmaker[AsyncSession], operand_scope: ProjectScope
+) -> None:
+    # More terms than the indexed projection budget must remain valid SQL. Include
+    # a real matching term so the existing path must evaluate a candidate too.
+    query = PreparedSearchQuery(
+        search_text="coffee OR " + " OR ".join(f"absentword{i}" for i in range(128)),
+        search_item_types=[SearchItemType.ENTITY],
+    )
+    compiled = compile_fts_filter(operand_scope, query)
+    assert "AS operand_" not in compiled.from_clause
+    fts = PostgresFts(session_maker)
+    rows = await fts.search(operand_scope, query, limit=100, offset=0)
+    assert {row.id for row in rows} == {1, 2, 4, 5}
+    assert await fts.count(operand_scope, query) == 4
