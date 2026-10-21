@@ -356,7 +356,9 @@ def is_tsquery_syntax_error(exc: Exception) -> bool:
 # --- Filter compilation ---
 
 
-def document_fts_vector_sql(processed_texts: Sequence[str], params: dict[str, Any]) -> str:
+def document_fts_vector_sql(
+    processed_texts: Sequence[str], params: dict[str, Any], *, indexed_operands: bool = False
+) -> str:
     """Build a query-sized vector representing lexemes found anywhere in one item."""
     operands: dict[str, str] = {}
     for processed_text in processed_texts:
@@ -369,6 +371,11 @@ def document_fts_vector_sql(processed_texts: Sequence[str], params: dict[str, An
         representative_param = f"text_representative_{index}"
         params[operand_param] = operand
         params[representative_param] = representative
+        if indexed_operands:
+            present_lexemes.append(
+                f"CASE WHEN fts_candidate.operand_{index} THEN :{representative_param} ELSE '' END"
+            )
+            continue
         present_lexemes.append(
             "CASE WHEN (search_index.textsearchable_index_col "
             f"@@ to_tsquery('english', :{operand_param}) OR EXISTS ("
@@ -389,6 +396,45 @@ def document_fts_vector_sql(processed_texts: Sequence[str], params: dict[str, An
     # unbounded vector.
     lexeme_array = f"ARRAY[{', '.join(present_lexemes)}]"
     return f"to_tsvector('english', array_to_string({lexeme_array}, ' '))"
+
+
+def _word_operand_from_clause(
+    scope: ProjectScope, params: dict[str, Any], operands: Sequence[str]
+) -> str:
+    """Find document-wide operand presence through GIN, without detoasting each candidate.
+
+    Each operand contributes document keys from the parent and chunk indexes. Grouping
+    those keys preserves cross-chunk AND/NOT semantics and operand order for ranking.
+    Unindexable negation additionally admits every scoped row, including documents with
+    none of the operands, just like the ordinary candidate path.
+    """
+    scans: list[str] = []
+    presence: list[str] = []
+    for index, operand in enumerate(operands):
+        params[f"text_operand_{index}"] = operand
+        for table, id_column, type_column in (
+            ("search_index", "id", "type"),
+            ("search_index_fts_chunks", "search_index_id", "search_index_type"),
+        ):
+            scans.append(
+                f"SELECT project_id, {id_column} AS id, {type_column} AS type, "
+                f"{index} AS operand FROM {table} "
+                f"WHERE {scope.predicate('project_id', params)} "
+                f"AND textsearchable_index_col @@ to_tsquery('english', :text_operand_{index})"
+            )
+        presence.append(f"bool_or(operand = {index}) AS operand_{index}")
+    scans.append(
+        "SELECT project_id, id, type, -1 AS operand FROM search_index "
+        f"WHERE {scope.predicate('project_id', params)} "
+        "AND querytree(to_tsquery('english', :text)) = 'T'"
+    )
+    return (
+        "search_index JOIN (SELECT project_id, id, type, "
+        f"{', '.join(presence)} FROM ({' UNION ALL '.join(scans)}) AS operand_matches "
+        "GROUP BY project_id, id, type) AS fts_candidate "
+        "ON fts_candidate.project_id = search_index.project_id "
+        "AND fts_candidate.id = search_index.id AND fts_candidate.type = search_index.type"
+    )
 
 
 def _word_candidate_from_clause(scope: ProjectScope, params: dict[str, Any]) -> str:
@@ -496,6 +542,7 @@ def compile_fts_filter(
     conditions: list[str] = []
     from_clause = "search_index"
     document_vector: str | None = None
+    indexed_document_vector: str | None = None
     script_tsqueries: list[str] = []
     search_text = query.search_text
 
@@ -518,7 +565,18 @@ def compile_fts_filter(
             if candidate_operands:
                 params["text_candidate"] = " | ".join(candidate_operands)
                 from_clause = _word_candidate_from_clause(scope, params)
-            document_vector = document_fts_vector_sql(probe_texts, params)
+            # Multi-word queries otherwise detoast the same candidate's chunks once
+            # per operand, again for ranking, and again for count. Collect presence
+            # from GIN instead. Single-word and mixed-script queries keep their
+            # existing candidate path and parent short-circuit behavior.
+            if len(candidate_operands) > 1 and not script_query.gram_phrases:
+                from_clause = _word_operand_from_clause(scope, params, list(candidate_operands))
+                indexed_document_vector = document_fts_vector_sql(
+                    probe_texts, params, indexed_operands=True
+                )
+                document_vector = "search_index.document_fts_vector"
+            else:
+                document_vector = document_fts_vector_sql(probe_texts, params)
             word_condition = f"{document_vector} @@ to_tsquery('english', :text)"
             if script_query.gram_phrases:
                 # Trigger: PostgreSQL's English dictionary removes every word term.
@@ -562,8 +620,11 @@ def compile_fts_filter(
     #   ``search_index`` unchanged.
     candidate_join = from_clause != "search_index"
     if candidate_join:
+        projection = "search_index.*"
+        if indexed_document_vector is not None:
+            projection += f", {indexed_document_vector} AS document_fts_vector"
         from_clause = (
-            f"(SELECT search_index.* FROM {from_clause} "
+            f"(SELECT {projection} FROM {from_clause} "
             f"WHERE {' AND '.join(shared_conditions)} OFFSET 0) AS search_index"
         )
     else:

@@ -284,12 +284,12 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     assert prepare_single_term("coffee", is_prefix=False) == "coffee"
 
     indexed = compile_fts_filter(
-        repo.scope, PreparedSearchQuery(search_text="coffee brewing"), allow_relaxed=True
+        repo.scope, PreparedSearchQuery(search_text="coffee"), allow_relaxed=True
     )
     assert "FROM search_index AS candidate_parent" in indexed.from_clause
     assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed.from_clause
     assert "querytree(to_tsquery('english', :text))" in indexed.from_clause
-    assert indexed.params["text_candidate"] == "coffee:* | brewing:*"
+    assert indexed.params["text_candidate"] == "coffee:*"
 
     filtered = compile_fts_filter(
         repo.scope,
@@ -300,7 +300,7 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
 
     negated = compile_fts_filter(repo.scope, PreparedSearchQuery(search_text="coffee NOT brewing"))
     assert "AS fts_candidate" in negated.from_clause
-    assert "FROM search_index AS candidate_all" in negated.from_clause
+    assert "querytree(to_tsquery('english', :text)) = 'T'" in negated.from_clause
     assert negated.params["text_candidate"] == "coffee | brewing"
 
     now = datetime.now(timezone.utc)
@@ -1980,7 +1980,10 @@ def _filter_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_postgres_text_conditions_run_only_on_candidates(session_maker, test_project):
+@pytest.mark.parametrize("search_text", ["meeting", "meeting budget review"])
+async def test_postgres_text_conditions_run_only_on_candidates(
+    session_maker, test_project, search_text
+):
     """The costly text conditions apply to the GIN candidates, not the whole scope (#1791).
 
     The document-vector condition probes the chunk table once per query operand. Postgres
@@ -1990,9 +1993,7 @@ async def test_postgres_text_conditions_run_only_on_candidates(session_maker, te
     """
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
     await repo.init_search_index()
-    query = PreparedSearchQuery(
-        search_text="meeting budget review", search_item_types=[SearchItemType.ENTITY]
-    )
+    query = PreparedSearchQuery(search_text=search_text, search_item_types=[SearchItemType.ENTITY])
     compiled = postgres_search_query_module.compile_fts_filter(
         ProjectScope.single(test_project.id), query, allow_relaxed=True
     )
@@ -2006,7 +2007,10 @@ async def test_postgres_text_conditions_run_only_on_candidates(session_maker, te
         plan = explained.scalar_one()[0]["Plan"]
 
     text_filtered = [
-        node for node in _filter_nodes(plan) if "to_tsvector" in node.get("Filter", "")
+        node
+        for node in _filter_nodes(plan)
+        if "to_tsvector" in node.get("Filter", "")
+        or "document_fts_vector" in node.get("Filter", "")
     ]
     assert text_filtered
     assert {node["Node Type"] for node in text_filtered} == {"Subquery Scan"}
