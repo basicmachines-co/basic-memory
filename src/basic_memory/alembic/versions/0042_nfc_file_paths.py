@@ -121,9 +121,15 @@ def _nfc_or_none(path: str | None) -> str | None:
 
 def _table_columns(connection: sa.Connection) -> dict[str, set[str]]:
     inspector = sa.inspect(connection)
+    # Reflect only tables this migration uses. Inspecting unrelated vec0 tables
+    # requires sqlite-vec on the migration connection even without reading rows.
+    needed_tables = {table for table, _, _ in TWIN_STATEMENTS} | {
+        table for table, _, _ in PATH_COLUMNS
+    }
     return {
         table: {column["name"] for column in inspector.get_columns(table)}
         for table in inspector.get_table_names()
+        if table in needed_tables
     }
 
 
