@@ -242,3 +242,25 @@ async def test_image_conversion(app, indexed_files, test_project):
 # complex mocking of internal logic. We've already tested the happy path
 # with the PDF file, and the error handling with our updated tool_utils tests.
 # We have 100% coverage of this code in read_file.py according to the coverage report.
+
+
+@pytest.mark.asyncio
+async def test_read_content_refuses_non_displayable_image_formats(
+    app, project_config, project_repository, session_maker, test_project
+):
+    """A TIFF stored under a .png name never reaches Pillow's TIFF decoder."""
+    from basic_memory.index.local_project import LocalProjectIndexRunner
+
+    disguised = project_config.home / "disguised.png"
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (4, 4), color="red").save(buffer, format="TIFF")
+    disguised.write_bytes(buffer.getvalue())
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository, session_maker=session_maker
+    )
+    await runner.index_project(test_project.id, force_full=True)
+
+    response = await read_content("disguised.png", project=test_project.name)
+
+    assert response["type"] == "error"
+    assert "Unsupported image format" in response["error"]
