@@ -19,6 +19,8 @@ from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     GraphContext,
+    MAX_CONTEXT_DEPTH,
+    MAX_RECENT_ACTIVITY_PAGE_SIZE,
     ProjectActivity,
     ActivityStats,
 )
@@ -105,9 +107,9 @@ async def recent_activity(
             Case-insensitive: "ENTITY" and "entity" are treated the same.
             Default is entity-only. Specify other types explicitly to include
             observations and relations.
-        depth: How many relation hops to traverse (1-3 recommended)
+        depth: How many relation hops to traverse (1-3 recommended, maximum: 5)
         page: Page number for pagination (default 1)
-        page_size: Number of items per page (default 10)
+        page_size: Number of items per page (default 10, maximum: 100)
         timeframe: Time window to search. Supports natural language:
             - Relative: "2 days ago", "last week", "yesterday"
             - Points in time: "2024-01-01", "January 1st"
@@ -153,8 +155,11 @@ async def recent_activity(
         raise ValueError(f"page must be >= 1, got {page}")
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
-    if page_size > 100:
-        raise ValueError(f"page_size must be <= 100, got {page_size}")
+    if page_size > MAX_RECENT_ACTIVITY_PAGE_SIZE:
+        raise ValueError(f"page_size must be <= {MAX_RECENT_ACTIVITY_PAGE_SIZE}, got {page_size}")
+    # Zero keeps meaning "use the default depth"; the API rejects the rest with a 422.
+    if depth < 0 or depth > MAX_CONTEXT_DEPTH:
+        raise ValueError(f"depth must be between 1 and {MAX_CONTEXT_DEPTH}, got {depth}")
 
     # Build common parameters for API calls
     params: dict[str, Any] = {

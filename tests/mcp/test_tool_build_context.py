@@ -7,6 +7,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import build_context, write_note
+from basic_memory.schemas.memory import MAX_CONTEXT_DEPTH
 
 
 @pytest.mark.asyncio
@@ -206,6 +207,25 @@ async def test_build_context_string_depth_parameter(client, test_graph, test_pro
     # Test invalid string depth parameter - should raise ToolError
     with pytest.raises(ToolError):
         await build_context(test_url, depth="invalid", project=test_project.name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth", [MAX_CONTEXT_DEPTH + 1, str(MAX_CONTEXT_DEPTH + 1), -1])
+async def test_build_context_rejects_depth_outside_bounds(client, test_project, depth):
+    """Deep traversals fail in the tool with the same bound the API enforces."""
+    with pytest.raises(ValueError, match=f"depth must be between 1 and {MAX_CONTEXT_DEPTH}"):
+        await build_context(url="memory://test/root", depth=depth, project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_build_context_accepts_max_depth(client, test_graph, test_project):
+    """The maximum depth is inclusive and reaches the API without a 422."""
+    result = await build_context(
+        url="memory://test/root", depth=MAX_CONTEXT_DEPTH, project=test_project.name
+    )
+
+    assert isinstance(result, dict)
+    assert result["metadata"]["depth"] == MAX_CONTEXT_DEPTH
 
 
 @pytest.mark.asyncio

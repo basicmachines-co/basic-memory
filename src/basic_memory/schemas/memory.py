@@ -13,6 +13,13 @@ DEFAULT_CONTEXT_PAGE_SIZE = 10
 MAX_CONTEXT_PAGE_SIZE = 50
 DEFAULT_CONTEXT_RELATED_RESULTS = 10
 MAX_CONTEXT_RELATED_RESULTS = 100
+# The relation CTE walks every simple path up to twice this many steps, so on a
+# dense graph its cost grows exponentially with depth. Five matches the prompt
+# API's existing cap and keeps the documented 1-3 range comfortably inside it.
+MAX_CONTEXT_DEPTH = 5
+# recent_activity has always accepted larger pages than build_context because its
+# default request is entity-only summaries, not full context bodies.
+MAX_RECENT_ACTIVITY_PAGE_SIZE = 100
 
 
 def validate_memory_url_path(path: str) -> bool:
