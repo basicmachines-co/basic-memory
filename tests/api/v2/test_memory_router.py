@@ -6,7 +6,12 @@ from pathlib import Path
 
 from basic_memory import db
 from basic_memory.models import Project
-from basic_memory.schemas.memory import MAX_CONTEXT_PAGE_SIZE, MAX_CONTEXT_RELATED_RESULTS
+from basic_memory.schemas.memory import (
+    MAX_CONTEXT_DEPTH,
+    MAX_CONTEXT_PAGE_SIZE,
+    MAX_CONTEXT_RELATED_RESULTS,
+    MAX_RECENT_ACTIVITY_PAGE_SIZE,
+)
 
 
 async def create_test_entity(
@@ -200,6 +205,8 @@ async def test_get_memory_context_by_permalink(
         {"page": 0},
         {"page_size": 0},
         {"max_related": -1},
+        {"depth": MAX_CONTEXT_DEPTH + 1},
+        {"depth": 0},
     ],
 )
 async def test_get_memory_context_rejects_unbounded_requests(
@@ -211,6 +218,48 @@ async def test_get_memory_context_rejects_unbounded_requests(
     response = await client.get(f"{v2_project_url}/memory/context-test", params=params)
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"depth": MAX_CONTEXT_DEPTH + 1},
+        {"depth": 0},
+        {"page_size": MAX_RECENT_ACTIVITY_PAGE_SIZE + 1},
+        {"page_size": 0},
+        {"page": 0},
+        {"max_related": MAX_CONTEXT_RELATED_RESULTS + 1},
+    ],
+)
+async def test_get_recent_context_rejects_unbounded_requests(
+    client: AsyncClient,
+    v2_project_url: str,
+    params: dict[str, int],
+):
+    """A deep recent-activity traversal is as costly as build_context's, so it is bounded too."""
+    response = await client.get(f"{v2_project_url}/memory/recent", params=params)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_memory_endpoints_accept_the_largest_allowed_requests(
+    client: AsyncClient,
+    v2_project_url: str,
+):
+    """The bounds are inclusive, so the documented maximums keep working."""
+    recent = await client.get(
+        f"{v2_project_url}/memory/recent",
+        params={"depth": MAX_CONTEXT_DEPTH, "page_size": MAX_RECENT_ACTIVITY_PAGE_SIZE},
+    )
+    context = await client.get(
+        f"{v2_project_url}/memory/context-test",
+        params={"depth": MAX_CONTEXT_DEPTH, "page_size": MAX_CONTEXT_PAGE_SIZE},
+    )
+
+    assert recent.status_code == 200
+    assert context.status_code == 200
 
 
 @pytest.mark.asyncio

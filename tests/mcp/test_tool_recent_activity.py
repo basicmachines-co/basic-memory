@@ -601,6 +601,14 @@ async def test_recent_activity_pagination_validation():
         await recent_activity(page_size=999)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth", [6, -1])
+async def test_recent_activity_depth_validation(depth):
+    """Deep traversals fail in the tool with the same bound the API enforces."""
+    with pytest.raises(ValueError, match=f"depth must be between 1 and 5, got {depth}"):
+        await recent_activity(depth=depth)
+
+
 def test_format_project_output_has_more_pagination_guidance():
     """When has_more is True, activity summary should show pagination guidance."""
     import importlib

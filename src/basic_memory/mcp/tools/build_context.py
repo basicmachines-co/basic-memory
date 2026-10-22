@@ -21,6 +21,7 @@ from basic_memory.schemas.memory import (
     DEFAULT_CONTEXT_RELATED_RESULTS,
     EntitySummary,
     GraphContext,
+    MAX_CONTEXT_DEPTH,
     MAX_CONTEXT_PAGE_SIZE,
     MAX_CONTEXT_RELATED_RESULTS,
     MemoryUrl,
@@ -259,7 +260,7 @@ async def build_context(
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         url: memory:// URI pointing to discussion content (e.g. memory://specs/search),
             or a bare permalink path.
-        depth: How many relation hops to traverse (1-3 recommended for performance)
+        depth: How many relation hops to traverse (1-3 recommended, maximum: 5)
         timeframe: How far back to look. Supports natural language like "2 days ago", "last week"
         page: Page number of results to return (default: 1)
         page_size: Number of primary results to return per page (default: 10, maximum: 50)
@@ -339,6 +340,17 @@ async def build_context(
 
             raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
 
+    # Trigger: a caller asks for a deep traversal of a densely linked project.
+    # Why: the relation CTE walks every simple path, so each extra hop multiplies
+    #      database work; the API rejects the same range with a 422.
+    # Outcome: fail here with a clear message instead of a remote validation error.
+    depth = depth or 1
+    if depth < 1 or depth > MAX_CONTEXT_DEPTH:
+        raise ValueError(
+            f"depth must be between 1 and {MAX_CONTEXT_DEPTH}, got {depth}. "
+            "Follow the returned memory:// links to explore further."
+        )
+
     # URL is already validated and normalized by MemoryUrl type annotation
 
     with logfire.span(
@@ -347,7 +359,7 @@ async def build_context(
         tool_name="build_context",
         requested_project=project,
         requested_project_id=project_id,
-        depth=depth or 1,
+        depth=depth,
         timeframe=timeframe,
         page=page,
         page_size=page_size,
@@ -379,7 +391,7 @@ async def build_context(
             memory_client = MemoryClient(client, active_project.external_id)
             graph = await memory_client.build_context(
                 resolved_path,
-                depth=depth or 1,
+                depth=depth,
                 timeframe=timeframe,
                 page=page,
                 page_size=page_size,

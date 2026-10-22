@@ -24,8 +24,10 @@ from basic_memory.schemas.memory import (
     DEFAULT_CONTEXT_PAGE_SIZE,
     DEFAULT_CONTEXT_RELATED_RESULTS,
     GraphContext,
+    MAX_CONTEXT_DEPTH,
     MAX_CONTEXT_PAGE_SIZE,
     MAX_CONTEXT_RELATED_RESULTS,
+    MAX_RECENT_ACTIVITY_PAGE_SIZE,
     normalize_memory_url,
 )
 from basic_memory.schemas.search import SearchItemType
@@ -53,11 +55,15 @@ async def recent(
     session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     type: Annotated[list[SearchItemType] | None, Query()] = None,
-    depth: int = 1,
+    depth: int = Query(1, ge=1, le=MAX_CONTEXT_DEPTH),
     timeframe: TimeFrame = "7d",
-    page: int = 1,
-    page_size: int = 10,
-    max_related: int = 10,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_CONTEXT_PAGE_SIZE, ge=1, le=MAX_RECENT_ACTIVITY_PAGE_SIZE),
+    max_related: int = Query(
+        DEFAULT_CONTEXT_RELATED_RESULTS,
+        ge=0,
+        le=MAX_CONTEXT_RELATED_RESULTS,
+    ),
 ) -> GraphContext:
     """Get recent activity context for a project.
 
@@ -141,7 +147,7 @@ async def get_memory_context(
     session_maker: SessionMakerDep,
     uri: str,
     project_id: str = Path(..., description="Project external UUID"),
-    depth: int = 1,
+    depth: int = Query(1, ge=1, le=MAX_CONTEXT_DEPTH),
     timeframe: Optional[TimeFrame] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_CONTEXT_PAGE_SIZE, ge=1, le=MAX_CONTEXT_PAGE_SIZE),
