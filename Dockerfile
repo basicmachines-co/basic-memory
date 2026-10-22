@@ -1,11 +1,21 @@
 FROM python:3.12-slim-bookworm
 
+# FastMCP 4 uses system trust. Require Debian's October 2026 CA fix before
+# downloading Python or dependencies; an older cached base image is insufficient.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge '20250419~deb12u2' && \
+    rm -rf /var/lib/apt/lists/*
+
 # Build arguments for user ID and group ID (defaults to 1000)
 ARG UID=1000
 ARG GID=1000
 
 # Copy uv from official image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.5 /uv /uvx /bin/
+
+# The base image's pip has its own CA bundle, independent of system trust.
+RUN uv pip install --system --python /usr/local/bin/python --upgrade 'pip>=26.2.2'
 
 # Set environment variables
 # UV_PYTHON_INSTALL_DIR ensures Python is installed to a persistent location
