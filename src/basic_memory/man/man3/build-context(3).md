@@ -58,7 +58,7 @@ Compact output is not a fixed token limit.
 - **url** (string, required) — memory:// URI pointing to discussion content (e.g. memory://specs/search), or a bare permalink path.
 - **project** (string | null, optional, default: None) — Project name to build context from. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
-- **depth** (string | integer | null, optional, default: 1) — How many relation hops to traverse (1-3 recommended for performance)
+- **depth** (string | integer | null, optional, default: 1) — How many relation hops to traverse (1-3 recommended, maximum: 5)
 - **timeframe** (string | null, optional, default: "7d") — How far back to look. Supports natural language like "2 days ago", "last week"
 - **page** (integer, optional, default: 1) — Page number of results to return (default: 1)
 - **page_size** (integer, optional, default: 10) — Number of primary results to return per page (default: 10, maximum: 50)
