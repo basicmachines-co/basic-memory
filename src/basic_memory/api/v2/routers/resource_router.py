@@ -10,7 +10,6 @@ storage-event indexing pipeline. No API endpoint writes resource files inline.
 """
 
 from dataclasses import dataclass
-from pathlib import Path as PathLib
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Response, Path
@@ -216,8 +215,7 @@ async def get_resource_content(
             action="get_content",
             phase="validate_path",
         ):
-            project_path = PathLib(config.home)
-            if not validate_project_path(entity_file_path, project_path):
+            if not validate_project_path(entity_file_path, file_service.local_project_path):
                 logger.error(  # pragma: no cover
                     f"Invalid file path in entity {entity_db_id}: {entity_file_path}"
                 )

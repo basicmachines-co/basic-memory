@@ -2,6 +2,7 @@ import os
 from asyncio import Lock
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any, AsyncIterator, Callable, Optional
@@ -20,11 +21,25 @@ from basic_memory.config import (
 if TYPE_CHECKING:
     # FastAPI is only needed when a request routes through the local ASGI
     # transport; importing it at module level costs ~0.1s on every CLI start (#886).
+    from basic_memory.schemas.project_info import ProjectItem
     from fastapi import FastAPI
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 LocalDatabaseState = tuple["AsyncEngine", "async_sessionmaker[AsyncSession]"]
 _MISSING_STATE_VALUE = object()
+
+
+class LocalASGIClient(AsyncClient):
+    """An API client whose project files belong to this local process.
+
+    Hosted factories also use ASGI, so transport alone cannot establish that
+    project paths are local. Only the local composition path creates this client.
+    """
+
+
+def local_project_path(client: AsyncClient, project: "ProjectItem") -> Path | None:
+    """Return a filesystem root only when routing selected the local API."""
+    return project.home if isinstance(client, LocalASGIClient) else None
 
 
 @dataclass
@@ -71,7 +86,7 @@ def _build_asgi_client(app: "FastAPI", timeout: Timeout) -> AsyncClient:
     """Create a local ASGI client for an already-prepared FastAPI app."""
     from basic_memory.workspace_context import workspace_permalink_headers
 
-    return AsyncClient(
+    return LocalASGIClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
         timeout=timeout,

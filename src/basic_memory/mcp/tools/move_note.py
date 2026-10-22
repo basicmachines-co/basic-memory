@@ -11,6 +11,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
+from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
@@ -596,7 +597,7 @@ async def move_note(
         )
 
         # Validate destination path to prevent path traversal attacks
-        project_path = active_project.home
+        project_path = local_project_path(client, active_project)
         if not validate_project_path(destination_path, project_path):
             logger.warning(
                 "Attempted path traversal attack blocked",

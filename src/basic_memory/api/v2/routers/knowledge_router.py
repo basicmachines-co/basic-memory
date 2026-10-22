@@ -468,7 +468,7 @@ async def place_note(
             project_permalink=project.permalink,
             workspace_permalink=workspace_slug_for_canonical_permalinks(),
         )
-        project_home = pathlib.Path(project.path)
+        project_home = file_service.local_project_path
 
         async def folder_exists(folder: str) -> bool:
             # Canonical note state is the accepted notes plus the files on storage.
@@ -672,6 +672,11 @@ async def index_file(
         action="index_file",
     ):
         logger.debug(f"API v2 request: index_file file_path='{data.file_path}'")
+
+        # This recovery endpoint scans disk; object storage is indexed by its own
+        # runtime. A logical cloud prefix must never become a host filesystem probe.
+        if file_service.local_project_path is None:
+            raise HTTPException(status_code=404, detail="Local file recovery is unavailable")
 
         if not validate_project_path(data.file_path, project_config.home):
             raise HTTPException(
