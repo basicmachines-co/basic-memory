@@ -27,6 +27,10 @@ from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
+# GIF is excluded until Pillow can be upgraded: GHSA-74r2-7ff9-mjj2 burns CPU
+# inside Image.open(), before resizing or pixel-count limits can protect callers.
+DISPLAYABLE_IMAGE_FORMATS = ("PNG", "JPEG", "WEBP")
+
 
 def calculate_target_params(content_length):
     """Calculate initial quality and size based on input file size"""
@@ -306,7 +310,18 @@ async def read_content(
         # Handle images
         elif content_type.startswith("image/"):
             logger.debug("Processing image")
-            img = PILImage.open(io.BytesIO(response.content))
+            # The content type comes from the stored file, which whoever wrote the
+            # file chose, and Pillow picks a decoder by sniffing the bytes. Decoding
+            # only the formats we display keeps a crafted TIFF, EPS or PDF named
+            # .png away from Pillow's other parsers, which carry known memory-safety
+            # bugs we cannot upgrade past yet (fastembed pins pillow<13).
+            try:
+                img = PILImage.open(io.BytesIO(response.content), formats=DISPLAYABLE_IMAGE_FORMATS)
+            except PILImage.UnidentifiedImageError:
+                return {
+                    "type": "error",
+                    "error": f"Unsupported image format for {path}: only PNG, JPEG and WebP can be shown",
+                }
             img_bytes = optimize_image(img, content_length)
             logger.debug(
                 f"MCP tool response: tool=read_content project={active_project.name} "
