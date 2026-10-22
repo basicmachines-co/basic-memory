@@ -27,8 +27,9 @@ from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
-# Raster formats read_content returns as images; Pillow refuses to decode anything else.
-DISPLAYABLE_IMAGE_FORMATS = ("PNG", "JPEG", "GIF", "WEBP")
+# GIF is excluded until Pillow can be upgraded: GHSA-74r2-7ff9-mjj2 burns CPU
+# inside Image.open(), before resizing or pixel-count limits can protect callers.
+DISPLAYABLE_IMAGE_FORMATS = ("PNG", "JPEG", "WEBP")
 
 
 def calculate_target_params(content_length):
@@ -319,7 +320,7 @@ async def read_content(
             except PILImage.UnidentifiedImageError:
                 return {
                     "type": "error",
-                    "error": f"Unsupported image format for {path}: only PNG, JPEG, GIF and WebP can be shown",
+                    "error": f"Unsupported image format for {path}: only PNG, JPEG and WebP can be shown",
                 }
             img_bytes = optimize_image(img, content_length)
             logger.debug(

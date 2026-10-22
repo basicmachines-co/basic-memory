@@ -245,22 +245,32 @@ async def test_image_conversion(app, indexed_files, test_project):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "image_format, filename",
+    [("TIFF", "disguised.png"), ("GIF", "disguised.png"), ("GIF", "image.gif")],
+)
 async def test_read_content_refuses_non_displayable_image_formats(
-    app, project_config, project_repository, session_maker, test_project
+    app,
+    project_config,
+    project_repository,
+    session_maker,
+    test_project,
+    image_format: str,
+    filename: str,
 ):
-    """A TIFF stored under a .png name never reaches Pillow's TIFF decoder."""
+    """Unsupported decoders are refused regardless of the file extension."""
     from basic_memory.index.local_project import LocalProjectIndexRunner
 
-    disguised = project_config.home / "disguised.png"
+    disguised = project_config.home / filename
     buffer = io.BytesIO()
-    PILImage.new("RGB", (4, 4), color="red").save(buffer, format="TIFF")
+    PILImage.new("RGB", (4, 4), color="red").save(buffer, format=image_format)
     disguised.write_bytes(buffer.getvalue())
     runner = LocalProjectIndexRunner(
         project_repository=project_repository, session_maker=session_maker
     )
     await runner.index_project(test_project.id, force_full=True)
 
-    response = await read_content("disguised.png", project=test_project.name)
+    response = await read_content(filename, project=test_project.name)
 
     assert response["type"] == "error"
     assert "Unsupported image format" in response["error"]
