@@ -23,6 +23,7 @@ from basic_memory.mcp.note_reads import (
     parse_opening_frontmatter,
     read_note_json_by_external_id,
 )
+from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
@@ -266,7 +267,7 @@ async def read_note(
                 memory_url_path(identifier) if identifier.startswith("memory://") else identifier
             )
             processed_path = entity_path
-            project_path = active_project.home
+            project_path = local_project_path(client, active_project)
 
             if not validate_project_path(raw_path, project_path) or not validate_project_path(
                 processed_path, project_path

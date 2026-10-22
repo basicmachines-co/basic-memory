@@ -30,6 +30,7 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     routes_to_default_project,
 )
+from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -539,7 +540,7 @@ async def write_note(
                 directory = ""
 
             # Validate directory path to prevent path traversal attacks
-            project_path = active_project.home
+            project_path = local_project_path(client, active_project)
             if directory and not validate_project_path(directory, project_path):
                 logger.warning(
                     "Attempted path traversal attack blocked",

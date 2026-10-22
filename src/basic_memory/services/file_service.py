@@ -77,8 +77,12 @@ class FileService:
         markdown_processor: Optional[MarkdownProcessor] = None,
         max_concurrent_files: int = 10,
         app_config: Optional["BasicMemoryConfig"] = None,
+        *,
+        local_filesystem: bool = True,
     ):
-        self.base_path = base_path.resolve()  # Get absolute path
+        # Object-store subclasses use a logical prefix, never a host directory.
+        self.base_path = base_path.resolve() if local_filesystem else base_path
+        self.local_project_path = self.base_path if local_filesystem else None
         self.markdown_processor = markdown_processor
         self.app_config = app_config
         # Semaphore to limit concurrent file operations

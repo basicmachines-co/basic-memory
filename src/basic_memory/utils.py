@@ -954,11 +954,18 @@ def valid_project_path_value(path: str):
     return True
 
 
-def validate_project_path(path: str, project_path: Path) -> bool:
-    """Ensure path is valid and stays within project boundaries."""
+def validate_project_path(path: str, project_path: Path | None) -> bool:
+    """Validate a relative path, resolving symlinks only for a local storage root.
+
+    Pass None for remote/object storage. Its logical namespace must never be
+    interpreted against the filesystem of the API or MCP process.
+    """
 
     if not valid_project_path_value(path):
         return False
+
+    if project_path is None:
+        return True
 
     try:
         resolved = (project_path / path).resolve()
