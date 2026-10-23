@@ -10,7 +10,8 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
-from basic_memory.mcp.note_targets import open_project_target, resolve_note
+from basic_memory.mcp.note_targets import PathQualifier, open_project_target, resolve_note
+from basic_memory.mcp.project_context import ProjectPathRoute
 from basic_memory.mcp.tools import write_note
 
 
@@ -194,3 +195,67 @@ async def test_routing_refusals_keep_the_requested_format(client, test_project, 
 
     assert json.loads(str(conflict.value))["error"] == "INVALID_ARGUMENTS"
     assert json.loads(str(unqualified.value))["error"] == "INVALID_ARGUMENTS"
+
+
+# --- PathQualifier ---
+
+
+def _route(*, stripped: bool, project: str | None = "My Research") -> ProjectPathRoute:
+    return ProjectPathRoute(project=project, project_id=None, path="notes", stripped=stripped)
+
+
+def test_qualifier_without_a_stripped_prefix_changes_nothing():
+    qualifier = PathQualifier.for_route(_route(stripped=False))
+
+    assert qualifier.prefix is None
+    assert qualifier.path("notes/a.md") == "notes/a.md"
+    assert qualifier.note({"file_path": "a.md"}) == {"file_path": "a.md"}
+
+
+@pytest.mark.parametrize(
+    ("value", "qualified"),
+    [
+        ("notes/a.md", "my-research/notes/a.md"),
+        ("/notes", "/my-research/notes"),
+        ("/", "/my-research"),
+        ("", "my-research"),
+    ],
+)
+def test_qualifier_keeps_the_slash_shape(value, qualified):
+    assert PathQualifier.for_route(_route(stripped=True)).path(value) == qualified
+
+
+def test_qualifier_rewrites_addresses_not_frontmatter():
+    qualifier = PathQualifier(prefix="research")
+    note = {"file_path": "a.md", "frontmatter": {"file_path": "kept.md"}, "permalink": "a"}
+
+    assert qualifier.note(note) == {
+        "file_path": "research/a.md",
+        "frontmatter": {"file_path": "kept.md"},
+        "permalink": "a",
+    }
+    assert qualifier.search({"results": [{"file_path": "a.md", "permalink": "a"}]}) == {
+        "results": [{"file_path": "research/a.md", "permalink": "a"}]
+    }
+
+
+def test_qualifier_walks_listing_nodes():
+    listing = {
+        "nodes": [
+            {
+                "directory_path": "/notes",
+                "children": [{"directory_path": "/notes/a.md", "file_path": "notes/a.md"}],
+            }
+        ]
+    }
+
+    assert PathQualifier(prefix="research").listing(listing) == {
+        "nodes": [
+            {
+                "directory_path": "/research/notes",
+                "children": [
+                    {"directory_path": "/research/notes/a.md", "file_path": "research/notes/a.md"}
+                ],
+            }
+        ]
+    }

@@ -1,11 +1,11 @@
-"""Tool refusals for the bm_* MCP tools (SPEC-35.2 C11, #1813).
+"""Tool refusals for the bm_* MCP tools.
 
 A refusal is a call the tool will not carry out as asked: a note that does not
 exist, a revision conflict, an argument combination the tool does not support.
 Every refusal is a tool error (`isError: true`), because a client that checks
-isError treats a returned "Error: ..." string as success. The message still has to
-help the model recover, so it names what was wrong and, when there is one, the
-call to try instead.
+isError treats a returned "Error: ..." string as success. The message helps the
+model recover: it names what was wrong and, when there is one, the call to try
+instead.
 """
 
 import json

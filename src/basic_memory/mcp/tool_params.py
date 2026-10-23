@@ -1,10 +1,9 @@
-"""Shared parameter types for the bm_* MCP tools (SPEC-35.2, #1829).
+"""Shared parameter types for the bm_* MCP tools.
 
 Every bm_* tool names its target, project, time window, paging and output the same
-way. Each type here carries the schema description a model reads, the hidden aliases
+way. Each type carries the schema description a model reads, the hidden aliases
 older callers and host tools reach for, and the validation that runs before a tool
-body sees the value. Tools import these instead of declaring their own variants, so
-one parameter means one thing across the surface.
+body sees the value, so one parameter means one thing across the surface.
 """
 
 import json

@@ -1,6 +1,6 @@
-"""bm_find: locate files by name or frontmatter, recursively (SPEC-35.2, #1830).
+"""bm_find: locate files by name or frontmatter, recursively.
 
-Replaces find. Two arms, chosen by whether `filters` is given:
+Two arms, chosen by whether `filters` is given:
 
 - without filters, a recursive directory listing, optionally narrowed by a
   file-name glob and bounded by depth;
@@ -20,7 +20,7 @@ from pydantic import BeforeValidator, Field
 from basic_memory.mcp.clients import DirectoryClient
 from basic_memory.mcp.directory_listing import format_listing_text
 from basic_memory.mcp.metadata_find import find_by_metadata, parse_field_paths
-from basic_memory.mcp.note_targets import open_project_target, qualify_listing_paths
+from basic_memory.mcp.note_targets import open_project_target
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
@@ -154,7 +154,7 @@ async def bm_find(
             page_size=page_size,
         )
 
-    qualified = qualify_listing_paths(listing.model_dump(mode="json"), target.route)
+    qualified = target.paths.listing(listing.model_dump(mode="json"))
     if output_format == "json":
         return qualified
     if listing.total == 0:

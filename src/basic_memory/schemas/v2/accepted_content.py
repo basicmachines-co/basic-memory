@@ -7,10 +7,15 @@ from pydantic import BaseModel, Field, field_validator
 AcceptedNoteExternalId = Annotated[str, Field(min_length=1, max_length=500)]
 
 
+MAX_ACCEPTED_CONTENT_BATCH = 25
+
+
 class AcceptedNoteContentBatchRequest(BaseModel):
     """One bounded, project-scoped batch of accepted note identifiers."""
 
-    entity_ids: list[AcceptedNoteExternalId] = Field(min_length=1, max_length=25)
+    entity_ids: list[AcceptedNoteExternalId] = Field(
+        min_length=1, max_length=MAX_ACCEPTED_CONTENT_BATCH
+    )
 
     @field_validator("entity_ids")
     @classmethod

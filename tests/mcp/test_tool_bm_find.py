@@ -163,3 +163,25 @@ async def test_frontmatter_query_with_no_matches(client, test_project):
 async def test_invalid_argument_combinations(client, test_project, arguments, message):
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: .*{message}"):
         await bm_find(project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_type_in_filter_matches_the_note_type_column(client, test_project):
+    await _seed(test_project.name)
+
+    payload = await find_json(filters={"type": {"$in": ["person"]}}, project=test_project.name)
+
+    assert [row["title"] for row in payload["results"]] == ["Gamma"]
+
+
+@pytest.mark.asyncio
+async def test_filter_text_continues_with_a_bm_find_call(client, test_project):
+    await _seed(test_project.name)
+
+    text = await bm_find(filters={"status": "active"}, page_size=1, project=test_project.name)
+
+    assert isinstance(text, str)
+    assert (
+        "Call bm_find(path='/', filters={'status': 'active'}, "
+        f"project='{test_project.name}', page=2, page_size=1) to continue."
+    ) in text

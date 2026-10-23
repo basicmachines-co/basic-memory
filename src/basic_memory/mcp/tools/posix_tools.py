@@ -49,8 +49,7 @@ from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.metadata_find import find_by_metadata, parse_field_paths
 from basic_memory.mcp.note_targets import (
     ProjectTarget,
-    qualify_listing_paths,
-    qualify_note_paths,
+    PathQualifier,
 )
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
@@ -197,7 +196,7 @@ async def cat(
         )
 
     if server_side_slice or (start_line is None and end_line is None):
-        return qualify_note_paths(payload, route)
+        return PathQualifier.for_route(route).note(payload)
 
     lines = document_lines(payload["content"])
     total_lines = len(lines)
@@ -210,7 +209,7 @@ async def cat(
     payload["start_line"] = first
     payload["end_line"] = last
     payload["total_lines"] = total_lines
-    return qualify_note_paths(payload, route)
+    return PathQualifier.for_route(route).note(payload)
 
 
 def _grep_retrieval_mode(semantic: bool) -> SearchRetrievalMode:
@@ -420,7 +419,7 @@ async def ls(
 
         directory_client = DirectoryClient(client, active_project.external_id)
         listing = await directory_client.list(list_path, depth=1, page=page, page_size=page_size)
-        return qualify_listing_paths(listing.model_dump(mode="json"), route)
+        return PathQualifier.for_route(route).listing(listing.model_dump(mode="json"))
 
 
 def routed_listing_root(path: str, route: ProjectPathRoute) -> str:
@@ -487,7 +486,7 @@ async def find_listing(
             page=page,
             page_size=page_size,
         )
-        payload = qualify_listing_paths(listing.model_dump(mode="json"), route)
+        payload = PathQualifier.for_route(route).listing(listing.model_dump(mode="json"))
 
     return payload, routed_listing_root(path, route)
 
