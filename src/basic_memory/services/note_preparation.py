@@ -36,7 +36,14 @@ from basic_memory.markdown.path_links import (
     is_path_target,
     resolve_project_path,
 )
-from basic_memory.markdown.sections import document_lines, setext_heading_underlined_at
+from basic_memory.markdown.sections import (
+    NoteSliceError,
+    SectionSpan,
+    document_lines,
+    locate_section,
+    parse_section_selector,
+    setext_heading_underlined_at,
+)
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -568,47 +575,66 @@ def _fenced_code_line_flags(lines: list[str]) -> list[bool]:
     return flags
 
 
+def _locate_edit_section(current_content: str, section: str) -> SectionSpan:
+    """Resolve an edit's section with the selector reads use (SPEC-35.2).
+
+    "Decisions" matches that heading at any level, "Auth/Decisions" one under
+    "Auth", and "Decisions[1]" the second of two; "## Decisions" still works.
+    A miss, an ambiguous name, or an unindexed duplicate refuses the edit.
+    """
+    selector = parse_section_selector(section)
+    if selector is None:
+        raise ValueError(f"Section '{section}' is not a heading name.")
+    located = locate_section(current_content, selector)
+    if isinstance(located, NoteSliceError):
+        raise ValueError(
+            f"{located.message} Read the note and use the exact heading, including any "
+            "trailing tags or text. Use append with a heading and content to create a new "
+            "section."
+        )
+    return located
+
+
+def _trim_blank_edges(lines: list[str]) -> list[str]:
+    """Drop blank lines at both ends; the section keeps its own spacing instead."""
+    start = 0
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    end = len(lines)
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def _repeats_heading(line: str, span: SectionSpan) -> bool:
+    """True when a replacement's first line restates the section's own heading."""
+    level = _markdown_heading_level(line)
+    return level == span.level and line.strip()[level:].strip() == span.heading
+
+
 def replace_section_content(
     current_content: str,
     section_header: str,
     new_content: str,
     replace_subsections: bool = True,
 ) -> str:
-    if not section_header.startswith("#"):
-        section_header = "## " + section_header
-    new_content_lines = new_content.lstrip().split("\n")
-    if new_content_lines and new_content_lines[0].strip() == section_header.strip():
-        new_content = "\n".join(new_content_lines[1:]).lstrip()
     lines = current_content.split("\n")
-    fenced = _fenced_code_line_flags(lines)
-    matches = [
-        index
-        for index, line in enumerate(lines)
-        if not fenced[index] and line.strip() == section_header.strip()
-    ]
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple sections found with header '{section_header}'. "
-            "Section replacement requires unique headers."
-        )
-    if not matches:
-        # A replacement must identify existing content before any write is prepared.
-        raise ValueError(
-            f"Section '{section_header}' not found in document. "
-            "Read the note and use the exact heading, including any trailing tags or text. "
-            "Use append with a heading and content to create a new section."
-        )
-    section_line_index = matches[0]
-    target_level = len(section_header) - len(section_header.lstrip("#"))
-    end_index = len(lines)
-    for index in range(section_line_index + 1, len(lines)):
-        if fenced[index]:
-            continue
-        heading_level = _markdown_heading_level(lines[index])
-        if heading_level is not None and (not replace_subsections or heading_level <= target_level):
-            end_index = index
-            break
-    return "\n".join([*lines[: section_line_index + 1], new_content, *lines[end_index:]])
+    span = _locate_edit_section(current_content, section_header)
+    end = span.end if replace_subsections else span.subsections_start
+    replacement = _trim_blank_edges(new_content.split("\n"))
+    # Models often send the heading back with its new body; the heading stays once.
+    if replacement and _repeats_heading(replacement[0], span):
+        replacement = _trim_blank_edges(replacement[1:])
+    # Trigger: the replaced span opened or closed with a blank line.
+    # Why: the blank line under a heading and the one before the next heading are
+    #      the section's layout, not its content; dropping them glued a table to
+    #      its heading (#1815).
+    # Outcome: the replacement is trimmed and the original spacing is kept.
+    replaced = lines[span.body_start : end]
+    leading = [""] if replaced and not replaced[0].strip() else []
+    trailing = [""] if len(replaced) > 1 and not replaced[-1].strip() else []
+    body = [*leading, *replacement, *trailing] if replacement else leading
+    return "\n".join([*lines[: span.body_start], *body, *lines[end:]])
 
 
 # A Markdown list item line: a bullet (-, *, +) or an ordered marker (1. or 1)).
@@ -621,33 +647,16 @@ def insert_relative_to_section(
     new_content: str,
     position: str,
 ) -> str:
-    if not section_header.startswith("#"):
-        section_header = "## " + section_header
     lines = current_content.split("\n")
-    fenced = _fenced_code_line_flags(lines)
-    matches = [
-        index
-        for index, line in enumerate(lines)
-        if not fenced[index] and line.strip() == section_header.strip()
-    ]
-    if not matches:
-        raise ValueError(
-            f"Section '{section_header}' not found in document. "
-            "Use append with a heading and content to create a new section."
-        )
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple sections found with header '{section_header}'. "
-            "Section insertion requires unique headers."
-        )
-    index = matches[0]
+    span = _locate_edit_section(current_content, section_header)
     insert_lines = new_content.rstrip("\n").split("\n")
     if position == "before":
-        before = lines[:index]
+        before = lines[: span.heading_start]
         if before and before[-1].strip():
             insert_lines = ["", *insert_lines]
-        return "\n".join([*before, *insert_lines, "", *lines[index:]])
-    after = lines[index + 1 :]
+        return "\n".join([*before, *insert_lines, "", *lines[span.heading_start :]])
+    heading = lines[: span.body_start]
+    after = lines[span.body_start :]
     spacer = len(after) - len(list(dropwhile(lambda line: not line.strip(), after)))
     first_content = after[spacer] if spacer < len(after) else None
     # Trigger: a list item is inserted and the section opens with a list, either
@@ -660,12 +669,12 @@ def insert_relative_to_section(
         and _LIST_ITEM_LINE.match(insert_lines[-1])
         and _LIST_ITEM_LINE.match(first_content)
     ):
-        return "\n".join([*lines[: index + 1], *after[:spacer], *insert_lines, *after[spacer:]])
+        return "\n".join([*heading, *after[:spacer], *insert_lines, *after[spacer:]])
     # Anything else keeps a blank line, so an inserted paragraph never runs into
     # the section's first paragraph.
     if after and after[0].strip():
         insert_lines.append("")
-    return "\n".join([*lines[: index + 1], *insert_lines, *after])
+    return "\n".join([*heading, *insert_lines, *after])
 
 
 def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
@@ -708,19 +717,34 @@ def _edit_join_separator(text_before: str, text_after: str, *, body_before: str)
     return line_break
 
 
+def _prepend_separator(content: str, text_after: str, *, body_before: str) -> str:
+    """Join prepended content to the body it now opens.
+
+    Trigger: the body opens with an ATX heading.
+    Why: "Prepended line.\\n# Title" renders, but runs the text into the heading
+        with no blank line, unlike any hand-written note (#1815).
+    Outcome: a blank line before the heading; every other join is unchanged.
+    """
+    separator = _edit_join_separator(content, text_after, body_before=body_before)
+    first_line = text_after.lstrip("\n").split("\n", 1)[0]
+    if _markdown_heading_level(first_line) is not None and not content.endswith("\n\n"):
+        return "\n\n" if not content.endswith("\n") else "\n"
+    return separator
+
+
 def _prepend_after_frontmatter(current_content: str, content: str) -> str:
     if has_frontmatter(current_content):
         frontmatter_data = parse_frontmatter(current_content)
         body_content = remove_frontmatter(current_content)
         # The prepended content opens the existing body, so it is a body fragment: any
         # `---` block inside it is Markdown, not frontmatter.
-        separator = _edit_join_separator(content, body_content, body_before=content)
+        separator = _prepend_separator(content, body_content, body_before=content)
         new_body = content + separator + body_content
         yaml_frontmatter = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
         return f"---\n{yaml_frontmatter}---\n\n{new_body.strip()}"
     # Without existing frontmatter the prepended content opens the note itself, so a
     # frontmatter block at its start becomes the note's frontmatter.
-    separator = _edit_join_separator(content, current_content, body_before=_markdown_body(content))
+    separator = _prepend_separator(content, current_content, body_before=_markdown_body(content))
     return content + separator + current_content
 
 
