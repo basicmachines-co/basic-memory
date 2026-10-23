@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
+from basic_memory.config import ConfigManager
 from basic_memory.markdown.line_scanning import LiteralLineScan, scan_lines
 from basic_memory.mcp.clients import KnowledgeClient, ResourceClient, SearchClient
 from basic_memory.mcp.index_readiness import project_index_required
@@ -29,6 +30,7 @@ from basic_memory.mcp.note_targets import (
     qualify_search_paths,
     resolve_note,
 )
+from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
@@ -41,6 +43,7 @@ from basic_memory.mcp.tool_params import (
     ProjectParam,
     search_item_types,
 )
+from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
 from basic_memory.mcp.tools.search import (
     _build_search_query,
     _compact_search_response,
@@ -264,6 +267,18 @@ async def bm_search(
         search_mode: str = mode or _search_type_for(None, query, [target.project.name])
         if query is not None and query.startswith("memory://"):
             query, search_mode = memory_url_path(query), "permalink"
+        # Trigger: a permalink search ('core/*' or an exact permalink).
+        # Why: permalinks are stored in index form, with the project prefix when
+        #      permalinks_include_project is on (and the workspace form in Cloud), so
+        #      a project-relative pattern matched nothing (#1812).
+        # Outcome: the permalink is put into index form before it is matched.
+        if search_mode == "permalink" and query is not None:
+            query = canonical_memory_path_for_active_route(
+                target.project,
+                query,
+                include_project=ConfigManager().config.permalinks_include_project,
+                cached_workspace=await get_cached_active_workspace(context),
+            )
 
         search_query = _build_search_query(
             query=query,
