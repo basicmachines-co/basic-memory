@@ -74,4 +74,4 @@ bm grep "deploy checklist" --json | jq '.results[].permalink'
 
 - see_also [[cat(1)]]
 - see_also [[find(1)]]
-- see_also [[search-notes(3)]]
+- see_also [[bm-search(3)]]

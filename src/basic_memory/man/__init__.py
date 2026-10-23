@@ -148,6 +148,31 @@ def find_page(ref: PageRef) -> ManPage | None:
     return None
 
 
+def search_pages(query: str) -> tuple[ManPage, ...]:
+    """apropos over the bundled pages: every query word, in any case, on the page.
+
+    Pages whose name, tool or summary carries every word come first, as `man -k`
+    matches the NAME line; pages that match only in their text follow. Both
+    groups keep the manual's section-then-name order.
+    """
+    words = query.casefold().split()
+    if not words:
+        return ()
+
+    def names_all(text: str) -> bool:
+        folded = text.casefold()
+        return all(word in folded for word in words)
+
+    in_name: list[ManPage] = []
+    in_text: list[ManPage] = []
+    for page in bundled_pages():
+        if names_all(f"{page.title} {page.tool or ''} {page.summary}"):
+            in_name.append(page)
+        elif names_all(page.body()):
+            in_text.append(page)
+    return (*in_name, *in_text)
+
+
 # --- Registry-generated SYNOPSIS ---
 # The MCP SYNOPSIS block on a section-3 page is a mechanical section: it must show
 # exactly the call the tool schema advertises. These helpers render it from the

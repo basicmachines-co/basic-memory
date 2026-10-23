@@ -91,6 +91,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "project",
     ],
     "bm_project_delete": ["name", "delete_notes", "workspace", "output_format"],
+    "bm_man": ["page", "query", "output_format"],
     "bm_schema": [
         "command",
         "note_type",
@@ -313,6 +314,7 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_delete": {"readOnlyHint": False, "destructiveHint": True},
     "bm_project": {"readOnlyHint": False, "destructiveHint": False},
     "bm_schema": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_man": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
     "list_directory": {"readOnlyHint": True, "destructiveHint": False},
@@ -384,6 +386,7 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_project": tools.bm_project,
     "bm_project_delete": tools.bm_project_delete,
     "bm_schema": tools.bm_schema,
+    "bm_man": tools.bm_man,
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
     "cat": tools.cat,

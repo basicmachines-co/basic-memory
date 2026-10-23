@@ -2,11 +2,9 @@
 
 import re
 import subprocess
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import typer.main
-from fastmcp.exceptions import ToolError
 from typer.core import TyperGroup
 from typer.testing import CliRunner
 
@@ -50,14 +48,7 @@ def test_man_topic_prints_the_page_as_markdown(argv):
     assert "title: search-notes(3)" not in result.output  # frontmatter is not rendered
 
 
-# A bundled miss now falls through to the MCP man tool (manual-project notes,
-# #1404); mock it so this test stays hermetic regardless of local config.
-@patch(
-    "basic_memory.mcp.tools.man",
-    new_callable=AsyncMock,
-    side_effect=ToolError("No manual entry for no-such-page"),
-)
-def test_man_unknown_topic_fails_and_points_at_list(mock_mcp_man):
+def test_man_unknown_topic_fails_and_points_at_list():
     result = runner.invoke(app, ["man", "no-such-page"])
 
     assert result.exit_code == 1

@@ -132,11 +132,11 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
 )
 async def note_resource(project: str, path: str, context: Context | None = None) -> str:
     """Return the raw markdown of one note."""
-    # `man` is the manual's namespace; its template registers first and wins the
-    # tie, and manual_page itself falls back to a note in a project really named
-    # man — delegating keeps both templates' answers identical either way.
+    # `man` is the manual's namespace (no project may be named man); its template
+    # registers first and wins the tie, and delegating keeps both templates'
+    # answers identical either way.
     if project == "man":
-        return await manual_page(path, context)
+        return await manual_page(path)
 
     # The {workspace}/{project}/info shape belongs to the project_info resource,
     # which itself falls back to a note named .../info — delegating keeps both

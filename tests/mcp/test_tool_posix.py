@@ -1683,58 +1683,30 @@ async def test_man_page_and_query_mutually_exclusive():
 
 
 @pytest.mark.asyncio
-async def test_man_note_fallback_reads_manual_notes(client, test_project):
+async def test_man_reads_only_bundled_pages(client, test_project):
+    """A manual project is never consulted; `project` is accepted and ignored."""
     await write_note(
         title="posix-custom-guide",
         directory="man",
-        content="# posix-custom-guide\n\nCustom manual body for fallback.",
+        content="# posix-custom-guide\n\nA note that is no bundled page.",
         project=test_project.name,
     )
 
-    result = await man(page="posix-custom-guide", project=test_project.name)
-
-    assert isinstance(result, str)
-    assert "Custom manual body for fallback." in result
-
-
-@pytest.mark.asyncio
-async def test_man_missing_page_raises_clear_error(client, test_project):
-    with pytest.raises(ToolError, match="No manual entry for totally-unknown-page"):
-        await man(page="totally-unknown-page", project=test_project.name)
-
-
-@pytest.mark.asyncio
-async def test_man_unparseable_page_falls_back_to_notes(client, test_project):
-    # "docs/..." cannot name a bundled page (the directory is not a section), so
-    # the reference goes to the note fallback and misses there too.
+    with pytest.raises(ToolError, match="No manual entry for posix-custom-guide"):
+        await man(page="posix-custom-guide", project=test_project.name)
     with pytest.raises(ToolError, match="No manual entry for docs/unknown-guide"):
-        await man(page="docs/unknown-guide", project=test_project.name)
+        await man(page="docs/unknown-guide")
 
 
 @pytest.mark.asyncio
-async def test_man_query_finds_manpage_notes(client, test_project):
-    await write_note(
-        title="posix-grep-manual",
-        directory="man",
-        content="# posix-grep-manual\n\nHow to grep with posixmanualneedle.",
-        note_type="manpage",
-        project=test_project.name,
-    )
-
-    result = await man(query="posixmanualneedle", project=test_project.name)
+async def test_man_query_searches_the_bundled_pages():
+    result = await man(query="frontmatter recursively", project="ignored")
 
     assert isinstance(result, dict)
     titles = [row["title"] for row in result["results"]]
-    assert "posix-grep-manual" in titles
-
-
-@pytest.mark.asyncio
-async def test_man_without_a_manual_project_stays_local(client, test_project):
-    """A local install with no manual project never asks for cloud credentials (#1628)."""
-    with pytest.raises(ToolError, match="query mode searches the 'manual' project"):
-        await man(query="anything")
-    with pytest.raises(ToolError, match=r"No manual entry for grep\(3\)"):
-        await man(page="grep(3)")
+    assert titles[:2] == ["find(1)", "bm-find(3)"]
+    assert result["total"] == len(titles)
+    assert result["results"][0]["uri"] == "memory://man/find(1)"
 
 
 # --- project-qualified routing (#1415) ---

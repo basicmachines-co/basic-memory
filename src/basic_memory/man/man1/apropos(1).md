@@ -16,38 +16,37 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm man apropos QUERY [--project PROJECT] [--json | --plain]
-               [--local | --cloud]
+bm man apropos QUERY [--json]
 ```
 
 ## DESCRIPTION
 
-Searches manual pages stored as notes in the manual project (default:
-`manual`), the same search the `man` MCP tool runs in query mode. The
-bundled pages shipped with the package are indexed by `bm man list`
-instead; a topic is read with `bm man <topic>`, which falls back to the
-manual project when the topic is not bundled.
+Lists the bundled manual pages that mention every word of the query, in any
+case, like `man -k`. Pages whose name, tool or summary carry the words come
+first. It reads the pages shipped with the package, so it needs no project or
+network; bm_man(query=...) runs the same search from an MCP client.
 
 An empty result is a successful search (exit 0), not an error.
 
 ## OPTIONS
 
-- **--project** — Manual project to search (default: manual)
 - **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--local** — Force local API routing (ignore cloud mode)
-- **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 
 ```
-bm man apropos "conflict resolution"
-bm man apropos sync --json
+bm man apropos "frontmatter filters"
+# → apropos(1)                   search the Basic Memory manual
+#   bm-find(3)                   find files by name or notes by frontmatter, recursively
+#   bm-man(3)                    read the Basic Memory manual
+#   bm-search(3)                 search a project's notes, ranked by relevance
+#   search-notes(3)              search the knowledge base by text, similarity, or metadata
+bm man apropos checksum --json
 bm man list            # index of the bundled pages
-bm man cat             # read one page, bundled pages first
+bm man bm_search       # read one page
 ```
 
 ## SEE ALSO
 
 - see_also [[cat(1)]]
-- see_also [[search-notes(3)]]
+- see_also [[bm-man(3)]]

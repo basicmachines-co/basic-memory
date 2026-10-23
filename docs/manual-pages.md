@@ -123,8 +123,14 @@ memory://man/3/search-notes       # any common spelling resolves,
 memory://man/search_notes         # including the tool name itself
 ```
 
-And in a shell, `bm man search-notes` prints the page as Markdown and
-`bm man list` lists every page with its summary.
+The `bm_man` tool reads the same bundled pages: `bm_man()` is the index,
+`bm_man(page="bm-search(3)")` one page, and `bm_man(query="frontmatter filters")`
+lists the pages that mention every word, like `man -k`. It never reads a manual
+project, so it works in every workspace with no network.
+
+And in a shell, `bm man bm-search` prints the page as Markdown, `bm man apropos
+WORDS` searches the bundled pages, and `bm man list` lists every page with its
+summary.
 
 And for the real thing — `man bm` in an actual terminal:
 
@@ -203,6 +209,10 @@ GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
   routing flags included), held byte-equal by a drift test. Those pages declare
   `generated: cli`. Curated sections stay hand-owned; the hand-written corpus
   remains the template spec for everything else.
+- **New tool pages (shipped)** — `uv run python scripts/update_man_pages.py --new
+  TOOL ...` scaffolds a section-3 page for a registered tool: frontmatter, NAME,
+  the generated SYNOPSIS and PARAMETERS, and empty EXAMPLES and SEE ALSO to curate.
+  It never overwrites an existing page.
 - **Projects as consumers** — `bm man install --project <name>` copies the
   bundled pages into a project as notes, so `SEE ALSO` becomes traversable
   relations and the pages join search. (`bm man <topic>`, `bm man list`, the

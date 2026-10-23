@@ -43,6 +43,7 @@ from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit import bm_edit
 from basic_memory.mcp.tools.find_files import bm_find
 from basic_memory.mcp.tools.listing import bm_list
+from basic_memory.mcp.tools.manual import bm_man
 from basic_memory.mcp.tools.move import bm_move
 from basic_memory.mcp.tools.note_schemas import bm_schema
 
@@ -58,6 +59,7 @@ __all__ = [
     "bm_edit",
     "bm_find",
     "bm_list",
+    "bm_man",
     "bm_move",
     "bm_project",
     "bm_project_delete",
