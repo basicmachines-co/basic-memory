@@ -16,6 +16,7 @@ from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
@@ -256,6 +257,25 @@ async def bm_search(
 
     # --- Several projects ---
     if several_projects and project is None:
+        # Checked here because the several-projects search reports "no criteria"
+        # as text rather than refusing.
+        criteria = _build_search_query(
+            query=query,
+            search_type="text",
+            note_types=normalized_note_types,
+            entity_types=entity_types,
+            categories=categories or [],
+            after_date=since,
+            metadata_filters=filters,
+            tags=tags,
+            status=None,
+            min_similarity=min_similarity,
+            valid_at=valid_at,
+            valid_overlaps=valid_overlaps,
+            time_kind=time_kind,
+        )
+        if criteria is None:
+            raise _nothing_to_search(output_format)
         return await _search_all_projects(
             query=query,
             page=page,
@@ -316,13 +336,7 @@ async def bm_search(
             file_path_prefix=target.route.path or None,
         )
         if search_query is None:
-            raise refusal(
-                "INVALID_ARGUMENTS",
-                "Nothing to search for.",
-                try_instead="give a `query`, or at least one of `filters`, `note_types`, "
-                "`items`, `categories` or `since`",
-                output_format=output_format,
-            )
+            raise _nothing_to_search(output_format)
 
         response = await SearchClient(target.client, target.project.external_id).search(
             search_query.model_dump(), page=page, page_size=page_size
@@ -349,6 +363,16 @@ async def bm_search(
         return payload
     next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
     return _format_results(payload, query, target.project.name, next_call=next_call)
+
+
+def _nothing_to_search(output_format: OutputFormat) -> ToolError:
+    return refusal(
+        "INVALID_ARGUMENTS",
+        "Nothing to search for.",
+        try_instead="give a `query`, or at least one of `filters`, `note_types`, "
+        "`items`, `categories` or `since`",
+        output_format=output_format,
+    )
 
 
 # --- Line matching ---

@@ -282,3 +282,12 @@ async def test_lines_for_several_observations_of_one_note(client, test_project):
 
     assert len(payload["results"]) == 2
     assert all(row["file_path"] == "ops/Runbook.md" for row in payload["results"])
+
+
+@pytest.mark.asyncio
+async def test_empty_search_across_projects_is_refused(client, test_project):
+    """Searching several projects for nothing refuses, like one project does."""
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: Nothing to search for"):
+        await bm_search(all_projects=True)
+    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
+        await bm_search(projects=[test_project.name], output_format="json")
