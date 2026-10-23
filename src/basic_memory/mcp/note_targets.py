@@ -19,6 +19,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from httpx import AsyncClient, HTTPStatusError
 
+from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
@@ -27,7 +28,9 @@ from basic_memory.mcp.project_context import (
 )
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat, parse_project, routing_arguments
+from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.utils import validate_project_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +51,8 @@ async def open_project_target(
     target: str,
     project: str | None,
     context: Context | None,
+    *,
+    output_format: OutputFormat = "text",
 ) -> AsyncIterator[ProjectTarget]:
     """Route `target` and yield a client for the project it lives in."""
     project_name, project_id = routing_arguments(parse_project(project))
@@ -58,6 +63,21 @@ async def open_project_target(
         client,
         active_project,
     ):
+        # Trigger: the target climbs out of the project ('../x', an absolute path, '~').
+        # Why: every bm_* tool, including the ones that write and delete, must stay
+        #      inside its project. Remote projects are checked lexically; only a local
+        #      project's root is resolved against the filesystem (#1807).
+        # Outcome: an OUTSIDE_PROJECT refusal before any read or write.
+        # A leading '/' anchors at the project root ('/' or '/specs'), never the
+        # filesystem root, so it is dropped before the check.
+        project_relative = memory_url_path(route.path).lstrip("/")
+        if not validate_project_path(project_relative, local_project_path(client, active_project)):
+            raise refusal(
+                "OUTSIDE_PROJECT",
+                f"'{target}' is outside the project. Paths must stay within the project.",
+                try_instead="a path relative to the project root, such as 'notes/plan.md'",
+                output_format=output_format,
+            )
         yield ProjectTarget(client=client, project=active_project, route=route)
 
 

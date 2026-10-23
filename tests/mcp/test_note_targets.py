@@ -4,6 +4,7 @@ These run the real ASGI stack through the shared `client` fixture.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from fastmcp.exceptions import ToolError
@@ -88,6 +89,47 @@ async def test_a_bare_project_name_is_not_a_note(client, test_project):
     message = str(refused.value)
     assert message.startswith("INVALID_ARGUMENTS:")
     assert f"bm_list(path='{test_project.name}/')" in message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["../escape.md", "notes/../../escape.md", "~/notes/plan.md"])
+async def test_targets_outside_the_project_are_refused(client, test_project, target):
+    with pytest.raises(ToolError) as refused:
+        async with open_project_target(target, test_project.name, None):
+            pass  # pragma: no cover — the refusal happens before the body
+
+    assert str(refused.value).startswith("OUTSIDE_PROJECT:")
+
+
+@pytest.mark.asyncio
+async def test_outside_project_refusal_in_json(client, test_project):
+    with pytest.raises(ToolError) as refused:
+        async with open_project_target(
+            "../escape.md", test_project.name, None, output_format="json"
+        ):
+            pass  # pragma: no cover — the refusal happens before the body
+
+    assert json.loads(str(refused.value))["error"] == "OUTSIDE_PROJECT"
+
+
+@pytest.mark.asyncio
+async def test_a_symlink_out_of_a_local_project_is_refused(client, test_project, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside")
+    (Path(test_project.path) / "escape").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ToolError) as refused:
+        async with open_project_target("escape/secret.md", test_project.name, None):
+            pass  # pragma: no cover — the refusal happens before the body
+
+    assert str(refused.value).startswith("OUTSIDE_PROJECT:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["/", "/notes", "notes/Plan.md", "memory://notes/plan"])
+async def test_project_relative_targets_are_allowed(client, test_project, target):
+    # A leading '/' anchors at the project root, not the filesystem root.
+    async with open_project_target(target, test_project.name, None) as routed:
+        assert routed.project.name == test_project.name
 
 
 @pytest.mark.asyncio
