@@ -107,16 +107,28 @@ def routing_arguments(selector: ProjectSelector) -> tuple[str | None, str | None
 
 # --- Time ---
 
+SINCE_DESCRIPTION = (
+    "How far back to look: '7d', '24h', '2 days ago', 'last week', or a date. "
+    "Windows shorter than one day are widened to one day."
+)
+_SINCE_ALIASES = AliasChoices("since", "timeframe", "after_date")
+
 Since = Annotated[
     str,
     BeforeValidator(validate_timeframe),
-    Field(
-        validation_alias=AliasChoices("since", "timeframe", "after_date"),
-        description=(
-            "How far back to look: '7d', '24h', '2 days ago', 'last week', or a date. "
-            "Windows shorter than one day are widened to one day."
-        ),
-    ),
+    Field(validation_alias=_SINCE_ALIASES, description=SINCE_DESCRIPTION),
+]
+
+
+def _validate_optional_timeframe(value: Any) -> Any:
+    return None if value is None else validate_timeframe(value)
+
+
+# For tools where no time window is the default (bm_search).
+OptionalSince = Annotated[
+    str | None,
+    BeforeValidator(_validate_optional_timeframe),
+    Field(validation_alias=_SINCE_ALIASES, description=SINCE_DESCRIPTION),
 ]
 
 # --- Paging ---

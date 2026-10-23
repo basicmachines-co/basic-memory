@@ -34,6 +34,7 @@ from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.search import (
+    normalize_file_path_prefix,
     SearchItemType,
     SearchQuery,
     SearchResponse,
@@ -67,6 +68,29 @@ _METADATA_KEY_ALIASES = {"note_type": "type"}
 _VALID_SEARCH_TYPES = ("hybrid", "permalink", "semantic", "text", "title", "vector")
 
 
+def split_tag_shorthand(
+    query: str | None, tags: list[str] | None
+) -> tuple[str | None, list[str] | None]:
+    """Move `tag:<value>` tokens out of the query and into the tags filter.
+
+    Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing" and
+    comma lists ("tag:coffee,brewing"). Done at the tool level so it works in every
+    search mode: hybrid and vector need non-empty text, but the service-layer tag:
+    parser clears the text after the mode is set.
+    """
+    if not query or "tag:" not in query.lower():
+        return query, tags
+    raw_values = re.findall(r"tag:(\S+)", query, flags=re.IGNORECASE)
+    tag_values = [value for raw in raw_values for value in raw.split(",") if value]
+    if not tag_values:
+        return query, tags
+    merged_tags = list(set((tags or []) + tag_values))
+    # Remove tag: tokens and Boolean connectors; whatever text remains is the query.
+    remainder = re.sub(r"tag:\S+", "", query, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
+    return remainder or None, merged_tags
+
+
 def _build_search_query(
     *,
     query: str | None,
@@ -82,6 +106,7 @@ def _build_search_query(
     valid_at: str | None,
     valid_overlaps: str | None,
     time_kind: str | None,
+    file_path_prefix: str | None = None,
 ) -> SearchQuery | None:
     """Map tool parameters onto one ``SearchQuery``; ``None`` when nothing narrows the search.
 
@@ -143,6 +168,9 @@ def _build_search_query(
         search_query.valid_overlaps = valid_overlaps
     if time_kind is not None:
         search_query.time_kind = time_kind
+    # Assigned after construction, so the field validator does not run: normalize here.
+    if file_path_prefix is not None:
+        search_query.file_path_prefix = normalize_file_path_prefix(file_path_prefix)
 
     if search_query.no_criteria():
         return None
@@ -1529,21 +1557,7 @@ async def search_notes(
     #          idempotent, so MCP-validated input passes through unchanged.
     tags = parse_tags(tags) or None
 
-    # Parse tag:<value> shorthand at tool level so it works with all search modes.
-    # Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing".
-    # Without this, hybrid/vector modes fail because they require non-empty text,
-    # but the service-layer tag: parser clears the text after the mode is set.
-    if query and "tag:" in query.lower():
-        # Extract tag values, splitting comma-separated lists (e.g. "tag:coffee,brewing")
-        raw_values = re.findall(r"tag:(\S+)", query, flags=re.IGNORECASE)
-        tag_values = [v for raw in raw_values for v in raw.split(",") if v]
-        if tag_values:
-            # Merge with any explicitly provided tags
-            tags = list(set((tags or []) + tag_values))
-            # Remove tag: tokens and boolean connectors, keep remaining text as query
-            remainder = re.sub(r"tag:\S+", "", query, flags=re.IGNORECASE)
-            remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
-            query = remainder or None
+    query, tags = split_tag_shorthand(query, tags)
 
     # Detect project from a memory URL or permalink prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.
