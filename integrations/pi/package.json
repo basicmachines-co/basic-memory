@@ -1,15 +1,21 @@
 {
   "name": "@basicmemory/pi-basic-memory",
-  "version": "0.23.2",
+  "version": "0.24.0",
   "type": "module",
-  "description": "Basic Memory package for Pi — local-first continuity so you are never starting over",
+  "description": "Basic Memory package for Pi \u2014 local-first continuity so you are never starting over",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/basicmachines-co/basic-memory.git",
     "directory": "integrations/pi"
   },
-  "keywords": ["pi-package", "pi", "basic-memory", "memory", "mcp"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "basic-memory",
+    "memory",
+    "mcp"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -23,8 +29,13 @@
     "dist/"
   ],
   "pi": {
-    "extensions": ["./extensions/index.ts"],
-    "skills": ["./skills/basic-memory-pi", "./skills/basic-memory-pi-setup"]
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills/basic-memory-pi",
+      "./skills/basic-memory-pi-setup"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

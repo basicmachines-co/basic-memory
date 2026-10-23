@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory>=0.23.2",
+#     "basic-memory>=0.24.0",
 #     "fastmcp==4.1.3",
 # ]
 # [tool.uv]
