@@ -82,8 +82,9 @@ def optimize_image(img, content_length, max_output_bytes=350000):
     quality = initial_quality
     size = initial_size
 
-    # Convert to RGB if needed
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+    # JPEG encodes only these modes; palette, alpha and wide-integer images are
+    # converted first, or the save raises "cannot write mode P as JPEG".
+    if img.mode not in ("RGB", "L", "CMYK"):
         img = img.convert("RGB")
         logger.debug("Converted to RGB mode")
 

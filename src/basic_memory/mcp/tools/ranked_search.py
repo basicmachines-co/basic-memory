@@ -208,6 +208,12 @@ async def bm_search(
             "`identifier` and `path` both scope the search; give one.",
             output_format=output_format,
         )
+    if all_projects and projects:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "`all_projects` searches every project and `projects` names some; give one.",
+            output_format=output_format,
+        )
     several_projects = all_projects or bool(projects)
     if several_projects and (identifier is not None or path is not None or lines is not None):
         raise refusal(
