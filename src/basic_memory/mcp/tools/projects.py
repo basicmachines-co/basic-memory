@@ -130,12 +130,16 @@ async def bm_project(
                 case str() as text if output_format == "text":
                     return text
                 case RecentRows() as recent:
-                    return {
+                    payload: dict[str, Any] = {
                         "results": recent.rows,
                         "page": recent.page,
                         "page_size": recent.page_size,
                         "has_more": recent.has_more,
                     }
+                    # Projects never indexed, beside the activity of those that were.
+                    if recent.guidance:
+                        payload["guidance"] = "\n\n".join(recent.guidance)
+                    return payload
                 case str() as guidance:
                     return {"results": [], "guidance": guidance}
 

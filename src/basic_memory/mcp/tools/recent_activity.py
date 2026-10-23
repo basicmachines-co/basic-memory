@@ -179,6 +179,8 @@ class RecentRows:
     page: int
     page_size: int
     has_more: bool
+    # Indexing guidance for projects that were never indexed (discovery mode).
+    guidance: tuple[str, ...] = ()
 
 
 async def recent_activity_page(
@@ -275,14 +277,17 @@ async def recent_activity_page(
             most_active_count = 0
             active_projects = 0
 
+            # Guidance for each project that was never indexed, kept beside the
+            # activity of the projects that were, so neither hides the other.
+            unindexed: list[str] = []
+
             # Query each project's activity
             for project_info in project_list.projects:
                 project_activity = await _get_project_activity(client, project_info, params, depth)
-                # Discovery must not hide an unindexed project in an empty summary.
                 if not project_activity.item_count:
                     guidance = await project_index_required(client, project_info)
                     if guidance is not None:
-                        return guidance
+                        unindexed.append(guidance)
                 projects_activity[project_info.name] = project_activity
 
                 # Aggregate stats
@@ -305,11 +310,19 @@ async def recent_activity_page(
                         most_active_count = item_count
                         most_active_project = project_info.name
 
+        # Trigger: no project has activity and some were never indexed.
+        # Why: an empty summary would read as "nothing happened" when the
+        #      unindexed projects were never searched.
+        # Outcome: the indexing guidance alone, as before.
+        if unindexed and active_projects == 0:
+            return "\n\n".join(unindexed)
+
         if output_format == "json":
             rows: list[dict[str, Any]] = []
             for project_name, project_activity in projects_activity.items():
                 rows.extend(_extract_recent_rows(project_activity.activity, project_name))
             return RecentRows(
+                guidance=tuple(unindexed),
                 rows=rows,
                 page=page,
                 page_size=page_size,
@@ -344,6 +357,9 @@ async def recent_activity_page(
                 )
                 guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
 
+        # Projects never indexed are named after the activity found elsewhere.
+        for project_guidance in unindexed:
+            guidance_lines.extend(["", project_guidance])
         guidance = "\n".join(guidance_lines)
 
         # Format discovery mode output

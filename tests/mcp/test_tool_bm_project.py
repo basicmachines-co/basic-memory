@@ -1,5 +1,6 @@
 """bm_project and bm_schema: one name per group, commands delegate (#1832)."""
 
+import importlib
 from typing import Any
 
 import pytest
@@ -116,6 +117,37 @@ async def test_recent_json_carries_paging(client, test_project):
     assert isinstance(first, dict)
     assert (first["page"], first["page_size"], first["has_more"]) == (1, 1, True)
     assert len(first["results"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_recent_discovery_keeps_activity_beside_unindexed_guidance(
+    client, test_project, second_project, monkeypatch
+):
+    """One unindexed project does not hide the activity found in the others."""
+    await bm_write(identifier="notes/fresh.md", content="# fresh", project=test_project.name)
+
+    async def no_project(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def only_second_unindexed(_client: Any, project: Any) -> str | None:
+        return (
+            f"'{project.name}' has never been indexed"
+            if project.name == second_project.name
+            else None
+        )
+
+    # The tools package re-exports the function under the module's name.
+    recent_activity_module = importlib.import_module("basic_memory.mcp.tools.recent_activity")
+    monkeypatch.setattr(recent_activity_module, "resolve_project_parameter", no_project)
+    monkeypatch.setattr(recent_activity_module, "project_index_required", only_second_unindexed)
+
+    payload = await bm_project(command="recent", output_format="json")
+    text = await bm_project(command="recent")
+
+    assert isinstance(payload, dict) and isinstance(text, str)
+    assert any(row["title"] == "fresh" for row in payload["results"])
+    assert payload["guidance"] == f"'{second_project.name}' has never been indexed"
+    assert "fresh" in text and f"'{second_project.name}' has never been indexed" in text
 
 
 @pytest.mark.asyncio
