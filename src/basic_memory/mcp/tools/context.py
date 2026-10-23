@@ -126,7 +126,11 @@ async def bm_context(
     if compact:
         graph = _compact_context_labels(graph)
     if output_format == "text":
-        return _format_context_markdown(graph, target.project.name, compact=compact)
+        # A permalink need not carry the project prefix, so the text names each
+        # note's qualified file path too: the address bm_read takes in any session.
+        return _format_context_markdown(
+            graph, target.project.name, compact=compact, with_paths=True
+        )
     if compact:
         # The server returned no observations, so the list is dropped rather than
         # shown empty; bodies are left for an explicit bm_read.
