@@ -183,6 +183,104 @@ async def test_create_memory_project_retry_indexes_partial_create(app, tmp_path_
     assert mock_index.await_count == 2
 
 
+def _path_mismatch_message(name: str, existing_path: str, requested_path: str) -> str:
+    return (
+        f"Project '{name}' already exists with different path. "
+        f"Existing: {existing_path}, Requested: {requested_path}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_memory_project_rejects_same_name_different_path(app, tmp_path_factory):
+    """A repeated name with another directory is an error and does not re-index."""
+    from basic_memory.mcp.clients import ProjectClient
+
+    existing_root = tmp_path_factory.mktemp("mismatch-existing-home")
+    requested_root = tmp_path_factory.mktemp("mismatch-requested-home")
+    project_name = "Path Mismatch Project"
+    created = await create_memory_project(
+        project_name=project_name,
+        project_path=str(existing_root),
+    )
+    assert isinstance(created, str)
+    assert created.startswith("✓")
+
+    index_calls = 0
+    original_index = ProjectClient.index
+
+    async def _counting_index(self, *args, **kwargs):
+        nonlocal index_calls
+        index_calls += 1
+        return await original_index(self, *args, **kwargs)
+
+    with patch.object(ProjectClient, "index", _counting_index):
+        result = await create_memory_project(
+            project_name=project_name,
+            project_path=str(requested_root),
+        )
+
+    assert result == (
+        "# Error\n\n"
+        + _path_mismatch_message(project_name, str(existing_root), str(requested_root))
+    )
+    assert "✓" not in result
+    assert "different path" in result
+    assert index_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_create_memory_project_rejects_same_name_different_path_json(app, tmp_path_factory):
+    """JSON callers get a failure payload, not an already-exists success."""
+    existing_root = tmp_path_factory.mktemp("mismatch-json-existing-home")
+    requested_root = tmp_path_factory.mktemp("mismatch-json-requested-home")
+    project_name = "Path Mismatch JSON"
+    await create_memory_project(
+        project_name=project_name,
+        project_path=str(existing_root),
+    )
+
+    result = await create_memory_project(
+        project_name=project_name,
+        project_path=str(requested_root),
+        output_format="json",
+    )
+
+    assert result == {
+        "name": project_name,
+        "existing_path": str(existing_root),
+        "requested_path": str(requested_root),
+        "created": False,
+        "already_exists": False,
+        "error": "PATH_MISMATCH",
+        "message": _path_mismatch_message(project_name, str(existing_root), str(requested_root)),
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_memory_project_same_name_same_path_is_idempotent(app, tmp_path_factory):
+    """The same directory, including a trailing slash and different name case, retries."""
+    project_root = tmp_path_factory.mktemp("same-path-project-home")
+    created = await create_memory_project(
+        project_name="Same Path Project",
+        project_path=str(project_root),
+        output_format="json",
+    )
+    assert isinstance(created, dict)
+    assert created["created"] is True
+    assert created["already_exists"] is False
+
+    retry = await create_memory_project(
+        project_name="same path project",
+        project_path=f"{project_root}/",
+        output_format="json",
+    )
+    assert isinstance(retry, dict)
+    assert retry["created"] is False
+    assert retry["already_exists"] is True
+    assert retry["name"] == "Same Path Project"
+    assert retry["path"] == created["path"]
+
+
 @pytest.mark.asyncio
 async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_factory):
     """delete_notes=True flows through to the API and removes the project files (#1034)."""
