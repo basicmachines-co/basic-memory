@@ -311,7 +311,10 @@ async def _move_directory(
         "destination": target.paths.path(destination),
         "total_files": moved.total_files,
         "moved_files": [target.paths.path(file) for file in moved.moved_files],
-        "failed": [{"path": failure.path, "error": failure.error} for failure in moved.errors],
+        "failed": [
+            {"path": target.paths.path(failure.path), "error": failure.error}
+            for failure in moved.errors
+        ],
     }
     # Trigger: some files moved and some did not.
     # Why: the move is neither done nor undone; the caller must see which files
@@ -320,10 +323,10 @@ async def _move_directory(
     if moved.failed_moves:
         raise refusal(
             "PARTIAL_FAILURE",
-            f"Moved {moved.successful_moves} of {moved.total_files} files from '{source}' to "
-            f"'{destination}'; {moved.failed_moves} failed: "
-            + "; ".join(f"{failure.path}: {failure.error}" for failure in moved.errors),
-            try_instead=f"bm_list(path='{destination}') to see what moved",
+            f"Moved {moved.successful_moves} of {moved.total_files} files from "
+            f"'{result['path']}' to '{result['destination']}'; {moved.failed_moves} failed: "
+            + "; ".join(f"{failure['path']}: {failure['error']}" for failure in result["failed"]),
+            try_instead=f"bm_list(path='{result['destination']}') to see what moved",
             output_format=output_format,
         )
     if output_format == "json":

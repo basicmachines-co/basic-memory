@@ -343,6 +343,8 @@ async def test_a_failed_probe_does_not_fail_the_write(client, test_project, monk
         ({"identifier": "../escape.md"}, "OUTSIDE_PROJECT", "outside the project"),
         ({"title": "A", "directory": "../up"}, "OUTSIDE_PROJECT", "outside the project"),
         ({"identifier": "notes/"}, "INVALID_ARGUMENTS", "not a note file"),
+        ({"identifier": "C++/plan.md"}, "INVALID_ARGUMENTS", "would be written as 'C'"),
+        ({"title": "A", "directory": "a@b"}, "INVALID_ARGUMENTS", "would be written as 'ab'"),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, code, message):

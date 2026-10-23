@@ -195,7 +195,9 @@ async def _delete_directory(
             "PARTIAL_FAILURE",
             f"Deleted {deleted.successful_deletes} of {deleted.total_files} files under "
             f"'{shown}'; {deleted.failed_deletes} failed: "
-            + "; ".join(f"{failure.path}: {failure.error}" for failure in deleted.errors),
+            + "; ".join(
+                f"{target.paths.path(failure.path)}: {failure.error}" for failure in deleted.errors
+            ),
             try_instead=f"bm_list(path='{shown}') to see what is left",
             output_format=output_format,
         )

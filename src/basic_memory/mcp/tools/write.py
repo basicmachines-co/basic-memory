@@ -48,7 +48,7 @@ from basic_memory.schemas.v2.note_write import (
     NoteTargetMoved,
     NoteUpdated,
 )
-from basic_memory.utils import coerce_dict, parse_tags, validate_project_path
+from basic_memory.utils import coerce_dict, nfc_path, parse_tags, validate_project_path
 
 MARKDOWN_SUFFIX = ".md"
 
@@ -213,6 +213,18 @@ async def bm_write(
             content=content,
             entity_metadata=entity_metadata or None,
         )
+        # Trigger: the folder name has characters a folder cannot hold ('C++', 'a@b').
+        # Why: the model sanitizes the directory, which would write the note somewhere
+        #      the caller did not name, and with overwrite replace a note already there.
+        # Outcome: the write is refused and names the folder it would have used.
+        if note.directory != nfc_path(placement.directory):
+            raise refusal(
+                "INVALID_ARGUMENTS",
+                f"Folder '{target.paths.path(placement.directory)}' has characters a folder "
+                f"name cannot hold; it would be written as '{target.paths.path(note.directory)}'.",
+                try_instead="a folder name of letters, digits, spaces, '.', '-' and '_'",
+                output_format=output_format,
+            )
         knowledge_client = KnowledgeClient(target.client, target.project.external_id)
         try:
             outcome = await knowledge_client.write_note(
