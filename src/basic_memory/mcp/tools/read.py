@@ -122,16 +122,16 @@ async def bm_read(
         # --- Metadata only ---
         if not include_content:
             entity = await knowledge_client.get_entity(note.external_id)
-            metadata = {
-                "title": entity.title,
-                "permalink": entity.permalink,
-                "file_path": entity.file_path,
-                "checksum": entity.db_checksum,
-                "updated_at": entity.updated_at.isoformat(),
-            }
-            if output_format == "json":
-                return target.paths.note(metadata)
-            return format_note_metadata(metadata)
+            metadata = target.paths.note(
+                {
+                    "title": entity.title,
+                    "permalink": entity.permalink,
+                    "file_path": entity.file_path,
+                    "checksum": entity.db_checksum,
+                    "updated_at": entity.updated_at.isoformat(),
+                }
+            )
+            return metadata if output_format == "json" else format_note_metadata(metadata)
 
         resource_client = ResourceClient(target.client, target.project.external_id)
 

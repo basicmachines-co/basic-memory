@@ -31,7 +31,13 @@ from basic_memory.mcp.project_context import (
 )
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat, parse_project, routing_arguments
-from basic_memory.schemas.memory import memory_url_path
+from basic_memory.schemas.memory import (
+    EntitySummary,
+    GraphContext,
+    ObservationSummary,
+    RelationSummary,
+    memory_url_path,
+)
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.v2.entity import EntityResolveResponse
 from basic_memory.utils import generate_permalink, validate_project_path
@@ -249,6 +255,30 @@ class PathQualifier:
                 {**row, "file_path": self.path(row["file_path"])} for row in payload["results"]
             ],
         }
+
+    def graph(self, graph: GraphContext) -> GraphContext:
+        """A context graph: every item's `file_path`, primary, observation or related."""
+        if self.prefix is None:
+            return graph
+        return graph.model_copy(
+            update={
+                "results": [
+                    result.model_copy(
+                        update={
+                            "primary_result": self._summary(result.primary_result),
+                            "observations": [self._summary(o) for o in result.observations],
+                            "related_results": [
+                                self._summary(item) for item in result.related_results
+                            ],
+                        }
+                    )
+                    for result in graph.results
+                ]
+            }
+        )
+
+    def _summary[S: EntitySummary | RelationSummary | ObservationSummary](self, summary: S) -> S:
+        return summary.model_copy(update={"file_path": self.path(summary.file_path)})
 
     def _node(self, node: dict[str, Any]) -> dict[str, Any]:
         qualified = {**node, "directory_path": self.path(node["directory_path"])}
