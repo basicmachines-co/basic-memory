@@ -454,7 +454,7 @@ async def _search_one_note(
 ) -> str | dict[str, Any]:
     """grep on one note: its matching lines, with context."""
     async with open_project_target(
-        identifier, project, context, output_format=output_format
+        identifier, project, context, kind="identifier", output_format=output_format
     ) as target:
         note = await resolve_note(target, identifier, output_format=output_format)
         contents = await KnowledgeClient(
