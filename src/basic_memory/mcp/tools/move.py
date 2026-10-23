@@ -150,11 +150,12 @@ def _project_relative_destination(
         relative = ""
     # The first segment names the project when it normalizes the way routing
     # does, so 'My Research/archive/' and 'my-research/archive/' both qualify.
+    # 'research/' alone is that project's root: normalization dropped its slash.
     first, separator, rest = relative.partition("/")
     if (
         target.route.stripped
         and target.route.project is not None
-        and separator
+        and (separator or into_folder)
         and generate_permalink(first) == generate_permalink(target.route.project)
     ):
         relative = rest
@@ -167,7 +168,8 @@ def _project_relative_destination(
             try_instead="a path relative to the project root, such as 'archive/plan.md'",
             output_format=output_format,
         )
-    return f"{relative}/" if into_folder and relative else relative
+    # Into the root keeps its '/', so both note and directory moves keep their names.
+    return f"{relative}/" if into_folder else relative
 
 
 # --- Notes ---
@@ -282,6 +284,13 @@ async def _move_directory(
         raise refusal(
             "INVALID_ARGUMENTS",
             "A directory cannot move to the project root; name its new path.",
+            output_format=output_format,
+        )
+    # 'archive/' or '/' for a directory already there names its current path.
+    if destination == source:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"'{target.paths.path(source)}' is already there; name a different destination.",
             output_format=output_format,
         )
     try:

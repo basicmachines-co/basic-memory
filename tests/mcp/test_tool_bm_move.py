@@ -139,6 +139,20 @@ async def test_destination_prefix_matches_any_spelling_of_the_project(client, te
 
 
 @pytest.mark.asyncio
+async def test_project_root_destination(client, test_project):
+    """'<project>/' is that project's root, for notes and directories alike."""
+    await _note(test_project.name)
+    await _note(test_project.name, "archive/drafts/a.md")
+    prefix = test_project.permalink
+
+    note = await move_json(identifier=f"{prefix}/notes/plan.md", destination=f"{prefix}/")
+    directory = await move_json(path=f"{prefix}/archive/drafts", destination=f"{prefix}/")
+
+    assert note["file_path"] == f"{prefix}/plan.md"
+    assert directory["moved_files"] == [f"{prefix}/drafts/a.md"]
+
+
+@pytest.mark.asyncio
 async def test_expected_checksum_guards_the_move(client, test_project):
     written = await _note(test_project.name)
 
@@ -272,7 +286,8 @@ async def test_missing_directory(client, test_project):
             "keeps the file type",
         ),
         ({"path": "/", "destination": "x"}, "INVALID_ARGUMENTS", "project root cannot"),
-        ({"path": "notes", "destination": "/"}, "INVALID_ARGUMENTS", "cannot move to the project"),
+        ({"path": "notes", "destination": "/"}, "INVALID_ARGUMENTS", "'notes' is already there"),
+        ({"path": "notes", "destination": ""}, "INVALID_ARGUMENTS", "cannot move to the project"),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, code, message):
