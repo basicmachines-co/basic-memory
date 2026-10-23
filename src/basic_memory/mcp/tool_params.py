@@ -7,6 +7,7 @@ body sees the value. Tools import these instead of declaring their own variants,
 one parameter means one thing across the surface.
 """
 
+import json
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -170,6 +171,13 @@ def _parse_item_kinds(value: Any) -> Any:
     """
     if value is None:
         return None
+    # Some MCP clients send the list as a JSON string ('["note", null]').
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            # Malformed JSON stays a string, which validation rejects with a message.
+            return value
     # A null member is not a kind; the shared parser would drop it and leave the
     # default search, so the list is handed to validation as given.
     if isinstance(value, list) and any(item is None for item in value):
