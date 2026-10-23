@@ -25,7 +25,7 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
     """Cross-project detection should fail open (return None) if the projects API errors."""
     import importlib
 
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    destinations_mod = importlib.import_module("basic_memory.mcp.move_destinations")
 
     # Mock ProjectClient to raise an exception on list_projects
     class MockProjectClient:
@@ -35,7 +35,7 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
         async def list_projects(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(destinations_mod, "ProjectClient", MockProjectClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -53,7 +53,7 @@ async def test_detect_cross_project_rejects_when_local_folder_check_fails(monkey
     """After a project name matches, a failed local-folder lookup keeps the rejection."""
     import importlib
 
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    destinations_mod = importlib.import_module("basic_memory.mcp.move_destinations")
 
     class _Project:
         def __init__(self, name: str) -> None:
@@ -76,8 +76,8 @@ async def test_detect_cross_project_rejects_when_local_folder_check_fails(monkey
         async def list(self, *args, **kwargs):
             raise RuntimeError("directory backend unavailable")
 
-    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
-    monkeypatch.setattr(clients_mod, "DirectoryClient", FailingDirectoryClient)
+    monkeypatch.setattr(destinations_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(destinations_mod, "DirectoryClient", FailingDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -96,7 +96,7 @@ async def test_detect_cross_project_stops_paging_after_root_folders(monkeypatch)
     """Root folders come first, so paging stops at the first page that holds a file."""
     import importlib
 
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    destinations_mod = importlib.import_module("basic_memory.mcp.move_destinations")
 
     class _Project:
         def __init__(self, name: str) -> None:
@@ -134,8 +134,8 @@ async def test_detect_cross_project_stops_paging_after_root_folders(monkeypatch)
                 return _Page([_Node("alpha", "directory")])
             return _Page([_Node("Other-Project", "directory"), _Node("note.md", "file")])
 
-    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
-    monkeypatch.setattr(clients_mod, "DirectoryClient", PagingDirectoryClient)
+    monkeypatch.setattr(destinations_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(destinations_mod, "DirectoryClient", PagingDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -154,7 +154,7 @@ async def test_detect_cross_project_matches_project_permalink(monkeypatch):
     """A destination addressed by project permalink ("Other Project" -> other-project)."""
     import importlib
 
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    destinations_mod = importlib.import_module("basic_memory.mcp.move_destinations")
 
     class _Project:
         def __init__(self, name: str) -> None:
@@ -181,8 +181,8 @@ async def test_detect_cross_project_matches_project_permalink(monkeypatch):
         async def list(self, *args, **kwargs):
             return _EmptyListing()
 
-    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
-    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
+    monkeypatch.setattr(destinations_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(destinations_mod, "DirectoryClient", MockDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -217,7 +217,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
     """
     import importlib
 
-    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    destinations_mod = importlib.import_module("basic_memory.mcp.move_destinations")
 
     class _Project:
         def __init__(self, name: str) -> None:
@@ -244,8 +244,8 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         async def list(self, *args, **kwargs):
             return _EmptyListing()
 
-    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
-    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
+    monkeypatch.setattr(destinations_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(destinations_mod, "DirectoryClient", MockDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 

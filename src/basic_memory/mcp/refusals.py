@@ -26,6 +26,8 @@ type RefusalCode = Literal[
     "OUTSIDE_PROJECT",
     "LOCKED",
     "UNSUPPORTED",
+    # Some items of a multi-file change succeeded and some did not.
+    "PARTIAL_FAILURE",
     # Not a refusal: the write left and no answer said whether it landed.
     "OUTCOME_UNKNOWN",
     # Not a refusal: the service that would answer did not.
@@ -80,6 +82,12 @@ class ApiRefusal:
     # note is gone.
     revision_conflict: bool
     current_checksum: str | None
+
+    def with_outcome(self, outcome: str) -> str:
+        """The server's message followed by what the tool did, as two sentences."""
+        message = self.message.rstrip()
+        stop = "" if message.endswith((".", "!", "?")) else "."
+        return f"{message}{stop} {outcome}"
 
 
 def api_refusal(error: ToolError) -> ApiRefusal | None:

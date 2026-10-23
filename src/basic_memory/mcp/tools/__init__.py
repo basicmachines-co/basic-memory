@@ -39,9 +39,11 @@ from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_
 
 # 1.0 tool surface (SPEC-35.2, #1827). Registered next to the tools they replace until #1833.
 from basic_memory.mcp.tools.context import bm_context
+from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit import bm_edit
 from basic_memory.mcp.tools.find_files import bm_find
 from basic_memory.mcp.tools.listing import bm_list
+from basic_memory.mcp.tools.move import bm_move
 from basic_memory.mcp.tools.ranked_search import bm_search
 from basic_memory.mcp.tools.read import bm_read
 from basic_memory.mcp.tools.write import bm_write
@@ -49,9 +51,11 @@ from basic_memory.mcp.tools.write import bm_write
 __all__ = [
     "basic_memory_diagnostics",
     "bm_context",
+    "bm_delete",
     "bm_edit",
     "bm_find",
     "bm_list",
+    "bm_move",
     "bm_read",
     "bm_search",
     "bm_write",

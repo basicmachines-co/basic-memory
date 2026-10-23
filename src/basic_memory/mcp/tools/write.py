@@ -277,7 +277,7 @@ async def bm_write(
         )
 
     requested_path = _requested_path(placement)
-    result = note_change_result(written, action=action, route=target.route)
+    result = note_change_result(written, action=action, paths=target.paths)
     result["similar_notes"] = [dataclasses.asdict(similar) for similar in similar_notes]
     # Trigger: the API wrote into an existing folder's spelling (#1796).
     # Why: the caller should learn the real path rather than keep using its guess.
@@ -301,7 +301,7 @@ def _write_failure(error: ToolError, file_path: str, output_format: OutputFormat
             output_format=output_format,
         )
     return refusal(
-        refused.code, f"{refused.message} Nothing was written.", output_format=output_format
+        refused.code, refused.with_outcome("Nothing was written."), output_format=output_format
     )
 
 

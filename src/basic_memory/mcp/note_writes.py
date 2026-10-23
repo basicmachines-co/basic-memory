@@ -6,16 +6,15 @@ path and checksum from one shape whichever tool made the change.
 
 from typing import Any
 
-from basic_memory.mcp.note_targets import qualify_note_paths
-from basic_memory.mcp.project_context import ProjectPathRoute
+from basic_memory.mcp.note_targets import PathQualifier
 from basic_memory.schemas.v2.entity import EntityResponseV2
 
 
 def note_change_result(
-    note: EntityResponseV2, *, action: str, route: ProjectPathRoute
+    note: EntityResponseV2, *, action: str, paths: PathQualifier
 ) -> dict[str, Any]:
     """The JSON result for a changed note, with its path qualified like the request."""
-    return qualify_note_paths(
+    return paths.note(
         {
             "action": action,
             "title": note.title,
@@ -27,8 +26,7 @@ def note_change_result(
             "observations": len(note.observations),
             "relations": len(note.relations),
             "unresolved_relations": sum(1 for relation in note.relations if not relation.to_id),
-        },
-        route,
+        }
     )
 
 

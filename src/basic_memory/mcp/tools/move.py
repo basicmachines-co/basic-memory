@@ -1,0 +1,346 @@
+"""bm_move: move or rename a note or a directory within a project (SPEC-35.2, #1831).
+
+Replaces move_note. `identifier` names a note and `path` a directory; one
+`destination` replaces destination_path and destination_folder, and a trailing '/'
+on it keeps the note's file name. Moves stay inside one project; a destination
+whose first folder names another project is refused.
+"""
+
+from pathlib import PurePosixPath, PureWindowsPath
+from typing import Annotated, Any
+
+from fastmcp import Context
+from fastmcp.exceptions import ToolError
+from pydantic import AliasChoices, Field
+
+from basic_memory.mcp.async_client import local_project_path
+from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.move_destinations import project_named_by_destination
+from basic_memory.mcp.note_targets import (
+    ProjectTarget,
+    open_project_target,
+    resolve_note,
+)
+from basic_memory.mcp.note_writes import format_note_change, note_change_result
+from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
+from basic_memory.schemas.memory import memory_url_path
+from basic_memory.utils import generate_permalink, validate_project_path
+
+
+@mcp.tool(
+    name="bm_move",
+    title="Move note",
+    description=(
+        "Move or rename a Basic Memory note (`identifier`) or a directory (`path`) within "
+        "its project. `destination` is the new project-relative path; ending it with '/' "
+        "moves into that folder under the current name ('archive/'). A note keeps "
+        "its file extension ('.markdown' may become '.md'). Pass `expected_checksum` (from "
+        "bm_read) to move a note only if it is still the revision you read. Moving into "
+        "another project is refused: bm_read, bm_write there, then bm_delete."
+    ),
+    tags={"notes"},
+    annotations={
+        "title": "Move note",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def bm_move(
+    destination: Annotated[
+        str,
+        Field(
+            min_length=1,
+            validation_alias=AliasChoices(
+                "destination", "destination_path", "destination_folder", "to", "new_path"
+            ),
+            description=(
+                "New path, e.g. 'archive/plan.md'. A trailing '/' ('archive/') moves the note "
+                "or directory into that folder under its current name."
+            ),
+        ),
+    ],
+    identifier: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            validation_alias=AliasChoices("identifier", "file_path"),
+            description="The note to move: a path, permalink, memory:// URL or exact title.",
+        ),
+    ] = None,
+    path: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            validation_alias=AliasChoices("path", "dir_name", "folder"),
+            description="The directory to move, with everything in it, e.g. 'drafts/2025'.",
+        ),
+    ] = None,
+    expected_checksum: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description="Move the note only while it is still this revision (from bm_read).",
+        ),
+    ] = None,
+    output_format: OutputFormat = "text",
+    project: ProjectParam = None,
+    context: Context | None = None,
+) -> str | dict[str, Any]:
+    """Move one note or one directory."""
+    # --- Argument combinations ---
+    if (identifier is None) == (path is None):
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "Give `identifier` to move a note or `path` to move a directory, exactly one.",
+            output_format=output_format,
+        )
+    if path is not None and expected_checksum is not None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "expected_checksum guards a single note; a directory move cannot take one.",
+            output_format=output_format,
+        )
+
+    source = identifier if identifier is not None else path
+    assert source is not None
+    async with open_project_target(source, project, context, output_format=output_format) as target:
+        destination_path = _project_relative_destination(target, destination, output_format)
+        other_project = await project_named_by_destination(
+            target.client, destination_path, target.project
+        )
+        if other_project is not None:
+            raise refusal(
+                "UNSUPPORTED",
+                f"'{destination}' starts with the project '{other_project}'; moves stay inside "
+                f"project '{target.project.name}'.",
+                try_instead=(
+                    f"bm_read the note, bm_write it with project='{other_project}', then "
+                    "bm_delete the original"
+                ),
+                output_format=output_format,
+            )
+        if identifier is not None:
+            return await _move_note(
+                target, identifier, destination_path, expected_checksum, output_format
+            )
+        return await _move_directory(target, destination_path, output_format)
+
+
+def _project_relative_destination(
+    target: ProjectTarget, destination: str, output_format: OutputFormat
+) -> str:
+    """The destination as a project-relative path, keeping a trailing '/'.
+
+    A caller who addressed the source as '<project>/path' gets paths back in that
+    form, so a destination spelled the same way names the same project and drops
+    its prefix here.
+    """
+    # Path normalization drops a trailing separator, which is meaningful here.
+    into_folder = destination.endswith(("/", "\\"))
+    relative = PureWindowsPath(memory_url_path(destination)).as_posix().lstrip("/")
+    if relative in {"", "."}:
+        relative = ""
+    if target.route.stripped and target.route.project is not None:
+        prefix = f"{generate_permalink(target.route.project)}/"
+        if relative.startswith(prefix):
+            relative = relative.removeprefix(prefix)
+    if not validate_project_path(
+        relative.rstrip("/"), local_project_path(target.client, target.project)
+    ):
+        raise refusal(
+            "OUTSIDE_PROJECT",
+            f"Destination '{destination}' is outside the project.",
+            try_instead="a path relative to the project root, such as 'archive/plan.md'",
+            output_format=output_format,
+        )
+    return f"{relative}/" if into_folder and relative else relative
+
+
+# --- Notes ---
+
+
+async def _move_note(
+    target: ProjectTarget,
+    identifier: str,
+    destination: str,
+    expected_checksum: str | None,
+    output_format: OutputFormat,
+) -> str | dict[str, Any]:
+    note = await resolve_note(target, identifier, output_format=output_format)
+    source = PurePosixPath(note.file_path)
+
+    # Trigger: the destination ends with '/', or is the project root.
+    # Why: one parameter covers both "move into this folder" and "move to this path".
+    # Outcome: the note keeps its file name under the destination folder.
+    if destination.endswith("/") or not destination:
+        destination_path = PurePosixPath(destination.rstrip("/")) / source.name
+    else:
+        destination_path = PurePosixPath(destination)
+    _check_note_destination(source, destination_path, destination, output_format)
+
+    try:
+        moved = await KnowledgeClient(target.client, target.project.external_id).move_entity(
+            note.external_id, str(destination_path), base_checksum=expected_checksum
+        )
+    except ToolError as error:
+        raise _move_failure(error, note.file_path, str(destination_path), output_format) from error
+
+    result = note_change_result(moved, action="moved", paths=target.paths)
+    result["previous_file_path"] = target.paths.path(note.file_path)
+    # Trigger: the API moved into an existing folder's spelling (#1326, #1796).
+    # Outcome: the result names the requested path next to the actual one.
+    if moved.file_path != str(destination_path):
+        result["requested_file_path"] = target.paths.path(str(destination_path))
+    if output_format == "json":
+        return result
+    lines = format_note_change(
+        result, headline=f"Moved {result['previous_file_path']} to {result['file_path']}"
+    )
+    if requested := result.get("requested_file_path"):
+        lines.insert(1, f"requested: {requested}")
+    return "\n".join(lines)
+
+
+def _check_note_destination(
+    source: PurePosixPath,
+    destination_path: PurePosixPath,
+    destination: str,
+    output_format: OutputFormat,
+) -> None:
+    """Refuse a note destination that is the same file or another kind of file."""
+    if destination_path == source:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"The note is already at '{source}'.",
+            output_format=output_format,
+        )
+    # Trigger: no extension, as in 'archive/2025'.
+    # Why: that could be a folder meant with a trailing '/', or a new file name;
+    #      guessing wrong renames the note.
+    # Outcome: the refusal spells out both readings.
+    if not destination_path.suffix:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"'{destination}' has no file extension.",
+            try_instead=(
+                f"'{destination}/' to move into that folder, or "
+                f"'{destination_path.with_suffix(source.suffix)}' to rename the note"
+            ),
+            output_format=output_format,
+        )
+    # '.md' and '.markdown' are one file type; any other change of type is refused.
+    both_markdown = {source.suffix.lower(), destination_path.suffix.lower()} <= (
+        RUNTIME_MARKDOWN_FILE_SUFFIXES
+    )
+    if destination_path.suffix.lower() != source.suffix.lower() and not both_markdown:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"A move keeps the file type: '{source.name}' cannot become '{destination_path.name}'.",
+            try_instead=f"'{destination_path.with_suffix(source.suffix)}'",
+            output_format=output_format,
+        )
+
+
+def _move_failure(
+    error: ToolError, source: str, destination: str, output_format: OutputFormat
+) -> ToolError:
+    """Explain a move the API refused, or one whose outcome is unknown."""
+    refused = api_refusal(error)
+    if refused is None:
+        return refusal(
+            "OUTCOME_UNKNOWN",
+            f"The move of '{source}' may or may not have happened: {error}",
+            try_instead=f"bm_read(identifier='{destination}') before retrying",
+            output_format=output_format,
+        )
+    if refused.revision_conflict:
+        return refusal(
+            "REVISION_CONFLICT",
+            f"'{source}' changed since you read it (current checksum "
+            f"{refused.current_checksum}). Nothing was moved.",
+            try_instead=(
+                f"bm_read(identifier='{source}'), then retry with "
+                f"expected_checksum='{refused.current_checksum}'"
+            ),
+            output_format=output_format,
+        )
+    # A 409 that is not a revision guard is a file already at the destination.
+    code = "ALREADY_EXISTS" if refused.code == "REVISION_CONFLICT" else refused.code
+    return refusal(
+        code,
+        refused.with_outcome("Nothing was moved."),
+        try_instead=f"bm_read(identifier='{destination}') to see what is there"
+        if code == "ALREADY_EXISTS"
+        else None,
+        output_format=output_format,
+    )
+
+
+# --- Directories ---
+
+
+async def _move_directory(
+    target: ProjectTarget, destination: str, output_format: OutputFormat
+) -> str | dict[str, Any]:
+    source = memory_url_path(target.route.path).strip("/")
+    # A trailing '/' moves the directory into that folder, as it does for a note.
+    if destination.endswith("/"):
+        destination = f"{destination}{PurePosixPath(source).name}"
+    destination = destination.strip("/")
+    if not source:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "The project root cannot be moved.",
+            output_format=output_format,
+        )
+    if not destination:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "A directory cannot move to the project root; name its new path.",
+            output_format=output_format,
+        )
+    try:
+        moved = await KnowledgeClient(target.client, target.project.external_id).move_directory(
+            source, destination
+        )
+    except ToolError as error:
+        raise _move_failure(error, source, destination, output_format) from error
+
+    if moved.total_files == 0:
+        raise refusal(
+            "NOT_FOUND",
+            f"No files under '{source}' in project '{target.project.name}'.",
+            try_instead=f"bm_list(path='{source.rpartition('/')[0] or '/'}')",
+            output_format=output_format,
+        )
+    result: dict[str, Any] = {
+        "action": "moved",
+        "path": target.paths.path(source),
+        "destination": target.paths.path(destination),
+        "total_files": moved.total_files,
+        "moved_files": [target.paths.path(file) for file in moved.moved_files],
+        "failed": [{"path": failure.path, "error": failure.error} for failure in moved.errors],
+    }
+    # Trigger: some files moved and some did not.
+    # Why: the move is neither done nor undone; the caller must see which files
+    #      already moved before deciding what to retry.
+    # Outcome: an error carrying the full summary.
+    if moved.failed_moves:
+        raise refusal(
+            "PARTIAL_FAILURE",
+            f"Moved {moved.successful_moves} of {moved.total_files} files from '{source}' to "
+            f"'{destination}'; {moved.failed_moves} failed: "
+            + "; ".join(f"{failure.path}: {failure.error}" for failure in moved.errors),
+            try_instead=f"bm_list(path='{destination}') to see what moved",
+            output_format=output_format,
+        )
+    if output_format == "json":
+        return result
+    return (
+        f"Moved directory {result['path']} to {result['destination']} ({moved.total_files} files)"
+    )

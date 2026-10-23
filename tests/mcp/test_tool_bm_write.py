@@ -207,6 +207,18 @@ async def test_root_path_and_blank_frontmatter_title(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_frontmatter_without_title_and_unresolved_relations(client, test_project):
+    text = await write_text(
+        identifier="notes/linked.md",
+        content="---\nstatus: draft\n---\n\n- relates_to [[No Such Note]]",
+        project=test_project.name,
+    )
+
+    assert "title: linked" in text
+    assert "relations: 1 (1 not yet resolved)" in text
+
+
+@pytest.mark.asyncio
 async def test_malformed_frontmatter_is_an_argument_error(client, test_project):
     with pytest.raises(
         ToolError, match="(?s)^INVALID_ARGUMENTS: Invalid YAML.*Nothing was written"

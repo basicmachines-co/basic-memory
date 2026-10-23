@@ -337,7 +337,7 @@ class KnowledgeClient:
 
     async def move_entity(
         self, entity_id: str, destination_path: str, *, base_checksum: str | None = None
-    ) -> EntityResponse:
+    ) -> EntityResponseV2:
         """Move an entity to a new location.
 
         Args:
@@ -347,7 +347,8 @@ class KnowledgeClient:
                 server refuse the move with a structured 409
 
         Returns:
-            EntityResponse with updated entity details
+            EntityResponseV2, the route's response model; it carries db_checksum,
+            which the legacy EntityResponse drops (#1586)
 
         Raises:
             ToolError: If the request fails
@@ -368,7 +369,7 @@ class KnowledgeClient:
                 operation="move_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}/move",
             )
-        return EntityResponse.model_validate(response.json())
+        return EntityResponseV2.model_validate(response.json())
 
     async def move_directory(
         self, source_directory: str, destination_directory: str
