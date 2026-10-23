@@ -148,17 +148,17 @@ def _project_relative_destination(
     relative = PureWindowsPath(memory_url_path(destination)).as_posix().lstrip("/")
     if relative in {"", "."}:
         relative = ""
-    # The first segment names the project when it normalizes the way routing
-    # does, so 'My Research/archive/' and 'my-research/archive/' both qualify.
-    # 'research/' alone is that project's root: normalization dropped its slash.
-    first, separator, rest = relative.partition("/")
-    if (
-        target.route.stripped
-        and target.route.project is not None
-        and (separator or into_folder)
-        and generate_permalink(first) == generate_permalink(target.route.project)
-    ):
-        relative = rest
+    # The leading segments name the project when they normalize the way routing
+    # does, so 'My Research/archive/' and 'my-research/archive/' both qualify, and
+    # a Cloud route's 'team/research/' prefix is matched whole. 'research/' alone
+    # is that project's root: normalization dropped its slash.
+    if target.route.stripped and target.route.project is not None:
+        prefix = [generate_permalink(part) for part in target.route.project.split("/")]
+        segments = relative.split("/")
+        leading = [generate_permalink(part) for part in segments[: len(prefix)]]
+        remainder = segments[len(prefix) :]
+        if leading == prefix and (remainder or into_folder):
+            relative = "/".join(remainder)
     if not validate_project_path(
         relative.rstrip("/"), local_project_path(target.client, target.project)
     ):

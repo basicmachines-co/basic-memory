@@ -11,6 +11,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
+from basic_memory.indexing.directory_delete_runner import normalize_directory_delete_path
 from basic_memory.mcp.clients import DirectoryClient, KnowledgeClient
 from basic_memory.mcp.note_targets import (
     ProjectTarget,
@@ -148,7 +149,16 @@ async def _delete_note(
 async def _delete_directory(
     target: ProjectTarget, recursive: bool, output_format: OutputFormat
 ) -> str | dict[str, Any]:
-    directory = memory_url_path(target.route.path).strip("/")
+    # The API normalizes the path this way before deleting, and an empty path is
+    # the whole project, so the root check runs on the normalized form (' ' too).
+    try:
+        directory = normalize_directory_delete_path(memory_url_path(target.route.path))
+    except ValueError as error:
+        raise refusal(
+            "OUTSIDE_PROJECT",
+            f"'{target.route.path}' is not a directory inside the project.",
+            output_format=output_format,
+        ) from error
     shown = target.paths.path(directory)
     if not directory:
         raise refusal(

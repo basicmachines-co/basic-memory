@@ -10,7 +10,11 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.note_targets import ProjectTarget
+from basic_memory.mcp.project_context import ProjectPathRoute
 from basic_memory.mcp.tools import bm_move, bm_read, bm_write
+from basic_memory.mcp.tools import move as move_module
+from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.response import DirectoryMoveResult
 
 
@@ -365,3 +369,23 @@ async def test_missing_directory_hint_is_qualified(client, test_project):
 
     with pytest.raises(ToolError, match=f"bm_list\\(path='{prefix}'\\)"):
         await bm_move(path=f"{prefix}/nope", destination=f"{prefix}/archive")
+
+
+@pytest.mark.parametrize(
+    ("destination", "relative"),
+    [
+        ("team/research/archive/a.md", "archive/a.md"),
+        ("Team/Research/archive/", "archive/"),
+        ("team/research/", "/"),
+        ("team/archive/a.md", "team/archive/a.md"),
+    ],
+)
+def test_workspace_qualified_destination_drops_the_whole_prefix(destination, relative):
+    """A Cloud route names its project as 'team/research'; both segments are the prefix."""
+    target = ProjectTarget(
+        client=httpx.AsyncClient(),
+        project=ProjectItem(id=1, external_id="p-1", name="research", path="/research"),
+        route=ProjectPathRoute(project="team/research", path="notes/a.md", stripped=True),
+    )
+
+    assert move_module._project_relative_destination(target, destination, "text") == relative

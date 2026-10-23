@@ -211,6 +211,18 @@ async def test_invalid_arguments(client, test_project, arguments, message):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", [" ", " / ", "\t"])
+async def test_a_blank_path_never_deletes_the_project(client, test_project, path):
+    """The API reads a blank directory as the project root; bm_delete refuses it."""
+    await bm_write(identifier="notes/keep.md", content="# Keep", project=test_project.name)
+
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: The project root cannot"):
+        await bm_delete(path=path, recursive=True, project=test_project.name)
+
+    assert await bm_read(identifier="notes/keep.md", project=test_project.name)
+
+
+@pytest.mark.asyncio
 async def test_guarded_delete_of_a_note_already_gone(client, test_project):
     """A pinned revision of a note that no longer exists is a conflict, not a miss."""
     with pytest.raises(ToolError, match="^REVISION_CONFLICT: 'notes/gone.md' was deleted"):
