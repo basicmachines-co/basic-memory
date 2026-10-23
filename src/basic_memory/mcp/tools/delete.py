@@ -95,7 +95,11 @@ async def bm_delete(
 
     source = identifier if identifier is not None else path
     assert source is not None
-    async with open_project_target(source, project, context, output_format=output_format) as target:
+    # A note is resolved by identifier; a directory is a path that must stay inside.
+    kind = "identifier" if identifier is not None else "path"
+    async with open_project_target(
+        source, project, context, kind=kind, output_format=output_format
+    ) as target:
         if identifier is not None:
             return await _delete_note(target, identifier, expected_checksum, output_format)
         return await _delete_directory(target, recursive, output_format)

@@ -107,7 +107,11 @@ async def bm_move(
 
     source = identifier if identifier is not None else path
     assert source is not None
-    async with open_project_target(source, project, context, output_format=output_format) as target:
+    # A note is resolved by identifier; a directory is a path that must stay inside.
+    kind = "identifier" if identifier is not None else "path"
+    async with open_project_target(
+        source, project, context, kind=kind, output_format=output_format
+    ) as target:
         destination_path = _project_relative_destination(target, destination, output_format)
         other_project = await project_named_by_destination(
             target.client, destination_path, target.project
