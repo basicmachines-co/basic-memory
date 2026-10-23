@@ -120,6 +120,9 @@ async def bm_context(
             include_observations=not compact,
         )
 
+    # Paths come back in the spelling the caller used to reach the project, so any
+    # item in the graph can be passed straight to bm_read.
+    graph = target.paths.graph(graph)
     if compact:
         graph = _compact_context_labels(graph)
     if output_format == "text":

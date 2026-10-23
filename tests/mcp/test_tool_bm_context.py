@@ -90,3 +90,18 @@ async def test_outside_the_project_is_refused(client, test_project):
     with pytest.raises(ToolError) as refused:
         await bm_context(identifier="../graph/node-a", project=test_project.name)
     assert json.loads(str(refused.value))["error"] == "OUTSIDE_PROJECT"
+
+
+@pytest.mark.asyncio
+async def test_project_qualified_start_returns_qualified_paths(client, test_project):
+    """Every path in the graph can be passed back to bm_read."""
+    await _seed(test_project.name)
+    prefix = test_project.permalink
+
+    graph = await context_json(identifier=f"{prefix}/graph/node-a")
+
+    (result,) = graph["results"]
+    paths = [result["primary_result"]["file_path"]]
+    paths += [row["file_path"] for row in result["observations"]]
+    paths += [row["file_path"] for row in result["related_results"]]
+    assert paths and all(path.startswith(f"{prefix}/graph/") for path in paths)

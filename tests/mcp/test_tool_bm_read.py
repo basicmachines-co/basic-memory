@@ -233,3 +233,13 @@ async def test_invalid_argument_combinations(client, test_project, arguments, me
 
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: .*{message}"):
         await bm_read("notes/Plan.md", project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_metadata_text_carries_the_qualified_path(client, test_project):
+    await _write(test_project.name, "Plan", "# Plan")
+    prefix = test_project.permalink
+
+    text = await read_text(f"{prefix}/notes/Plan.md", include_content=False)
+
+    assert f"file_path: {prefix}/notes/Plan.md" in text
