@@ -118,6 +118,16 @@ async def test_no_matches(client, test_project):
     assert text == f"No results for 'zxqv' in project '{test_project.name}'."
 
 
+@pytest.mark.asyncio
+async def test_project_relative_permalink_pattern(client, test_project):
+    # #1812: permalinks carry the project prefix here, and 'tasks/*' still matches.
+    await _seed(test_project.name)
+
+    payload = await search_json(query="tasks/*", mode="permalink", project=test_project.name)
+
+    assert [row["title"] for row in payload["results"]] == ["Deploy Plan"]
+
+
 # --- Matching lines ---
 
 

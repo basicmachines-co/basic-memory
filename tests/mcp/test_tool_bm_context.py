@@ -1,0 +1,92 @@
+"""bm_context: graph context from a note or pattern, routed like every bm_* tool (#1830).
+
+These run the real ASGI stack through the shared `client` fixture.
+"""
+
+import json
+from typing import Any
+
+import pytest
+from fastmcp.exceptions import ToolError
+
+from basic_memory.mcp.tools import bm_context, write_note
+
+
+async def _seed(project_name: str) -> None:
+    await write_note(
+        title="Node A",
+        directory="graph",
+        content="# Node A\n\n- [fact] A starts the chain\n\n- links_to [[Node B]]",
+        project=project_name,
+    )
+    await write_note(
+        title="Node B",
+        directory="graph",
+        content="# Node B\n\n- [fact] B is in the middle\n\n- links_to [[Node A]]",
+        project=project_name,
+    )
+
+
+async def context_json(**arguments: Any) -> dict[str, Any]:
+    result = await bm_context(**arguments)
+    assert isinstance(result, dict)
+    return result
+
+
+@pytest.mark.asyncio
+async def test_json_by_default_with_related_notes(client, test_project):
+    await _seed(test_project.name)
+
+    graph = await context_json(identifier="graph/node-a", project=test_project.name)
+
+    (result,) = graph["results"]
+    assert result["primary_result"]["title"] == "Node A"
+    related_titles = {row.get("title") for row in result["related_results"]}
+    assert "Node B" in related_titles
+
+
+@pytest.mark.asyncio
+async def test_explicit_project_keeps_the_identifier_a_path(client, test_project, caplog):
+    # #1814: the first segment ("graph") was resolved as a project, logging a
+    # client error on every call.
+    await _seed(test_project.name)
+
+    graph = await context_json(identifier="memory://graph/node-a", project=test_project.name)
+
+    assert graph["results"][0]["primary_result"]["title"] == "Node A"
+    assert "Project not found: 'graph'" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_pattern_and_compact_text(client, test_project):
+    await _seed(test_project.name)
+
+    # #1812: a project-relative pattern, though permalinks here carry the project prefix.
+    text = await bm_context(
+        identifier="graph/*",
+        compact=True,
+        output_format="text",
+        project=test_project.name,
+    )
+
+    assert isinstance(text, str)
+    assert "Node A" in text and "Node B" in text
+
+
+@pytest.mark.asyncio
+async def test_compact_json_drops_bodies(client, test_project):
+    await _seed(test_project.name)
+
+    graph = await context_json(identifier="graph/node-a", compact=True, project=test_project.name)
+
+    primary = graph["results"][0]["primary_result"]
+    assert "content" not in primary
+    assert "observations" not in graph["results"][0]
+
+
+@pytest.mark.asyncio
+async def test_outside_the_project_is_refused(client, test_project):
+    # bm_context defaults to JSON, so its refusals are JSON too.
+    with pytest.raises(ToolError) as refused:
+        await bm_context(identifier="../graph/node-a", project=test_project.name)
+    assert json.loads(str(refused.value))["error"] == "OUTSIDE_PROJECT"
