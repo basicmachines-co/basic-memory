@@ -215,6 +215,19 @@ async def bm_search(
             "`identifier`, `path` and `lines` search one project, not several.",
             output_format=output_format,
         )
+    if several_projects and project is not None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "`project` names one project; `projects` and `all_projects` name several. Give one.",
+            output_format=output_format,
+        )
+    # Matching lines are note content, which `compact` exists to leave out.
+    if lines is not None and compact:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "`lines` returns note lines and `compact` omits note content; give one.",
+            output_format=output_format,
+        )
     # The text a matching line must contain; empty means no line matching is possible.
     line_query = (query or "").strip()
     if (lines is not None or identifier is not None) and not line_query:
@@ -287,7 +300,7 @@ async def bm_search(
     entity_types = [item.value for item in search_item_types(items) or []]
 
     # --- Several projects ---
-    if several_projects and project is None:
+    if several_projects:
         searched = await _search_all_projects(
             query=query,
             page=page,

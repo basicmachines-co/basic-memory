@@ -224,6 +224,8 @@ def test_query_terms(query, terms):
     [
         ({"query": "x", "identifier": "a.md", "path": "notes"}, "give one"),
         ({"query": "x", "path": "notes", "all_projects": True}, "search one project"),
+        ({"query": "x", "projects": ["a", "b"]}, "Give one"),
+        ({"query": "x", "lines": 1, "compact": True}, "give one"),
         ({"lines": 1}, "need a `query`"),
         ({"query": "a\nb", "lines": 1}, "single-line query"),
         (
