@@ -44,9 +44,10 @@ bm project add NAME [PATH] [--cloud] [--workspace SELECTOR]
 Creates and registers a project. Local projects take a filesystem path;
 cloud projects take a cloud-relative path (`"/manual"`) and an optional
 `workspace` selector (slug, name, or tenant id — discover via
-[[list-workspaces(3)]]). Repeating a project name is idempotent when the
-path is the same directory. The same name with a different path is an error
-and does not re-index the existing project.
+[[list-workspaces(3)]]). Repeating a local project's name with the same
+directory is idempotent and re-indexes it. The same name with a different
+directory is refused with `ALREADY_EXISTS`. Cloud paths are derived from the
+project name, so a cloud retry is never refused for its path.
 
 ## MCP USAGE
 
@@ -72,7 +73,7 @@ bm project add manual --cloud \
 ## GOTCHAS
 
 - [gotcha] Cloud project paths are tenant-relative ("/manual"); passing one to a local create attempts a literal filesystem mkdir #paths
-- [gotcha] Re-creating an existing name is idempotent only for the same path. A different path is an error (`PATH_MISMATCH` in json, `already_exists` false) and does not re-index #semantics
+- [gotcha] Re-creating an existing local name is idempotent only for the same directory; a different directory is an `ALREADY_EXISTS` refusal that names the stored path #semantics
 
 ## SEE ALSO
 

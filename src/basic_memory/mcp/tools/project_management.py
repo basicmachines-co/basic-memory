@@ -634,29 +634,27 @@ async def create_memory_project(
         )
         index_in_background = _routes_to_cloud(workspace_id)
         if existing_match:
+            # Trigger: a local project of this name is stored at another directory.
+            # Why: an already-exists success would ignore the requested path and
+            #   re-index the existing project (#1811). The API's add_project
+            #   compares the same normalized paths.
+            # Outcome: refuse before indexing. Cloud is not checked: hosted paths are
+            #   tenant-relative and derived from the project name, so a requested
+            #   path never moves a cloud project, and normalizing one here would
+            #   resolve it against this process's working directory.
             requested_path = os.path.abspath(os.path.expanduser(project_path))
             existing_path = os.path.abspath(os.path.expanduser(existing_match.path))
-            # Trigger: the name matches a project stored at a different directory.
-            # Why: a name-only success ignores the requested path and re-indexes
-            # the existing project (#1811). The API compares these normalized paths.
-            # Outcome: fail fast and name the stored path and the requested path,
-            # without indexing.
-            if requested_path != existing_path:
-                message = (
-                    f"Project '{existing_match.name}' already exists with different path. "
-                    f"Existing: {existing_match.path}, Requested: {project_path}"
+            if not _routes_to_cloud(workspace_id) and requested_path != existing_path:
+                raise refusal(
+                    "ALREADY_EXISTS",
+                    f"Project '{existing_match.name}' already exists at "
+                    f"{existing_match.path}, not {project_path}.",
+                    try_instead=(
+                        f"another name, or create_memory_project(project_name="
+                        f"'{existing_match.name}', project_path='{existing_match.path}')"
+                    ),
+                    output_format=output_format,
                 )
-                if output_format == "json":
-                    return {
-                        "name": existing_match.name,
-                        "existing_path": existing_match.path,
-                        "requested_path": project_path,
-                        "created": False,
-                        "already_exists": False,
-                        "error": "PATH_MISMATCH",
-                        "message": message,
-                    }
-                return f"# Error\n\n{message}"
 
             is_default = bool(
                 existing_match.is_default or existing.default_project == existing_match.name

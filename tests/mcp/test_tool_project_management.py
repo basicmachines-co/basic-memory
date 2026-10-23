@@ -187,77 +187,92 @@ async def test_create_memory_project_retry_indexes_partial_create(app, tmp_path_
     assert mock_index.await_count == 2
 
 
-def _path_mismatch_message(name: str, existing_path: str, requested_path: str) -> str:
-    return (
-        f"Project '{name}' already exists with different path. "
-        f"Existing: {existing_path}, Requested: {requested_path}"
-    )
-
-
 @pytest.mark.asyncio
-async def test_create_memory_project_rejects_same_name_different_path(app, tmp_path_factory):
-    """A repeated name with another directory is an error and does not re-index."""
+async def test_create_memory_project_refuses_same_name_different_path(app, tmp_path_factory):
+    """A repeated name with another directory is refused and does not re-index (#1811)."""
     from basic_memory.mcp.clients import ProjectClient
 
     existing_root = tmp_path_factory.mktemp("mismatch-existing-home")
     requested_root = tmp_path_factory.mktemp("mismatch-requested-home")
-    project_name = "Path Mismatch Project"
     created = await create_memory_project(
-        project_name=project_name,
+        project_name="Path Mismatch Project",
         project_path=str(existing_root),
     )
     assert isinstance(created, str)
     assert created.startswith("✓")
 
-    index_calls = 0
-    original_index = ProjectClient.index
+    with patch.object(ProjectClient, "index", new_callable=AsyncMock) as mock_index:
+        with pytest.raises(ToolError) as refused:
+            await create_memory_project(
+                project_name="Path Mismatch Project",
+                project_path=str(requested_root),
+            )
 
-    async def _counting_index(self, *args, **kwargs):
-        nonlocal index_calls
-        index_calls += 1
-        return await original_index(self, *args, **kwargs)
-
-    with patch.object(ProjectClient, "index", _counting_index):
-        result = await create_memory_project(
-            project_name=project_name,
-            project_path=str(requested_root),
-        )
-
-    assert result == (
-        "# Error\n\n"
-        + _path_mismatch_message(project_name, str(existing_root), str(requested_root))
+    assert str(refused.value) == (
+        f"ALREADY_EXISTS: Project 'Path Mismatch Project' already exists at "
+        f"{existing_root}, not {requested_root}.\n"
+        f"Try instead: another name, or create_memory_project(project_name="
+        f"'Path Mismatch Project', project_path='{existing_root}')"
     )
-    assert "✓" not in result
-    assert "different path" in result
-    assert index_calls == 0
+    mock_index.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_create_memory_project_rejects_same_name_different_path_json(app, tmp_path_factory):
-    """JSON callers get a failure payload, not an already-exists success."""
+async def test_create_memory_project_refuses_different_path_as_json(app, tmp_path_factory):
+    """JSON callers get the same refusal as a JSON tool error."""
     existing_root = tmp_path_factory.mktemp("mismatch-json-existing-home")
     requested_root = tmp_path_factory.mktemp("mismatch-json-requested-home")
-    project_name = "Path Mismatch JSON"
     await create_memory_project(
-        project_name=project_name,
+        project_name="Path Mismatch JSON",
         project_path=str(existing_root),
     )
 
-    result = await create_memory_project(
-        project_name=project_name,
-        project_path=str(requested_root),
-        output_format="json",
+    with pytest.raises(ToolError) as refused:
+        await create_memory_project(
+            project_name="Path Mismatch JSON",
+            project_path=str(requested_root),
+            output_format="json",
+        )
+
+    payload = json.loads(str(refused.value))
+    assert payload["error"] == "ALREADY_EXISTS"
+    assert payload["message"] == (
+        f"Project 'Path Mismatch JSON' already exists at {existing_root}, not {requested_root}."
     )
 
-    assert result == {
-        "name": project_name,
-        "existing_path": str(existing_root),
-        "requested_path": str(requested_root),
-        "created": False,
-        "already_exists": False,
-        "error": "PATH_MISMATCH",
-        "message": _path_mismatch_message(project_name, str(existing_root), str(requested_root)),
-    }
+
+@pytest.mark.asyncio
+async def test_create_memory_project_cloud_retry_does_not_compare_paths(app):
+    """Hosted paths are tenant-relative, so a retry spelling the path differently succeeds."""
+    from basic_memory.mcp.clients import ProjectClient
+
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch.object(
+            ProjectClient,
+            "list_projects",
+            new_callable=AsyncMock,
+            return_value=_make_list([_make_project("manual", "/manual")], default=None),
+        ),
+        patch.object(
+            ProjectClient,
+            "index",
+            new_callable=AsyncMock,
+            return_value={"status": "index_started", "message": "Indexing accepted"},
+        ),
+    ):
+        result = await create_memory_project(
+            project_name="manual",
+            project_path="manual",
+            output_format="json",
+        )
+
+    assert isinstance(result, dict)
+    assert result["already_exists"] is True
+    assert result["path"] == "/manual"
 
 
 @pytest.mark.asyncio
