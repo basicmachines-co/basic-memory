@@ -228,6 +228,31 @@ async def test_move_a_directory(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_directory_move_reports_the_existing_folder_spelling(client, test_project):
+    """Moving into 'archive/' beside 'Archive/' reports the folder the files are in."""
+    await _note(test_project.name, "Archive/seed.md")
+    await _note(test_project.name, "drafts/a.md")
+
+    result = await move_json(path="drafts", destination="archive/", project=test_project.name)
+
+    assert result["destination"] == "Archive/drafts"
+    assert result["requested_destination"] == "archive/drafts"
+    assert result["moved_files"] == ["Archive/drafts/a.md"]
+
+
+@pytest.mark.asyncio
+async def test_guarded_move_of_a_note_already_gone(client, test_project):
+    """A pinned revision of a note that no longer exists is a conflict, not a miss."""
+    with pytest.raises(ToolError, match="^REVISION_CONFLICT: 'notes/gone.md' was deleted"):
+        await bm_move(
+            identifier="notes/gone.md",
+            destination="archive/",
+            expected_checksum="abc",
+            project=test_project.name,
+        )
+
+
+@pytest.mark.asyncio
 async def test_partial_directory_move_is_an_error(client, test_project, monkeypatch):
     async def partial(*_args: Any, **_kwargs: Any) -> DirectoryMoveResult:
         return DirectoryMoveResult.model_validate(

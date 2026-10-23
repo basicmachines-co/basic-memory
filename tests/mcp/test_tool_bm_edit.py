@@ -305,3 +305,16 @@ async def test_refusal_guidance_keeps_the_project_prefix(client, test_project):
             content="x",
             expected_checksum="stale",
         )
+
+
+@pytest.mark.asyncio
+async def test_guarded_edit_of_a_note_already_gone(client, test_project):
+    """A pinned revision of a note that no longer exists is a conflict, not a miss."""
+    with pytest.raises(ToolError, match="^REVISION_CONFLICT: 'notes/gone.md' was deleted"):
+        await bm_edit(
+            identifier="notes/gone.md",
+            command="append",
+            content="x",
+            expected_checksum="abc",
+            project=test_project.name,
+        )

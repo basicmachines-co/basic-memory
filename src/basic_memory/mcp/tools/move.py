@@ -182,7 +182,13 @@ async def _move_note(
     expected_checksum: str | None,
     output_format: OutputFormat,
 ) -> str | dict[str, Any]:
-    note = await resolve_note(target, identifier, output_format=output_format)
+    note = await resolve_note(
+        target,
+        identifier,
+        output_format=output_format,
+        expected_checksum=expected_checksum,
+        unchanged="Nothing was moved.",
+    )
     source = PurePosixPath(note.file_path)
 
     # Trigger: the destination ends with '/', or is the project root.
@@ -315,10 +321,14 @@ async def _move_directory(
             try_instead=f"bm_list(path='{target.paths.path(source.rpartition('/')[0]) or '/'}')",
             output_format=output_format,
         )
+    # The server may have kept an existing folder's spelling ('Archive' for
+    # 'archive'); report the folder the files are in. A server older than the
+    # field reports none, and the requested spelling is the best there is.
+    written_destination = moved.destination if moved.destination is not None else destination
     result: dict[str, Any] = {
         "action": "moved",
         "path": target.paths.path(source),
-        "destination": target.paths.path(destination),
+        "destination": target.paths.path(written_destination),
         "total_files": moved.total_files,
         "moved_files": [target.paths.path(file) for file in moved.moved_files],
         "failed": [
@@ -326,6 +336,9 @@ async def _move_directory(
             for failure in moved.errors
         ],
     }
+    # As a note move does, say when the folder differs from the one asked for.
+    if written_destination != destination:
+        result["requested_destination"] = target.paths.path(destination)
     # Trigger: some files moved and some did not.
     # Why: the move is neither done nor undone; the caller must see which files
     #      already moved before deciding what to retry.

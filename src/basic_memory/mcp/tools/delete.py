@@ -111,7 +111,13 @@ async def _delete_note(
     expected_checksum: str | None,
     output_format: OutputFormat,
 ) -> str | dict[str, Any]:
-    note = await resolve_note(target, identifier, output_format=output_format)
+    note = await resolve_note(
+        target,
+        identifier,
+        output_format=output_format,
+        expected_checksum=expected_checksum,
+        unchanged="Nothing was deleted.",
+    )
     try:
         deleted = await KnowledgeClient(target.client, target.project.external_id).delete_entity(
             note.external_id, base_checksum=expected_checksum

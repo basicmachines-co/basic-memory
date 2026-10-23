@@ -154,6 +154,8 @@ async def bm_edit(
             identifier,
             output_format=output_format,
             try_instead=f"bm_write(identifier='{identifier}', content='...') to create it",
+            expected_checksum=expected_checksum,
+            unchanged="Nothing was changed.",
         )
         if not runtime_file_path_is_markdown_note(note.file_path):
             raise refusal(

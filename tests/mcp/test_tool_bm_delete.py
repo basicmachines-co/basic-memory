@@ -208,3 +208,12 @@ async def test_partial_directory_delete_is_an_error(client, test_project, monkey
 async def test_invalid_arguments(client, test_project, arguments, message):
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: .*{message}"):
         await bm_delete(project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_guarded_delete_of_a_note_already_gone(client, test_project):
+    """A pinned revision of a note that no longer exists is a conflict, not a miss."""
+    with pytest.raises(ToolError, match="^REVISION_CONFLICT: 'notes/gone.md' was deleted"):
+        await bm_delete(
+            identifier="notes/gone.md", expected_checksum="abc", project=test_project.name
+        )
