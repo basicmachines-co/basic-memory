@@ -10,7 +10,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
-from basic_memory.mcp.tools import bm_search, write_note
+from basic_memory.mcp.tools import bm_read, bm_search, write_note
 from basic_memory.mcp.tools import ranked_search as ranked_search_module
 from basic_memory.mcp.tools.ranked_search import _query_terms
 from basic_memory.mcp.tools.search import MultiProjectFailed, MultiProjectNotIndexed
@@ -335,3 +335,18 @@ async def test_a_project_qualified_memory_url_routes_the_search(client, test_pro
     payload = await search_json(query=f"memory://{test_project.permalink}/tasks/*")
 
     assert [row["title"] for row in payload["results"]] == ["Deploy Plan"]
+
+
+@pytest.mark.asyncio
+async def test_results_across_projects_carry_routable_paths(client, test_project):
+    """Each hit's path names its project, so bm_read can follow it in any session."""
+    await _seed(test_project.name)
+
+    payload = await search_json(query="rollback", mode="text", all_projects=True)
+    text = await search_text(query="rollback", mode="text", all_projects=True)
+
+    paths = [row["file_path"] for row in payload["results"]]
+    assert f"{test_project.permalink}/tasks/Deploy Plan.md" in paths
+    assert text.startswith("Results for 'rollback' in all projects:")
+    note = await bm_read(paths[0])
+    assert isinstance(note, str)

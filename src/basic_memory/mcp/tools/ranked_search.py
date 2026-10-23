@@ -59,7 +59,7 @@ from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.search import SearchResponse, SearchResult
 from basic_memory.schemas.v2.entity import EntityResolveResponse
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
-from basic_memory.utils import parse_str_list
+from basic_memory.utils import generate_permalink, parse_str_list
 
 type SearchMode = Literal["hybrid", "text", "semantic", "title", "permalink"]
 
@@ -200,6 +200,8 @@ async def bm_search(
         "time_kind": time_kind,
         "min_similarity": min_similarity,
         "project": project,
+        "projects": projects,
+        "all_projects": all_projects or None,
     }
     # --- Argument combinations, before any I/O ---
     if identifier is not None and path is not None:
@@ -314,7 +316,6 @@ async def bm_search(
             page=page,
             page_size=page_size,
             search_type=mode,
-            output_format=output_format,
             note_types=normalized_note_types,
             entity_types=entity_types,
             categories=categories or [],
@@ -329,10 +330,31 @@ async def bm_search(
             context=context,
             compact=compact,
             projects=projects,
+            # bm_search re-qualifies the rows and renders text itself, so it always
+            # asks for the rows.
+            output_format="json",
         )
         match searched:
-            case MultiProjectRan(rendered=rendered):
-                return rendered
+            case MultiProjectRan(rendered=dict() as rows):
+                # Each hit carries its project, so its path can be routed back to it.
+                payload = {
+                    **rows,
+                    "results": [
+                        {
+                            **row,
+                            "file_path": f"{generate_permalink(row['project'])}/{row['file_path']}",
+                        }
+                        for row in rows["results"]
+                    ],
+                }
+                if output_format == "json":
+                    return payload
+                scope = f"projects {', '.join(projects)}" if projects else "all projects"
+                next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
+                return _format_results(payload, query, scope, next_call=next_call)
+            case MultiProjectRan(rendered=str() as text):  # pragma: no cover
+                # Only a text request renders text, and this call asks for JSON.
+                return text
             case MultiProjectNotIndexed(guidance=guidance):
                 return (
                     {"results": [], "guidance": guidance} if output_format == "json" else guidance
@@ -420,7 +442,7 @@ async def bm_search(
     if output_format == "json":
         return payload
     next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
-    return _format_results(payload, query, target.project.name, next_call=next_call)
+    return _format_results(payload, query, f"project '{target.project.name}'", next_call=next_call)
 
 
 def _nothing_to_search(output_format: OutputFormat) -> ToolError:
@@ -535,14 +557,14 @@ async def _search_one_note(
     if output_format == "json":
         return payload["results"][0]
     # One note is one result: there is no next page.
-    return _format_results(payload, query, target.project.name, next_call=None)
+    return _format_results(payload, query, f"project '{target.project.name}'", next_call=None)
 
 
 # --- Text output ---
 
 
 def _format_results(
-    payload: dict[str, Any], query: str | None, project_name: str, *, next_call: str | None
+    payload: dict[str, Any], query: str | None, scope: str, *, next_call: str | None
 ) -> str:
     """Render hits as a compact list: path, title, score, then excerpt or matching lines.
 
@@ -551,11 +573,11 @@ def _format_results(
     results = payload["results"]
     heading = f"Results for '{query}'" if query else "Results"
     if not results:
-        return f"No results for '{query or ''}' in project '{project_name}'." + (
+        return f"No results for '{query or ''}' in {scope}." + (
             f"\n\n{payload['query_hint']}" if payload.get("query_hint") else ""
         )
 
-    lines = [f"{heading} in project '{project_name}':", ""]
+    lines = [f"{heading} in {scope}:", ""]
     for row in results:
         header = f"- {row['file_path']} | {row['title']}"
         if row.get("score") is not None:
