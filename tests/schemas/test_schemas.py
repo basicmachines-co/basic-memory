@@ -34,6 +34,21 @@ def test_entity_project_id():
     assert entity.note_type == "knowledge"
 
 
+def test_entity_file_name_sets_the_file_path():
+    """An explicit file_name is used as-is; the title stays the note's title."""
+    entity = Entity.model_validate(
+        {"title": "Q4 Plan", "directory": "plans", "file_name": "q4-plan.md"}
+    )
+    assert entity.file_path == "plans/q4-plan.md"
+    assert entity.title == "Q4 Plan"
+
+
+@pytest.mark.parametrize("file_name", ["", " ", "a/b.md", "a\\b.md", ".", ".."])
+def test_entity_file_name_must_be_one_segment(file_name):
+    with pytest.raises(ValidationError, match="file_name must be a single file name"):
+        Entity.model_validate({"title": "T", "directory": "plans", "file_name": file_name})
+
+
 def test_entity_non_markdown():
     """Test entity for regular non-markdown file."""
     data = {

@@ -12,6 +12,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 import re
 import unicodedata
 
+from basic_memory.utils import portable_path_key
 from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
 from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
@@ -364,9 +365,9 @@ def _plan_wiki_projection(
         for note in snapshot.notes
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
-    note_by_path = {_portable_path_key(note.path): note for note in notes}
+    note_by_path = {portable_path_key(note.path): note for note in notes}
     for requested_scope in request.requested_scopes:
-        if existing_note := note_by_path.get(_portable_path_key(requested_scope)):
+        if existing_note := note_by_path.get(portable_path_key(requested_scope)):
             raise ValueError(
                 "Wiki projection scope collides with an existing source note path: "
                 f"{requested_scope}, {existing_note.path}"
@@ -398,12 +399,12 @@ def _plan_wiki_projection(
         change.previous_path for change in changes if change.previous_path is not None
     )
     reserved_permalink_keys = {
-        _portable_path_key(_reserved_path(scope, filename).removesuffix(".md"))
+        portable_path_key(_reserved_path(scope, filename).removesuffix(".md"))
         for scope in affected_wiki_scopes(*all_projection_paths)
         for filename in RESERVED_WIKI_FILENAMES
     }
     for note in notes:
-        if _portable_path_key(note.permalink) in reserved_permalink_keys:
+        if portable_path_key(note.permalink) in reserved_permalink_keys:
             raise ValueError(
                 "Wiki source note permalink collides with a generated document identity: "
                 f"{note.permalink}"
@@ -411,14 +412,14 @@ def _plan_wiki_projection(
     for change in changes:
         if (
             change.operation is not WikiChangeOperation.deleted
-            and _portable_path_key(change.permalink) in reserved_permalink_keys
+            and portable_path_key(change.permalink) in reserved_permalink_keys
         ):
             raise ValueError(
                 "Wiki source change permalink collides with a generated document identity: "
                 f"{change.permalink}"
             )
     for scope in (*scopes, *retained_scope_ancestors):
-        if existing_note := note_by_path.get(_portable_path_key(scope)):
+        if existing_note := note_by_path.get(portable_path_key(scope)):
             raise ValueError(
                 "Wiki projection scope collides with an existing source note path: "
                 f"{scope}, {existing_note.path}"
@@ -438,7 +439,7 @@ def _plan_wiki_projection(
         sorted({*note_scopes, *scopes, *retained_scope_ancestors} - colliding_scopes)
     )
     existing_by_path = {
-        _portable_path_key(document.path): document for document in snapshot.reserved_documents
+        portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
     collision_warnings = tuple(collision.message for collision in scope_collisions)
     rendered: dict[str, bytes] = {}
@@ -463,7 +464,7 @@ def _plan_wiki_projection(
             reason="reserved path is not owned by the Wiki Projector",
         )
         for path in sorted(rendered)
-        if (existing := existing_by_path.get(_portable_path_key(path))) is not None
+        if (existing := existing_by_path.get(portable_path_key(path))) is not None
         and not existing.projector_owned
     )
     if conflicts:
@@ -492,7 +493,7 @@ def _plan_wiki_projection(
     created = 0
     updated = 0
     for path, content in sorted(rendered.items()):
-        existing = existing_by_path.get(_portable_path_key(path))
+        existing = existing_by_path.get(portable_path_key(path))
         if existing is not None and (
             existing.content == content
             or (
@@ -574,7 +575,7 @@ def _scope_collisions(scopes: Iterable[str]) -> tuple[WikiScopeCollision, ...]:
     """Group distinct scope spellings that share one portable path."""
     spellings_by_portable_path: dict[str, set[str]] = {}
     for scope in scopes:
-        spellings_by_portable_path.setdefault(_portable_path_key(scope), set()).add(scope)
+        spellings_by_portable_path.setdefault(portable_path_key(scope), set()).add(scope)
     return tuple(
         WikiScopeCollision(scopes=tuple(sorted(spellings)))
         for _portable_path, spellings in sorted(spellings_by_portable_path.items())
@@ -892,14 +893,9 @@ def _require_unique_paths(
 ) -> None:
     paths = [value.path for value in values]
     if not case_sensitive:
-        paths = [_portable_path_key(path) for path in paths]
+        paths = [portable_path_key(path) for path in paths]
     if len(paths) != len(set(paths)):
         raise ValueError(f"Wiki projection snapshot has duplicate {label} paths")
-
-
-def _portable_path_key(path: str) -> str:
-    """Compare paths the way normalization-insensitive filesystems do."""
-    return unicodedata.normalize("NFC", path).casefold()
 
 
 def _reserved_path(scope: str, filename: str) -> str:

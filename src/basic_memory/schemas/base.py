@@ -19,7 +19,14 @@ from typing import List, Optional, Annotated, Dict
 
 from annotated_types import MinLen, MaxLen
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import sanitize_for_filename, sanitize_for_directory
@@ -242,6 +249,8 @@ class Entity(BaseModel):
     title: str
     content: Optional[str] = None
     directory: str
+    # The file name to use as-is, e.g. "plan.md". None derives it from the title.
+    file_name: Optional[str] = None
     note_type: NoteType = "note"
     entity_metadata: Optional[Dict] = Field(default=None, description="Optional metadata")
     content_type: ContentType = Field(
@@ -255,6 +264,16 @@ class Entity(BaseModel):
         # directory would lose its accents instead of matching the NFC spelling (#1275).
         data["directory"] = sanitize_for_directory(nfc_path(data.get("directory", "")))
         super().__init__(**data)
+
+    @field_validator("file_name")
+    @classmethod
+    def validate_file_name(cls, value: Optional[str]) -> Optional[str]:
+        """A file name is one path segment: the directory carries the folders."""
+        if value is None:
+            return value
+        if not value.strip() or "/" in value or "\\" in value or value in {".", ".."}:
+            raise ValueError(f"file_name must be a single file name, got {value!r}")
+        return value
 
     @property
     def safe_title(self) -> str:
@@ -284,12 +303,13 @@ class Entity(BaseModel):
     @computed_field
     @property
     def file_path(self) -> str:
-        """Get the file path for this entity based on its permalink."""
-        safe_title = self.safe_title
-        if self.content_type == "text/markdown":
-            filename = f"{safe_title}.md"
+        """The file path: `file_name` when given, otherwise derived from the title."""
+        if self.file_name is not None:
+            filename = self.file_name
+        elif self.content_type == "text/markdown":
+            filename = f"{self.safe_title}.md"
         else:
-            filename = safe_title
+            filename = self.safe_title
         return nfc_path(f"{self.directory}/{filename}" if self.directory else filename)
 
     @property

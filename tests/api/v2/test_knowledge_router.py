@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+import unicodedata
 import uuid
 
 import pytest
@@ -448,6 +449,59 @@ async def test_create_entity_resolves_nested_directory_casing(client: AsyncClien
     assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
     assert entity.file_path == "Schemas/Drafts/Nested.md"
+
+
+@pytest.mark.asyncio
+async def test_create_entity_resolves_unicode_normalization_twin(
+    client: AsyncClient, v2_project_url
+):
+    """An NFD spelling of an existing NFC folder lands in that folder (#1796)."""
+    nfc = unicodedata.normalize("NFC", "Café")
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Menu", "directory": nfc, "content": "Menu"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Hours",
+            "directory": unicodedata.normalize("NFD", "café"),
+            "content": "Hours",
+        },
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == f"{nfc}/Hours.md"
+
+
+@pytest.mark.asyncio
+async def test_create_entity_with_file_name(client: AsyncClient, file_service, v2_project_url):
+    """An explicit file_name names the file; the folder still resolves its casing."""
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Seed", "directory": "Plans", "content": "Seed"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Q4 Plan",
+            "directory": "plans",
+            "file_name": "q4-plan.md",
+            "content": "Ship it",
+        },
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "Plans/q4-plan.md"
+    assert entity.title == "Q4 Plan"
+    file_content, _ = await file_service.read_file("Plans/q4-plan.md")
+    assert "Ship it" in file_content
 
 
 @pytest.mark.asyncio
