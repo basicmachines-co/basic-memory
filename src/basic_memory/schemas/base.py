@@ -14,7 +14,7 @@ Key Concepts:
 import mimetypes
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import List, Optional, Annotated, Dict
 
 from annotated_types import MinLen, MaxLen
@@ -30,6 +30,7 @@ from pydantic import (
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import sanitize_for_filename, sanitize_for_directory
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.utils import generate_permalink, nfc_path
 
 
@@ -260,8 +261,8 @@ class Entity(BaseModel):
     )
 
     def __init__(self, **data):
-        # NFC before sanitizing: the sanitizer drops combining marks, so an NFD
-        # directory would lose its accents instead of matching the NFC spelling (#1275).
+        # NFC first on macOS, where paths are identity keys in NFC (#1275); elsewhere
+        # the path keeps its form and the sanitizer keeps combining marks (#1796).
         data["directory"] = sanitize_for_directory(nfc_path(data.get("directory", "")))
         super().__init__(**data)
 
@@ -274,6 +275,22 @@ class Entity(BaseModel):
         if not value.strip() or "/" in value or "\\" in value or value in {".", ".."}:
             raise ValueError(f"file_name must be a single file name, got {value!r}")
         return value
+
+    @model_validator(mode="after")
+    def validate_markdown_file_name(self) -> "Entity":
+        """A Markdown note's explicit file name must be one indexing reads as a note.
+
+        Indexing recognizes only .md and .markdown; a note written as 'plan.txt'
+        would be accepted, then never indexed again as a note.
+        """
+        if self.file_name is None or self.content_type != "text/markdown":
+            return self
+        if PurePosixPath(self.file_name).suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES:
+            raise ValueError(
+                f"file_name for a Markdown note must end in .md or .markdown, "
+                f"got {self.file_name!r}"
+            )
+        return self
 
     @property
     def safe_title(self) -> str:

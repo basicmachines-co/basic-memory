@@ -43,6 +43,20 @@ def test_entity_file_name_sets_the_file_path():
     assert entity.title == "Q4 Plan"
 
 
+def test_markdown_file_name_must_have_a_note_suffix():
+    """Indexing reads only .md and .markdown as notes."""
+    assert Entity(title="T", directory="d", file_name="t.markdown").file_path == "d/t.markdown"
+    with pytest.raises(ValidationError, match="must end in .md or .markdown"):
+        Entity(title="T", directory="d", file_name="plan.txt")
+    # A non-Markdown file keeps whatever name it has.
+    assert (
+        Entity(
+            title="T", directory="d", file_name="data.json", content_type="application/json"
+        ).file_path
+        == "d/data.json"
+    )
+
+
 @pytest.mark.parametrize("file_name", ["", " ", "a/b.md", "a\\b.md", ".", ".."])
 def test_entity_file_name_must_be_one_segment(file_name):
     with pytest.raises(ValidationError, match="file_name must be a single file name"):
