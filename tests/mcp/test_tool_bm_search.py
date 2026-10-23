@@ -338,6 +338,13 @@ async def test_a_project_qualified_memory_url_routes_the_search(client, test_pro
 
 
 @pytest.mark.asyncio
+async def test_a_memory_url_with_a_folder_path_is_refused(client, test_project):
+    """The URL names its own project; a folder could name another, so give one."""
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: A memory:// query"):
+        await bm_search(query=f"memory://{test_project.permalink}/tasks/*", path="tasks")
+
+
+@pytest.mark.asyncio
 async def test_results_across_projects_carry_routable_paths(client, test_project):
     """Each hit's path names its project, so bm_read can follow it in any session."""
     await _seed(test_project.name)

@@ -64,8 +64,14 @@ def _compact_context_labels(graph: GraphContext) -> GraphContext:
     )
 
 
-def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str:
-    """Format a single context result as a markdown block."""
+def _format_entity_block(
+    result: ContextResult, *, compact: bool = False, with_paths: bool = False
+) -> str:
+    """Format a single context result as a markdown block.
+
+    with_paths adds each note's file path, the address bm_read accepts in any
+    session, beside its permalink.
+    """
     primary = result.primary_result
     lines = []
 
@@ -73,6 +79,8 @@ def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str
     lines.append(f"## {primary.title}")
     if primary.permalink:
         lines.append(f"permalink: {primary.permalink}")
+    if with_paths:
+        lines.append(f"path: {primary.file_path}")
     # RelationSummary has no content field; Entity/Observation do
     if not compact and not isinstance(primary, RelationSummary) and primary.content:
         lines.append("")
@@ -118,13 +126,15 @@ def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str
         lines.append("")
         lines.append("### Related")
         for item in related_entities:
-            permalink = item.permalink if item.permalink else ""
-            lines.append(f"- [[{item.title}]] ({permalink})")
+            address = item.file_path if with_paths else (item.permalink or "")
+            lines.append(f"- [[{item.title}]] ({address})")
 
     return "\n".join(lines)
 
 
-def _format_context_markdown(graph: GraphContext, project: str, *, compact: bool = False) -> str:
+def _format_context_markdown(
+    graph: GraphContext, project: str, *, compact: bool = False, with_paths: bool = False
+) -> str:
     """Format GraphContext as compact markdown text.
 
     Produces a human-readable markdown representation that is much smaller
@@ -148,7 +158,10 @@ def _format_context_markdown(graph: GraphContext, project: str, *, compact: bool
     parts.append("")
 
     # --- Entity blocks separated by --- ---
-    entity_blocks = [_format_entity_block(result, compact=compact) for result in graph.results]
+    entity_blocks = [
+        _format_entity_block(result, compact=compact, with_paths=with_paths)
+        for result in graph.results
+    ]
     parts.append("\n\n---\n\n".join(entity_blocks))
 
     # --- Footer ---

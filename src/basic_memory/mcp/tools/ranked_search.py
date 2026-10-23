@@ -210,6 +210,15 @@ async def bm_search(
             "`identifier` and `path` both scope the search; give one.",
             output_format=output_format,
         )
+    # A memory:// URL names its own project and location, and a folder `path` could
+    # name another project; one location keeps the routing unambiguous.
+    if path is not None and query is not None and query.startswith("memory://"):
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "A memory:// query names its own location, and `path` names a folder; give one.",
+            try_instead="put the folder in the URL, such as 'memory://research/specs/*'",
+            output_format=output_format,
+        )
     if all_projects and projects:
         raise refusal(
             "INVALID_ARGUMENTS",
@@ -370,11 +379,11 @@ async def bm_search(
                 raise _nothing_to_search(output_format)
 
     # --- One project ---
-    # Trigger: the query is a memory:// URL and no folder scope was given.
+    # Trigger: the query is a memory:// URL (a folder `path` was refused above).
     # Why: the URL may name its project ('memory://research/foo'), which must route
     #      the search the way it routes a read, not fall to the active project.
     # Outcome: the URL is the routed target; its project-relative path is the query.
-    memory_query = query is not None and query.startswith("memory://") and path is None
+    memory_query = query is not None and query.startswith("memory://")
     routed = query if memory_query and query is not None else path or ""
     kind = "identifier" if memory_query else "path"
     async with open_project_target(
@@ -383,8 +392,6 @@ async def bm_search(
         search_mode: str = mode or _search_type_for(None, query, [target.project.name])
         if memory_query:
             query, search_mode = memory_url_path(target.route.path), "permalink"
-        elif query is not None and query.startswith("memory://"):
-            query, search_mode = memory_url_path(query), "permalink"
         # Trigger: a permalink search ('core/*' or an exact permalink).
         # Why: permalinks are stored in index form, with the project prefix when
         #      permalinks_include_project is on (and the workspace form in Cloud), and

@@ -106,3 +106,16 @@ async def test_project_qualified_start_returns_qualified_paths(client, test_proj
     paths += [row["file_path"] for row in result["observations"]]
     paths += [row["file_path"] for row in result["related_results"]]
     assert paths and all(path.startswith(f"{prefix}/graph/") for path in paths)
+
+
+@pytest.mark.asyncio
+async def test_project_qualified_text_names_qualified_paths(client, test_project):
+    """Text output carries the qualified paths too; a permalink may lack the prefix."""
+    await _seed(test_project.name)
+    prefix = test_project.permalink
+
+    text = await bm_context(identifier=f"{prefix}/graph/node-a", output_format="text")
+
+    assert isinstance(text, str)
+    assert f"path: {prefix}/graph/Node A.md" in text
+    assert f"[[Node B]] ({prefix}/graph/Node B.md)" in text
