@@ -6,6 +6,7 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
+from basic_memory.mcp.directory_listing import format_listing_text
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.directory import (
@@ -146,125 +147,31 @@ async def list_directory(
         if output_format == "json":
             return listing.model_dump(mode="json")
 
-        nodes = [node.model_dump(mode="json", exclude_none=True) for node in listing.nodes]
-
         if listing.total == 0:
-            filter_desc = ""
-            if file_name_glob:
-                filter_desc = f" matching '{file_name_glob}'"
+            filter_desc = f" matching '{file_name_glob}'" if file_name_glob else ""
             return f"No files found in directory '{dir_name}'{filter_desc}"
 
-        # Format the results
-        output_lines = []
-        if file_name_glob:
-            output_lines.append(
-                f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):"
-            )
-        else:
-            output_lines.append(f"Contents of '{dir_name}' (depth {depth}):")
-        output_lines.append(
-            f"Page {listing.page} (page size {listing.page_size}, {listing.total} total items)"
+        heading = (
+            f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):"
+            if file_name_glob
+            else f"Contents of '{dir_name}' (depth {depth}):"
         )
-        output_lines.append("")
-
-        # The API has already applied the requested stable order. Partitioning
-        # preserves that order while retaining the existing text presentation.
-        directories = [n for n in nodes if n["type"] == "directory"]
-        files = [n for n in nodes if n["type"] == "file"]
-
-        if not nodes:
-            output_lines.append("No items on this page.")
-
-        # Display directories first
-        for node in directories:
-            path_display = node["directory_path"]
-            output_lines.append(f"📁 {node['name']:<30} {path_display}")
-
-        # Add separator if we have both directories and files
-        if directories and files:
-            output_lines.append("")
-
-        # Display files with metadata
-        for node in files:
-            path_display = node["directory_path"]
-            title = node.get("title", "")
-            updated = node.get("updated_at", "")
-
-            # Remove leading slash if present, requesting the file via read_note does not use the beginning slash'
-            if path_display.startswith("/"):
-                path_display = path_display[1:]
-
-            # Format date if available
-            date_str = ""
-            if updated:
-                try:
-                    from datetime import datetime
-
-                    dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-                    date_str = dt.strftime("%Y-%m-%d")
-                except Exception:  # pragma: no cover
-                    date_str = updated[:10] if len(updated) >= 10 else ""
-
-            # Create formatted line
-            file_line = f"📄 {node['name']:<30} {path_display}"
-            if title and title != node["name"]:
-                file_line += f" | {title}"
-            if date_str:
-                file_line += f" | {date_str}"
-            # Web-app deep links are built from the note's external_id; hosted
-            # MCP appends a link template that references it, so the id must be
-            # visible in the listing the agent actually reads.
-            external_id = node.get("external_id")
-            if external_id:
-                file_line += f" | id: {external_id}"
-
-            output_lines.append(file_line)
-
-        # Add summary
-        output_lines.append("")
-        total_count = len(directories) + len(files)
-        summary_parts = []
-        if directories:
-            summary_parts.append(
-                f"{len(directories)} director{'y' if len(directories) == 1 else 'ies'}"
-            )
-        if files:
-            summary_parts.append(f"{len(files)} file{'s' if len(files) != 1 else ''}")
-
-        if summary_parts:
-            output_lines.append(f"Total: {total_count} items ({', '.join(summary_parts)})")
-        else:
-            output_lines.append("Total: 0 items")
-
-        if not nodes:
-            last_page = (listing.total + listing.page_size - 1) // listing.page_size
-            output_lines.append(
-                f"Requested page {listing.page} is beyond the available results; "
-                f"the last available page is {last_page}."
-            )
-
-        if listing.has_more:
-            next_page = listing.page + 1
-            continuation_args = [
-                f"dir_name={dir_name!r}",
-                f"depth={depth}",
-                f"page={next_page}",
-                f"page_size={listing.page_size}",
-            ]
-            if file_name_glob:
-                continuation_args.append(f"file_name_glob={file_name_glob!r}")
-            if sort is not None:
-                continuation_args.append(f"sort={sort!r}")
-            if project_id:
-                continuation_args.append(f"project_id={project_id!r}")
-            elif project:
-                continuation_args.append(f"project={project!r}")
-            output_lines.extend(
-                [
-                    "",
-                    "More results available. Call "
-                    f"list_directory({', '.join(continuation_args)}) to continue.",
-                ]
-            )
-
-        return "\n".join(output_lines)
+        continuation_args = [
+            f"dir_name={dir_name!r}",
+            f"depth={depth}",
+            f"page={listing.page + 1}",
+            f"page_size={listing.page_size}",
+        ]
+        if file_name_glob:
+            continuation_args.append(f"file_name_glob={file_name_glob!r}")
+        if sort is not None:
+            continuation_args.append(f"sort={sort!r}")
+        if project_id:
+            continuation_args.append(f"project_id={project_id!r}")
+        elif project:
+            continuation_args.append(f"project={project!r}")
+        return format_listing_text(
+            listing,
+            heading=heading,
+            next_call=f"list_directory({', '.join(continuation_args)})",
+        )

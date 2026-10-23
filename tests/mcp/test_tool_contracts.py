@@ -14,6 +14,7 @@ from basic_memory.mcp.server import mcp
 
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "basic_memory_diagnostics": [],
+    "bm_list": ["path", "glob", "sort", "page", "page_size", "output_format", "project"],
     "bm_read": [
         "identifier",
         "section",
@@ -191,6 +192,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 # openWorldHint values.
 EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "basic_memory_diagnostics": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_list": {"readOnlyHint": True, "destructiveHint": False},
     "bm_read": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
@@ -249,6 +251,7 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
 
 
 TOOL_FUNCTIONS: dict[str, object] = {
+    "bm_list": tools.bm_list,
     "bm_read": tools.bm_read,
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,

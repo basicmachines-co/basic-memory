@@ -26,7 +26,7 @@ from basic_memory.mcp.file_content import (
     classify_file_response,
 )
 from basic_memory.mcp.note_reads import format_note_metadata, read_note_json_by_external_id
-from basic_memory.mcp.note_targets import open_project_target, resolve_note
+from basic_memory.mcp.note_targets import open_project_target, qualify_note_paths, resolve_note
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
@@ -130,7 +130,9 @@ async def bm_read(
                 "checksum": entity.db_checksum,
                 "updated_at": entity.updated_at.isoformat(),
             }
-            return metadata if output_format == "json" else format_note_metadata(metadata)
+            if output_format == "json":
+                return qualify_note_paths(metadata, target.route)
+            return format_note_metadata(metadata)
 
         resource_client = ResourceClient(target.client, target.project.external_id)
 
@@ -148,9 +150,12 @@ async def bm_read(
                     output_format=output_format,
                 )
             response = await resource_client.read(note.external_id)
-            return _present_file(
+            presented = _present_file(
                 classify_file_response(response), note.file_path, note.title, output_format
             )
+            if isinstance(presented, dict):
+                return qualify_note_paths(presented, target.route)
+            return presented
 
         # --- Markdown notes ---
         lines = f"{start_line or 1}-{'' if end_line is None else end_line}" if line_range else None
@@ -167,7 +172,11 @@ async def bm_read(
         )
 
     if not sliced:
-        return payload if output_format == "json" else payload["content"]
+        return (
+            qualify_note_paths(payload, target.route)
+            if output_format == "json"
+            else payload["content"]
+        )
 
     first, last, total = payload["start_line"], payload["end_line"], payload["total_lines"]
     if output_format == "json":
@@ -175,7 +184,7 @@ async def bm_read(
         payload["has_more"] = last < total
         payload["next_start_line"] = last + 1 if last < total else None
         payload["next_end_line"] = min(total, last + width) if last < total else None
-        return payload
+        return qualify_note_paths(payload, target.route)
     # Trigger: max_tokens cut the content.
     # Why: the cut content ends with an ellipsis marker, so its lines no longer match
     #      the coordinates one for one and cannot be numbered.

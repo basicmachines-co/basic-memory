@@ -46,13 +46,16 @@ from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_in
 from basic_memory.markdown.line_scanning import scan_literal_lines
 from basic_memory.markdown.sections import document_lines, line_range_past_end
 from basic_memory.mcp.async_client import is_factory_mode
+from basic_memory.mcp.directory_listing import project_mount_listing
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
+from basic_memory.mcp.note_targets import (
+    qualify_listing_paths,
+    qualify_note_paths,
+    qualify_search_paths,
+)
 from basic_memory.mcp.project_context import (
-    OTHER_WORKSPACES_HINT,
     ProjectPathRoute,
-    addressable_projects,
     get_project_client,
-    other_workspace_slugs,
     resolve_project_path_route,
 )
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
@@ -60,117 +63,10 @@ from basic_memory.repository.metadata_filters import MetadataPath, parse_metadat
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
-    DirectoryListResponse,
-    DirectoryNode,
 )
 from basic_memory.schemas.memory import EntitySummary
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 from basic_memory.utils import coerce_list, generate_permalink
-
-# --- Round-trip coherence ---
-# A path a routed verb returns must be a path the resolver accepts. When a call
-# addresses its project in the path ('ls research/notes'), the project prefix is
-# stripped before the project-scoped API sees it, so that API answers in
-# project-relative paths — '/notes'. Handing those back unchanged breaks the
-# navigation loop the mount model promises: feeding '/notes' into `ls` refuses as
-# unqualified, or worse, opens a *different* project that happens to be mounted
-# as 'notes'.
-#
-# One rule decides *whether* and *with what* (_route_prefix); each response
-# schema says *where*. That split is deliberate. Rewriting by key name anywhere
-# in the payload also rewrote a note's own frontmatter when the author happened
-# to use a `file_path:` key, so a routed `cat` returned frontmatter that
-# disagreed with both its own `content` and the stored file. Transport metadata
-# and note content are different things that can spell a key the same way, and
-# only position tells them apart.
-
-
-def _route_prefix(route: ProjectPathRoute) -> str | None:
-    """The prefix a routed response must re-attach, or None if nothing was stripped.
-
-    None means the caller addressed the project some other way (an explicit
-    param, or a single-project session), so the project-relative paths it gets
-    back are already the ones it can feed back.
-    """
-    if not route.stripped or route.project is None:
-        return None
-    # The permalink form is the spelling `ls "/"` advertises and the resolver
-    # normalizes to, so it round-trips for display names too ('My Research').
-    return generate_permalink(route.project)
-
-
-def _requalified_path(value: str, prefix: str) -> str:
-    """Re-attach a stripped project prefix, preserving the field's slash shape."""
-    if value.startswith("/"):
-        return f"/{prefix}" if value == "/" else f"/{prefix}{value}"
-    return f"{prefix}/{value}" if value else prefix
-
-
-def qualify_note_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
-    """Re-qualify a note payload's transport path.
-
-    ``file_path`` is the note's address and is re-qualified. ``frontmatter`` is
-    the note's own YAML — canonical content that must come back byte for byte,
-    even when it carries keys named like transport fields — and ``permalink`` is
-    an identity with its own canonical form; neither is touched.
-    """
-    prefix = _route_prefix(route)
-    if prefix is None:
-        return payload
-    return {**payload, "file_path": _requalified_path(payload["file_path"], prefix)}
-
-
-def _requalified_directory_node(node: dict[str, Any], prefix: str) -> dict[str, Any]:
-    """Re-qualify one DirectoryNode's addressing fields, and its children."""
-    requalified = dict(node)
-    directory_path = node.get("directory_path")
-    if isinstance(directory_path, str):
-        requalified["directory_path"] = _requalified_path(directory_path, prefix)
-    # file_path is Optional on DirectoryNode: directory rows carry no file.
-    file_path = node.get("file_path")
-    if isinstance(file_path, str):
-        requalified["file_path"] = _requalified_path(file_path, prefix)
-    children = node.get("children")
-    if children:
-        requalified["children"] = [_requalified_directory_node(child, prefix) for child in children]
-    return requalified
-
-
-def qualify_listing_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
-    """Re-qualify a directory listing's node addressing fields."""
-    prefix = _route_prefix(route)
-    if prefix is None:
-        return payload
-    return {
-        **payload,
-        "nodes": [_requalified_directory_node(node, prefix) for node in payload["nodes"]],
-    }
-
-
-def qualify_search_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
-    """Re-qualify a search response's per-hit transport paths.
-
-    The third response shape a routed verb can answer with. `find --meta` returns
-    search hits rather than listing nodes, and the rule is per response shape,
-    not per verb: the metadata arm shipped without it and handed back
-    project-relative paths that `cat` then refused — or, worse, opened in a
-    different project mounted under that name (#1435).
-
-    ``file_path`` is the hit's address, the same field the listing nodes carry;
-    ``permalink`` is an identity with its own canonical form and is left alone,
-    exactly as in ``qualify_note_paths``.
-    """
-    prefix = _route_prefix(route)
-    if prefix is None:
-        return payload
-    return {
-        **payload,
-        "results": [
-            {**row, "file_path": _requalified_path(row["file_path"], prefix)}
-            for row in payload["results"]
-        ],
-    }
-
 
 # The manual project holds the non-bundled manual pages as ordinary notes;
 # `man` falls back to it for page reads and searches it in query mode.
@@ -465,48 +361,6 @@ async def grep(
         return payload
 
 
-async def _project_mount_listing(
-    *, page: int, page_size: int, context: Context | None
-) -> dict[str, Any]:
-    """Render the addressable projects as directory entries (the mount-point view).
-
-    Sources ``addressable_projects`` — the same set the path resolver routes by
-    — so every mount advertised here is reachable as '<project>/path' (#1421).
-    Each row's ``directory_path`` is the copyable '/<project>' prefix form, and
-    the set already arrives sorted by project name.
-
-    A cloud session that can see several workspaces also gets their slugs and a
-    note on reaching them (#1778). They are not listed as rows: a bare slug is not
-    a routable path, and every row here must be one.
-    """
-    rows = [
-        DirectoryNode(
-            name=item.name,
-            directory_path=f"/{item.permalink}",
-            permalink=item.permalink,
-            type="directory",
-        )
-        for item in await addressable_projects(context=context)
-    ]
-    start = (page - 1) * page_size
-    listing = DirectoryListResponse(
-        nodes=rows[start : start + page_size],
-        page=page,
-        page_size=page_size,
-        total=len(rows),
-        has_more=start + page_size < len(rows),
-    ).model_dump(mode="json")
-    workspaces = await other_workspace_slugs(context=context)
-    if workspaces:
-        listing["workspaces"] = list(workspaces)
-        listing["note"] = (
-            "the projects above are this session's workspace; "
-            + OTHER_WORKSPACES_HINT
-            + f" (workspace slugs: {', '.join(workspaces)})"
-        )
-    return listing
-
-
 @mcp.tool(
     title="Ls",
     description="List one directory level. '/' lists projects; paths accept '<project>/path'.",
@@ -560,7 +414,7 @@ async def ls(
         and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         and not path.strip().strip("/")
     ):
-        return await _project_mount_listing(page=page, page_size=page_size, context=context)
+        return await project_mount_listing(page=page, page_size=page_size, context=context)
 
     route = await resolve_project_path_route(
         path, project=project, project_id=project_id, context=context

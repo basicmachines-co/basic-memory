@@ -14,6 +14,7 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import (
+    DirectoryPath,
     Filters,
     Items,
     NoteIdentifier,
@@ -35,6 +36,7 @@ probe_server = FastMCP("probe")
 @probe_server.tool
 def probe(
     identifier: NoteIdentifier,
+    path: DirectoryPath = "/",
     project: ProjectParam = None,
     since: Since = "7d",
     page: Page = 1,
@@ -45,6 +47,7 @@ def probe(
     """Echo the validated arguments."""
     return {
         "identifier": identifier,
+        "path": path,
         "project": project,
         "since": since,
         "page": page,
@@ -77,6 +80,7 @@ async def test_schema_lists_primary_names_only():
         (tool,) = await client.list_tools()
     assert set(tool.input_schema["properties"]) == {
         "identifier",
+        "path",
         "project",
         "since",
         "page",
@@ -94,6 +98,7 @@ async def test_schema_lists_primary_names_only():
 async def test_hidden_aliases_reach_the_primary_parameters():
     echoed = await call_probe(
         file_path="notes/plan.md",
+        dir_name="specs",
         project_id="research",
         timeframe="2 days ago",
         limit=25,
@@ -101,6 +106,7 @@ async def test_hidden_aliases_reach_the_primary_parameters():
         entity_types=["entity", "observation"],
     )
     assert echoed["identifier"] == "notes/plan.md"
+    assert echoed["path"] == "specs"
     assert echoed["project"] == "research"
     assert echoed["since"] == "2d"
     assert echoed["page_size"] == 25
