@@ -357,3 +357,10 @@ async def test_results_across_projects_carry_routable_paths(client, test_project
     assert text.startswith("Results for 'rollback' in all projects:")
     note = await bm_read(paths[0])
     assert isinstance(note, str)
+
+
+@pytest.mark.asyncio
+async def test_max_matches_needs_a_line_scan(client, test_project):
+    """Ranked results have no matching lines, so a max_matches bound cannot apply."""
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: `max_matches` bounds"):
+        await bm_search(query="deploy", max_matches=1, project=test_project.name)

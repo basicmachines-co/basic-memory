@@ -119,3 +119,17 @@ async def test_project_qualified_text_names_qualified_paths(client, test_project
     assert isinstance(text, str)
     assert f"path: {prefix}/graph/Node A.md" in text
     assert f"[[Node B]] ({prefix}/graph/Node B.md)" in text
+
+
+@pytest.mark.asyncio
+async def test_text_output_names_the_next_page(client, test_project):
+    """A pattern with more matches than a page says how to fetch the next one."""
+    await _seed(test_project.name)
+
+    text = await bm_context(
+        identifier="graph/*", page_size=1, output_format="text", project=test_project.name
+    )
+
+    assert isinstance(text, str)
+    assert "More results available. Call bm_context(identifier='graph/*'" in text
+    assert "page=2, page_size=1)" in text
