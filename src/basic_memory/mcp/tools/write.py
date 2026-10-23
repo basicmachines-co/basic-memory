@@ -24,8 +24,9 @@ from basic_memory.config import ConfigManager
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.mcp.note_targets import ProjectTarget, open_project_target, qualify_note_paths
-from basic_memory.mcp.refusals import refusal
+from basic_memory.mcp.note_targets import ProjectTarget, open_project_target
+from basic_memory.mcp.note_writes import format_note_change, note_change_result
+from basic_memory.mcp.refusals import api_refusal, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import (
     SimilarNote,
@@ -212,9 +213,12 @@ async def bm_write(
             entity_metadata=entity_metadata or None,
         )
         knowledge_client = KnowledgeClient(target.client, target.project.external_id)
-        outcome = await knowledge_client.write_note(
-            note, overwrite=effective_overwrite, expected_checksum=expected_checksum
-        )
+        try:
+            outcome = await knowledge_client.write_note(
+                note, overwrite=effective_overwrite, expected_checksum=expected_checksum
+            )
+        except ToolError as error:
+            raise _write_failure(error, note.file_path, output_format) from error
 
         # --- Outcomes ---
         match outcome:
@@ -263,7 +267,7 @@ async def bm_write(
                     ),
                     output_format=output_format,
                 )
-            case _:
+            case _:  # pragma: no cover
                 assert_never(outcome)
 
         similar_notes = (
@@ -273,22 +277,8 @@ async def bm_write(
         )
 
     requested_path = _requested_path(placement)
-    result = qualify_note_paths(
-        {
-            "action": action,
-            "title": written.title,
-            "permalink": written.permalink,
-            "file_path": written.file_path,
-            # The accepted revision's checksum: what bm_edit and bm_write take back as
-            # expected_checksum. file_checksum lags behind materialization (#1586).
-            "checksum": written.db_checksum,
-            "observations": len(written.observations),
-            "relations": len(written.relations),
-            "unresolved_relations": sum(1 for relation in written.relations if not relation.to_id),
-            "similar_notes": [dataclasses.asdict(similar) for similar in similar_notes],
-        },
-        target.route,
-    )
+    result = note_change_result(written, action=action, route=target.route)
+    result["similar_notes"] = [dataclasses.asdict(similar) for similar in similar_notes]
     # Trigger: the API wrote into an existing folder's spelling (#1796).
     # Why: the caller should learn the real path rather than keep using its guess.
     # Outcome: the result names the path that was asked for next to the one written.
@@ -297,6 +287,22 @@ async def bm_write(
     if output_format == "json":
         return result
     return _format_text(result, similar_notes)
+
+
+def _write_failure(error: ToolError, file_path: str, output_format: OutputFormat) -> ToolError:
+    """Explain a write the API did not answer with a typed outcome."""
+    refused = api_refusal(error)
+    if refused is None:
+        # The request left and no 4xx came back, so the note may have been written.
+        return refusal(
+            "OUTCOME_UNKNOWN",
+            f"The write to '{file_path}' may or may not have landed: {error}",
+            try_instead=f"bm_read(identifier='{file_path}') before retrying",
+            output_format=output_format,
+        )
+    return refusal(
+        refused.code, f"{refused.message} Nothing was written.", output_format=output_format
+    )
 
 
 def _place_note(
@@ -409,19 +415,12 @@ async def _similar_notes(
 
 def _format_text(result: dict[str, Any], similar_notes: list[SimilarNote]) -> str:
     """The text result: what was written, where, and the checksum to pass back."""
-    lines = [
-        f"{result['action'].capitalize()} {result['file_path']}",
-        f"title: {result['title']}",
-        f"permalink: {result['permalink']}",
-        f"checksum: {result['checksum']}",
-    ]
+    lines = format_note_change(
+        result, headline=f"{result['action'].capitalize()} {result['file_path']}"
+    )
     if requested := result.get("requested_file_path"):
         # The folder already existed under another spelling (#1796).
-        lines.append(f"requested: {requested}")
-    relations = f"relations: {result['relations']}"
-    if result["unresolved_relations"]:
-        relations += f" ({result['unresolved_relations']} not yet resolved)"
-    lines.append(f"observations: {result['observations']}, {relations}")
+        lines.insert(1, f"requested: {requested}")
     if similar_notes:
         new_note = result["permalink"] or result["file_path"]
         lines.append(

@@ -3,7 +3,7 @@
 from typing import Any, List, Optional, Annotated, Literal
 from annotated_types import MaxLen, MinLen
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from basic_memory.schemas.base import (
     Relation,
@@ -72,6 +72,8 @@ class EditEntityRequest(BaseModel):
         "replace_section",
         "insert_before_section",
         "insert_after_section",
+        # Frontmatter only: `metadata` is merged and the body is left byte for byte.
+        "set_metadata",
     ]
     content: str
     section: Optional[str] = None
@@ -109,6 +111,17 @@ class EditEntityRequest(BaseModel):
         if info.data.get("operation") == "find_replace" and not v:
             raise ValueError("find_text parameter is required for find_replace operation")
         return v
+
+    @model_validator(mode="after")
+    def validate_set_metadata(self) -> "EditEntityRequest":
+        """set_metadata changes frontmatter only, so it needs metadata and no content."""
+        if self.operation != "set_metadata":
+            return self
+        if not self.metadata:
+            raise ValueError("metadata is required for set_metadata")
+        if self.content:
+            raise ValueError("set_metadata changes frontmatter only; content must be empty")
+        return self
 
 
 class MoveEntityRequest(BaseModel):

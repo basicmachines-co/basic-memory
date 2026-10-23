@@ -5,10 +5,15 @@ These run the real ASGI stack through the shared `client` fixture.
 
 from typing import Any
 
+import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.similar_notes import SimilarNote
 from basic_memory.mcp.tools import bm_read, bm_write
+from basic_memory.mcp.tools import write as write_module
+from basic_memory.schemas.v2.note_write import NoteLocked, NoteTargetMoved
 
 
 async def write_json(**arguments: Any) -> dict[str, Any]:
@@ -171,6 +176,113 @@ async def test_refusals_carry_json_codes(client, test_project):
             output_format="json",
             project=test_project.name,
         )
+
+
+# --- Content details ---
+
+
+@pytest.mark.asyncio
+async def test_tags_and_metadata_land_in_frontmatter(client, test_project):
+    await bm_write(
+        identifier="notes/tagged.md",
+        content="Body",
+        tags="a,b",
+        metadata={"status": "draft"},
+        project=test_project.name,
+    )
+
+    text = await bm_read("notes/tagged.md", project=test_project.name)
+    assert isinstance(text, str)
+    assert "status: draft" in text and "- a" in text and "- b" in text
+
+
+@pytest.mark.asyncio
+async def test_root_path_and_blank_frontmatter_title(client, test_project):
+    result = await write_json(
+        identifier="top.md", content="---\ntitle: ''\n---\nBody", project=test_project.name
+    )
+
+    assert result["file_path"] == "top.md"
+    assert result["title"] == "top"
+
+
+@pytest.mark.asyncio
+async def test_malformed_frontmatter_is_an_argument_error(client, test_project):
+    with pytest.raises(
+        ToolError, match="(?s)^INVALID_ARGUMENTS: Invalid YAML.*Nothing was written"
+    ):
+        await bm_write(
+            identifier="notes/bad.md",
+            content="---\ntitle: [unclosed\n---\nbody",
+            project=test_project.name,
+        )
+
+
+@pytest.mark.asyncio
+async def test_unanswered_write_is_an_unknown_outcome(client, test_project, monkeypatch):
+    async def lost(*_args: Any, **_kwargs: Any) -> None:
+        error = ToolError("timed out")
+        error.__cause__ = httpx.ReadTimeout("timed out")
+        raise error
+
+    monkeypatch.setattr(KnowledgeClient, "write_note", lost)
+    with pytest.raises(ToolError, match="^OUTCOME_UNKNOWN: .*\nTry instead: bm_read"):
+        await bm_write(identifier="notes/a.md", content="Body", project=test_project.name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outcome", "pattern"),
+    [
+        (
+            NoteTargetMoved(
+                external_id="abc", title="A", file_path="moved/a.md", permalink="moved/a"
+            ),
+            r"^ALREADY_EXISTS: .*moved to 'moved/a.md'.*\nTry instead: bm_read\(identifier='abc'\)",
+        ),
+        (NoteLocked(message="Note is locked for review."), "^LOCKED: Note is locked"),
+    ],
+)
+async def test_typed_refusals(client, test_project, monkeypatch, outcome, pattern):
+    async def answer(*_args: Any, **_kwargs: Any) -> Any:
+        return outcome
+
+    monkeypatch.setattr(KnowledgeClient, "write_note", answer)
+    with pytest.raises(ToolError, match=pattern):
+        await bm_write(
+            identifier="notes/a.md", content="Body", overwrite=True, project=test_project.name
+        )
+
+
+# --- Similar-note advisory ---
+
+
+@pytest.mark.asyncio
+async def test_similar_notes_are_listed_with_bm_verbs(client, test_project, monkeypatch):
+    async def neighbors(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
+        return [SimilarNote(title="Old Plan", permalink="notes/old-plan", file_path="notes/o.md")]
+
+    monkeypatch.setattr(write_module, "find_similar_notes", neighbors)
+    text = await write_text(identifier="notes/new.md", content="Body", project=test_project.name)
+    payload = await write_json(
+        identifier="notes/newer.md", content="Body", project=test_project.name
+    )
+
+    assert "## Similar existing notes" in text
+    assert "bm_edit(identifier='notes/old-plan'" in text
+    assert payload["similar_notes"][0]["title"] == "Old Plan"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_probe_does_not_fail_the_write(client, test_project, monkeypatch):
+    async def declined(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
+        raise ToolError("semantic search is disabled")
+
+    monkeypatch.setattr(write_module, "find_similar_notes", declined)
+    result = await write_json(identifier="notes/a.md", content="Body", project=test_project.name)
+
+    assert result["action"] == "created"
+    assert result["similar_notes"] == []
 
 
 # --- Refusals ---

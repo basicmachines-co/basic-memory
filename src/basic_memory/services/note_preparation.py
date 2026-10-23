@@ -764,6 +764,9 @@ def apply_edit_operation(
         return current_content + separator + content
     if operation == "prepend":
         return _prepend_after_frontmatter(current_content, content)
+    if operation == "set_metadata":
+        # The metadata merge happens after this, independent of the operation.
+        return current_content
     if operation == "find_replace":
         if not find_text:
             raise ValueError("find_text is required for find_replace operation")

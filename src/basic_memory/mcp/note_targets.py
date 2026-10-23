@@ -142,6 +142,7 @@ async def resolve_note(
     identifier: str,
     *,
     output_format: OutputFormat = "text",
+    try_instead: str | None = None,
 ) -> EntityResolveResponse:
     """Resolve the routed target to its note, exactly.
 
@@ -149,7 +150,8 @@ async def resolve_note(
     what a tool needs to decide how to read or change it.
 
     `identifier` is the caller's original spelling, used in the refusal so the
-    model sees what it asked for.
+    model sees what it asked for. `try_instead` replaces the default bm_search hint
+    on a NOT_FOUND refusal (bm_edit points to bm_write).
     """
     # Trigger: the input was a bare project name ('research' or 'research/').
     # Why: routing consumed the whole identifier; there is no note left to resolve.
@@ -172,7 +174,7 @@ async def resolve_note(
                 raise refusal(
                     "NOT_FOUND",
                     f"No note matches '{identifier}' in project '{target.project.name}'.",
-                    try_instead=f"bm_search(query='{identifier}')",
+                    try_instead=try_instead or f"bm_search(query='{identifier}')",
                     output_format=output_format,
                 ) from error
             # Several notes match exactly (two notes with one title); the API's
