@@ -133,7 +133,20 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 # (or a page for a retired tool) shows up here instead of going unnoticed.
 # The POSIX read-side tools (#1399) ship without section-3 pages for now; the
 # manual campaign adds them next. Their wire descriptions stay one-liners.
-TOOLS_WITHOUT_PAGES: set[str] = {"cat", "find", "grep", "ls", "man", "tail"}
+# The 1.0 bm_* tools get their pages with bm_man (SPEC-35.2, #1832).
+TOOLS_WITHOUT_PAGES: set[str] = {
+    "cat",
+    "find",
+    "grep",
+    "ls",
+    "man",
+    "tail",
+    "bm_context",
+    "bm_find",
+    "bm_list",
+    "bm_read",
+    "bm_search",
+}
 PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
 
