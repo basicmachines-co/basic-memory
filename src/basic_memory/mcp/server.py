@@ -31,6 +31,18 @@ import logfire
 POSIX_TOOLS_TAG = "posix"
 
 
+PROJECT_DELETE_TAG = "project-delete"
+
+
+def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
+    """Show or hide the project-delete tools (bm_project_delete, delete_project).
+
+    Like set_posix_tools_visibility, the last mark appended wins, so this is safe
+    to call at import, at each lifespan start, and in tests.
+    """
+    server.add_transform(Visibility(enabled, tags={PROJECT_DELETE_TAG}))
+
+
 def set_posix_tools_visibility(server: FastMCP, enabled: bool) -> None:
     """Mark the POSIX tool group visible or hidden.
 
@@ -111,6 +123,10 @@ async def lifespan(app: FastMCP):
     #      config decides what clients see (no if-checks inside tool bodies).
     # Outcome: enabled by default; an explicit opt-out hides the POSIX group.
     set_posix_tools_visibility(app, config.enable_posix_tools)
+    # Trigger: the enable_project_delete config flag (off by default).
+    # Why: deleting a project removes it for every client; only the user turns it on.
+    # Outcome: bm_project_delete is listed only then.
+    set_project_delete_visibility(app, config.enable_project_delete)
 
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 

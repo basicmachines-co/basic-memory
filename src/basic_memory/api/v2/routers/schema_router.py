@@ -464,6 +464,7 @@ async def diff_schema_endpoint(
             for f in result.dropped_fields
         ],
         cardinality_changes=result.cardinality_changes,
+        notes_compared=len(notes_data),
     )
 
 

@@ -77,6 +77,28 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "project",
     ],
+    "bm_project": [
+        "command",
+        "name",
+        "path",
+        "set_default",
+        "workspace",
+        "since",
+        "items",
+        "page",
+        "page_size",
+        "output_format",
+        "project",
+    ],
+    "bm_project_delete": ["name", "delete_notes", "workspace", "output_format"],
+    "bm_schema": [
+        "command",
+        "note_type",
+        "identifier",
+        "threshold",
+        "output_format",
+        "project",
+    ],
     "bm_write": [
         "content",
         "identifier",
@@ -144,7 +166,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
     ],
     "delete_note": ["identifier", "is_directory", "project", "project_id", "output_format"],
-    "delete_project": ["project_name", "delete_notes", "workspace"],
+    "delete_project": ["project_name", "delete_notes", "workspace", "output_format"],
     "edit_note": [
         "identifier",
         "operation",
@@ -289,6 +311,8 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_edit": {"readOnlyHint": False, "destructiveHint": True},
     "bm_move": {"readOnlyHint": False, "destructiveHint": False},
     "bm_delete": {"readOnlyHint": False, "destructiveHint": True},
+    "bm_project": {"readOnlyHint": False, "destructiveHint": False},
+    "bm_schema": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
     "list_directory": {"readOnlyHint": True, "destructiveHint": False},
@@ -307,7 +331,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     # if the target already exists.
     "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
     "delete_note": {"readOnlyHint": False, "destructiveHint": True},
-    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
@@ -333,6 +356,9 @@ OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "ls": {"readOnlyHint": True, "destructiveHint": False},
     "man": {"readOnlyHint": True, "destructiveHint": False},
     "tail": {"readOnlyHint": True, "destructiveHint": False},
+    # Listed only when enable_project_delete is on.
+    "bm_project_delete": {"readOnlyHint": False, "destructiveHint": True},
+    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
 }
 
 EXPECTED_EDIT_NOTE_OPERATIONS = [
@@ -355,6 +381,9 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_edit": tools.bm_edit,
     "bm_move": tools.bm_move,
     "bm_delete": tools.bm_delete,
+    "bm_project": tools.bm_project,
+    "bm_project_delete": tools.bm_project_delete,
+    "bm_schema": tools.bm_schema,
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
     "cat": tools.cat,

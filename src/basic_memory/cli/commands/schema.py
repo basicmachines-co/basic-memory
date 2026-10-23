@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.command_utils import run_schema_tool
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
 from basic_memory.cli.markup import literal
@@ -209,7 +209,7 @@ def validate(
                 note_type = target
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_validate(
                     note_type=note_type,
                     identifier=identifier,
@@ -287,7 +287,7 @@ def infer(
         project_name = _resolve_project_name(project)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_infer(
                     note_type=note_type,
                     threshold=threshold,
@@ -370,7 +370,7 @@ def diff(
         project_name = _resolve_project_name(project)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_diff(
                     note_type=note_type,
                     project=project_name,

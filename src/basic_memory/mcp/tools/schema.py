@@ -8,8 +8,11 @@ from typing import Any, Literal, Optional
 
 from loguru import logger
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.refusals import api_refusals, refusal
+from basic_memory.mcp.tool_params import OutputFormat
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
 
@@ -159,6 +162,16 @@ def _format_drift_report(report: DriftReport) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _nothing_to_report(output_format: OutputFormat, message: str, guidance: str) -> ToolError:
+    """A NOT_FOUND refusal: the short message in JSON, the full guidance as text (C11).
+
+    A success that describes a failure reads as success to a client that checks
+    isError, so "nothing to report" is a refusal.
+    """
+    text = message if output_format == "json" else guidance
+    return refusal("NOT_FOUND", text, output_format=output_format)
 
 
 def _no_notes_guidance(note_type: str, tool_name: str) -> str:
@@ -312,71 +325,65 @@ async def schema_validate(
             f"note_type={note_type} identifier={identifier}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
+        schema_client = SchemaClient(client, active_project.external_id)
+        # The API refuses an invalid schema definition with a 400.
+        with api_refusals(output_format):
             result = await schema_client.validate(
                 note_type=note_type,
                 identifier=identifier,
             )
 
-            logger.debug(
-                f"MCP tool response: tool=schema_validate project={active_project.name} "
-                f"total={result.total_notes} valid={result.valid_count} "
-                f"warnings={result.warning_count} errors={result.error_count}"
-            )
+        logger.debug(
+            f"MCP tool response: tool=schema_validate project={active_project.name} "
+            f"total={result.total_notes} valid={result.valid_count} "
+            f"warnings={result.warning_count} errors={result.error_count}"
+        )
 
-            # --- All-types mode ---
-            # Trigger: called with neither identifier nor note_type (#1013)
-            # Why: an empty report here means "no schemas defined", not
-            #   "no notes of type 'unknown'" — the guards below would mislead
-            # Outcome: per-type summary, or guidance for defining a first schema
-            if note_type is None and identifier is None:
-                if not result.type_summaries:
-                    if output_format == "json":
-                        return {"error": "No schemas defined in this project"}
-                    return _no_schemas_defined_guidance("schema_validate")
-                if output_format == "json":
-                    return result.model_dump(mode="json", exclude_none=True)
-                return _format_validation_report(result)
-
-            # --- No notes guard ---
-            # Trigger: no entities of this type exist in the project
-            # Why: can't validate notes that don't exist yet
-            # Outcome: return guidance on creating notes of this type
-            effective_type = note_type or result.note_type or "unknown"
-            if result.total_entities == 0:
-                if output_format == "json":
-                    return {"error": f"No notes found of type '{effective_type}'"}
-                return _no_notes_guidance(effective_type, "schema_validate")
-
-            # --- No schema guard ---
-            # Trigger: entities exist but none were validated (no schema found)
-            # Why: notes of this type exist but no schema was found, so none were validated
-            # Outcome: return guidance on how to create a schema
-            if result.total_notes == 0:
-                if output_format == "json":
-                    return {"error": f"No schema found for type '{effective_type}'"}
-                return _no_schema_guidance(effective_type, "schema_validate")
-
+        # --- All-types mode ---
+        # Trigger: called with neither identifier nor note_type (#1013)
+        # Why: an empty report here means "no schemas defined", not
+        #   "no notes of type 'unknown'" — the guards below would mislead
+        # Outcome: per-type summary, or guidance for defining a first schema
+        if note_type is None and identifier is None:
+            if not result.type_summaries:
+                raise _nothing_to_report(
+                    output_format,
+                    "No schemas defined in this project",
+                    _no_schemas_defined_guidance("schema_validate"),
+                )
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
-
             return _format_validation_report(result)
 
-        except Exception as e:
-            logger.error(f"Schema validation failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema validation failed: {e}"}
-            return (
-                f"# Schema Validation Failed\n\n"
-                f"Error validating schemas: {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure schema notes exist (type: schema) for the target note type\n"
-                f"2. Check that notes have the correct type in frontmatter\n"
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
+        # --- No notes guard ---
+        # Trigger: no entities of this type exist in the project
+        # Why: can't validate notes that don't exist yet
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type
+        effective_type = note_type or result.note_type or "unknown"
+        if result.total_entities == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{effective_type}'",
+                _no_notes_guidance(effective_type, "schema_validate"),
             )
+
+        # --- No schema guard ---
+        # Trigger: entities exist but none were validated (no schema found)
+        # Why: notes of this type exist but no schema was found, so none were validated
+        # Outcome: a NOT_FOUND refusal with guidance on how to create a schema
+        if result.total_notes == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema found for type '{effective_type}'",
+                _no_schema_guidance(effective_type, "schema_validate"),
+            )
+
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
+
+        return _format_validation_report(result)
 
 
 @mcp.tool(
@@ -448,66 +455,59 @@ async def schema_infer(
             f"note_type={note_type} threshold={threshold}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
+        schema_client = SchemaClient(client, active_project.external_id)
+        with api_refusals(output_format):
             result = await schema_client.infer(note_type, threshold=threshold)
 
-            logger.debug(
-                f"MCP tool response: tool=schema_infer project={active_project.name} "
-                f"note_type={note_type} notes_analyzed={result.notes_analyzed} "
-                f"required={len(result.suggested_required)} "
-                f"optional={len(result.suggested_optional)}"
+        logger.debug(
+            f"MCP tool response: tool=schema_infer project={active_project.name} "
+            f"note_type={note_type} notes_analyzed={result.notes_analyzed} "
+            f"required={len(result.suggested_required)} "
+            f"optional={len(result.suggested_optional)}"
+        )
+
+        # --- No notes guard ---
+        # Trigger: no notes of this type exist, so nothing was analyzed
+        # Why: an empty report would read as a successful inference (C11)
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type
+        if result.notes_analyzed == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{note_type}'",
+                _no_notes_guidance(note_type, "schema_infer"),
             )
 
-            # --- Empty schema guard ---
-            # Trigger: notes were analyzed but no fields met the threshold
-            # Why: returning hundreds of excluded fields overwhelms the LLM context
-            # Outcome: return actionable guidance instead of a massive empty result
-            if result.notes_analyzed > 0 and not result.suggested_schema:
-                if output_format == "json":
-                    return {
-                        "error": (
-                            f"No schema pattern found for '{note_type}' "
-                            f"(threshold: {threshold:.0%})"
-                        )
-                    }
-                return (
-                    f"# No Schema Pattern Found\n\n"
-                    f"Analyzed {result.notes_analyzed} notes of type '{note_type}', "
-                    f"but no observation or relation appeared in enough notes to suggest "
-                    f"a schema (threshold: {threshold:.0%}).\n\n"
-                    f"This usually means '{note_type}' is too broad — the notes don't "
-                    f"share a consistent structure.\n\n"
-                    f"## Suggestions\n"
-                    f"1. **Use a more specific type** — try `search_notes` with "
-                    f"`note_types` filter to see what types exist\n"
-                    f"2. **Lower the threshold** — "
-                    f'`schema_infer("{note_type}", threshold=0.1)` to include '
-                    f"rarer fields\n"
-                    f"3. **Create typed notes** — use `write_note` with a specific "
-                    f'`note_type` (e.g., "person", "meeting") to build consistent '
-                    f"structure\n"
-                )
-
-            if output_format == "json":
-                return result.model_dump(mode="json", exclude_none=True)
-
-            return _format_inference_report(result)
-
-        except Exception as e:
-            logger.error(f"Schema inference failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema inference failed: {e}"}
-            return (
-                f"# Schema Inference Failed\n\n"
-                f"Error inferring schema for type '{note_type}': {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure notes of type '{note_type}' exist in the project\n"
-                f'2. Try searching: `search_notes("{note_type}", note_types=["{note_type}"])`\n'
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
+        # --- Empty schema guard ---
+        # Trigger: notes were analyzed but no fields met the threshold
+        # Why: returning hundreds of excluded fields overwhelms the LLM context
+        # Outcome: a NOT_FOUND refusal with guidance instead of a massive empty result
+        if not result.suggested_schema:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema pattern found for '{note_type}' (threshold: {threshold:.0%})",
+                f"# No Schema Pattern Found\n\n"
+                f"Analyzed {result.notes_analyzed} notes of type '{note_type}', "
+                f"but no observation or relation appeared in enough notes to suggest "
+                f"a schema (threshold: {threshold:.0%}).\n\n"
+                f"This usually means '{note_type}' is too broad — the notes don't "
+                f"share a consistent structure.\n\n"
+                f"## Suggestions\n"
+                f"1. **Use a more specific type** — try `search_notes` with "
+                f"`note_types` filter to see what types exist\n"
+                f"2. **Lower the threshold** — "
+                f'`schema_infer("{note_type}", threshold=0.1)` to include '
+                f"rarer fields\n"
+                f"3. **Create typed notes** — use `write_note` with a specific "
+                f'`note_type` (e.g., "person", "meeting") to build consistent '
+                f"structure\n",
             )
+
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
+
+        return _format_inference_report(result)
 
 
 @mcp.tool(
@@ -572,43 +572,44 @@ async def schema_diff(
             f"MCP tool call tool=schema_diff project={active_project.name} note_type={note_type}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
+        schema_client = SchemaClient(client, active_project.external_id)
+        # The API refuses an invalid schema definition with a 400.
+        with api_refusals(output_format):
             result = await schema_client.diff(note_type)
 
-            logger.debug(
-                f"MCP tool response: tool=schema_diff project={active_project.name} "
-                f"note_type={note_type} schema_found={result.schema_found} "
-                f"new_fields={len(result.new_fields)} "
-                f"dropped_fields={len(result.dropped_fields)} "
-                f"cardinality_changes={len(result.cardinality_changes)}"
+        logger.debug(
+            f"MCP tool response: tool=schema_diff project={active_project.name} "
+            f"note_type={note_type} schema_found={result.schema_found} "
+            f"new_fields={len(result.new_fields)} "
+            f"dropped_fields={len(result.dropped_fields)} "
+            f"cardinality_changes={len(result.cardinality_changes)}"
+        )
+
+        # --- No schema guard ---
+        # Trigger: API reports no schema was found for this type
+        # Why: diff requires a schema to compare against
+        # Outcome: a NOT_FOUND refusal with guidance on how to create a schema
+        if not result.schema_found:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema found for type '{note_type}'",
+                _no_schema_guidance(note_type, "schema_diff"),
             )
 
-            # --- No schema guard ---
-            # Trigger: API reports no schema was found for this type
-            # Why: diff requires a schema to compare against
-            # Outcome: return guidance on how to create a schema
-            if not result.schema_found:
-                if output_format == "json":
-                    return {"error": f"No schema found for type '{note_type}'"}
-                return _no_schema_guidance(note_type, "schema_diff")
-
-            if output_format == "json":
-                return result.model_dump(mode="json", exclude_none=True)
-
-            return _format_drift_report(result)
-
-        except Exception as e:
-            logger.error(f"Schema diff failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema diff failed: {e}"}
-            return (
-                f"# Schema Diff Failed\n\n"
-                f"Error detecting drift for type '{note_type}': {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure a schema note exists for type '{note_type}'\n"
-                f"2. Ensure notes of type '{note_type}' exist in the project\n"
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
+        # --- No notes guard ---
+        # Trigger: a schema exists but no notes of the type do.
+        # Why: an empty comparison reads as "no drift", a comparison that never ran.
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type.
+        if result.notes_compared == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{note_type}'",
+                _no_notes_guidance(note_type, "schema_diff"),
             )
+
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
+
+        return _format_drift_report(result)

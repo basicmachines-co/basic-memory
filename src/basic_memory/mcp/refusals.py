@@ -9,6 +9,8 @@ instead.
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -35,26 +37,53 @@ type RefusalCode = Literal[
 ]
 
 
+class Refusal(ToolError):
+    """A tool error that is a refusal, keeping its parts for in-process callers.
+
+    MCP clients see only the rendered message. The CLI, which calls tool functions
+    directly, reads `code` to tell "nothing to report" from a failure.
+    """
+
+    def __init__(
+        self,
+        code: RefusalCode,
+        message: str,
+        *,
+        try_instead: str | None,
+        output_format: OutputFormat,
+    ) -> None:
+        self.code: RefusalCode = code
+        self.message = message
+        self.try_instead = try_instead
+        super().__init__(_render(code, message, try_instead, output_format))
+
+
+def _render(
+    code: RefusalCode, message: str, try_instead: str | None, output_format: OutputFormat
+) -> str:
+    if output_format == "json":
+        payload: dict[str, str] = {"error": code, "message": message}
+        if try_instead is not None:
+            payload["try_instead"] = try_instead
+        return json.dumps(payload)
+    if try_instead is None:
+        return f"{code}: {message}"
+    return f"{code}: {message}\nTry instead: {try_instead}"
+
+
 def refusal(
     code: RefusalCode,
     message: str,
     *,
     try_instead: str | None = None,
     output_format: OutputFormat = "text",
-) -> ToolError:
+) -> Refusal:
     """Build the error a tool raises to refuse a call.
 
     Returns the exception rather than raising it, so the call site reads
     `raise refusal(...)` and the type checker sees the branch end.
     """
-    if output_format == "json":
-        payload: dict[str, str] = {"error": code, "message": message}
-        if try_instead is not None:
-            payload["try_instead"] = try_instead
-        return ToolError(json.dumps(payload))
-    if try_instead is None:
-        return ToolError(f"{code}: {message}")
-    return ToolError(f"{code}: {message}\nTry instead: {try_instead}")
+    return Refusal(code, message, try_instead=try_instead, output_format=output_format)
 
 
 # --- API refusals ---
@@ -116,6 +145,27 @@ def api_refusal(error: ToolError) -> ApiRefusal | None:
         revision_conflict=isinstance(detail, dict) and "db_checksum" in detail,
         current_checksum=detail.get("db_checksum") if isinstance(detail, dict) else None,
     )
+
+
+@contextmanager
+def api_refusals(output_format: OutputFormat) -> Iterator[None]:
+    """Re-render the API's own refusals in the requested format.
+
+    A typed client raises an API refusal as a plain-text ToolError; inside this
+    block it becomes a refusal in `output_format`. Refusals raised here already
+    and failures with an unknown outcome pass through unchanged.
+    """
+    try:
+        yield
+    except Refusal:
+        raise
+    except ToolError as error:
+        refused_by_api = api_refusal(error)
+        if refused_by_api is None:
+            raise
+        raise refusal(
+            refused_by_api.code, refused_by_api.message, output_format=output_format
+        ) from error
 
 
 # --- Failed note changes ---

@@ -163,16 +163,14 @@ async def test_create_project_disabled_in_constrained_mode(mcp_server, app, test
             result = await client.call_tool(
                 "create_memory_project",
                 {"project_name": "new-project", "project_path": "/tmp/new-project"},
+                raise_on_error=False,
             )
 
-            assert len(result.content) == 1
+            # A refusal is a tool error (#1813), and it still names the way forward.
+            assert result.is_error
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-            # Should show error message
-            assert "# Error" in response_text
-            assert "Project creation disabled" in response_text
+            assert response_text.startswith("UNSUPPORTED: Project creation disabled")
             assert f"constrained to project '{test_project.name}'" in response_text
-            assert "Use the CLI to create projects:" in response_text
             assert 'basic-memory project add "new-project" "/tmp/new-project"' in response_text
 
     finally:
@@ -181,6 +179,7 @@ async def test_create_project_disabled_in_constrained_mode(mcp_server, app, test
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("project_delete_enabled")
 async def test_delete_project_disabled_in_constrained_mode(mcp_server, app, test_project):
     """Test that delete_project is disabled when server is constrained."""
 
@@ -189,16 +188,15 @@ async def test_delete_project_disabled_in_constrained_mode(mcp_server, app, test
 
     try:
         async with Client(mcp_server) as client:
-            result = await client.call_tool("delete_project", {"project_name": "some-project"})
+            result = await client.call_tool(
+                "delete_project", {"project_name": "some-project"}, raise_on_error=False
+            )
 
-            assert len(result.content) == 1
+            # A refusal is a tool error (#1813), and it still names the way forward.
+            assert result.is_error
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-            # Should show error message
-            assert "# Error" in response_text
-            assert "Project deletion disabled" in response_text
+            assert response_text.startswith("UNSUPPORTED: Project deletion disabled")
             assert f"constrained to project '{test_project.name}'" in response_text
-            assert "Use the CLI to delete projects:" in response_text
             assert 'basic-memory project remove "some-project"' in response_text
 
     finally:

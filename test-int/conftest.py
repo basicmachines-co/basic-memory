@@ -93,6 +93,7 @@ from basic_memory.deps import get_engine_factory, get_app_config
 
 # Import MCP tools so they're available for testing
 from basic_memory.mcp import tools  # noqa: F401
+from basic_memory.mcp.server import mcp as mcp_instance, set_project_delete_visibility
 
 
 # =============================================================================
@@ -560,6 +561,20 @@ def mcp_server(config_manager, search_service):
     import basic_memory.mcp.prompts  # noqa: F401
 
     return server
+
+
+@pytest.fixture
+def project_delete_enabled(config_manager: ConfigManager) -> Generator[None, None, None]:
+    """Turn on enable_project_delete, so delete_project and bm_project_delete are listed.
+
+    The server lifespan applies the flag when a client connects. Visibility marks
+    outlive the test on the shared server, so the teardown hides the tools again.
+    """
+    config = config_manager.load_config()
+    config.enable_project_delete = True
+    config_manager.save_config(config)
+    yield
+    set_project_delete_visibility(mcp_instance, False)
 
 
 @pytest_asyncio.fixture

@@ -4,7 +4,10 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import json
+
 import pytest
+from fastmcp.exceptions import ToolError
 from sqlalchemy import select
 
 from basic_memory import db
@@ -137,6 +140,7 @@ async def test_create_and_delete_project_and_name_match_branch(
         await session.commit()
 
     delete_result = await delete_project("My Project")
+    assert isinstance(delete_result, str)
     assert delete_result.startswith("✓")
     # Local routing with delete_notes=False: files are retained on disk.
     assert "Note files remain on disk" in delete_result
@@ -198,6 +202,7 @@ async def test_delete_project_delete_notes_removes_local_files(app, tmp_path_fac
     assert result.startswith("✓")
 
     delete_result = await delete_project("Delete Notes Project", delete_notes=True)
+    assert isinstance(delete_result, str)
     assert delete_result.startswith("✓")
     # The local route deletes the directory before answering, so it reports completion.
     assert "Note files on disk were deleted along with the project" in delete_result
@@ -482,7 +487,7 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
 
 
 @pytest.mark.asyncio
-async def test_create_memory_project_constrained_with_workspace_returns_disabled_message(
+async def test_create_memory_project_constrained_with_workspace_refuses(
     monkeypatch, tmp_path_factory
 ):
     """A constrained MCP session rejects creation before resolving a workspace selector."""
@@ -500,15 +505,16 @@ async def test_create_memory_project_constrained_with_workspace_returns_disabled
             side_effect=RuntimeError("bad workspace"),
         ) as mock_resolve_workspace,
     ):
-        result = await create_memory_project(
-            project_name="Any Project",
-            project_path=str(project_root),
-            workspace="missing-team",
-        )
+        with pytest.raises(
+            ToolError, match="^UNSUPPORTED: Project creation disabled.*'locked-project'"
+        ):
+            await create_memory_project(
+                project_name="Any Project",
+                project_path=str(project_root),
+                workspace="missing-team",
+            )
 
     mock_resolve_workspace.assert_not_awaited()
-    assert "Project creation disabled" in result
-    assert "locked-project" in result
 
 
 @pytest.mark.asyncio
@@ -584,12 +590,21 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
         result = await delete_project(
             "WS Project", delete_notes=delete_notes, workspace="team-paul"
         )
+        structured = await delete_project(
+            "WS Project", delete_notes=delete_notes, workspace="team-paul", output_format="json"
+        )
 
-    mock_resolve_workspace.assert_awaited_once_with(workspace="team-paul", context=None)
+    mock_resolve_workspace.assert_awaited_with(workspace="team-paul", context=None)
     assert captured["workspace"] == "tenant-abc-123"
     # The cloud service deletes files on every project delete (basic-memory-cloud#2117),
     # so the request says so whatever the caller passed.
-    mock_delete_project.assert_awaited_once_with("project-uuid", delete_notes=True)
+    mock_delete_project.assert_awaited_with("project-uuid", delete_notes=True)
+    # JSON reports what the backend did: a queued delete, files included, and its job.
+    assert isinstance(structured, dict)
+    assert structured["delete_notes"] is True
+    assert structured["deletion_status"] == "pending"
+    assert structured["job_id"] == fake_status.job_id
+    assert isinstance(result, str)
     assert result.startswith("✓")
     assert "Project deletion status: pending" in result
     assert "Deletion job ID: 28993" in result
@@ -757,7 +772,7 @@ def test_format_note_file_delete_result_reports_backend_status(status, cloud_rou
 
 
 @pytest.mark.asyncio
-async def test_delete_project_constrained_with_workspace_returns_disabled_message(monkeypatch):
+async def test_delete_project_constrained_with_workspace_refuses(monkeypatch):
     """A constrained MCP session rejects deletion before resolving a workspace selector."""
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "locked-project")
 
@@ -772,11 +787,12 @@ async def test_delete_project_constrained_with_workspace_returns_disabled_messag
             side_effect=RuntimeError("bad workspace"),
         ) as mock_resolve_workspace,
     ):
-        result = await delete_project("Any Project", workspace="missing-team")
+        with pytest.raises(
+            ToolError, match="^UNSUPPORTED: Project deletion disabled.*'locked-project'"
+        ):
+            await delete_project("Any Project", workspace="missing-team")
 
     mock_resolve_workspace.assert_not_awaited()
-    assert "Project deletion disabled" in result
-    assert "locked-project" in result
 
 
 # --- Cloud merge tests ---
@@ -1435,3 +1451,25 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
 
     mock_index.assert_awaited_once()
     assert "- cloud-proj (cloud) [00000000-0000-0000-0000-000000000001]" in result
+
+
+@pytest.mark.asyncio
+async def test_unknown_workspace_is_a_refusal_in_the_requested_format():
+    """A workspace selector that names no workspace refuses; JSON keeps the shape."""
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Workspace 'nope' not found. Available: team-paul"),
+        ),
+    ):
+        with pytest.raises(ToolError) as refused:
+            await delete_project("Any Project", workspace="nope", output_format="json")
+
+    payload = json.loads(str(refused.value))
+    assert payload["error"] == "INVALID_ARGUMENTS"
+    assert "Workspace 'nope' not found" in payload["message"]

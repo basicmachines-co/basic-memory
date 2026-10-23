@@ -9,7 +9,10 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import json
+
 import pytest
+from fastmcp.exceptions import ToolError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
@@ -277,13 +280,13 @@ async def test_schema_validate_by_title(app, test_project, index_project):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_identifier_no_schema_returns_guidance(
+async def test_schema_validate_identifier_no_schema_refuses_with_guidance(
     app, test_project, index_project
 ):
-    """When a note exists but no schema is defined, return guidance.
+    """When a note exists but no schema is defined, refuse with guidance.
 
     Regression test for issue #33: when validating a single note by identifier
-    and no schema exists, the tool should return guidance instead of an empty report.
+    and no schema exists, the tool should refuse with guidance instead of an empty report.
     """
     project_path = Path(test_project.path)
 
@@ -296,12 +299,15 @@ async def test_schema_validate_identifier_no_schema_returns_guidance(
 
     await index_project()
 
-    result = await schema_validate(
-        identifier="Alice",
-        project=test_project.name,
-    )
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_validate(
+            identifier="Alice",
+            project=test_project.name,
+        )
+    result = str(refused.value)
 
-    # Should return guidance string about missing schema
+    # The refusal carries guidance about the missing schema
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
@@ -431,10 +437,10 @@ async def test_schema_validate_all_types_json(app, test_project, index_project):
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_all_types_no_schemas_returns_guidance(
+async def test_schema_validate_all_types_no_schemas_refuses_with_guidance(
     app, test_project, index_project
 ):
-    """With no arguments and no schemas defined, return guidance — not 'unknown'.
+    """With no arguments and no schemas defined, refuse with guidance — not 'unknown'.
 
     Regression test for issue #1013: schema_validate() without note_type or
     identifier reported "No Notes Found of Type 'unknown'" instead of
@@ -451,7 +457,10 @@ async def test_schema_validate_all_types_no_schemas_returns_guidance(
 
     await index_project()
 
-    result = await schema_validate(project=test_project.name)
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_validate(project=test_project.name)
+    result = str(refused.value)
 
     assert isinstance(result, str)
     assert "No Schemas Defined" in result
@@ -462,9 +471,12 @@ async def test_schema_validate_all_types_no_schemas_returns_guidance(
 @pytest.mark.asyncio
 async def test_schema_validate_all_types_no_schemas_json(app, test_project, index_project):
     """JSON output with no schemas defined returns a clear error dict."""
-    result = await schema_validate(project=test_project.name, output_format="json")
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_validate(project=test_project.name, output_format="json")
+    result = json.loads(str(refused.value))
 
-    assert result == {"error": "No schemas defined in this project"}
+    assert result == {"error": "NOT_FOUND", "message": "No schemas defined in this project"}
 
 
 # --- write_note metadata → schema workflow ---
@@ -589,8 +601,8 @@ permalink: employees/{name.lower()}
 
 
 @pytest.mark.asyncio
-async def test_schema_infer_empty_schema_returns_guidance(app, test_project, index_project):
-    """When notes exist but no fields meet the threshold, return guidance instead of data."""
+async def test_schema_infer_empty_schema_refuses_with_guidance(app, test_project, index_project):
+    """When notes exist but no fields meet the threshold, refuse with guidance instead of data."""
     project_path = Path(test_project.path)
 
     # Create notes with completely different observation categories so no field
@@ -623,12 +635,15 @@ permalink: things/{name}
 
     await index_project()
 
-    result = await schema_infer(
-        note_type="widget",
-        project=test_project.name,
-    )
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_infer(
+            note_type="widget",
+            project=test_project.name,
+        )
+    result = str(refused.value)
 
-    # Should return guidance string, not an InferenceReport
+    # The refusal carries guidance, not an InferenceReport
     assert isinstance(result, str)
     assert "No Schema Pattern Found" in result
     assert "widget" in result
@@ -639,14 +654,17 @@ permalink: things/{name}
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_no_notes_returns_guidance(app, test_project, index_project):
-    """When no notes of the requested type exist, return guidance on creating notes."""
-    result = await schema_validate(
-        note_type="employee",
-        project=test_project.name,
-    )
+async def test_schema_validate_no_notes_refuses_with_guidance(app, test_project, index_project):
+    """When no notes of the requested type exist, refuse with guidance on creating notes."""
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_validate(
+            note_type="employee",
+            project=test_project.name,
+        )
+    result = str(refused.value)
 
-    # Should return guidance about creating notes, not about missing schema
+    # The refusal is about creating notes, not about a missing schema
     assert isinstance(result, str)
     assert "No Notes Found" in result
     assert "employee" in result
@@ -655,8 +673,8 @@ async def test_schema_validate_no_notes_returns_guidance(app, test_project, inde
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_no_schema_returns_guidance(app, test_project, index_project):
-    """When notes exist but no schema is defined, return guidance on creating one."""
+async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project, index_project):
+    """When notes exist but no schema is defined, refuse with guidance on creating one."""
     project_path = Path(test_project.path)
 
     # Create person notes but no schema note
@@ -669,12 +687,15 @@ async def test_schema_validate_no_schema_returns_guidance(app, test_project, ind
 
     await index_project()
 
-    result = await schema_validate(
-        note_type="person",
-        project=test_project.name,
-    )
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_validate(
+            note_type="person",
+            project=test_project.name,
+        )
+    result = str(refused.value)
 
-    # Should return guidance string, not a ValidationReport
+    # The refusal carries guidance, not a ValidationReport
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
@@ -683,8 +704,8 @@ async def test_schema_validate_no_schema_returns_guidance(app, test_project, ind
 
 
 @pytest.mark.asyncio
-async def test_schema_diff_no_schema_returns_guidance(app, test_project, index_project):
-    """When no schema exists for the type, return guidance on creating one."""
+async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, index_project):
+    """When no schema exists for the type, refuse with guidance on creating one."""
     project_path = Path(test_project.path)
 
     # Create person notes but no schema note
@@ -696,12 +717,15 @@ async def test_schema_diff_no_schema_returns_guidance(app, test_project, index_p
 
     await index_project()
 
-    result = await schema_diff(
-        note_type="person",
-        project=test_project.name,
-    )
+    # Nothing to report is a refusal now, not a success (C11, #1813).
+    with pytest.raises(ToolError) as refused:
+        await schema_diff(
+            note_type="person",
+            project=test_project.name,
+        )
+    result = str(refused.value)
 
-    # Should return guidance string, not a DriftReport
+    # The refusal carries guidance, not a DriftReport
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
@@ -713,48 +737,39 @@ async def test_schema_diff_no_schema_returns_guidance(app, test_project, index_p
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_error_returns_guidance(app, test_project):
-    """When SchemaClient.validate raises, the tool returns a troubleshooting string."""
+async def test_schema_validate_error_propagates(app, test_project):
+    """When SchemaClient.validate raises, the error reaches the caller as a tool error."""
     mock_validate = AsyncMock(side_effect=RuntimeError("connection lost"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.validate", mock_validate):
-        result = await schema_validate(
-            note_type="person",
-            project=test_project.name,
-        )
-
-    assert isinstance(result, str)
-    assert "Schema Validation Failed" in result
-    assert "Troubleshooting" in result
+        with pytest.raises(RuntimeError, match="connection lost"):
+            await schema_validate(
+                note_type="person",
+                project=test_project.name,
+            )
 
 
 @pytest.mark.asyncio
-async def test_schema_infer_error_returns_guidance(app, test_project):
-    """When SchemaClient.infer raises, the tool returns a troubleshooting string."""
+async def test_schema_infer_error_propagates(app, test_project):
+    """When SchemaClient.infer raises, the error reaches the caller as a tool error."""
     mock_infer = AsyncMock(side_effect=RuntimeError("db unavailable"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.infer", mock_infer):
-        result = await schema_infer(
-            note_type="person",
-            project=test_project.name,
-        )
-
-    assert isinstance(result, str)
-    assert "Schema Inference Failed" in result
-    assert "Troubleshooting" in result
+        with pytest.raises(RuntimeError, match="db unavailable"):
+            await schema_infer(
+                note_type="person",
+                project=test_project.name,
+            )
 
 
 @pytest.mark.asyncio
-async def test_schema_diff_error_returns_guidance(app, test_project):
-    """When SchemaClient.diff raises, the tool returns a troubleshooting string."""
+async def test_schema_diff_error_propagates(app, test_project):
+    """When SchemaClient.diff raises, the error reaches the caller as a tool error."""
     mock_diff = AsyncMock(side_effect=RuntimeError("network error"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.diff", mock_diff):
-        result = await schema_diff(
-            note_type="person",
-            project=test_project.name,
-        )
-
-    assert isinstance(result, str)
-    assert "Schema Diff Failed" in result
-    assert "Troubleshooting" in result
+        with pytest.raises(RuntimeError, match="network error"):
+            await schema_diff(
+                note_type="person",
+                project=test_project.name,
+            )

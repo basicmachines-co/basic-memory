@@ -28,7 +28,8 @@ from basic_memory.mcp.project_context import (
     ensure_workspace_project_index,
     resolve_workspace_parameter,
 )
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.refusals import api_refusals, refusal
+from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
@@ -476,8 +477,13 @@ def _format_constrained_text(constrained_project: str) -> str:
 async def _resolve_workspace_routing(
     workspace: str | None,
     context: Context | None,
+    output_format: Literal["text", "json"],
 ) -> str | None:
-    """Resolve an optional workspace selector to the routing tenant id."""
+    """Resolve an optional workspace selector to the routing tenant id.
+
+    An unknown or ambiguous selector is an INVALID_ARGUMENTS refusal in the
+    caller's output format, naming the workspaces it could have meant.
+    """
     if workspace is None:
         return None
 
@@ -499,7 +505,10 @@ async def _resolve_workspace_routing(
     #   uses X-Workspace-ID with the tenant id as its routing authority.
     # Outcome: resolve once before the project-management request and pass only
     #   the tenant id downstream.
-    resolved_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    try:
+        resolved_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    except ValueError as error:
+        raise refusal("INVALID_ARGUMENTS", str(error), output_format=output_format) from error
     return resolved_workspace.tenant_id
 
 
@@ -585,25 +594,18 @@ async def create_memory_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: return the existing disabled response before opening a routed client.
+    # Outcome: an UNSUPPORTED refusal before opening a routed client.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
-        if output_format == "json":
-            return {
-                "name": project_name,
-                "path": project_path,
-                "is_default": False,
-                "created": False,
-                "already_exists": False,
-                "error": "PROJECT_CONSTRAINED",
-                "message": (
-                    f"Project creation disabled - MCP server is constrained to project "
-                    f"'{constrained_project}'."
-                ),
-            }
-        return f'# Error\n\nProject creation disabled - MCP server is constrained to project \'{constrained_project}\'.\nUse the CLI to create projects: `basic-memory project add "{project_name}" "{project_path}"`'
+        raise refusal(
+            "UNSUPPORTED",
+            f"Project creation disabled - MCP server is constrained to project "
+            f"'{constrained_project}'.",
+            try_instead=f'the CLI: basic-memory project add "{project_name}" "{project_path}"',
+            output_format=output_format,
+        )
 
-    workspace_id = await _resolve_workspace_routing(workspace, context)
+    workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
 
     # workspace targets a non-default cloud workspace at create time.
     # Trigger: caller passed workspace (e.g. a slug discovered via list_workspaces).
@@ -677,7 +679,10 @@ async def create_memory_project(
                 )
             return result
 
-        status_response = await project_client.create_project(project_request.model_dump())
+        # The API refuses some creates (a path inside another project, a name whose
+        # permalink collides).
+        with api_refusals(output_format):
+            status_response = await project_client.create_project(project_request.model_dump())
         from basic_memory.mcp.project_context import invalidate_project_caches
 
         await invalidate_project_caches(context)
@@ -772,7 +777,8 @@ def _format_note_file_delete_result(
 
 @mcp.tool(
     title="Delete Project",
-    tags={"projects"},
+    # Hidden unless enable_project_delete is on, like bm_project_delete.
+    tags={"projects", PROJECT_DELETE_TAG},
     annotations={
         "title": "Delete Project",
         "readOnlyHint": False,
@@ -784,8 +790,9 @@ async def delete_project(
     project_name: str,
     delete_notes: bool = False,
     workspace: str | None = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict[str, Any]:
     """Delete a Basic Memory project.
 
     Removes a project from Basic Memory's configuration and database records.
@@ -824,12 +831,18 @@ async def delete_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot delete projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: return the existing disabled message before opening a routed client.
+    # Outcome: an UNSUPPORTED refusal before opening a routed client.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
-        return f"# Error\n\nProject deletion disabled - MCP server is constrained to project '{constrained_project}'.\nUse the CLI to delete projects: `basic-memory project remove \"{project_name}\"`"
+        raise refusal(
+            "UNSUPPORTED",
+            f"Project deletion disabled - MCP server is constrained to project "
+            f"'{constrained_project}'.",
+            try_instead=f'the CLI: basic-memory project remove "{project_name}"',
+            output_format=output_format,
+        )
 
-    workspace_id = await _resolve_workspace_routing(workspace, context)
+    workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
     async with get_client(workspace=workspace_id) as client:
         if context:  # pragma: no cover
             await context.info(f"Deleting project: {project_name}")
@@ -856,8 +869,11 @@ async def delete_project(
 
         if not target_project:
             available_projects = [p.name for p in project_list.projects]
-            raise ValueError(
-                f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
+            raise refusal(
+                "NOT_FOUND",
+                f"Project '{project_name}' not found. Available projects: "
+                f"{', '.join(available_projects)}",
+                output_format=output_format,
             )
 
         # Trigger: the delete is served by a cloud backend.
@@ -870,13 +886,28 @@ async def delete_project(
         cloud_routed = _routes_to_cloud(workspace_id)
         files_deleted = delete_notes or cloud_routed
 
-        # Delete project using project external_id
-        status_response = await project_client.delete_project(
-            target_project.external_id, delete_notes=files_deleted
-        )
+        # The API refuses some deletes (the default project, for one).
+        with api_refusals(output_format):
+            status_response = await project_client.delete_project(
+                target_project.external_id, delete_notes=files_deleted
+            )
         from basic_memory.mcp.project_context import invalidate_project_caches
 
         await invalidate_project_caches(context)
+
+        # The backend's own account of what happened: a Cloud delete can be queued,
+        # and its note files are always deleted whatever delete_notes said.
+        if output_format == "json":
+            return {
+                "action": "deleted",
+                "name": target_project.name,
+                "external_id": target_project.external_id,
+                "delete_notes": files_deleted,
+                "deletion_status": status_response.deletion_status,
+                "file_delete_status": status_response.file_delete_status if files_deleted else None,
+                "job_id": status_response.job_id,
+                "message": status_response.message,
+            }
 
         result = f"✓ {status_response.message}\n\n"
 

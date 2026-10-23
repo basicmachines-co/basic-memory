@@ -1,5 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
+from dataclasses import dataclass
 from datetime import timezone
 from pathlib import PurePosixPath
 from typing import Any, Annotated, List, Union, Optional, Literal
@@ -149,6 +150,52 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
+    page_result = await recent_activity_page(
+        type=type,
+        depth=depth,
+        timeframe=timeframe,
+        page=page,
+        page_size=page_size,
+        project=project,
+        project_id=project_id,
+        output_format=output_format,
+        context=context,
+    )
+    match page_result:
+        case RecentRows(rows=rows):
+            return rows
+        case str() as text:
+            return text
+
+
+@dataclass(frozen=True, slots=True)
+class RecentRows:
+    """One page of recent activity as rows, and whether another page follows.
+
+    In discovery mode `has_more` is true when any project has another page.
+    """
+
+    rows: list[dict[str, Any]]
+    page: int
+    page_size: int
+    has_more: bool
+    # Indexing guidance for projects that were never indexed (discovery mode).
+    guidance: tuple[str, ...] = ()
+
+
+async def recent_activity_page(
+    *,
+    type: str | list[str],
+    depth: int,
+    timeframe: str,
+    page: int,
+    page_size: int,
+    project: str | None,
+    project_id: str | None,
+    output_format: Literal["text", "json"],
+    context: Context | None,
+) -> str | RecentRows:
+    """Recent activity as text, or as rows with paging for JSON callers."""
     # Validate pagination arguments before they reach the API layer,
     # where negative offset would cause a database error.
     if page < 1:
@@ -230,14 +277,17 @@ async def recent_activity(
             most_active_count = 0
             active_projects = 0
 
+            # Guidance for each project that was never indexed, kept beside the
+            # activity of the projects that were, so neither hides the other.
+            unindexed: list[str] = []
+
             # Query each project's activity
             for project_info in project_list.projects:
                 project_activity = await _get_project_activity(client, project_info, params, depth)
-                # Discovery must not hide an unindexed project in an empty summary.
                 if not project_activity.item_count:
                     guidance = await project_index_required(client, project_info)
                     if guidance is not None:
-                        return guidance
+                        unindexed.append(guidance)
                 projects_activity[project_info.name] = project_activity
 
                 # Aggregate stats
@@ -260,11 +310,24 @@ async def recent_activity(
                         most_active_count = item_count
                         most_active_project = project_info.name
 
+        # Trigger: no project has activity and some were never indexed.
+        # Why: an empty summary would read as "nothing happened" when the
+        #      unindexed projects were never searched.
+        # Outcome: the indexing guidance alone, as before.
+        if unindexed and active_projects == 0:
+            return "\n\n".join(unindexed)
+
         if output_format == "json":
             rows: list[dict[str, Any]] = []
             for project_name, project_activity in projects_activity.items():
                 rows.extend(_extract_recent_rows(project_activity.activity, project_name))
-            return rows
+            return RecentRows(
+                guidance=tuple(unindexed),
+                rows=rows,
+                page=page,
+                page_size=page_size,
+                has_more=any(activity.activity.has_more for activity in projects_activity.values()),
+            )
 
         # Build summary stats
         summary = ActivityStats(
@@ -294,6 +357,9 @@ async def recent_activity(
                 )
                 guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
 
+        # Projects never indexed are named after the activity found elsewhere.
+        for project_guidance in unindexed:
+            guidance_lines.extend(["", project_guidance])
         guidance = "\n".join(guidance_lines)
 
         # Format discovery mode output
@@ -330,7 +396,12 @@ async def recent_activity(
                     return guidance
 
             if output_format == "json":
-                return _extract_recent_rows(activity_data)
+                return RecentRows(
+                    rows=_extract_recent_rows(activity_data),
+                    page=page,
+                    page_size=page_size,
+                    has_more=activity_data.has_more,
+                )
 
             # Format project-specific mode output. Pass the external id so onboarding examples
             # route by id, not by a name that can collide across cloud workspaces.

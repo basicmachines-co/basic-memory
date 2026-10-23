@@ -34,7 +34,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.command_utils import run_schema_tool, run_with_cleanup
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import has_frontmatter, remove_frontmatter
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
@@ -1512,7 +1512,7 @@ def schema_validate(
                 note_type = target
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_validate(
                     note_type=note_type,
                     identifier=identifier,
@@ -1575,7 +1575,7 @@ def schema_infer(
         validate_routing_flags(local, cloud)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_infer(
                     note_type=note_type,
                     threshold=threshold,
@@ -1634,7 +1634,7 @@ def schema_diff(
         validate_routing_flags(local, cloud)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = run_schema_tool(
                 mcp_schema_diff(
                     note_type=note_type,
                     project=project,
