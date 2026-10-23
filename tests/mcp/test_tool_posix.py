@@ -17,6 +17,7 @@ import pytest_asyncio
 import yaml
 from fastmcp.exceptions import ToolError
 
+import basic_memory.mcp.metadata_find as metadata_find
 import basic_memory.mcp.tools.posix_tools as posix_tools
 from basic_memory import db
 from basic_memory.mcp.project_context import (
@@ -905,7 +906,7 @@ def test_project_metadata_fields(entity_metadata, fields, expected):
     # Projection takes parsed paths, not strings: the fixtures go through the
     # same parse find does, which is what makes an unwalkable path unreachable
     # here rather than a null that looks like data.
-    assert posix_tools._project_metadata_fields(entity_metadata, _paths(fields)) == expected
+    assert metadata_find.project_metadata_fields(entity_metadata, _paths(fields)) == expected
 
 
 def _paths(keys: list[str]) -> list[MetadataPath]:
@@ -1239,14 +1240,14 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
 def test_projection_metadata_preserves_indexed_defaults_without_frontmatter():
     normalized = {"title": "Plain Note", "type": "note"}
 
-    assert posix_tools._projection_metadata("# Plain Note\n\nBody", normalized) == normalized
+    assert metadata_find.projection_metadata("# Plain Note\n\nBody", normalized) == normalized
 
 
 def test_projection_metadata_preserves_indexed_defaults_for_malformed_frontmatter():
     normalized = {"title": "Malformed Note", "type": "note"}
     malformed = "---\ntags: [unterminated\n---\n# Malformed Note"
 
-    assert posix_tools._projection_metadata(malformed, normalized) == normalized
+    assert metadata_find.projection_metadata(malformed, normalized) == normalized
 
 
 @pytest.mark.asyncio
@@ -1498,7 +1499,7 @@ async def test_find_meta_fields_hydrates_hits_concurrently(
     # Import here to mirror the tool's own deferred client import.
     from basic_memory.mcp.clients import KnowledgeClient
 
-    monkeypatch.setattr(posix_tools, "_FIELD_PROJECTION_CONCURRENCY", limit)
+    monkeypatch.setattr(metadata_find, "FIELD_PROJECTION_CONCURRENCY", limit)
     original_get_entity = KnowledgeClient.get_entity
     in_flight = 0
     peak = 0
