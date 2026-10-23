@@ -252,10 +252,12 @@ class KnowledgeClient:
         """Accepted Markdown by external id, for any number of notes.
 
         Reads in batches of MAX_ACCEPTED_CONTENT_BATCH. Ids with no accepted
-        content (files that are not notes) are absent from the result.
+        content (files that are not notes) are absent from the result. Repeated
+        ids are read once: observation and relation hits share their note's id,
+        and the batch request refuses duplicates.
         """
         contents: dict[str, str] = {}
-        for chunk in batched(entity_ids, MAX_ACCEPTED_CONTENT_BATCH):
+        for chunk in batched(dict.fromkeys(entity_ids), MAX_ACCEPTED_CONTENT_BATCH):
             response = await self.get_accepted_note_contents(list(chunk))
             contents.update({item.external_id: item.content for item in response.items})
         return contents
