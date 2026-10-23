@@ -1,6 +1,6 @@
 {
   "name": "@basicmemory/pi-basic-memory",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "type": "module",
   "description": "Basic Memory package for Pi \u2014 local-first continuity so you are never starting over",
   "license": "AGPL-3.0-or-later",
