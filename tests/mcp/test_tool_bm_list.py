@@ -118,3 +118,11 @@ async def test_bm_read_returns_the_path_it_was_given(client, test_project):
 async def test_listing_outside_the_project_is_refused(client, test_project):
     with pytest.raises(ToolError, match="^OUTSIDE_PROJECT:"):
         await bm_list(path="../elsewhere", project=test_project.name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{"glob": "*.md"}, {"sort": "title_asc"}])
+async def test_project_listing_refuses_file_filters(client, test_project, arguments):
+    """'/' lists projects, which a file glob or sort cannot filter."""
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: '/' lists projects"):
+        await bm_list(path="/", **arguments)

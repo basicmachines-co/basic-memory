@@ -222,10 +222,13 @@ def test_query_terms(query, terms):
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        ({"query": "x", "identifier": "a.md", "path": "notes"}, "give one"),
-        ({"query": "x", "path": "notes", "all_projects": True}, "search one project"),
+        ({"query": "x", "identifier": "a.md", "path": "notes"}, "`identifier` and `path` each"),
+        ({"query": "x", "path": "notes", "all_projects": True}, "`path` and `all_projects` each"),
+        ({"query": "memory://a/b", "all_projects": True}, "memory:// query and `all_projects`"),
+        ({"query": "memory://a/b", "projects": ["a"]}, "memory:// query and `projects`"),
+        ({"query": "x", "lines": 1, "projects": ["a"]}, "not several"),
         ({"query": "x", "projects": ["a", "b"]}, "Give one"),
-        ({"query": "x", "projects": ["a"], "all_projects": True}, "all_projects` searches every"),
+        ({"query": "x", "projects": ["a"], "all_projects": True}, "`projects` and `all_projects`"),
         ({"query": "x", "lines": 1, "compact": True}, "give one"),
         ({"lines": 1}, "need a `query`"),
         ({"query": "a\nb", "lines": 1}, "single-line query"),
@@ -340,7 +343,7 @@ async def test_a_project_qualified_memory_url_routes_the_search(client, test_pro
 @pytest.mark.asyncio
 async def test_a_memory_url_with_a_folder_path_is_refused(client, test_project):
     """The URL names its own project; a folder could name another, so give one."""
-    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: A memory:// query"):
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: `path` and a memory:// query"):
         await bm_search(query=f"memory://{test_project.permalink}/tasks/*", path="tasks")
 
 
