@@ -162,3 +162,18 @@ async def test_an_identifier_can_be_a_title_that_looks_like_a_path(client, test_
     with pytest.raises(ToolError, match="^OUTSIDE_PROJECT:"):
         async with open_project_target("~/x", test_project.name, None):
             pass
+
+
+@pytest.mark.asyncio
+async def test_an_ambiguous_title_is_an_ambiguous_refusal(client, test_project):
+    """Two notes share the title, so neither is picked; JSON keeps the refusal shape."""
+    for directory in ("a", "b"):
+        await write_note(
+            title="Twin", directory=directory, content="# Twin", project=test_project.name
+        )
+
+    async with open_project_target("Twin", test_project.name, None, kind="identifier") as target:
+        with pytest.raises(ToolError) as refused:
+            await resolve_note(target, "Twin", output_format="json")
+
+    assert json.loads(str(refused.value))["error"] == "AMBIGUOUS"
