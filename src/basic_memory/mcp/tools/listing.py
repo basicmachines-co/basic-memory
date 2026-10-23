@@ -16,6 +16,7 @@ from basic_memory.mcp.directory_listing import format_listing_text, project_moun
 from basic_memory.mcp.note_targets import open_project_target, qualify_listing_paths
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
+    Pagination,
     DirectoryPath,
     OutputFormat,
     Page,
@@ -80,7 +81,7 @@ async def bm_list(
         text = format_listing_text(
             DirectoryListResponse.model_validate(mounts),
             heading="Projects:",
-            next_call=f"bm_list(path='/', page={page + 1}, page_size={page_size})",
+            next_call=Pagination.of(mounts).next_call("bm_list", {"path": "/"}),
         )
         note = mounts.get("note")
         return f"{text}\n\nNote: {note}" if note else text
@@ -106,16 +107,11 @@ async def bm_list(
         matching = f" matching '{glob}'" if glob else ""
         return f"No files in '{path}'{matching}."
 
-    next_arguments = [f"path={path!r}", f"page={page + 1}", f"page_size={page_size}"]
-    if glob:
-        next_arguments.append(f"glob={glob!r}")
-    if sort is not None:
-        next_arguments.append(f"sort={sort!r}")
-    if project is not None:
-        next_arguments.append(f"project={project!r}")
     matching = f" matching '{glob}'" if glob else ""
     return format_listing_text(
         DirectoryListResponse.model_validate(qualified),
         heading=f"Contents of '{path}'{matching}:",
-        next_call=f"bm_list({', '.join(next_arguments)})",
+        next_call=Pagination.of(qualified).next_call(
+            "bm_list", {"path": path, "glob": glob, "sort": sort, "project": project}
+        ),
     )

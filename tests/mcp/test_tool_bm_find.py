@@ -78,7 +78,7 @@ async def test_listing_text_continues_with_a_bm_find_call(client, test_project):
     text = await find_text(path="/", page_size=1, project=test_project.name)
 
     assert text.startswith("Files under '/':")
-    assert f"bm_find(path='/', page=2, page_size=1, project='{test_project.name}')" in text
+    assert f"bm_find(path='/', project='{test_project.name}', page=2, page_size=1)" in text
 
 
 @pytest.mark.asyncio

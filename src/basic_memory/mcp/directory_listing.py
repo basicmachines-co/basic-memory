@@ -60,11 +60,13 @@ async def project_mount_listing(
     return listing
 
 
-def format_listing_text(listing: DirectoryListResponse, *, heading: str, next_call: str) -> str:
+def format_listing_text(
+    listing: DirectoryListResponse, *, heading: str, next_call: str | None
+) -> str:
     """Render one page of a listing: directories first, then files with their metadata.
 
     `heading` names what was listed; `next_call` is the exact call that fetches the
-    next page, printed only when more pages exist.
+    next page (Pagination.next_call), None on the last page.
     """
     nodes = [node.model_dump(mode="json", exclude_none=True) for node in listing.nodes]
     output_lines = [
@@ -137,7 +139,7 @@ def format_listing_text(listing: DirectoryListResponse, *, heading: str, next_ca
             f"the last available page is {last_page}."
         )
 
-    if listing.has_more:
+    if next_call is not None:
         output_lines.extend(["", f"More results available. Call {next_call} to continue."])
 
     return "\n".join(output_lines)

@@ -78,7 +78,7 @@ async def test_text_listing_continues_with_a_bm_list_call(client, test_project):
     text = await list_text(path="notes", page_size=2, project=test_project.name)
 
     assert text.startswith("Contents of 'notes':")
-    assert f"bm_list(path='notes', page=2, page_size=2, project='{test_project.name}')" in text
+    assert f"bm_list(path='notes', project='{test_project.name}', page=2, page_size=2)" in text
 
 
 @pytest.mark.asyncio
