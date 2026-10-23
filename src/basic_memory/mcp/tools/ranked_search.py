@@ -72,6 +72,9 @@ def _parse_mode(value: Any) -> Any:
 StringList = Annotated[list[str] | None, BeforeValidator(parse_str_list)]
 
 
+DEFAULT_MAX_MATCHES = 10
+
+
 @mcp.tool(
     name="bm_search",
     title="Search notes",
@@ -137,7 +140,7 @@ async def bm_search(
     ] = None,
     max_matches: Annotated[
         int, Field(ge=1, le=100, description="Matching lines shown per note with `lines`.")
-    ] = 10,
+    ] = DEFAULT_MAX_MATCHES,
     identifier: Annotated[
         str | None,
         Field(
@@ -236,6 +239,14 @@ async def bm_search(
         raise refusal(
             "INVALID_ARGUMENTS",
             "`project` names one project; `projects` and `all_projects` name several. Give one.",
+            output_format=output_format,
+        )
+    # max_matches bounds a line scan; ranked results have no matching lines to bound.
+    if max_matches != DEFAULT_MAX_MATCHES and lines is None and identifier is None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "`max_matches` bounds matching lines; it needs `lines` or `identifier`.",
+            try_instead="add `lines`, or drop `max_matches`",
             output_format=output_format,
         )
     # Matching lines are note content, which `compact` exists to leave out.

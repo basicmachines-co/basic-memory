@@ -16,7 +16,7 @@ from basic_memory.mcp.clients import MemoryClient
 from basic_memory.mcp.note_targets import open_project_target
 from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tool_params import OutputFormat, Page, ProjectParam, Since
+from basic_memory.mcp.tool_params import OutputFormat, Page, Pagination, ProjectParam, Since
 from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
 from basic_memory.mcp.tools.build_context import (
     _compact_context_labels,
@@ -128,9 +128,24 @@ async def bm_context(
     if output_format == "text":
         # A permalink need not carry the project prefix, so the text names each
         # note's qualified file path too: the address bm_read takes in any session.
-        return _format_context_markdown(
+        text = _format_context_markdown(
             graph, target.project.name, compact=compact, with_paths=True
         )
+        next_call = Pagination(page=page, page_size=page_size, has_more=graph.has_more).next_call(
+            "bm_context",
+            {
+                "identifier": identifier,
+                "depth": depth,
+                "since": since,
+                "max_related": max_related,
+                "compact": compact or None,
+                "output_format": output_format,
+                "project": project,
+            },
+        )
+        if next_call is None:
+            return text
+        return f"{text}\n\nMore results available. Call {next_call} to continue."
     if compact:
         # The server returned no observations, so the list is dropped rather than
         # shown empty; bodies are left for an explicit bm_read.
