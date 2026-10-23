@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from fastmcp.exceptions import ToolError
 from sqlalchemy import select
 
 from basic_memory import db
@@ -482,7 +483,7 @@ async def test_create_memory_project_default_workspace_is_none(app, tmp_path_fac
 
 
 @pytest.mark.asyncio
-async def test_create_memory_project_constrained_with_workspace_returns_disabled_message(
+async def test_create_memory_project_constrained_with_workspace_refuses(
     monkeypatch, tmp_path_factory
 ):
     """A constrained MCP session rejects creation before resolving a workspace selector."""
@@ -500,15 +501,16 @@ async def test_create_memory_project_constrained_with_workspace_returns_disabled
             side_effect=RuntimeError("bad workspace"),
         ) as mock_resolve_workspace,
     ):
-        result = await create_memory_project(
-            project_name="Any Project",
-            project_path=str(project_root),
-            workspace="missing-team",
-        )
+        with pytest.raises(
+            ToolError, match="^UNSUPPORTED: Project creation disabled.*'locked-project'"
+        ):
+            await create_memory_project(
+                project_name="Any Project",
+                project_path=str(project_root),
+                workspace="missing-team",
+            )
 
     mock_resolve_workspace.assert_not_awaited()
-    assert "Project creation disabled" in result
-    assert "locked-project" in result
 
 
 @pytest.mark.asyncio
@@ -757,7 +759,7 @@ def test_format_note_file_delete_result_reports_backend_status(status, cloud_rou
 
 
 @pytest.mark.asyncio
-async def test_delete_project_constrained_with_workspace_returns_disabled_message(monkeypatch):
+async def test_delete_project_constrained_with_workspace_refuses(monkeypatch):
     """A constrained MCP session rejects deletion before resolving a workspace selector."""
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "locked-project")
 
@@ -772,11 +774,12 @@ async def test_delete_project_constrained_with_workspace_returns_disabled_messag
             side_effect=RuntimeError("bad workspace"),
         ) as mock_resolve_workspace,
     ):
-        result = await delete_project("Any Project", workspace="missing-team")
+        with pytest.raises(
+            ToolError, match="^UNSUPPORTED: Project deletion disabled.*'locked-project'"
+        ):
+            await delete_project("Any Project", workspace="missing-team")
 
     mock_resolve_workspace.assert_not_awaited()
-    assert "Project deletion disabled" in result
-    assert "locked-project" in result
 
 
 # --- Cloud merge tests ---

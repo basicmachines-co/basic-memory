@@ -9,7 +9,6 @@ from typing import Any, cast
 import pytest
 
 from basic_memory.mcp import tools
-from basic_memory.mcp.tools.projects import bm_project_with_delete
 from basic_memory.mcp.server import mcp
 
 
@@ -91,21 +90,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "project",
     ],
-    # The same tool name with the delete command; shown only with enable_project_delete.
-    "bm_project_with_delete": [
-        "command",
-        "name",
-        "path",
-        "set_default",
-        "workspace",
-        "delete_notes",
-        "since",
-        "items",
-        "page",
-        "page_size",
-        "output_format",
-        "project",
-    ],
+    "bm_project_delete": ["name", "delete_notes", "workspace"],
     "bm_schema": [
         "command",
         "note_type",
@@ -372,6 +357,8 @@ OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "ls": {"readOnlyHint": True, "destructiveHint": False},
     "man": {"readOnlyHint": True, "destructiveHint": False},
     "tail": {"readOnlyHint": True, "destructiveHint": False},
+    # Listed only when enable_project_delete is on.
+    "bm_project_delete": {"readOnlyHint": False, "destructiveHint": True},
 }
 
 EXPECTED_EDIT_NOTE_OPERATIONS = [
@@ -395,7 +382,7 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_move": tools.bm_move,
     "bm_delete": tools.bm_delete,
     "bm_project": tools.bm_project,
-    "bm_project_with_delete": bm_project_with_delete,
+    "bm_project_delete": tools.bm_project_delete,
     "bm_schema": tools.bm_schema,
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,

@@ -28,6 +28,7 @@ from basic_memory.mcp.project_context import (
     ensure_workspace_project_index,
     resolve_workspace_parameter,
 )
+from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
@@ -585,23 +586,17 @@ async def create_memory_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: return the existing disabled response before opening a routed client.
+    # Outcome: an UNSUPPORTED refusal before opening a routed client; it used to
+    #          return as a success describing the failure (#1813).
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
-        if output_format == "json":
-            return {
-                "name": project_name,
-                "path": project_path,
-                "is_default": False,
-                "created": False,
-                "already_exists": False,
-                "error": "PROJECT_CONSTRAINED",
-                "message": (
-                    f"Project creation disabled - MCP server is constrained to project "
-                    f"'{constrained_project}'."
-                ),
-            }
-        return f'# Error\n\nProject creation disabled - MCP server is constrained to project \'{constrained_project}\'.\nUse the CLI to create projects: `basic-memory project add "{project_name}" "{project_path}"`'
+        raise refusal(
+            "UNSUPPORTED",
+            f"Project creation disabled - MCP server is constrained to project "
+            f"'{constrained_project}'.",
+            try_instead=f'the CLI: basic-memory project add "{project_name}" "{project_path}"',
+            output_format=output_format,
+        )
 
     workspace_id = await _resolve_workspace_routing(workspace, context)
 
@@ -824,10 +819,16 @@ async def delete_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot delete projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: return the existing disabled message before opening a routed client.
+    # Outcome: an UNSUPPORTED refusal before opening a routed client; it used to
+    #          return as a success describing the failure (#1813).
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
-        return f"# Error\n\nProject deletion disabled - MCP server is constrained to project '{constrained_project}'.\nUse the CLI to delete projects: `basic-memory project remove \"{project_name}\"`"
+        raise refusal(
+            "UNSUPPORTED",
+            f"Project deletion disabled - MCP server is constrained to project "
+            f"'{constrained_project}'.",
+            try_instead=f'the CLI: basic-memory project remove "{project_name}"',
+        )
 
     workspace_id = await _resolve_workspace_routing(workspace, context)
     async with get_client(workspace=workspace_id) as client:

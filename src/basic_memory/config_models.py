@@ -610,7 +610,7 @@ class BasicMemoryConfig(BaseSettings):
     enable_project_delete: bool = Field(
         default=False,
         description=(
-            "Offer bm_project(command='delete') to MCP clients. Off by default, so an "
+            "Offer the bm_project_delete tool to MCP clients. Off by default, so an "
             "assistant cannot remove a project unless you turn this on. "
             "Env: BASIC_MEMORY_ENABLE_PROJECT_DELETE"
         ),

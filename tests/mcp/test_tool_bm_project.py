@@ -1,47 +1,40 @@
 """bm_project and bm_schema: one name per group, commands delegate (#1832)."""
 
-from typing import Any
-
 import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.server import lifespan, mcp, set_project_delete_visibility
-from basic_memory.mcp.tools import bm_project, bm_schema, bm_write
-from basic_memory.mcp.tools.projects import bm_project_with_delete
+from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_schema, bm_write
 
 
-async def _listed_bm_project() -> Any:
+async def _listed_names() -> set[str]:
     # The server's own listing: entering a Client would run the lifespan, which
-    # re-applies the config flag this test sets directly.
-    (tool,) = [tool for tool in await mcp.list_tools() if tool.name == "bm_project"]
-    return tool
+    # re-applies the config flag these tests set directly.
+    return {tool.name for tool in await mcp.list_tools()}
 
 
 # --- Delete is opt-in ---
 
 
 @pytest.mark.asyncio
-async def test_delete_is_hidden_by_default():
-    tool = await _listed_bm_project()
+async def test_project_delete_is_hidden_by_default():
+    names = await _listed_names()
+
+    assert "bm_project" in names
+    assert "bm_project_delete" not in names
+
+
+@pytest.mark.asyncio
+async def test_bm_project_is_never_destructive():
+    (tool,) = [tool for tool in await mcp.list_tools() if tool.name == "bm_project"]
 
     assert tool.parameters["properties"]["command"]["enum"] == ["list", "create", "recent"]
+    assert tool.annotations is not None
     assert tool.annotations.destructive_hint is False
 
 
 @pytest.mark.asyncio
-async def test_enabling_delete_swaps_in_the_destructive_variant():
-    set_project_delete_visibility(mcp, True)
-    try:
-        tool = await _listed_bm_project()
-    finally:
-        set_project_delete_visibility(mcp, False)
-
-    assert "delete" in tool.parameters["properties"]["command"]["enum"]
-    assert tool.annotations.destructive_hint is True
-
-
-@pytest.mark.asyncio
-async def test_config_flag_enables_delete_through_lifespan(config_manager):
+async def test_config_flag_lists_project_delete_through_lifespan(config_manager):
     cfg = config_manager.load_config()
     assert cfg.enable_project_delete is False
     cfg.enable_project_delete = True
@@ -49,11 +42,11 @@ async def test_config_flag_enables_delete_through_lifespan(config_manager):
 
     try:
         async with lifespan(mcp):
-            tool = await _listed_bm_project()
+            names = await _listed_names()
     finally:
         set_project_delete_visibility(mcp, False)
 
-    assert tool.annotations.destructive_hint is True
+    assert "bm_project_delete" in names
 
 
 # --- Commands ---
@@ -72,7 +65,7 @@ async def test_create_and_delete(app, tmp_path_factory):
     project_root = tmp_path_factory.mktemp("bm-project-home")
 
     created = await bm_project(command="create", name="Scratch", path=str(project_root))
-    deleted = await bm_project_with_delete(command="delete", name="Scratch")
+    deleted = await bm_project_delete(name="Scratch")
 
     assert isinstance(created, str) and created.startswith("✓")
     assert isinstance(deleted, str) and deleted.startswith("✓")
@@ -116,18 +109,13 @@ async def test_project_argument_refusals(arguments, message):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["create", "delete"])
-async def test_constrained_server_refuses_project_changes(monkeypatch, command):
+async def test_constrained_server_refuses_project_changes(monkeypatch):
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "only-this")
 
-    with pytest.raises(ToolError, match="^UNSUPPORTED: .*constrained to project 'only-this'"):
-        await bm_project_with_delete(command=command, name="x", path="/tmp/x")
-
-
-@pytest.mark.asyncio
-async def test_delete_needs_a_name():
-    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: delete needs `name`"):
-        await bm_project_with_delete(command="delete")
+    with pytest.raises(ToolError, match="^UNSUPPORTED: Project creation disabled"):
+        await bm_project(command="create", name="x", path="/tmp/x")
+    with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled"):
+        await bm_project_delete(name="x")
 
 
 # --- bm_schema ---
@@ -148,14 +136,17 @@ async def test_schema_commands_delegate(client, test_project):
     assert isinstance(inferred, dict) and inferred["note_type"] == "person"
     assert inferred["suggested_schema"]
 
-    with pytest.raises(ToolError, match="^NOT_FOUND: No schema note describes type 'person'"):
+    # The replaced tools now refuse "nothing to report" instead of returning it (C11).
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Found for 'person'"):
         await bm_schema(command="diff", note_type="person", project=test_project.name)
-    with pytest.raises(ToolError, match="^NOT_FOUND: No schema note describes type 'person'"):
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Found for 'person'"):
         await bm_schema(command="validate", note_type="person", project=test_project.name)
-    with pytest.raises(ToolError, match="^NOT_FOUND: This project has no schema notes"):
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Schemas Defined"):
         await bm_schema(command="validate", project=test_project.name)
-    with pytest.raises(ToolError, match="^NOT_FOUND: No notes of type 'robot'"):
-        await bm_schema(command="validate", note_type="robot", project=test_project.name)
+    with pytest.raises(ToolError, match='"error": "NOT_FOUND"'):
+        await bm_schema(
+            command="validate", note_type="robot", output_format="json", project=test_project.name
+        )
 
 
 PERSON_SCHEMA = (
@@ -193,12 +184,6 @@ async def test_schema_reports_once_a_schema_exists(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_infer_with_no_notes_of_the_type(client, test_project):
-    with pytest.raises(ToolError, match="^NOT_FOUND: No notes of type 'robot'"):
-        await bm_schema(command="infer", note_type="robot", project=test_project.name)
-
-
-@pytest.mark.asyncio
 async def test_infer_below_the_threshold(client, test_project):
     for name, category in (("ada", "role"), ("grace", "hobby"), ("alan", "pet")):
         await bm_write(
@@ -207,7 +192,7 @@ async def test_infer_below_the_threshold(client, test_project):
             project=test_project.name,
         )
 
-    with pytest.raises(ToolError, match="^NOT_FOUND: No field appears in 90%"):
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Pattern Found"):
         await bm_schema(
             command="infer", note_type="person", threshold=0.9, project=test_project.name
         )

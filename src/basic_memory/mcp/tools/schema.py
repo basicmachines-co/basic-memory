@@ -8,15 +8,169 @@ from typing import Any, Literal, Optional
 
 from loguru import logger
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_project_client
-from basic_memory.mcp.schema_reports import (
-    format_drift_report,
-    format_inference_report,
-    format_validation_report,
-)
+from basic_memory.mcp.refusals import refusal
+from basic_memory.mcp.tool_params import OutputFormat
 from basic_memory.mcp.server import mcp
-from basic_memory.schemas.schema import ValidationReport
+from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
+
+
+def _format_validation_report(report: ValidationReport) -> str:
+    """Render a ValidationReport as readable markdown.
+
+    Produces output the LLM can display directly instead of trying to
+    interpret raw JSON, which leads to "undefined — invalid" rendering.
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    type_label = report.note_type or "all"
+    lines.append(f"# Schema Validation: {type_label}")
+    lines.append("")
+    lines.append(
+        f"Notes: {report.total_notes} | Valid: {report.valid_count} "
+        f"| Warnings: {report.warning_count} | Errors: {report.error_count}"
+    )
+    lines.append("")
+
+    # --- Per-type breakdown (all-types mode) ---
+    if report.type_summaries:
+        lines.append("## By Type")
+        lines.append("")
+        for summary in report.type_summaries:
+            if summary.total_entities == 0:
+                lines.append(f"- **{summary.note_type}**: no notes")
+            else:
+                lines.append(
+                    f"- **{summary.note_type}**: {summary.valid_count}/{summary.total_notes} valid"
+                )
+        lines.append("")
+
+    # --- Per-note results ---
+    for r in report.results:
+        status = "valid" if r.passed else "INVALID"
+        lines.append(f"- **{r.note_identifier}** — {status}")
+        for w in r.warnings:
+            lines.append(f"  - warning: {w}")
+        for e in r.errors:
+            lines.append(f"  - error: {e}")
+
+    return "\n".join(lines)
+
+
+def _format_inference_report(report: InferenceReport) -> str:
+    """Render an InferenceReport as readable markdown.
+
+    Without this formatter the LLM receives raw JSON and renders
+    field names as "undefined".
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    lines.append(f"# Schema Inference: {report.note_type}")
+    lines.append("")
+    lines.append(f"Notes analyzed: {report.notes_analyzed}")
+    lines.append("")
+
+    # --- Suggested schema YAML ---
+    if report.suggested_schema:
+        lines.append("## Suggested Schema")
+        lines.append("")
+        lines.append("```yaml")
+        lines.append("---")
+        lines.append(f"title: {report.note_type.title()}")
+        lines.append("type: schema")
+        lines.append(f"entity: {report.note_type}")
+        lines.append("version: 1")
+        lines.append("schema:")
+        for field_name, field_def in report.suggested_schema.items():
+            lines.append(f"  {field_name}: {field_def}")
+        lines.append("---")
+        lines.append("```")
+        lines.append("")
+
+    # --- Field frequency table ---
+    if report.field_frequencies:
+        lines.append("## Field Frequencies")
+        lines.append("")
+        for f in report.field_frequencies:
+            pct = f"{f.percentage:.0%}"
+            req_marker = "required" if f.name in report.suggested_required else "optional"
+            samples = ", ".join(f.sample_values[:3]) if f.sample_values else ""
+            sample_str = f" (e.g. {samples})" if samples else ""
+            lines.append(
+                f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total}) "
+                f"[{req_marker}]{sample_str}"
+            )
+        lines.append("")
+
+    # --- Excluded fields ---
+    if report.excluded:
+        lines.append("## Excluded (below threshold)")
+        lines.append("")
+        for name in report.excluded:
+            lines.append(f"- {name}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_drift_report(report: DriftReport) -> str:
+    """Render a DriftReport as readable markdown.
+
+    Without this formatter the LLM receives raw JSON and renders
+    field names as "undefined".
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    lines.append(f"# Schema Drift: {report.note_type}")
+    lines.append("")
+
+    has_drift = report.new_fields or report.dropped_fields or report.cardinality_changes
+
+    if not has_drift:
+        lines.append("No drift detected — schema matches actual usage.")
+        return "\n".join(lines)
+
+    # --- New fields ---
+    if report.new_fields:
+        lines.append("## New Fields (in notes but not in schema)")
+        lines.append("")
+        for f in report.new_fields:
+            pct = f"{f.percentage:.0%}"
+            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total})")
+        lines.append("")
+
+    # --- Dropped fields ---
+    if report.dropped_fields:
+        lines.append("## Dropped Fields (in schema but rare in notes)")
+        lines.append("")
+        for f in report.dropped_fields:
+            pct = f"{f.percentage:.0%}"
+            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total})")
+        lines.append("")
+
+    # --- Cardinality changes ---
+    if report.cardinality_changes:
+        lines.append("## Cardinality Changes")
+        lines.append("")
+        for change in report.cardinality_changes:
+            lines.append(f"- {change}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _nothing_to_report(output_format: OutputFormat, message: str, guidance: str) -> ToolError:
+    """A NOT_FOUND refusal: the short message in JSON, the full guidance as text (C11).
+
+    These cases used to return as successful results describing a failure (#1813).
+    """
+    text = message if output_format == "json" else guidance
+    return refusal("NOT_FOUND", text, output_format=output_format)
 
 
 def _no_notes_guidance(note_type: str, tool_name: str) -> str:
@@ -170,71 +324,63 @@ async def schema_validate(
             f"note_type={note_type} identifier={identifier}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
-            result = await schema_client.validate(
-                note_type=note_type,
-                identifier=identifier,
-            )
+        schema_client = SchemaClient(client, active_project.external_id)
+        result = await schema_client.validate(
+            note_type=note_type,
+            identifier=identifier,
+        )
 
-            logger.debug(
-                f"MCP tool response: tool=schema_validate project={active_project.name} "
-                f"total={result.total_notes} valid={result.valid_count} "
-                f"warnings={result.warning_count} errors={result.error_count}"
-            )
+        logger.debug(
+            f"MCP tool response: tool=schema_validate project={active_project.name} "
+            f"total={result.total_notes} valid={result.valid_count} "
+            f"warnings={result.warning_count} errors={result.error_count}"
+        )
 
-            # --- All-types mode ---
-            # Trigger: called with neither identifier nor note_type (#1013)
-            # Why: an empty report here means "no schemas defined", not
-            #   "no notes of type 'unknown'" — the guards below would mislead
-            # Outcome: per-type summary, or guidance for defining a first schema
-            if note_type is None and identifier is None:
-                if not result.type_summaries:
-                    if output_format == "json":
-                        return {"error": "No schemas defined in this project"}
-                    return _no_schemas_defined_guidance("schema_validate")
-                if output_format == "json":
-                    return result.model_dump(mode="json", exclude_none=True)
-                return format_validation_report(result)
-
-            # --- No notes guard ---
-            # Trigger: no entities of this type exist in the project
-            # Why: can't validate notes that don't exist yet
-            # Outcome: return guidance on creating notes of this type
-            effective_type = note_type or result.note_type or "unknown"
-            if result.total_entities == 0:
-                if output_format == "json":
-                    return {"error": f"No notes found of type '{effective_type}'"}
-                return _no_notes_guidance(effective_type, "schema_validate")
-
-            # --- No schema guard ---
-            # Trigger: entities exist but none were validated (no schema found)
-            # Why: notes of this type exist but no schema was found, so none were validated
-            # Outcome: return guidance on how to create a schema
-            if result.total_notes == 0:
-                if output_format == "json":
-                    return {"error": f"No schema found for type '{effective_type}'"}
-                return _no_schema_guidance(effective_type, "schema_validate")
-
+        # --- All-types mode ---
+        # Trigger: called with neither identifier nor note_type (#1013)
+        # Why: an empty report here means "no schemas defined", not
+        #   "no notes of type 'unknown'" — the guards below would mislead
+        # Outcome: per-type summary, or guidance for defining a first schema
+        if note_type is None and identifier is None:
+            if not result.type_summaries:
+                raise _nothing_to_report(
+                    output_format,
+                    "No schemas defined in this project",
+                    _no_schemas_defined_guidance("schema_validate"),
+                )
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
+            return _format_validation_report(result)
 
-            return format_validation_report(result)
-
-        except Exception as e:
-            logger.error(f"Schema validation failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema validation failed: {e}"}
-            return (
-                f"# Schema Validation Failed\n\n"
-                f"Error validating schemas: {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure schema notes exist (type: schema) for the target note type\n"
-                f"2. Check that notes have the correct type in frontmatter\n"
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
+        # --- No notes guard ---
+        # Trigger: no entities of this type exist in the project
+        # Why: can't validate notes that don't exist yet
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type
+        effective_type = note_type or result.note_type or "unknown"
+        if result.total_entities == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{effective_type}'",
+                _no_notes_guidance(effective_type, "schema_validate"),
             )
+
+        # --- No schema guard ---
+        # Trigger: entities exist but none were validated (no schema found)
+        # Why: notes of this type exist but no schema was found, so none were validated
+        # Outcome: a NOT_FOUND refusal with guidance on how to create a schema
+        if result.total_notes == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema found for type '{effective_type}'",
+                _no_schema_guidance(effective_type, "schema_validate"),
+            )
+
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
+
+        return _format_validation_report(result)
 
 
 @mcp.tool(
@@ -306,66 +452,47 @@ async def schema_infer(
             f"note_type={note_type} threshold={threshold}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
-            result = await schema_client.infer(note_type, threshold=threshold)
+        schema_client = SchemaClient(client, active_project.external_id)
+        result = await schema_client.infer(note_type, threshold=threshold)
 
-            logger.debug(
-                f"MCP tool response: tool=schema_infer project={active_project.name} "
-                f"note_type={note_type} notes_analyzed={result.notes_analyzed} "
-                f"required={len(result.suggested_required)} "
-                f"optional={len(result.suggested_optional)}"
+        logger.debug(
+            f"MCP tool response: tool=schema_infer project={active_project.name} "
+            f"note_type={note_type} notes_analyzed={result.notes_analyzed} "
+            f"required={len(result.suggested_required)} "
+            f"optional={len(result.suggested_optional)}"
+        )
+
+        # --- Empty schema guard ---
+        # Trigger: notes were analyzed but no fields met the threshold
+        # Why: returning hundreds of excluded fields overwhelms the LLM context
+        # Outcome: a NOT_FOUND refusal with guidance instead of a massive empty result
+        if result.notes_analyzed > 0 and not result.suggested_schema:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema pattern found for '{note_type}' (threshold: {threshold:.0%})",
+                f"# No Schema Pattern Found\n\n"
+                f"Analyzed {result.notes_analyzed} notes of type '{note_type}', "
+                f"but no observation or relation appeared in enough notes to suggest "
+                f"a schema (threshold: {threshold:.0%}).\n\n"
+                f"This usually means '{note_type}' is too broad — the notes don't "
+                f"share a consistent structure.\n\n"
+                f"## Suggestions\n"
+                f"1. **Use a more specific type** — try `search_notes` with "
+                f"`note_types` filter to see what types exist\n"
+                f"2. **Lower the threshold** — "
+                f'`schema_infer("{note_type}", threshold=0.1)` to include '
+                f"rarer fields\n"
+                f"3. **Create typed notes** — use `write_note` with a specific "
+                f'`note_type` (e.g., "person", "meeting") to build consistent '
+                f"structure\n",
             )
 
-            # --- Empty schema guard ---
-            # Trigger: notes were analyzed but no fields met the threshold
-            # Why: returning hundreds of excluded fields overwhelms the LLM context
-            # Outcome: return actionable guidance instead of a massive empty result
-            if result.notes_analyzed > 0 and not result.suggested_schema:
-                if output_format == "json":
-                    return {
-                        "error": (
-                            f"No schema pattern found for '{note_type}' "
-                            f"(threshold: {threshold:.0%})"
-                        )
-                    }
-                return (
-                    f"# No Schema Pattern Found\n\n"
-                    f"Analyzed {result.notes_analyzed} notes of type '{note_type}', "
-                    f"but no observation or relation appeared in enough notes to suggest "
-                    f"a schema (threshold: {threshold:.0%}).\n\n"
-                    f"This usually means '{note_type}' is too broad — the notes don't "
-                    f"share a consistent structure.\n\n"
-                    f"## Suggestions\n"
-                    f"1. **Use a more specific type** — try `search_notes` with "
-                    f"`note_types` filter to see what types exist\n"
-                    f"2. **Lower the threshold** — "
-                    f'`schema_infer("{note_type}", threshold=0.1)` to include '
-                    f"rarer fields\n"
-                    f"3. **Create typed notes** — use `write_note` with a specific "
-                    f'`note_type` (e.g., "person", "meeting") to build consistent '
-                    f"structure\n"
-                )
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
 
-            if output_format == "json":
-                return result.model_dump(mode="json", exclude_none=True)
-
-            return format_inference_report(result)
-
-        except Exception as e:
-            logger.error(f"Schema inference failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema inference failed: {e}"}
-            return (
-                f"# Schema Inference Failed\n\n"
-                f"Error inferring schema for type '{note_type}': {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure notes of type '{note_type}' exist in the project\n"
-                f'2. Try searching: `search_notes("{note_type}", note_types=["{note_type}"])`\n'
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
-            )
+        return _format_inference_report(result)
 
 
 @mcp.tool(
@@ -430,43 +557,31 @@ async def schema_diff(
             f"MCP tool call tool=schema_diff project={active_project.name} note_type={note_type}"
         )
 
-        try:
-            from basic_memory.mcp.clients.schema import SchemaClient
+        from basic_memory.mcp.clients.schema import SchemaClient
 
-            schema_client = SchemaClient(client, active_project.external_id)
-            result = await schema_client.diff(note_type)
+        schema_client = SchemaClient(client, active_project.external_id)
+        result = await schema_client.diff(note_type)
 
-            logger.debug(
-                f"MCP tool response: tool=schema_diff project={active_project.name} "
-                f"note_type={note_type} schema_found={result.schema_found} "
-                f"new_fields={len(result.new_fields)} "
-                f"dropped_fields={len(result.dropped_fields)} "
-                f"cardinality_changes={len(result.cardinality_changes)}"
+        logger.debug(
+            f"MCP tool response: tool=schema_diff project={active_project.name} "
+            f"note_type={note_type} schema_found={result.schema_found} "
+            f"new_fields={len(result.new_fields)} "
+            f"dropped_fields={len(result.dropped_fields)} "
+            f"cardinality_changes={len(result.cardinality_changes)}"
+        )
+
+        # --- No schema guard ---
+        # Trigger: API reports no schema was found for this type
+        # Why: diff requires a schema to compare against
+        # Outcome: a NOT_FOUND refusal with guidance on how to create a schema
+        if not result.schema_found:
+            raise _nothing_to_report(
+                output_format,
+                f"No schema found for type '{note_type}'",
+                _no_schema_guidance(note_type, "schema_diff"),
             )
 
-            # --- No schema guard ---
-            # Trigger: API reports no schema was found for this type
-            # Why: diff requires a schema to compare against
-            # Outcome: return guidance on how to create a schema
-            if not result.schema_found:
-                if output_format == "json":
-                    return {"error": f"No schema found for type '{note_type}'"}
-                return _no_schema_guidance(note_type, "schema_diff")
+        if output_format == "json":
+            return result.model_dump(mode="json", exclude_none=True)
 
-            if output_format == "json":
-                return result.model_dump(mode="json", exclude_none=True)
-
-            return format_drift_report(result)
-
-        except Exception as e:
-            logger.error(f"Schema diff failed: {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {"error": f"Schema diff failed: {e}"}
-            return (
-                f"# Schema Diff Failed\n\n"
-                f"Error detecting drift for type '{note_type}': {e}\n\n"
-                f"## Troubleshooting\n"
-                f"1. Ensure a schema note exists for type '{note_type}'\n"
-                f"2. Ensure notes of type '{note_type}' exist in the project\n"
-                f"3. Verify the project has been indexed: `basic-memory status`\n"
-            )
+        return _format_drift_report(result)

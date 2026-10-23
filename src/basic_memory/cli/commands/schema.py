@@ -9,6 +9,7 @@ with human-friendly formatting.
 """
 
 import json
+from collections.abc import Coroutine
 from typing import Any, Annotated, Optional
 
 import typer
@@ -166,6 +167,23 @@ def _render_diff_output(data: dict[str, Any]) -> None:
 # --- Commands ---
 
 
+def _run_schema_tool(call: Coroutine[Any, Any, Any]) -> Any:
+    """Run a schema tool; nothing to report keeps the CLI's {"error": message} result.
+
+    The MCP tools refuse "no schemas yet" and "no notes of this type" as NOT_FOUND
+    (#1813). For the CLI that is not a failure: the command prints the message and
+    exits 0, as it always has.
+    """
+    from basic_memory.mcp.refusals import Refusal
+
+    try:
+        return run_with_cleanup(call)
+    except Refusal as refused:
+        if refused.code != "NOT_FOUND":
+            raise
+        return {"error": refused.message}
+
+
 @schema_app.command()
 def validate(
     target: Annotated[
@@ -209,7 +227,7 @@ def validate(
                 note_type = target
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = _run_schema_tool(
                 mcp_schema_validate(
                     note_type=note_type,
                     identifier=identifier,
@@ -287,7 +305,7 @@ def infer(
         project_name = _resolve_project_name(project)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = _run_schema_tool(
                 mcp_schema_infer(
                     note_type=note_type,
                     threshold=threshold,
@@ -370,7 +388,7 @@ def diff(
         project_name = _resolve_project_name(project)
 
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
+            result = _run_schema_tool(
                 mcp_schema_diff(
                     note_type=note_type,
                     project=project_name,
