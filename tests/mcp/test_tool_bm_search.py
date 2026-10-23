@@ -259,3 +259,26 @@ async def test_identifier_text_shows_the_note_lines(client, test_project):
 
     assert ": Rollback is manual." in text
     assert "to continue" not in text
+
+
+@pytest.mark.asyncio
+async def test_lines_for_several_observations_of_one_note(client, test_project):
+    """Observation hits share their note's id; the content batch reads it once."""
+    await write_note(
+        title="Runbook",
+        directory="ops",
+        content="# Runbook\n\n- [step] deploy the canary\n- [step] deploy the fleet",
+        project=test_project.name,
+    )
+
+    payload = await search_json(
+        query="deploy",
+        mode="text",
+        items=["observation"],
+        lines=0,
+        path="ops",
+        project=test_project.name,
+    )
+
+    assert len(payload["results"]) == 2
+    assert all(row["file_path"] == "ops/Runbook.md" for row in payload["results"])
