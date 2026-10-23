@@ -292,8 +292,24 @@ async def test_similar_notes_are_listed_with_bm_verbs(client, test_project, monk
     )
 
     assert "## Similar existing notes" in text
-    assert "bm_edit(identifier='notes/old-plan'" in text
+    assert "bm_edit(identifier='notes/o.md'" in text
+    assert "bm_delete(identifier='notes/new.md')" in text
     assert payload["similar_notes"][0]["title"] == "Old Plan"
+
+
+@pytest.mark.asyncio
+async def test_similar_note_calls_reach_the_routed_project(client, test_project, monkeypatch):
+    async def neighbors(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
+        return [SimilarNote(title="Old Plan", permalink="notes/old-plan", file_path="notes/o.md")]
+
+    monkeypatch.setattr(write_module, "find_similar_notes", neighbors)
+    prefix = test_project.permalink
+    text = await write_text(identifier=f"{prefix}/notes/new.md", content="Body")
+    payload = await write_json(identifier=f"{prefix}/notes/newer.md", content="Body")
+
+    assert f"bm_edit(identifier='{prefix}/notes/o.md'" in text
+    assert f"bm_delete(identifier='{prefix}/notes/new.md')" in text
+    assert payload["similar_notes"][0]["file_path"] == f"{prefix}/notes/o.md"
 
 
 @pytest.mark.asyncio

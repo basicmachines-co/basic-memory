@@ -274,11 +274,16 @@ async def bm_write(
             case _:  # pragma: no cover
                 assert_never(outcome)
 
-        similar_notes = (
-            await _similar_notes(target, knowledge_client, written, content)
-            if action == "created"
-            else []
-        )
+        # File paths, qualified like the request, so each one round-trips to the
+        # project the write addressed.
+        similar_notes = [
+            dataclasses.replace(similar, file_path=target.paths.path(similar.file_path))
+            for similar in (
+                await _similar_notes(target, knowledge_client, written, content)
+                if action == "created"
+                else []
+            )
+        ]
 
     # Trigger: the API wrote into an existing folder's spelling.
     # Why: the caller should learn the real path rather than keep using its guess.
@@ -425,14 +430,14 @@ def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
     """The text result: what was written, where, and the checksum to pass back."""
     lines = change.text_lines()
     if similar_notes:
-        new_note = change.permalink or change.file_path
         lines.append(
             format_similar_notes_section(
                 similar_notes,
                 same_topic=lambda closest: (
                     f"`bm_edit(identifier='{closest}', command='append', content='...')`, "
-                    f"then `bm_delete(identifier='{new_note}')`"
+                    f"then `bm_delete(identifier='{change.file_path}')`"
                 ),
+                reference=lambda note: note.file_path,
             )
         )
     return "\n".join(lines)

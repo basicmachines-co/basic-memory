@@ -126,6 +126,19 @@ async def test_project_qualified_destination(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_destination_prefix_matches_any_spelling_of_the_project(client, test_project):
+    """'TEST-PROJECT/archive/' names the same project as 'test-project/...'."""
+    await _note(test_project.name)
+    prefix = test_project.permalink
+
+    result = await move_json(
+        identifier=f"{prefix}/notes/plan.md", destination=f"{prefix.upper()}/archive/"
+    )
+
+    assert result["file_path"] == f"{prefix}/archive/plan.md"
+
+
+@pytest.mark.asyncio
 async def test_expected_checksum_guards_the_move(client, test_project):
     written = await _note(test_project.name)
 

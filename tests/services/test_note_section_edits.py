@@ -106,3 +106,28 @@ def test_prepend_leaves_a_blank_line_before_a_heading():
     )
     # A body that opens with text keeps the existing single-newline join.
     assert apply_edit_operation("body", "prepend", "- item") == "- item\nbody"
+
+
+# --- Line terminators ---
+
+
+def test_lone_carriage_returns_address_the_same_lines_as_the_scanner():
+    """A lone \\r ends a line for the scanner, so the edit must split there too."""
+    note = "## A\rold\r## B\rkeep"
+
+    assert replace_section_content(note, "A", "new") == "## A\rnew\r## B\rkeep"
+    assert insert_relative_to_section(note, "B", "first", "after") == (
+        "## A\rold\r## B\rfirst\r\rkeep"
+    )
+
+
+def test_crlf_lines_outside_the_edit_keep_their_bytes():
+    note = "## A\r\nold\r\n## B\r\nkeep\r\n"
+
+    assert replace_section_content(note, "A", "new") == "## A\r\nnew\r\n## B\r\nkeep\r\n"
+
+
+def test_an_edit_at_the_end_keeps_the_final_newline_state():
+    assert replace_section_content("## A\nold", "A", "new") == "## A\nnew"
+    assert replace_section_content("## A\nold\n", "A", "new") == "## A\nnew\n"
+    assert insert_relative_to_section("## A", "A", "first", "after") == "## A\nfirst"

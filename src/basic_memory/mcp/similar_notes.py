@@ -203,8 +203,15 @@ def probe_declined_by_server(error: BaseException) -> bool:
     return False
 
 
+def _permalink_or_path(note: SimilarNote) -> str:
+    return note.permalink or note.file_path
+
+
 def format_similar_notes_section(
-    similar_notes: Sequence[SimilarNote], *, same_topic: Callable[[str], str]
+    similar_notes: Sequence[SimilarNote],
+    *,
+    same_topic: Callable[[str], str],
+    reference: Callable[[SimilarNote], str] = _permalink_or_path,
 ) -> str:
     """Render the advisory as a question with the ways out spelled out.
 
@@ -213,16 +220,17 @@ def format_similar_notes_section(
     signal does not have. Ranking is the useful part.
 
     `same_topic` renders the "merge into the closest note" calls for the closest note's
-    reference, in the calling tool's own vocabulary (write_note or bm_write).
+    reference, in the calling tool's own vocabulary; `reference` picks how a note is
+    named, its permalink by default.
     """
     closest = similar_notes[0]
-    closest_ref = closest.permalink or closest.file_path
+    closest_ref = reference(closest)
     lines = [
         "",
         "## Similar existing notes",
         "This note looks similar to notes that already exist. "
         "Did you mean to write to one of these?",
-        *(f"- {note.title} (`{note.permalink or note.file_path}`)" for note in similar_notes),
+        *(f"- {note.title} (`{reference(note)}`)" for note in similar_notes),
         "",
         "| If it is... | Then |",
         "|---|---|",

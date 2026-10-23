@@ -144,10 +144,16 @@ def _project_relative_destination(
     relative = PureWindowsPath(memory_url_path(destination)).as_posix().lstrip("/")
     if relative in {"", "."}:
         relative = ""
-    if target.route.stripped and target.route.project is not None:
-        prefix = f"{generate_permalink(target.route.project)}/"
-        if relative.startswith(prefix):
-            relative = relative.removeprefix(prefix)
+    # The first segment names the project when it normalizes the way routing
+    # does, so 'My Research/archive/' and 'my-research/archive/' both qualify.
+    first, separator, rest = relative.partition("/")
+    if (
+        target.route.stripped
+        and target.route.project is not None
+        and separator
+        and generate_permalink(first) == generate_permalink(target.route.project)
+    ):
+        relative = rest
     if not validate_project_path(
         relative.rstrip("/"), local_project_path(target.client, target.project)
     ):

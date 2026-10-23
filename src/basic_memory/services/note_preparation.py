@@ -575,8 +575,42 @@ def _fenced_code_line_flags(lines: list[str]) -> list[bool]:
     return flags
 
 
+# The Markdown scanner's line terminators. Section edits split on the same rule,
+# so the scanner's line positions address the same lines.
+_LINE_TERMINATOR = re.compile(r"\r\n|\r|\n")
+_LINE_WITH_END = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+\Z")
+
+
+def _lines_keeping_ends(text: str) -> list[str]:
+    """Split a document into lines that keep their own terminators.
+
+    A trailing terminator adds no extra line, matching the scanner's line count,
+    and joining the lines with "" gives the document back byte for byte.
+    """
+    return _LINE_WITH_END.findall(text)
+
+
+def _splice_lines(text: str, start: int, end: int, inserted: list[str]) -> str:
+    """Replace lines [start, end) of `text` with `inserted` (lines without terminators).
+
+    Untouched lines keep their bytes. Inserted lines take the document's own line
+    ending, an edit at the end keeps whether the document ended with a newline,
+    and a line that had no terminator gets one before text follows it.
+    """
+    lines = _lines_keeping_ends(text)
+    first_ending = _LINE_TERMINATOR.search(text)
+    newline = first_ending.group(0) if first_ending else "\n"
+    head, tail = lines[:start], lines[end:]
+    body = [line + newline for line in inserted]
+    if body and head and not _LINE_TERMINATOR.search(head[-1]):
+        head[-1] += newline
+    if body and not tail and lines and not _LINE_TERMINATOR.search(lines[-1]):
+        body[-1] = body[-1].removesuffix(newline)
+    return "".join([*head, *body, *tail])
+
+
 def _locate_edit_section(current_content: str, section: str) -> SectionSpan:
-    """Resolve an edit's section with the selector reads use (SPEC-35.2).
+    """Resolve an edit's section with the selector reads use.
 
     "Decisions" matches that heading at any level, "Auth/Decisions" one under
     "Auth", and "Decisions[1]" the second of two; "## Decisions" still works.
@@ -618,23 +652,23 @@ def replace_section_content(
     new_content: str,
     replace_subsections: bool = True,
 ) -> str:
-    lines = current_content.split("\n")
+    lines = _lines_keeping_ends(current_content)
     span = _locate_edit_section(current_content, section_header)
     end = span.end if replace_subsections else span.subsections_start
-    replacement = _trim_blank_edges(new_content.split("\n"))
+    replacement = _trim_blank_edges(_LINE_TERMINATOR.split(new_content))
     # Models often send the heading back with its new body; the heading stays once.
     if replacement and _repeats_heading(replacement[0], span):
         replacement = _trim_blank_edges(replacement[1:])
     # Trigger: the replaced span opened or closed with a blank line.
     # Why: the blank line under a heading and the one before the next heading are
-    #      the section's layout, not its content; dropping them glued a table to
-    #      its heading (#1815).
+    #      the section's layout, not its content; dropping them glues a table to
+    #      its heading.
     # Outcome: the replacement is trimmed and the original spacing is kept.
     replaced = lines[span.body_start : end]
     leading = [""] if replaced and not replaced[0].strip() else []
     trailing = [""] if len(replaced) > 1 and not replaced[-1].strip() else []
     body = [*leading, *replacement, *trailing] if replacement else leading
-    return "\n".join([*lines[: span.body_start], *body, *lines[end:]])
+    return _splice_lines(current_content, span.body_start, end, body)
 
 
 # A Markdown list item line: a bullet (-, *, +) or an ordered marker (1. or 1)).
@@ -647,34 +681,35 @@ def insert_relative_to_section(
     new_content: str,
     position: str,
 ) -> str:
-    lines = current_content.split("\n")
+    lines = _lines_keeping_ends(current_content)
     span = _locate_edit_section(current_content, section_header)
-    insert_lines = new_content.rstrip("\n").split("\n")
+    insert_lines = _LINE_TERMINATOR.split(new_content.rstrip("\r\n"))
     if position == "before":
         before = lines[: span.heading_start]
         if before and before[-1].strip():
             insert_lines = ["", *insert_lines]
-        return "\n".join([*before, *insert_lines, "", *lines[span.heading_start :]])
-    heading = lines[: span.body_start]
+        return _splice_lines(
+            current_content, span.heading_start, span.heading_start, [*insert_lines, ""]
+        )
     after = lines[span.body_start :]
     spacer = len(after) - len(list(dropwhile(lambda line: not line.strip(), after)))
     first_content = after[spacer] if spacer < len(after) else None
     # Trigger: a list item is inserted and the section opens with a list, either
     #   right under the heading or after the conventional blank line.
-    # Why: a blank line between the inserted item and the list splits it in two
-    #   (#1720).
+    # Why: a blank line between the inserted item and the list splits it in two.
     # Outcome: the item joins the list tightly, below any heading spacer.
     if (
         first_content is not None
         and _LIST_ITEM_LINE.match(insert_lines[-1])
         and _LIST_ITEM_LINE.match(first_content)
     ):
-        return "\n".join([*heading, *after[:spacer], *insert_lines, *after[spacer:]])
+        at = span.body_start + spacer
+        return _splice_lines(current_content, at, at, insert_lines)
     # Anything else keeps a blank line, so an inserted paragraph never runs into
     # the section's first paragraph.
     if after and after[0].strip():
         insert_lines.append("")
-    return "\n".join([*heading, *insert_lines, *after])
+    return _splice_lines(current_content, span.body_start, span.body_start, insert_lines)
 
 
 def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
