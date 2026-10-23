@@ -101,7 +101,9 @@ async def test_fanout_query_hint(monkeypatch, case: str, output_format: Literal[
         time_kind=None,
         context=None,
     )
-    if isinstance(result, str):
-        assert ("shorter word" in result) == (case == "empty")
+    assert isinstance(result, search.MultiProjectRan | search.MultiProjectFailed)
+    rendered = result.rendered
+    if isinstance(rendered, str):
+        assert ("shorter word" in rendered) == (case == "empty")
     else:
-        assert (result.get("query_hint") is not None) == (case == "empty")
+        assert (rendered.get("query_hint") is not None) == (case == "empty")

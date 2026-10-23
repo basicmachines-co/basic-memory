@@ -11,7 +11,9 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools import bm_search, write_note
+from basic_memory.mcp.tools import ranked_search as ranked_search_module
 from basic_memory.mcp.tools.ranked_search import _query_terms
+from basic_memory.mcp.tools.search import MultiProjectFailed, MultiProjectNotIndexed
 
 
 async def search_text(**arguments: Any) -> str:
@@ -230,6 +232,11 @@ def test_query_terms(query, terms):
         ),
         ({"query": "x", "valid_at": "not-a-date"}, "Invalid valid-time filter"),
         ({}, "Nothing to search for"),
+        (
+            {"query": "x", "identifier": "a.md", "filters": {"status": "active"}},
+            "filters cannot apply",
+        ),
+        ({"query": "x", "identifier": "a.md", "mode": "text", "compact": True}, "mode, compact"),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, message):
@@ -291,3 +298,26 @@ async def test_empty_search_across_projects_is_refused(client, test_project):
         await bm_search(all_projects=True)
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
         await bm_search(projects=[test_project.name], output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_ran_nowhere_is_an_error(client, test_project, monkeypatch):
+    """Every database failing is UNAVAILABLE, not an empty successful search."""
+
+    async def ran_nowhere(**_kwargs: Any) -> MultiProjectFailed:
+        return MultiProjectFailed(reason="local: database is locked", rendered="# Search Failed")
+
+    monkeypatch.setattr(ranked_search_module, "_search_all_projects", ran_nowhere)
+    with pytest.raises(ToolError, match='"error": "UNAVAILABLE"'):
+        await bm_search(query="deploy", all_projects=True, output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_unindexed_projects_keep_the_json_shape(client, test_project, monkeypatch):
+    async def not_indexed(**_kwargs: Any) -> MultiProjectNotIndexed:
+        return MultiProjectNotIndexed(guidance="Index the project first.")
+
+    monkeypatch.setattr(ranked_search_module, "_search_all_projects", not_indexed)
+    payload = await search_json(query="deploy", all_projects=True)
+
+    assert payload == {"results": [], "guidance": "Index the project first."}
