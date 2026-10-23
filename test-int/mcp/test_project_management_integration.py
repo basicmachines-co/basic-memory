@@ -123,49 +123,78 @@ async def test_create_project_with_default_flag(mcp_server, app, test_project, t
 
 @pytest.mark.asyncio
 async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_path):
-    """Test creating a project with duplicate name is idempotent."""
+    """Same name is idempotent only when the path is the same directory."""
+
+    projects = tmp_path.parent / (tmp_path.name + "-projects")
+    original_path = str(projects / "project-duplicate-test-1")
+    other_path = str(projects / "project-duplicate-test-2")
 
     async with Client(mcp_server) as client:
-        # First create a project
         await client.call_tool(
             "create_memory_project",
             {
                 "project_name": "duplicate-test",
-                "project_path": str(
-                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-1"
-                ),
+                "project_path": original_path,
             },
         )
 
-        # Second create with same name should succeed idempotently
-        second_result = await client.call_tool(
+        mismatch = await client.call_tool(
             "create_memory_project",
             {
                 "project_name": "duplicate-test",
-                "project_path": str(
-                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-2"
-                ),
+                "project_path": other_path,
             },
         )
-        second_text = second_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "already exists" in second_text.lower()
-        assert "duplicate-test" in second_text
+        mismatch_text = mismatch.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Error" in mismatch_text
+        assert "different path" in mismatch_text
+        assert "Existing:" in mismatch_text
+        assert "Requested:" in mismatch_text
+        assert original_path in mismatch_text
+        assert other_path in mismatch_text
+        assert "✓" not in mismatch_text
 
-        # JSON mode should explicitly report already_exists=true
-        second_json = await client.call_tool(
+        mismatch_json = await client.call_tool(
             "create_memory_project",
             {
                 "project_name": "duplicate-test",
-                "project_path": str(
-                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-3"
-                ),
+                "project_path": other_path,
                 "output_format": "json",
             },
         )
-        second_json_text = second_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        mismatch_json_text = mismatch_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "PATH_MISMATCH" in mismatch_json_text
+        assert original_path in mismatch_json_text
+        assert other_path in mismatch_json_text
         assert (
-            '"already_exists":true' in second_json_text
-            or '"already_exists": true' in second_json_text
+            '"already_exists":false' in mismatch_json_text
+            or '"already_exists": false' in mismatch_json_text
+        )
+        assert '"created":false' in mismatch_json_text or '"created": false' in mismatch_json_text
+
+        same = await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": "duplicate-test",
+                "project_path": original_path,
+            },
+        )
+        same_text = same.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "✓" in same_text
+        assert "already exists" in same_text.lower()
+        assert "different path" not in same_text
+
+        same_json = await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": "duplicate-test",
+                "project_path": original_path,
+                "output_format": "json",
+            },
+        )
+        same_json_text = same_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert (
+            '"already_exists":true' in same_json_text or '"already_exists": true' in same_json_text
         )
 
 
