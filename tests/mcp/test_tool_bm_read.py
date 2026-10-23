@@ -47,6 +47,9 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
     gif = io.BytesIO()
     PILImage.new("RGB", (4, 4), "red").save(gif, format="GIF")
     (test_files["image"].parent / "anim.gif").write_bytes(gif.getvalue())
+    palette = io.BytesIO()
+    PILImage.new("RGB", (4, 4), "blue").convert("P").save(palette, format="PNG")
+    (test_files["image"].parent / "palette.png").write_bytes(palette.getvalue())
     (test_files["image"].parent / "data.json").write_text('{"k": 1}')
     runner = LocalProjectIndexRunner(
         project_repository=project_repository, session_maker=session_maker
@@ -57,6 +60,7 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
         "pdf": test_files["pdf"].name,
         "gif": "anim.gif",
         "json": "data.json",
+        "palette": "palette.png",
     }
 
 
@@ -243,3 +247,11 @@ async def test_metadata_text_carries_the_qualified_path(client, test_project):
     text = await read_text(f"{prefix}/notes/Plan.md", include_content=False)
 
     assert f"file_path: {prefix}/notes/Plan.md" in text
+
+
+@pytest.mark.asyncio
+async def test_a_palette_png_is_shown_as_an_image(client, test_project, non_note_files):
+    """Palette mode has to become RGB before JPEG encoding."""
+    result = await bm_read(non_note_files["palette"], project=test_project.name)
+
+    assert isinstance(result, ImageContent)
