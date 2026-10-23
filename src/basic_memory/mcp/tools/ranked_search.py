@@ -44,6 +44,10 @@ from basic_memory.mcp.tool_params import (
 )
 from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
 from basic_memory.mcp.tools.search import (
+    MultiProjectFailed,
+    MultiProjectNoCriteria,
+    MultiProjectNotIndexed,
+    MultiProjectRan,
     _build_search_query,
     _compact_search_response,
     _search_all_projects,
@@ -240,6 +244,33 @@ async def bm_search(
 
     # --- One note: grep on a single file ---
     if identifier is not None:
+        # Trigger: a one-note search also names filters or a ranking mode.
+        # Why: one note is scanned for lines, not searched; silently dropping a
+        #      filter would turn an AND-filtered request into an unfiltered grep.
+        # Outcome: the arguments that cannot apply are refused by name.
+        ignored = [
+            name
+            for name, value in (
+                ("mode", mode),
+                ("filters", filters),
+                ("note_types", note_types),
+                ("items", items),
+                ("categories", categories),
+                ("since", since),
+                ("valid_at", valid_at),
+                ("valid_overlaps", valid_overlaps),
+                ("time_kind", time_kind),
+                ("min_similarity", min_similarity),
+            )
+            if value is not None
+        ] + (["compact"] if compact else [])
+        if ignored:
+            raise refusal(
+                "INVALID_ARGUMENTS",
+                f"`identifier` searches one note's lines; {', '.join(ignored)} cannot apply to it.",
+                try_instead="drop them, or search a folder with `path` instead",
+                output_format=output_format,
+            )
         return await _search_one_note(
             identifier,
             line_query,
@@ -257,26 +288,7 @@ async def bm_search(
 
     # --- Several projects ---
     if several_projects and project is None:
-        # Checked here because the several-projects search reports "no criteria"
-        # as text rather than refusing.
-        criteria = _build_search_query(
-            query=query,
-            search_type="text",
-            note_types=normalized_note_types,
-            entity_types=entity_types,
-            categories=categories or [],
-            after_date=since,
-            metadata_filters=filters,
-            tags=tags,
-            status=None,
-            min_similarity=min_similarity,
-            valid_at=valid_at,
-            valid_overlaps=valid_overlaps,
-            time_kind=time_kind,
-        )
-        if criteria is None:
-            raise _nothing_to_search(output_format)
-        return await _search_all_projects(
+        searched = await _search_all_projects(
             query=query,
             page=page,
             page_size=page_size,
@@ -297,6 +309,22 @@ async def bm_search(
             compact=compact,
             projects=projects,
         )
+        match searched:
+            case MultiProjectRan(rendered=rendered):
+                return rendered
+            case MultiProjectNotIndexed(guidance=guidance):
+                return (
+                    {"results": [], "guidance": guidance} if output_format == "json" else guidance
+                )
+            case MultiProjectFailed(reason=reason):
+                raise refusal(
+                    "UNAVAILABLE",
+                    f"The search did not run in any project: {reason}",
+                    try_instead="retry, or search one project with `project`",
+                    output_format=output_format,
+                )
+            case MultiProjectNoCriteria():
+                raise _nothing_to_search(output_format)
 
     # --- One project ---
     async with open_project_target(

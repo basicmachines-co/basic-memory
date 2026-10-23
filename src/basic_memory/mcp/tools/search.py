@@ -868,6 +868,39 @@ def _project_item(ref: SearchProjectRef) -> ProjectItem:
     return ProjectItem(id=ref.id, external_id=ref.external_id, name=ref.bare_name, path=ref.path)
 
 
+@dataclass(frozen=True, slots=True)
+class MultiProjectRan:
+    """The search ran in at least one database; `rendered` is its JSON or text."""
+
+    rendered: dict[str, Any] | str
+
+
+@dataclass(frozen=True, slots=True)
+class MultiProjectNotIndexed:
+    """Nothing matched, and a project has not been indexed yet, so the miss is not final."""
+
+    guidance: str
+
+
+@dataclass(frozen=True, slots=True)
+class MultiProjectFailed:
+    """No database answered: the search did not run."""
+
+    reason: str
+    # The legacy tool's rendering of the failure.
+    rendered: str
+
+
+@dataclass(frozen=True, slots=True)
+class MultiProjectNoCriteria:
+    """The request named nothing to search for."""
+
+
+type MultiProjectSearch = (
+    MultiProjectRan | MultiProjectNotIndexed | MultiProjectFailed | MultiProjectNoCriteria
+)
+
+
 async def _search_all_projects(
     *,
     query: str | None,
@@ -889,7 +922,7 @@ async def _search_all_projects(
     context: Context | None,
     compact: bool = False,
     projects: list[str] | None = None,
-) -> dict[str, Any] | str:
+) -> MultiProjectSearch:
     """Search every accessible project, one query per database.
 
     Projects that share a database are searched with one scoped query, so within that
@@ -917,8 +950,8 @@ async def _search_all_projects(
             temporal_applied=True if temporal_requested else None,
         )
         if output_format == "json":
-            return response.model_dump(mode="json", exclude_none=True)
-        return _format_search_markdown(response, scope_label, query)
+            return MultiProjectRan(response.model_dump(mode="json", exclude_none=True))
+        return MultiProjectRan(_format_search_markdown(response, scope_label, query))
 
     effective_search_type = _search_type_for(search_type, query, [ref.name for ref in project_refs])
     search_query = _build_search_query(
@@ -937,7 +970,7 @@ async def _search_all_projects(
         time_kind=time_kind,
     )
     if search_query is None:
-        return _NO_SEARCH_CRITERIA_MESSAGE
+        return MultiProjectNoCriteria()
     query_payload = search_query.model_dump()
 
     # Import here to avoid circular import (tools -> clients -> utils -> tools)
@@ -976,10 +1009,13 @@ async def _search_all_projects(
                     for ref in refs:
                         guidance = await project_index_required(client, _project_item(ref))
                         if guidance is not None:
-                            return guidance
+                            return MultiProjectNotIndexed(guidance)
         except Exception as exc:
             if _is_service_unavailable_error(exc):
-                return _format_service_unavailable_response(label, str(exc), query or "")
+                return MultiProjectFailed(
+                    reason=f"{label}: {exc}",
+                    rendered=_format_service_unavailable_response(label, str(exc), query or ""),
+                )
             logger.warning(f"Multi-project search failed for {label}: {exc}")
             failures.append(f"{label}: {exc}")
             total_is_exact = False
@@ -1017,8 +1053,11 @@ async def _search_all_projects(
         )
     if databases_answered == 0:
         # Every database failed. That is a failed search, not an empty one.
-        return _format_search_error_response(
-            scope_label, "; ".join(failures), query or "", effective_search_type
+        return MultiProjectFailed(
+            reason="; ".join(failures),
+            rendered=_format_search_error_response(
+                scope_label, "; ".join(failures), query or "", effective_search_type
+            ),
         )
 
     # Each database owns retrieval and optional reranking behind its typed API client.
@@ -1052,8 +1091,10 @@ async def _search_all_projects(
         payload = response.model_dump(mode="json", exclude_none=True)
         for item in payload["results"]:
             item["project"] = project_names[item["project_external_id"]]
-        return payload
-    return _format_search_markdown(response, scope_label, query, project_names=project_names)
+        return MultiProjectRan(payload)
+    return MultiProjectRan(
+        _format_search_markdown(response, scope_label, query, project_names=project_names)
+    )
 
 
 @mcp.tool(
@@ -1598,7 +1639,16 @@ async def search_notes(
             compact=compact,
             projects=projects,
         )
-        return all_projects_result
+        # search_notes reports every outcome in its result, as it always has.
+        match all_projects_result:
+            case MultiProjectRan(rendered=rendered):
+                return rendered
+            case MultiProjectNotIndexed(guidance=guidance):
+                return guidance
+            case MultiProjectFailed(rendered=rendered):
+                return rendered
+            case MultiProjectNoCriteria():
+                return _NO_SEARCH_CRITERIA_MESSAGE
 
     with logfire.span(
         "mcp.tool.search_notes",
