@@ -1,8 +1,46 @@
 # CHANGELOG
 
-## v0.24.0 (2026-10-08)
+## v0.24.0 (2026-10-22)
+
+### Security
+
+- **GHSA-4gfv-c2mm-mvj2** (high): A web page could reach a `basic-memory mcp --transport
+  sse` or `streamable-http` server bound to `127.0.0.1` through DNS rebinding and call
+  every MCP tool, including reading and deleting notes. The HTTP transports have no
+  authentication, and the server did not check the `Host` or `Origin` header, so binding
+  to localhost was not enough. Both HTTP transports now reject a foreign `Host` or
+  `Origin` on a loopback bind and bind to `127.0.0.1` by default (#1697, see Breaking
+  Changes). Releases before v0.24.0 are affected. Stdio, the default transport, is not.
+
+- **GHSA-pqm2-2wxw-p5hx** (low): In hosted deployments a project's path is an
+  object-storage prefix, but path validation still resolved it on the API host and
+  followed the host's symlinks. A project named after a host directory, such as `etc`,
+  let a caller learn which host paths are symlinks from whether a request was refused
+  or returned "not found". No file contents were exposed. Remote project paths are now
+  checked lexically and never touch the host filesystem. Local projects keep the
+  symlink-aware check (#1807).
+
+- **#1804**: `build_context` and `recent_activity` accepted any `depth`, and
+  `/memory/recent` had no limit on `page_size`, `page` or `max_related`. On a densely
+  linked project one deep call could run until the client timed out, and any
+  authenticated caller, including a read-only API key, could repeat it. `depth` is now
+  1-5 (the default stays 1), and `page_size` and `max_related` on `/memory/recent` are
+  at most 100. The MCP tools refuse out-of-range values with an error naming the limit;
+  the API returns 422.
+
+- **#1805**: Security floors for direct dependencies: pyjwt >= 2.15.0 (14 advisories,
+  reached through FastMCP's bearer auth) and litellm >= 1.91.5. The lock refreshes
+  aiohttp, urllib3, multidict, cryptography, certifi and yarl, and FastMCP moves to
+  4.1.3. Pillow cannot move to 13 while fastembed pins `pillow<13`, so `read_content`
+  now decodes only PNG, JPEG and WebP and refuses other formats, GIF included
+  (GHSA-74r2-7ff9-mjj2), before Pillow parses them. The Docker image requires Debian's
+  October 2026 `ca-certificates` update and upgrades pip's own CA bundle.
 
 ### Breaking Changes
+
+- **#1805**: `read_content` shows only PNG, JPEG and WebP images. GIF, TIFF, BMP and
+  other image files return "Unsupported image format" instead of a JPEG. Text, JSON and
+  other binary files are unchanged.
 
 - **#1683**: A refused `write_note` is an MCP tool error (`isError`), as a failed
   `delete_note` or `move_note` is (#1641). This covers an existing note without
@@ -381,6 +419,23 @@
   rules, live query pipelines, how to check numbers they cannot see rendered, and the
   coded errors a broken component shows. Component problems never block a write. The
   skill is registered in the OpenClaw manifest.
+
+- Skills: `memory-reflect` and `memory-defrag` work on a project's notes instead of
+  `MEMORY.md`. Reflect folds recent activity into the notes each topic belongs in,
+  writes a dated reflection note, and resumes from its last one. Defrag writes a plan
+  note, applies what loses nothing, and merges or deletes only when told to. Both pass
+  `expected_checksum` on every edit. The note-writing skills date facts with temporal
+  qualifiers (`@effective`, `@due`, ...). The wheel ships the distributed skills under
+  `basic_memory/data/skills`, so hosts that load skills from the installed package can
+  use them.
+
+- New `memory-okf` skill: makes a project ready for OKF export with the note tools. It
+  finds non-`.md` notes, notes at the Wiki's reserved `index.md`/`log.md` names and
+  reserved export frontmatter, then fixes them with `move_note` and guarded writes.
+
+- New `memory-agents` skill: write, run and check Basic Memory Cloud agents (notes with
+  `type: agent`), including their frontmatter, watch triggers, run logs and skip
+  reasons.
 
 ### Bug Fixes
 
@@ -941,9 +996,62 @@
   its next sync. In Cloud, the embedding jobs queued for projector writes become cheap
   deletes.
 
+- **#1275**: On macOS, file paths are normalized to NFC where they enter the index.
+  macOS resolves NFC and NFD spellings to one file but reports whichever is on disk,
+  and Syncthing keeps NFD names, so a flipped name could create a `-1` twin and make
+  `edit_note` fail on the permalink constraint. Migration 0042 merges existing twins
+  (macOS only). Linux and Windows keep byte-exact paths. **#1801**: the migration no
+  longer fails with `no such module: vec0` when a vector table exists.
+
+- **#1775**: `edit_note` append/prepend that creates a missing note from a
+  project-qualified identifier no longer nests it under a folder named after the
+  project. The server decides where the note goes from the folders that already hold
+  notes (indexed, accepted or on storage), refuses an identifier that two folders could
+  match with `AMBIGUOUS_NOTE_PATH`, and refuses any reading outside the project before
+  looking at a folder.
+
+- **#1769**: A full-document `PUT` of a note (Cloud's web editor) deletes frontmatter
+  keys the request leaves out, instead of keeping them from the stored note.
+  `write_note(overwrite=True)` still merges frontmatter.
+
+- **#1781**: A new note without a frontmatter `created` keeps the file's creation time
+  instead of the time of the index run. Thanks to @ningyixi.
+
+- **#1778**: In a hosted session that can reach several workspaces, a POSIX refusal for
+  a path naming a project in another workspace names that workspace and the spelling
+  that reaches it, and `ls /` lists the accessible workspace slugs. A discovery failure
+  no longer turns `ls /` or a refusal into an error. Local sessions make no new
+  control-plane calls.
+
+- `move_note` can rename a `.markdown` note to `.md`. Other extension changes are still
+  refused.
+
+- `write_note`'s similar-notes advisory skips notes with `generated:` in their
+  frontmatter (Wiki indexes and logs, agent run logs).
+
+- **#1789**: A Wiki run reports source folders that differ only by letter case or
+  Unicode normalization (`customers/CPC` and `customers/cpc`) instead of failing the
+  whole run every time.
+
+- **#1790**: `bm import chatgpt` imports conversations that have no title, naming them
+  `Untitled conversation <id prefix>`, instead of failing the import with `KeyError`.
+
+- **#1788**: Editing a note with many vector chunks updates the reused chunks' metadata
+  in set-based batches instead of one statement per chunk.
+
+- **#1762**: Read-cache invalidation deletes the entries it retires instead of leaving
+  them in Redis until their TTL. **#1761**: Read-cache hits are no longer recorded as
+  error spans.
+
+- The Hermes plugin masks credentials on its capture path, including bearer tokens and
+  quoted field names.
+
+- Skill tooling reads and writes skill files as UTF-8 with LF line endings, which fixes
+  the Windows unit job.
+
 ### Internal
 
-- FastMCP 4.0.3 → 4.1.0 and mcp 2.0.0 → 2.3.0, including the Claude Code and Codex
+- FastMCP 4.0.3 → 4.1.3 and mcp 2.0.0 → 2.3.0, including the Claude Code and Codex
   hook pins. FastMCP now applies its Host/Origin guard to the SSE transport, so
   `basic-memory mcp --transport sse` uses it instead of installing its own copy.
   Streamable HTTP sessions now expire after 30 idle minutes (the MCP SDK default);
@@ -1056,6 +1164,14 @@
   agent-task harness that compares the rich and POSIX tool surfaces, with resumable
   scoring, configurable model endpoints, and secret redaction in saved errors. A
   multilingual embedding benchmark covers chunk boundaries and model-cache measurement.
+
+- **#1791** (#1793, #1794, #1795, #1802): Postgres search is faster on large projects.
+  The admitted-chunk count reads the chunk manifest alone, FTS text conditions run only
+  on GIN candidates, chunk candidates come from the GIN index, and multiword queries
+  collect each operand's matches through GIN once.
+
+- **#1779**: A dev-mode `.envrc` keeps a development checkout's Basic Memory config
+  separate from the installed one.
 
 
 ## v0.23.2 (2026-08-25)
