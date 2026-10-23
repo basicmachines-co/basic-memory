@@ -227,6 +227,11 @@ def test_query_terms(query, terms):
         ({"query": "memory://a/b", "all_projects": True}, "memory:// query and `all_projects`"),
         ({"query": "memory://a/b", "projects": ["a"]}, "memory:// query and `projects`"),
         ({"query": "x", "lines": 1, "projects": ["a"]}, "not several"),
+        ({"query": "x", "projects": []}, "`projects` is empty"),
+        (
+            {"query": "x", "all_projects": True, "page": 11, "page_size": 100},
+            "at most result 1000; page 11 of 100 ends at 1100",
+        ),
         ({"query": "x", "projects": ["a", "b"]}, "Give one"),
         ({"query": "x", "projects": ["a"], "all_projects": True}, "`projects` and `all_projects`"),
         ({"query": "x", "lines": 1, "compact": True}, "give one"),

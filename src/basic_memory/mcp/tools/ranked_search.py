@@ -56,7 +56,11 @@ from basic_memory.mcp.tools.search import (
 )
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.schemas.search import SearchResponse, SearchResult
+from basic_memory.schemas.search import (
+    MAX_SCOPED_SEARCH_PAGE_SIZE,
+    SearchResponse,
+    SearchResult,
+)
 from basic_memory.schemas.v2.entity import EntityResolveResponse
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 from basic_memory.utils import generate_permalink, parse_str_list
@@ -219,7 +223,7 @@ async def bm_search(
             ("`identifier`", identifier is not None),
             ("`path`", path is not None),
             ("a memory:// query", memory_query),
-            ("`projects`", bool(projects)),
+            ("`projects`", projects is not None),
             ("`all_projects`", all_projects),
         )
         if given
@@ -231,7 +235,22 @@ async def bm_search(
             try_instead="one scope; a folder can go in the URL, as 'memory://research/specs/*'",
             output_format=output_format,
         )
-    several_projects = all_projects or bool(projects)
+    if projects is not None and not projects:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "`projects` is empty; name at least one project, or leave it out.",
+            output_format=output_format,
+        )
+    several_projects = all_projects or projects is not None
+    # Each database answers every row up to the end of the page, in one request.
+    if several_projects and page * page_size > MAX_SCOPED_SEARCH_PAGE_SIZE:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"A search across projects reaches at most result {MAX_SCOPED_SEARCH_PAGE_SIZE}; "
+            f"page {page} of {page_size} ends at {page * page_size}.",
+            try_instead="narrow the query, or search one project with `project`",
+            output_format=output_format,
+        )
     if several_projects and lines is not None:
         raise refusal(
             "INVALID_ARGUMENTS",

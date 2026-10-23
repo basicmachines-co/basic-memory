@@ -228,6 +228,12 @@ class SearchQuery(BaseModel):
         return any(pattern in text for pattern in boolean_patterns)
 
 
+# One scoped request answers at most this many rows. A multi-project page asks
+# each database for every row up to its end (page * page_size), so this bounds
+# how deep a multi-project search can page.
+MAX_SCOPED_SEARCH_PAGE_SIZE = 1000
+
+
 class ScopedSearchQuery(SearchQuery):
     """A search over an explicit set of projects in one database.
 

@@ -21,7 +21,12 @@ from basic_memory.api.v2.utils import (
 from basic_memory.deps import AppConfigDep, SessionMakerDep
 from basic_memory.repository.search_repository import create_search_reader
 from basic_memory.repository.search_scope import ProjectScope
-from basic_memory.schemas.search import ScopedSearchQuery, SearchResponse, SearchRetrievalMode
+from basic_memory.schemas.search import (
+    MAX_SCOPED_SEARCH_PAGE_SIZE,
+    ScopedSearchQuery,
+    SearchResponse,
+    SearchRetrievalMode,
+)
 from basic_memory.services.scoped_search_service import ScopedSearchService
 
 # App registration mounts this router at /v2.
@@ -42,7 +47,7 @@ async def search_scope(
     session_maker: SessionMakerDep,
     response: Response,
     page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=1000),
+    page_size: int = Query(10, ge=1, le=MAX_SCOPED_SEARCH_PAGE_SIZE),
 ) -> SearchResponse:
     """Search an explicit set of projects in this database.
 
