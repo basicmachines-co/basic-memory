@@ -14,15 +14,15 @@ from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.project_context import routes_to_default_project
 from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
-from basic_memory.mcp.tools.write_note import (
+from basic_memory.mcp.similar_notes import (
     SIMILAR_NOTES_LIMIT,
     SIMILAR_NOTES_MIN_SIMILARITY,
     SIMILAR_NOTES_PROBE_CHARS,
-    _collapse_similar_notes,
-    _compose_similarity_probe,
-    _compose_workspace_project_route,
+    collapse_similar_notes,
+    compose_similarity_probe,
     similar_notes_min_similarity,
 )
+from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
@@ -1748,7 +1748,7 @@ def _entity_result(
 
 
 def test_similarity_probe_leads_with_title_and_drops_frontmatter():
-    probe = _compose_similarity_probe(
+    probe = compose_similarity_probe(
         "BU Product Mapping",
         "---\ntitle: ignored\n---\n\n# BU Product Mapping\n\nWhich units own which products.",
     )
@@ -1757,7 +1757,7 @@ def test_similarity_probe_leads_with_title_and_drops_frontmatter():
 
 
 def test_similarity_probe_is_bounded_to_the_index_chunk_size():
-    probe = _compose_similarity_probe("Long", "word " * 1000)
+    probe = compose_similarity_probe("Long", "word " * 1000)
     assert len(probe) <= SIMILAR_NOTES_PROBE_CHARS
 
 
@@ -1814,7 +1814,7 @@ def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
         _entity_result("D", "p/d", "d/D.md", 0.6),
     ]
 
-    similar = _collapse_similar_notes(
+    similar = collapse_similar_notes(
         rows,
         exclude_file_path="new/New.md",
         exclude_permalink="p/new",

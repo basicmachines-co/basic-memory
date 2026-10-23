@@ -12,7 +12,7 @@ import pytest
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
-from basic_memory.mcp.tools.write_note import (
+from basic_memory.mcp.similar_notes import (
     similar_notes_min_similarity,
     similar_notes_query,
 )

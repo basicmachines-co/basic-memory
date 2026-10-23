@@ -22,6 +22,7 @@ type RefusalCode = Literal[
     "REVISION_CONFLICT",
     "INVALID_ARGUMENTS",
     "OUTSIDE_PROJECT",
+    "LOCKED",
     "UNSUPPORTED",
     # Not a refusal: the service that would answer did not.
     "UNAVAILABLE",
