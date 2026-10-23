@@ -218,6 +218,7 @@ async def test_infer_below_the_threshold(client, test_project):
     ("arguments", "message"),
     [
         ({"command": "infer"}, "infer needs `note_type`"),
+        ({"command": "validate", "note_type": "person", "identifier": "a.md"}, "Give `note_type`"),
         ({"command": "diff"}, "diff needs `note_type`"),
         ({"command": "diff", "identifier": "a.md"}, "diff works on a note type, not one note"),
     ],

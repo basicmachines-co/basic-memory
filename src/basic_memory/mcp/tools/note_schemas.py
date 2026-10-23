@@ -73,6 +73,14 @@ async def bm_schema(
     context: Context | None = None,
 ) -> ValidationReport | str | dict[str, Any]:
     """Validate, infer or diff note schemas."""
+    # A note's own type decides its schema, so naming both would validate one and
+    # label the report as the other.
+    if note_type is not None and identifier is not None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "Give `note_type` to validate a type, or `identifier` to validate one note.",
+            output_format=output_format,
+        )
     project_name, project_id = routing_arguments(parse_project(project))
     if command == "validate":
         return await schema_validate(
