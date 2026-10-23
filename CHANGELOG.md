@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.24.1 (2026-10-22)
+
+### Bug Fixes
+
+- On a fresh install, `bm status` and other commands that load the API failed with
+  `cannot import name 'get_flat_dependant' from 'fastapi.dependencies.utils'`. The read
+  cache imports that FastAPI helper, FastAPI removed it in 0.140.7, and the
+  `fastapi>=0.136.1` floor let new installs pick up 0.140.13 or later. FastAPI is now
+  pinned to exactly 0.139.0, the version CI tests. Existing installs can work around it
+  with `uv tool install basic-memory --with 'fastapi==0.139.0'`. Reported by lastguru.
+
 ## v0.24.0 (2026-10-22)
 
 ### Security

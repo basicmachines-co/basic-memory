@@ -420,7 +420,7 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.10.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "dateparser", specifier = ">=1.2.0" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.136.1" },
+    { name = "fastapi", extras = ["standard"], specifier = "==0.139.0" },
     { name = "fastapi-redis-sdk", specifier = "==0.8.1" },
     { name = "fastembed", specifier = ">=0.7.4" },
     { name = "fastmcp", specifier = "==4.1.3" },
