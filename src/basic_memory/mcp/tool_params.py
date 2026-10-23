@@ -170,6 +170,10 @@ def _parse_item_kinds(value: Any) -> Any:
     """
     if value is None:
         return None
+    # A null member is not a kind; the shared parser would drop it and leave the
+    # default search, so the list is handed to validation as given.
+    if isinstance(value, list) and any(item is None for item in value):
+        return value
     parsed = parse_str_list(value)
     # Non-list input comes back unchanged so Pydantic rejects it with a clear message.
     if not isinstance(parsed, list):

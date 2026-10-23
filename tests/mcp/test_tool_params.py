@@ -109,6 +109,12 @@ async def test_hidden_aliases_reach_the_primary_parameters():
     assert echoed["items"] == ["note", "observation"]
 
 
+@pytest.mark.asyncio
+async def test_null_item_members_are_refused():
+    """[null] is not a kind; it must not quietly become the default note search."""
+    assert "items" in await probe_error(identifier="plan", items=[None])
+
+
 # --- Coercion of string-serialized values ---
 
 

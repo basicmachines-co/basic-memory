@@ -144,3 +144,21 @@ async def test_other_resolution_failures_pass_through(client, test_project, monk
     async with open_project_target("notes/Plan.md", test_project.name, None) as target:
         with pytest.raises(ToolError, match="backend unavailable"):
             await resolve_note(target, "notes/Plan.md")
+
+
+@pytest.mark.asyncio
+async def test_an_identifier_can_be_a_title_that_looks_like_a_path(client, test_project):
+    """A title such as 'Home ~ Plan' is resolved, not checked as a path."""
+    await write_note(
+        title="Home ~ Plan", directory="notes", content="# Home", project=test_project.name
+    )
+
+    async with open_project_target(
+        "Home ~ Plan", test_project.name, None, kind="identifier"
+    ) as target:
+        external_id = await resolve_note(target, "Home ~ Plan")
+
+    assert external_id
+    with pytest.raises(ToolError, match="^OUTSIDE_PROJECT:"):
+        async with open_project_target("~/x", test_project.name, None):
+            pass

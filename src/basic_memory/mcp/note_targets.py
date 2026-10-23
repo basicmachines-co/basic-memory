@@ -14,6 +14,7 @@ deletes must never act on a near match.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Literal
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -31,6 +32,9 @@ from basic_memory.mcp.tool_params import OutputFormat, parse_project, routing_ar
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import validate_project_path
+
+
+type TargetKind = Literal["path", "identifier"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +56,17 @@ async def open_project_target(
     project: str | None,
     context: Context | None,
     *,
+    kind: TargetKind = "path",
     output_format: OutputFormat = "text",
 ) -> AsyncIterator[ProjectTarget]:
-    """Route `target` and yield a client for the project it lives in."""
+    """Route `target` and yield a client for the project it lives in.
+
+    `kind` says what the target is. A "path" names a location in the project (a
+    directory, or a file to create) and must not climb out of it. An "identifier"
+    names an existing note by path, permalink, title or id; it is resolved by the
+    project-scoped API, so it cannot leave the project, and an exact title such as
+    'Home ~ Plan' is not a path to check.
+    """
     project_name, project_id = routing_arguments(parse_project(project))
     route = await resolve_project_path_route(
         target, project=project_name, project_id=project_id, context=context
@@ -63,15 +75,17 @@ async def open_project_target(
         client,
         active_project,
     ):
-        # Trigger: the target climbs out of the project ('../x', an absolute path, '~').
+        # Trigger: a path target climbs out of the project ('../x', an absolute path, '~').
         # Why: every bm_* tool, including the ones that write and delete, must stay
         #      inside its project. Remote projects are checked lexically; only a local
-        #      project's root is resolved against the filesystem (#1807).
+        #      project's root is resolved against the filesystem.
         # Outcome: an OUTSIDE_PROJECT refusal before any read or write.
         # A leading '/' anchors at the project root ('/' or '/specs'), never the
         # filesystem root, so it is dropped before the check.
         project_relative = memory_url_path(route.path).lstrip("/")
-        if not validate_project_path(project_relative, local_project_path(client, active_project)):
+        if kind == "path" and not validate_project_path(
+            project_relative, local_project_path(client, active_project)
+        ):
             raise refusal(
                 "OUTSIDE_PROJECT",
                 f"'{target}' is outside the project. Paths must stay within the project.",
