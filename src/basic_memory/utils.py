@@ -77,6 +77,17 @@ FilePath = Union[Path, str]
 WINDOWS_LOG_FILE_RETENTION = 5
 
 
+def portable_path_key(path: str) -> str:
+    """Compare paths the way case- and normalization-insensitive filesystems do.
+
+    macOS and Windows treat 'Teams' and 'teams' as one folder, and macOS also folds
+    Unicode normalization. Two paths with the same key would merge on such a
+    filesystem, so the wiki projector and folder-case resolution on write both
+    compare by this key.
+    """
+    return unicodedata.normalize("NFC", path).casefold()
+
+
 def nfc_path(path: str) -> str:
     """Return a project-relative path in Unicode NFC form.
 
@@ -881,7 +892,9 @@ def resolve_directory_casing(directory: str, existing_directories: List[str]) ->
     under the already-resolved parent:
 
     - Exact match wins: the requested segment casing is kept unchanged.
-    - Unique case-insensitive match: the existing folder's casing is adopted.
+    - Unique match by portable_path_key (casefold plus Unicode NFC, #1796): the
+      existing folder's spelling is adopted, so 'teams' and an NFD-spelled
+      'café' land in the folder a case-insensitive filesystem would merge them into.
     - No match: the segment is kept as given (a new folder).
     - Multiple case-variant folders exist: ambiguous, the segment is kept as
       given (today's exact behavior).
@@ -905,13 +918,14 @@ def resolve_directory_casing(directory: str, existing_directories: List[str]) ->
         if candidate in existing:
             resolved_prefix = candidate
             continue
+        candidate_key = portable_path_key(candidate)
         # Candidates are constrained to children of the already-resolved parent:
         # once a parent segment stays ambiguous (kept as requested), a deeper
         # existing folder under a *different* parent casing must not be spliced in.
         matches = [
             existing_directory
             for existing_directory in existing
-            if existing_directory.lower() == candidate.lower()
+            if portable_path_key(existing_directory) == candidate_key
             and existing_directory.rpartition("/")[0] == resolved_prefix
         ]
         resolved_prefix = matches[0] if len(matches) == 1 else candidate

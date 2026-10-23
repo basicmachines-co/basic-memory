@@ -1,7 +1,7 @@
 """Move note tool for Basic Memory MCP server."""
 
 import json
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from textwrap import dedent
 from typing import Any, Annotated, NoReturn, Optional, Literal
 
@@ -12,15 +12,14 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import local_project_path
+from basic_memory.mcp.move_destinations import project_named_by_destination
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
-from basic_memory.schemas.directory import MAX_DIRECTORY_PAGE_SIZE
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import (
     generate_permalink,
     normalize_project_reference,
-    resolve_directory_casing,
     validate_project_path,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
@@ -70,99 +69,29 @@ async def _detect_cross_project_move_attempt(
         Error message with guidance if cross-project move is detected, None otherwise
     """
     try:
-        # Import here to avoid circular import
-        from basic_memory.mcp.clients import DirectoryClient, ProjectClient
-
-        # Use typed ProjectClient for API calls
-        project_client = ProjectClient(client)
-        project_list = await project_client.list_projects()
-
-        path_parts = [
-            part for part in PureWindowsPath(destination_path).as_posix().split("/") if part
-        ]
-        if not path_parts:
-            return None
-        leading_folder = path_parts[0]
-
-        # --- Detection 1: leading segment is a known project name ---
-        # Trigger: the first path segment matches a different project's name.
-        # Why: a routing-style destination like "other-project/file.md" expresses an
-        #      intent to move into another project, which move_note cannot do — it
-        #      would silently create a same-project nested folder instead.
-        # Outcome: candidate for rejection, unless the folder is already local (below).
-        # Projects are addressed by name or by permalink ("Other Project" is
-        # "other-project"), so compare the generated permalinks too. A lone segment
-        # with an extension is a root filename, not a folder: generate_permalink
-        # would strip ".md" and turn "other-project.md" into a project prefix.
-        is_root_filename = len(path_parts) == 1 and bool(PurePosixPath(leading_folder).suffix)
-        leading_permalink = None if is_root_filename else generate_permalink(leading_folder)
-        matching_project = next(
-            (
-                p.name
-                for p in project_list.projects
-                if (
-                    p.name.lower() == leading_folder.lower()
-                    or generate_permalink(p.name) == leading_permalink
-                )
-                and p.name.lower() != active_project.name.lower()
-            ),
-            None,
+        matching_project = await project_named_by_destination(
+            client, destination_path, active_project
         )
-        if matching_project is None:
-            return None
-
-        # Trigger: the leading folder already holds content in the active project.
-        # Why: a knowledge base organised by domain routinely has folders named after
-        #      sibling projects; an existing local folder is evidence of local intent,
-        #      and rejecting it left `git mv` as the only way in (#1607).
-        # Outcome: the move proceeds as an ordinary same-project move.
-        # Trigger: the folder lookup itself fails after a project name matched.
-        # Why: the name match already signals routing intent; allowing the move
-        #      unverified is the silent misroute this guard exists to prevent.
-        # Outcome: keep the cross-project rejection.
-        # The server resolves a destination folder to an existing folder's casing
-        # (#1326), so "schemas/" lands in "Schemas/"; resolve the same way here.
-        try:
-            directory_client = DirectoryClient(client, active_project.external_id)
-            root_folders: list[str] = []
-            page = 1
-            while True:
-                listing = await directory_client.list(
-                    "/", depth=1, page=page, page_size=MAX_DIRECTORY_PAGE_SIZE
-                )
-                root_folders.extend(node.name for node in listing.nodes if node.type == "directory")
-                # The default listing orders folders before files, so the first page
-                # holding a file has already yielded every root folder.
-                if not listing.has_more or any(node.type != "directory" for node in listing.nodes):
-                    break
-                page += 1
-        except Exception as e:
-            logger.debug(f"Could not verify local folder {leading_folder!r}: {e}")
-        else:
-            if resolve_directory_casing(leading_folder, root_folders) in root_folders:
-                return None
-
-        return _format_cross_project_error_response(
-            identifier, destination_path, active_project.name, matching_project
-        )
-
-        # NOTE: a "<seg>/projects/<seg>/..." structural heuristic was removed here.
-        # Why: matching any destination whose 2nd segment is literally "projects" is
-        #      fundamentally ambiguous — it cannot distinguish the cloud workspace
-        #      routing shape from a legitimate same-project nested folder like
-        #      "notes/projects/2025/file.md" or "work/projects/q1/report.md". The
-        #      heuristic produced false CROSS_PROJECT_MOVE_NOT_SUPPORTED rejections for
-        #      those common layouts.
-        # Outcome: cross-workspace routing that does not match a known project name (above)
-        #      now falls through to the move and is caught honestly by the MOVE_OUTCOME_MISMATCH
-        #      backstop if the result lands somewhere other than the requested path.
-
     except Exception as e:
         # If we can't detect, don't interfere with normal error handling
         logger.debug(f"Could not check for cross-project move: {e}")
         return None
+    if matching_project is None:
+        return None
+    return _format_cross_project_error_response(
+        identifier, destination_path, active_project.name, matching_project
+    )
 
-    return None
+    # NOTE: a "<seg>/projects/<seg>/..." structural heuristic was removed here.
+    # Why: matching any destination whose 2nd segment is literally "projects" is
+    #      fundamentally ambiguous — it cannot distinguish the cloud workspace
+    #      routing shape from a legitimate same-project nested folder like
+    #      "notes/projects/2025/file.md" or "work/projects/q1/report.md". The
+    #      heuristic produced false CROSS_PROJECT_MOVE_NOT_SUPPORTED rejections for
+    #      those common layouts.
+    # Outcome: cross-workspace routing that does not match a known project name (above)
+    #      now falls through to the move and is caught honestly by the MOVE_OUTCOME_MISMATCH
+    #      backstop if the result lands somewhere other than the requested path.
 
 
 def _format_cross_project_error_response(

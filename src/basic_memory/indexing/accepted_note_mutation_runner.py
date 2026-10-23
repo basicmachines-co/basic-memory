@@ -207,6 +207,8 @@ class AcceptedNoteMoveMutation:
     destination_path: RuntimeFilePath
     actor: AcceptedNoteMutationActor
     source: RuntimeNoteChangeSource
+    # db_checksum the caller last read; None means no precondition (SPEC-35.2 C9).
+    base_checksum: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +220,8 @@ class AcceptedNoteDeleteMutation:
     # None records the delete unattributed, as every delete was before actors
     # reached this path; the journal source stays ACCEPTED_NOTE_DELETE_SOURCE.
     actor: AcceptedNoteMutationActor | None = None
+    # db_checksum the caller last read; None means no precondition (SPEC-35.2 C9).
+    base_checksum: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,6 +510,18 @@ def reject_stale_base_checksum(current_db_checksum: str | None) -> NoReturn:
     )
 
 
+def reject_guarded_delete_of_missing_note(base_checksum: str | None) -> None:
+    """Refuse a guarded delete whose note is already gone.
+
+    Trigger: the caller pinned the revision it read, and no note exists now.
+    Why: an unguarded delete of a missing note stays idempotent, but a pinned
+        revision says the caller expected that note; someone else removed it.
+    Outcome: the stale-checksum conflict with no current checksum ("gone").
+    """
+    if base_checksum is not None:
+        reject_stale_base_checksum(current_db_checksum=None)
+
+
 def reject_guarded_missing_state(
     error: AcceptedNoteMutationRejected,
     *,
@@ -693,6 +709,8 @@ async def run_accepted_note_move(
     """Accept a note move into DB state without materializing its file."""
     try:
         return await _run_accepted_note_move(session, request=request, dependencies=dependencies)
+    except AcceptedNoteMutationRejected as error:
+        reject_guarded_missing_state(error, guarded=request.base_checksum is not None)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:
@@ -700,7 +718,7 @@ async def run_accepted_note_move(
             session,
             error,
             entity_external_id=request.entity_external_id,
-            base_checksum=None,
+            base_checksum=request.base_checksum,
         )
 
 
@@ -723,6 +741,7 @@ async def run_accepted_note_delete(
         load_relations=False,
     )
     if entity is None:
+        reject_guarded_delete_of_missing_note(request.base_checksum)
         return AcceptedNoteMutationResult(
             change=await delete_accepted_note(
                 session,
@@ -747,6 +766,7 @@ async def run_accepted_note_delete(
         load_relations=False,
     )
     if entity is None:
+        reject_guarded_delete_of_missing_note(request.base_checksum)
         return AcceptedNoteMutationResult(
             change=await delete_accepted_note(
                 session,
@@ -767,6 +787,13 @@ async def run_accepted_note_delete(
     if note_content is not None:
         await session.refresh(note_content)
         reject_locked_note(note_content)
+    # Checked against the row locked above, as edits are (issue #1552).
+    if request.base_checksum is not None and (
+        note_content is None or note_content.db_checksum != request.base_checksum
+    ):
+        reject_stale_base_checksum(
+            current_db_checksum=note_content.db_checksum if note_content is not None else None
+        )
     change = await delete_accepted_note(
         session,
         project_id=project.id,
@@ -1273,6 +1300,11 @@ async def _run_accepted_note_move(
         entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    if (
+        request.base_checksum is not None
+        and current_note_content.db_checksum != request.base_checksum
+    ):
+        reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
     # The identity lookup precedes the NoteContent lock. Refresh after the lock
     # so an overlapping move records the committed source path it actually
     # replaces, rather than the path observed while waiting.

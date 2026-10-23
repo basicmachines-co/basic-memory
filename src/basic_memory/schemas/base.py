@@ -14,15 +14,23 @@ Key Concepts:
 import mimetypes
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import List, Optional, Annotated, Dict
 
 from annotated_types import MinLen, MaxLen
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import sanitize_for_filename, sanitize_for_directory
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.utils import generate_permalink, nfc_path
 
 
@@ -242,6 +250,8 @@ class Entity(BaseModel):
     title: str
     content: Optional[str] = None
     directory: str
+    # The file name to use as-is, e.g. "plan.md". None derives it from the title.
+    file_name: Optional[str] = None
     note_type: NoteType = "note"
     entity_metadata: Optional[Dict] = Field(default=None, description="Optional metadata")
     content_type: ContentType = Field(
@@ -251,10 +261,36 @@ class Entity(BaseModel):
     )
 
     def __init__(self, **data):
-        # NFC before sanitizing: the sanitizer drops combining marks, so an NFD
-        # directory would lose its accents instead of matching the NFC spelling (#1275).
+        # NFC first on macOS, where paths are identity keys in NFC (#1275); elsewhere
+        # the path keeps its form and the sanitizer keeps combining marks (#1796).
         data["directory"] = sanitize_for_directory(nfc_path(data.get("directory", "")))
         super().__init__(**data)
+
+    @field_validator("file_name")
+    @classmethod
+    def validate_file_name(cls, value: Optional[str]) -> Optional[str]:
+        """A file name is one path segment: the directory carries the folders."""
+        if value is None:
+            return value
+        if not value.strip() or "/" in value or "\\" in value or value in {".", ".."}:
+            raise ValueError(f"file_name must be a single file name, got {value!r}")
+        return value
+
+    @model_validator(mode="after")
+    def validate_markdown_file_name(self) -> "Entity":
+        """A Markdown note's explicit file name must be one indexing reads as a note.
+
+        Indexing recognizes only .md and .markdown; a note written as 'plan.txt'
+        would be accepted, then never indexed again as a note.
+        """
+        if self.file_name is None or self.content_type != "text/markdown":
+            return self
+        if PurePosixPath(self.file_name).suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES:
+            raise ValueError(
+                f"file_name for a Markdown note must end in .md or .markdown, "
+                f"got {self.file_name!r}"
+            )
+        return self
 
     @property
     def safe_title(self) -> str:
@@ -284,12 +320,13 @@ class Entity(BaseModel):
     @computed_field
     @property
     def file_path(self) -> str:
-        """Get the file path for this entity based on its permalink."""
-        safe_title = self.safe_title
-        if self.content_type == "text/markdown":
-            filename = f"{safe_title}.md"
+        """The file path: `file_name` when given, otherwise derived from the title."""
+        if self.file_name is not None:
+            filename = self.file_name
+        elif self.content_type == "text/markdown":
+            filename = f"{self.safe_title}.md"
         else:
-            filename = safe_title
+            filename = self.safe_title
         return nfc_path(f"{self.directory}/{filename}" if self.directory else filename)
 
     @property

@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+import unicodedata
 import uuid
 
 import pytest
@@ -448,6 +449,59 @@ async def test_create_entity_resolves_nested_directory_casing(client: AsyncClien
     assert response.status_code == 202
     entity = EntityResponseV2.model_validate(response.json())
     assert entity.file_path == "Schemas/Drafts/Nested.md"
+
+
+@pytest.mark.asyncio
+async def test_create_entity_resolves_unicode_normalization_twin(
+    client: AsyncClient, v2_project_url
+):
+    """An NFD spelling of an existing NFC folder lands in that folder (#1796)."""
+    nfc = unicodedata.normalize("NFC", "Café")
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Menu", "directory": nfc, "content": "Menu"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Hours",
+            "directory": unicodedata.normalize("NFD", "café"),
+            "content": "Hours",
+        },
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == f"{nfc}/Hours.md"
+
+
+@pytest.mark.asyncio
+async def test_create_entity_with_file_name(client: AsyncClient, file_service, v2_project_url):
+    """An explicit file_name names the file; the folder still resolves its casing."""
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Seed", "directory": "Plans", "content": "Seed"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Q4 Plan",
+            "directory": "plans",
+            "file_name": "q4-plan.md",
+            "content": "Ship it",
+        },
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "Plans/q4-plan.md"
+    assert entity.title == "Q4 Plan"
+    file_content, _ = await file_service.read_file("Plans/q4-plan.md")
+    assert "Ship it" in file_content
 
 
 @pytest.mark.asyncio
@@ -1564,6 +1618,91 @@ async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url
     assert response.status_code == 202
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is False
+
+
+async def _create_guarded_note(
+    client: AsyncClient, session_maker, project: Project, v2_project_url: str, title: str
+) -> tuple[EntityResponseV2, str]:
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": title, "directory": "guarded", "content": "Original"},
+    )
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, project.id, entity.id)
+    assert note_content is not None
+    return entity, note_content.db_checksum
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_with_stale_base_checksum_returns_409(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    """A pinned revision guards deletes the way it guards edits (SPEC-35.2 C9)."""
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Delete Guard"
+    )
+    url = f"{v2_project_url}/knowledge/entities/{entity.external_id}"
+
+    stale = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale"})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["db_checksum"] == checksum
+
+    current = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum})
+    assert current.status_code == 202
+    assert current.json()["deleted"] is True
+
+    # The note is gone now, so the same pinned revision is a conflict, not a no-op.
+    gone = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum})
+    assert gone.status_code == 409
+    assert gone.json()["detail"]["db_checksum"] is None
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_stale_base_checksum_returns_409(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Move Guard"
+    )
+    url = f"{v2_project_url}/knowledge/entities/{entity.external_id}/move"
+
+    stale = await client.put(
+        url,
+        json={"destination_path": "moved/Move Guard.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["db_checksum"] == checksum
+
+    current = await client.put(
+        url,
+        json={"destination_path": "moved/Move Guard.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum},
+    )
+    assert current.status_code == 202
+    assert current.json()["file_path"] == "moved/Move Guard.md"
+
+
+@pytest.mark.asyncio
+async def test_guarded_move_of_a_deleted_note_is_a_revision_conflict(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    """A pinned revision that vanished is the structured 409, as for edits."""
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Gone Move"
+    )
+    deleted = await client.delete(f"{v2_project_url}/knowledge/entities/{entity.external_id}")
+    assert deleted.status_code == 202
+
+    moved = await client.put(
+        f"{v2_project_url}/knowledge/entities/{entity.external_id}/move",
+        json={"destination_path": "moved/Gone Move.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum},
+    )
+
+    assert moved.status_code == 409
+    assert moved.json()["detail"]["db_checksum"] is None
 
 
 @pytest.mark.asyncio

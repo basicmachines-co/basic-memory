@@ -34,6 +34,35 @@ def test_entity_project_id():
     assert entity.note_type == "knowledge"
 
 
+def test_entity_file_name_sets_the_file_path():
+    """An explicit file_name is used as-is; the title stays the note's title."""
+    entity = Entity.model_validate(
+        {"title": "Q4 Plan", "directory": "plans", "file_name": "q4-plan.md"}
+    )
+    assert entity.file_path == "plans/q4-plan.md"
+    assert entity.title == "Q4 Plan"
+
+
+def test_markdown_file_name_must_have_a_note_suffix():
+    """Indexing reads only .md and .markdown as notes."""
+    assert Entity(title="T", directory="d", file_name="t.markdown").file_path == "d/t.markdown"
+    with pytest.raises(ValidationError, match="must end in .md or .markdown"):
+        Entity(title="T", directory="d", file_name="plan.txt")
+    # A non-Markdown file keeps whatever name it has.
+    assert (
+        Entity(
+            title="T", directory="d", file_name="data.json", content_type="application/json"
+        ).file_path
+        == "d/data.json"
+    )
+
+
+@pytest.mark.parametrize("file_name", ["", " ", "a/b.md", "a\\b.md", ".", ".."])
+def test_entity_file_name_must_be_one_segment(file_name):
+    with pytest.raises(ValidationError, match="file_name must be a single file name"):
+        Entity.model_validate({"title": "T", "directory": "plans", "file_name": file_name})
+
+
 def test_entity_non_markdown():
     """Test entity for regular non-markdown file."""
     data = {
@@ -710,3 +739,18 @@ class TestObservationContentLength:
 
         obs = Observation(category="test", content="  some content  ")
         assert obs.content == "some content"
+
+
+def test_set_metadata_edit_needs_metadata_and_no_content():
+    """set_metadata changes frontmatter only (SPEC-35.2)."""
+    request = EditEntityRequest(operation="set_metadata", content="", metadata={"a": 1})
+    assert request.metadata == {"a": 1}
+
+    with pytest.raises(ValidationError, match="metadata is required"):
+        EditEntityRequest(operation="set_metadata", content="")
+    with pytest.raises(ValidationError, match="content must be empty"):
+        EditEntityRequest(operation="set_metadata", content="x", metadata={"a": 1})
+    with pytest.raises(ValidationError, match="cannot change permalink, title"):
+        EditEntityRequest(
+            operation="set_metadata", content="", metadata={"title": "T", "permalink": "p"}
+        )

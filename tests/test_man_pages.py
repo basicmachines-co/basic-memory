@@ -142,10 +142,14 @@ TOOLS_WITHOUT_PAGES: set[str] = {
     "man",
     "tail",
     "bm_context",
+    "bm_delete",
+    "bm_edit",
     "bm_find",
     "bm_list",
+    "bm_move",
     "bm_read",
     "bm_search",
+    "bm_write",
 }
 PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 

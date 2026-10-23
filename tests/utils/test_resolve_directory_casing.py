@@ -1,4 +1,6 @@
-"""Tests for case-insensitive directory resolution (issue #1326)."""
+"""Tests for case-insensitive directory resolution (issues #1326, #1796)."""
+
+import unicodedata
 
 from basic_memory.utils import resolve_directory_casing
 
@@ -61,3 +63,15 @@ def test_root_directory_is_unchanged():
 
 def test_no_existing_directories_keeps_requested():
     assert resolve_directory_casing("schemas", []) == "schemas"
+
+
+def test_unicode_normalization_twin_adopts_existing_spelling():
+    """#1796: an NFD spelling of an existing NFC folder lands in that folder."""
+    nfc = unicodedata.normalize("NFC", "Café")
+    nfd = unicodedata.normalize("NFD", "café")
+    assert resolve_directory_casing(f"{nfd}/menus", [nfc]) == f"{nfc}/menus"
+
+
+def test_casefold_matches_beyond_lower():
+    """casefold folds 'ß' to 'ss', as case-insensitive filesystems compare."""
+    assert resolve_directory_casing("strasse", ["Straße"]) == "Straße"

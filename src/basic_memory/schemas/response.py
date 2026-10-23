@@ -333,6 +333,9 @@ class DirectoryMoveResult(SQLAlchemyModel):
     failed_moves: int
     moved_files: List[str]  # List of file paths that were moved
     errors: List[DirectoryMoveError]  # List of errors for failed moves
+    # The destination as written: an existing folder's spelling when the request
+    # differed only in case or Unicode form. None from servers older than this field.
+    destination: Optional[str] = None
 
 
 class DirectoryDeleteResult(SQLAlchemyModel):

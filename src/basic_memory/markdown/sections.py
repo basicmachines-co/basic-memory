@@ -94,6 +94,8 @@ class MarkdownSection:
     end_line: int
     start_offset: int
     end_offset: int
+    # The heading's last line: start_line for an ATX heading, the underline for setext.
+    heading_end_line: int
 
     @property
     def heading_path(self) -> str:
@@ -108,6 +110,8 @@ class _ScannedHeading:
     level: int
     text: str
     line_index: int
+    # Exclusive 0-indexed end: a setext heading spans its text and its underline.
+    end_line_index: int
 
 
 def _scan_headings(body: str) -> list[_ScannedHeading]:
@@ -124,6 +128,7 @@ def _scan_headings(body: str) -> list[_ScannedHeading]:
                 level=int(token.tag[1:]),
                 text=tokens[index + 1].content.strip(),
                 line_index=token.map[0],
+                end_line_index=token.map[1],
             )
         )
     return headings
@@ -197,6 +202,7 @@ def scan_sections(body: str) -> tuple[MarkdownSection, ...]:
                 end_line=end_line_index,
                 start_offset=line_start_offsets[heading.line_index],
                 end_offset=line_offset(end_line_index),
+                heading_end_line=heading.end_line_index,
             )
         )
     return tuple(sections)
@@ -237,6 +243,8 @@ class SectionSelector:
     raw: str
     segments: tuple[str, ...]
     duplicate_index: int
+    # True when the caller wrote the [n] suffix; edits need it to pick among duplicates.
+    indexed: bool = False
 
 
 def parse_section_selector(selector: str) -> SectionSelector | None:
@@ -249,6 +257,7 @@ def parse_section_selector(selector: str) -> SectionSelector | None:
     text = selector.strip()
     duplicate_index = 0
     suffix = _DUPLICATE_INDEX_SUFFIX.search(text)
+    indexed = suffix is not None
     if suffix:
         duplicate_index = int(suffix.group(1))
         text = text[: suffix.start()].rstrip()
@@ -259,7 +268,12 @@ def parse_section_selector(selector: str) -> SectionSelector | None:
         if not cleaned:
             return None
         segments.append(cleaned)
-    return SectionSelector(raw=selector, segments=tuple(segments), duplicate_index=duplicate_index)
+    return SectionSelector(
+        raw=selector,
+        segments=tuple(segments),
+        duplicate_index=duplicate_index,
+        indexed=indexed,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,6 +410,71 @@ def _find_section(
     return NoteSliceError(
         f"Section '{selector.raw}' not found{note_label}: {len(matches)} section(s) share "
         f"the path '{distinct_paths[0]}' (duplicate indexes 0-{len(matches) - 1})."
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SectionSpan:
+    """Where a selected section sits in a full document, for edits.
+
+    Positions are 0-indexed into ``full_text.split("\\n")`` and count the whole
+    document, frontmatter included. ``end`` and ``subsections_start`` are exclusive.
+    """
+
+    heading: str
+    level: int
+    label: str
+    heading_start: int
+    # First line after the heading; a setext heading spans two lines.
+    body_start: int
+    # The next heading of the same or higher level, or the end of the document.
+    end: int
+    # The first subsection heading, or `end` when the section has none.
+    subsections_start: int
+
+
+def locate_section(
+    full_text: str,
+    selector: SectionSelector,
+    *,
+    note_title: str | None = None,
+) -> SectionSpan | NoteSliceError:
+    """Find the section an edit addresses, with the same selector reads use.
+
+    Reads take the first of several same-path sections; an edit refuses instead,
+    unless the selector names one with [n], because changing the wrong section
+    loses text.
+    """
+    doc_lines = _split_lines(full_text)
+    frontmatter_lines = _frontmatter_line_count(full_text)
+    sections = scan_sections("\n".join(doc_lines[frontmatter_lines:]))
+    found = _find_section(sections, selector, note_title)
+    if isinstance(found, NoteSliceError):
+        return found
+    matched, label = found
+    twins = [section for section in sections if section.path == matched.path]
+    if len(twins) > 1 and not selector.indexed:
+        note_label = f" in note '{note_title}'" if note_title else ""
+        choices = ", ".join(f"{matched.heading_path}[{twin.duplicate_index}]" for twin in twins)
+        return NoteSliceError(
+            f"Multiple sections found with header '{selector.raw}'{note_label}. "
+            f"Name one: {choices}."
+        )
+    position = sections.index(matched)
+    following = sections[position + 1] if position + 1 < len(sections) else None
+    subsections_start = (
+        following.start_line - 1
+        if following is not None and following.start_line <= matched.end_line
+        else matched.end_line
+    )
+    return SectionSpan(
+        heading=matched.heading,
+        level=matched.level,
+        label=label,
+        heading_start=frontmatter_lines + matched.start_line - 1,
+        body_start=frontmatter_lines + matched.heading_end_line,
+        end=frontmatter_lines + matched.end_line,
+        subsections_start=frontmatter_lines + subsections_start,
     )
 
 

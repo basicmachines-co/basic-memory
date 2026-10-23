@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+import unicodedata
 import secrets
 import stat
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
@@ -599,9 +600,16 @@ def sanitize_for_directory(directory: str) -> str:
     if sanitized.startswith("./"):
         sanitized = sanitized[2:]
 
-    # ensure no special characters (except for a few that are allowed)
+    # ensure no special characters (except for a few that are allowed).
+    # Combining marks (category M*) stay: an NFD name spells "é" as "e" plus U+0301,
+    # and Linux keeps NFD paths as given, so dropping the mark turned "café" into
+    # "cafe" (#1796).
     sanitized = "".join(
-        c for c in sanitized if c.isalnum() or c in (".", " ", "-", "_", "\\", "/")
+        c
+        for c in sanitized
+        if c.isalnum()
+        or unicodedata.category(c).startswith("M")
+        or c in (".", " ", "-", "_", "\\", "/")
     ).rstrip()
 
     # compress multiple, repeated instances of path separators

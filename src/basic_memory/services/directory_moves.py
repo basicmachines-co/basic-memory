@@ -121,6 +121,7 @@ async def move_directory(
         failed_moves=len(errors),
         moved_files=moved_files,
         errors=errors,
+        destination=destination,
     )
 
 
