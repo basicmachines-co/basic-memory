@@ -12,7 +12,7 @@ from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
-from basic_memory.mcp.tools.read_note import format_note_metadata
+from basic_memory.mcp.note_reads import format_note_metadata
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
 from typing import override

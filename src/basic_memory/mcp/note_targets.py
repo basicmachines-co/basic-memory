@@ -34,6 +34,7 @@ from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat, parse_project, routing_arguments
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.schemas.v2.entity import EntityResolveResponse
 from basic_memory.utils import validate_project_path
 
 
@@ -131,8 +132,11 @@ async def resolve_note(
     identifier: str,
     *,
     output_format: OutputFormat = "text",
-) -> str:
-    """Resolve the routed target to a note's external id, exactly.
+) -> EntityResolveResponse:
+    """Resolve the routed target to its note, exactly.
+
+    The response carries the note's external id, file path and title, which is
+    what a tool needs to decide how to read or change it.
 
     `identifier` is the caller's original spelling, used in the refusal so the
     model sees what it asked for.
@@ -150,7 +154,7 @@ async def resolve_note(
 
     knowledge_client = KnowledgeClient(target.client, target.project.external_id)
     try:
-        return await knowledge_client.resolve_entity(target.route.path, strict=True)
+        return await knowledge_client.resolve_entity_response(target.route.path, strict=True)
     except ToolError as error:
         answer = _api_answer(error)
         match answer.status_code if answer is not None else None:

@@ -20,6 +20,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_and_path,
 )
 from basic_memory.mcp.note_reads import (
+    format_note_metadata,
     parse_opening_frontmatter,
     read_note_json_by_external_id,
 )
@@ -605,19 +606,6 @@ async def read_note(
                 ]
                 return payload
             return format_related_results(active_project.name, identifier, text_candidates)
-
-
-def format_note_metadata(metadata: dict[str, Any]) -> str:
-    """Format a metadata-only read as plain key/value lines.
-
-    The checksum is printed in full: it is the token edit_note and write_note take
-    as expected_checksum, so a truncated one would be useless.
-    """
-    lines = ["# Note metadata"]
-    lines.extend(
-        f"{key}: {value if value is not None else 'unknown'}" for key, value in metadata.items()
-    )
-    return "\n".join(lines)
 
 
 def format_not_found_message(project: str | None, identifier: str) -> str:
