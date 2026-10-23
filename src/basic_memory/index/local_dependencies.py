@@ -61,6 +61,7 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
+    local_promotion_confirmation_reader,
     note_content_repository_for_project,
 )
 from basic_memory.markdown import EntityMarkdown, EntityParser, MarkdownProcessor
@@ -745,6 +746,7 @@ def build_local_markdown_file_indexer(
         note_content_reconciler=NoteContentReconciler(
             note_content_repository=note_content_repository_for_project(project_id),
             session_maker=session_maker,
+            promotion_confirmation_reader=local_promotion_confirmation_reader(file_service),
         ),
     )
 
@@ -814,6 +816,7 @@ async def build_local_index_project_dependencies(
         content_type_provider=file_service,
         session_maker=session_maker,
         file_reader=FileServiceNoteContentReconcileFileReader(file_service=file_service),
+        promotion_confirmation_reader=local_promotion_confirmation_reader(file_service),
     )
     file_indexer = build_local_markdown_file_indexer(
         project_id=project.id,

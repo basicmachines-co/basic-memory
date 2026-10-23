@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from dataclasses import dataclass
-from typing import Protocol, assert_never
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
+from typing import Literal, Protocol, assert_never
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db, file_utils
 from basic_memory.indexing.note_content_reconciliation import (
+    AcceptedNoteContentLineage,
     NoteContentBootstrap,
+    NoteContentChecksum,
     NoteContentFileObserved,
     NoteContentFileSynced,
     NoteContentMaterializationStatusUpdate,
@@ -32,6 +35,11 @@ from basic_memory.indexing.note_content_reconciliation import (
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import NoteContentRepository
+from basic_memory.repository.note_content_repository import AcceptedNoteContentVersions
+from basic_memory.runtime.note_file_guards import (
+    RuntimeFileChecksumReader,
+    read_runtime_file_checksum,
+)
 from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeFilePath
 
 type NoteContentUpdatePlan = (
@@ -74,6 +82,14 @@ class NoteContentStore(NoteContentStateUpdateStore, Protocol):
         data: NoteContent,
     ) -> NoteContent:
         """Create a note_content row."""
+
+    async def find_accepted_content_versions(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        checksum: NoteContentChecksum,
+    ) -> AcceptedNoteContentVersions:
+        """Locate one checksum in the note's accepted-change history."""
 
 
 class NoteContentReconcileEntitySource(Protocol):
@@ -119,6 +135,113 @@ class NoteContentReconcileFileReader(Protocol):
 
     async def get_file(self, path: RuntimeFilePath) -> NoteContentReconcileFile:
         """Return canonical file content for one relative path."""
+
+
+class PromotionConfirmationStorage(RuntimeFileChecksumReader, Protocol):
+    """File storage that says whether it is the host's local filesystem."""
+
+    @property
+    def local_project_path(self) -> Path | None: ...
+
+
+def local_promotion_confirmation_reader(
+    storage: PromotionConfirmationStorage,
+) -> RuntimeFileChecksumReader | None:
+    """Return ``storage`` as the authoritative re-read only for a local filesystem.
+
+    Constraint: object-storage file services (Cloud's S3 service subclasses
+    FileService) compute checksums with ordinary reads, which can serve the same
+    stale object generation the promotion rollback guard exists to catch. Only a
+    local filesystem re-read is authoritative, so only it may confirm a
+    superseded observation. Object storage gets None, and the guard defers.
+    """
+    return storage if storage.local_project_path is not None else None
+
+
+# --- Promotion Rollback Guard ---
+
+# How the rollback guard judged one planned promotion:
+# - not_superseded: observed bytes match no accepted version, or the newest one
+# - confirmed_by_storage: superseded bytes, but an authoritative re-read agrees
+# - no_authoritative_reader: superseded bytes and nothing can confirm them
+# - storage_disagrees: superseded bytes and the authoritative re-read differs
+type NoteContentRollbackGuardOutcome = Literal[
+    "not_superseded",
+    "confirmed_by_storage",
+    "no_authoritative_reader",
+    "storage_disagrees",
+]
+
+
+def rollback_guard_allows_promotion(outcome: NoteContentRollbackGuardOutcome) -> bool:
+    """Return whether a planned promotion may be applied after the rollback guard."""
+    return outcome in ("not_superseded", "confirmed_by_storage")
+
+
+async def guard_note_content_promotion(
+    lineage: AcceptedNoteContentLineage,
+    *,
+    confirmation_reader: RuntimeFileChecksumReader | None,
+    file_path: RuntimeFilePath,
+    observed_checksum: NoteContentChecksum,
+) -> NoteContentRollbackGuardOutcome:
+    """Decide whether observed bytes that would become a new version are trustworthy.
+
+    Trigger: the observed checksum equals an accepted version that a newer accepted
+      change already replaced.
+    Why: that is the signature of a stale object-storage read. Promoting it would save
+      old bytes as the newest version and silently roll the note back.
+    Outcome: promote only when an authoritative storage re-read returns the same
+      bytes; otherwise the caller defers and the DB keeps the newer accepted content.
+
+    Trade-off: a sync user who deliberately restores a file to the exact bytes of an
+    older accepted version is deferred too, unless the authoritative re-read confirms
+    it. Nothing is lost: the newer content stays accepted in the DB.
+    """
+    if not lineage.observation_is_superseded:
+        return "not_superseded"
+    if confirmation_reader is None:
+        return "no_authoritative_reader"
+    confirmed_checksum = await read_runtime_file_checksum(confirmation_reader, file_path)
+    if confirmed_checksum == observed_checksum:
+        return "confirmed_by_storage"
+    return "storage_disagrees"
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentPromotionRecord:
+    """Structured telemetry for one applied or refused note_content promotion."""
+
+    entity_id: int
+    previous_db_version: int
+    new_db_version: int | None
+    observed_checksum: NoteContentChecksum
+    matched_accepted_db_version: int | None
+    newest_accepted_db_version: int | None
+    observed_at: str
+    source: NoteContentSource
+    rollback_guard: NoteContentRollbackGuardOutcome
+
+
+def log_note_content_promotion(record: NoteContentPromotionRecord) -> None:
+    """Emit one promotion decision so silent version changes leave a trace.
+
+    Applied promotions log at info. Refused rollback candidates log at warning,
+    because each one is a storage read that tried to roll a note back.
+    """
+    fields = asdict(record)
+    if record.new_db_version is None:
+        logger.warning(
+            "Refused note_content promotion: observed file matches a superseded accepted version",
+            event="note_content.promotion_refused",
+            **fields,
+        )
+        return
+    logger.info(
+        "Promoted observed file content to a new accepted note_content version",
+        event="note_content.promotion_applied",
+        **fields,
+    )
 
 
 def note_content_repository_for_project(project_id: ProjectId) -> NoteContentStore:
@@ -291,9 +414,13 @@ class NoteContentReconciler:
         *,
         note_content_repository: NoteContentStore,
         session_maker: async_sessionmaker[AsyncSession],
+        promotion_confirmation_reader: RuntimeFileChecksumReader | None = None,
     ) -> None:
         self._note_content_repository = note_content_repository
         self._session_maker = session_maker
+        # Authoritative storage re-read for promotions of superseded bytes. None
+        # means storage reads cannot be trusted to confirm them, so they defer.
+        self._promotion_confirmation_reader = promotion_confirmation_reader
 
     async def capture_anchor(self, entity_id: int | None) -> NoteContentReconciliationAnchor:
         """Capture the accepted state before storage bytes enter the index pipeline."""
@@ -414,6 +541,48 @@ class NoteContentReconciler:
                 )
                 return NoteContentReconciliationResult.deferred()
 
+            # Trigger: the planner wants the observed bytes to become a new accepted version.
+            # Why: a promotion records no accepted_project_note_change row and no live
+            #   update, so a stale storage read here would silently roll the note back.
+            # Outcome: superseded bytes need authoritative confirmation or they defer;
+            #   every applied or refused promotion leaves a structured log record.
+            applied_promotion_record: NoteContentPromotionRecord | None = None
+            if isinstance(plan, NoteContentPromoted):
+                accepted_versions = (
+                    await self._note_content_repository.find_accepted_content_versions(
+                        session,
+                        entity.id,
+                        observed.checksum,
+                    )
+                )
+                lineage = AcceptedNoteContentLineage(
+                    newest_accepted_db_version=accepted_versions.newest_db_version,
+                    matched_accepted_db_version=accepted_versions.matched_db_version,
+                )
+                # note_content mirrors the entity path; a stale mirror can only make
+                # the re-read disagree, which defers rather than promotes.
+                guard_outcome = await guard_note_content_promotion(
+                    lineage,
+                    confirmation_reader=self._promotion_confirmation_reader,
+                    file_path=note_content.file_path,
+                    observed_checksum=observed.checksum,
+                )
+                promotion_record = NoteContentPromotionRecord(
+                    entity_id=entity.id,
+                    previous_db_version=current_state.db_version,
+                    new_db_version=None,
+                    observed_checksum=observed.checksum,
+                    matched_accepted_db_version=lineage.matched_accepted_db_version,
+                    newest_accepted_db_version=lineage.newest_accepted_db_version,
+                    observed_at=observed.observed_at.isoformat(),
+                    source=observed.source,
+                    rollback_guard=guard_outcome,
+                )
+                if not rollback_guard_allows_promotion(guard_outcome):
+                    log_note_content_promotion(promotion_record)
+                    return NoteContentReconciliationResult.deferred()
+                applied_promotion_record = replace(promotion_record, new_db_version=plan.db_version)
+
             applied = await apply_note_content_update_plan(
                 self._note_content_repository,
                 session,
@@ -429,6 +598,9 @@ class NoteContentReconciler:
                     entity.id,
                 )
                 return NoteContentReconciliationResult.stale()
+
+            if applied_promotion_record is not None:
+                log_note_content_promotion(applied_promotion_record)
 
             if isinstance(plan, NoteContentFileObserved):
                 # The observed bytes describe an older materialized file while DB content is

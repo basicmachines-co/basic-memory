@@ -27,6 +27,7 @@ from basic_memory.indexing.note_content_reconciler import (
 )
 from basic_memory.models import Entity
 from basic_memory.repository import NoteContentRepository
+from basic_memory.repository.note_content_repository import AcceptedNoteContentVersions
 
 
 class FakeSession:
@@ -71,6 +72,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         file_version=1,
         file_checksum="previous-file-checksum",
         file_write_status="synced",
+        file_path="notes/repaired.md",
     )
     repository = SimpleNamespace(
         get_by_entity_id=AsyncMock(side_effect=[None, existing_note_content]),
@@ -82,6 +84,12 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
             )
         ),
         update_state_fields=AsyncMock(),
+        find_accepted_content_versions=AsyncMock(
+            return_value=AcceptedNoteContentVersions(
+                newest_db_version=None,
+                matched_db_version=None,
+            )
+        ),
     )
     entity = cast(Entity, SimpleNamespace(id=42))
     session = FakeSession()
@@ -176,12 +184,19 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
         file_version=3,
         file_checksum=stale_checksum,
         file_write_status="synced",
+        file_path="notes/observed.md",
     )
     repository = SimpleNamespace(
         get_by_entity_id=AsyncMock(return_value=existing_note_content),
         create=AsyncMock(),
         # update_state_fields returns None: the db_version advanced under us.
         update_state_fields=AsyncMock(return_value=None),
+        find_accepted_content_versions=AsyncMock(
+            return_value=AcceptedNoteContentVersions(
+                newest_db_version=None,
+                matched_db_version=None,
+            )
+        ),
     )
     entity = cast(Entity, SimpleNamespace(id=42))
     session = FakeSession()

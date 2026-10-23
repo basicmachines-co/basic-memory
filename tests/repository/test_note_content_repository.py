@@ -8,11 +8,16 @@ from basic_memory import db
 from basic_memory.models import NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
+    AcceptedNoteContentVersions,
     AcceptedNoteContentWrite,
     NoteContentRepository,
     NoteContentVersionConflict,
 )
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from typing import Any
 
 
@@ -732,3 +737,107 @@ async def test_find_stuck_materializations_is_project_scoped(
         )
 
     assert stuck_a == []
+
+
+@pytest.mark.asyncio
+async def test_find_accepted_content_versions_reads_this_notes_journal(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+):
+    """Only this note's revision rows count toward its accepted lineage."""
+    project_repository = ProjectRepository()
+    accepted_at = datetime(2026, 10, 22, 9, 0, tzinfo=timezone.utc)
+
+    def change(
+        position: int,
+        *,
+        entity_id: int,
+        note_external_id: str,
+        operation: RuntimeProjectNoteOperation,
+        db_version: int | None,
+        db_checksum: str | None,
+    ) -> RuntimeAcceptedProjectNoteChange:
+        return RuntimeAcceptedProjectNoteChange(
+            project_id=test_project.id,
+            project_external_id=test_project.external_id,
+            partition_position=position,
+            entity_id=entity_id,
+            note_external_id=note_external_id,
+            permalink="test/test-entity",
+            title="Test Entity",
+            operation=operation,
+            file_path=sample_entity.file_path,
+            accepted_at=accepted_at,
+            source="api",
+            db_version=db_version,
+            db_checksum=db_checksum,
+        )
+
+    this_note = {"entity_id": sample_entity.id, "note_external_id": sample_entity.external_id}
+    changes = [
+        change(
+            1,
+            **this_note,
+            operation=RuntimeProjectNoteOperation.created,
+            db_version=1,
+            db_checksum="checksum-a",
+        ),
+        change(
+            2,
+            **this_note,
+            operation=RuntimeProjectNoteOperation.updated,
+            db_version=2,
+            db_checksum="checksum-b",
+        ),
+        change(
+            3,
+            **this_note,
+            operation=RuntimeProjectNoteOperation.updated,
+            db_version=3,
+            db_checksum="checksum-a",
+        ),
+        # Another note reusing the same bytes at a higher version must not count.
+        change(
+            4,
+            entity_id=sample_entity.id + 1000,
+            note_external_id="other-note",
+            operation=RuntimeProjectNoteOperation.updated,
+            db_version=9,
+            db_checksum="checksum-b",
+        ),
+        # Delete evidence carries no revision and drops out of both aggregates.
+        change(
+            5,
+            **this_note,
+            operation=RuntimeProjectNoteOperation.deleted,
+            db_version=None,
+            db_checksum=None,
+        ),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        for accepted in changes:
+            await project_repository.advance_partition_position(session, test_project.id)
+            await project_repository.record_accepted_note_change(session, accepted)
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        repeated = await repository.find_accepted_content_versions(
+            session, sample_entity.id, "checksum-a"
+        )
+        superseded = await repository.find_accepted_content_versions(
+            session, sample_entity.id, "checksum-b"
+        )
+        unknown = await repository.find_accepted_content_versions(
+            session, sample_entity.id, "checksum-z"
+        )
+        no_history = await repository.find_accepted_content_versions(
+            session, sample_entity.id + 1, "checksum-a"
+        )
+
+    assert repeated == AcceptedNoteContentVersions(newest_db_version=3, matched_db_version=3)
+    assert superseded == AcceptedNoteContentVersions(newest_db_version=3, matched_db_version=2)
+    assert unknown == AcceptedNoteContentVersions(newest_db_version=3, matched_db_version=None)
+    assert no_history == AcceptedNoteContentVersions(
+        newest_db_version=None, matched_db_version=None
+    )
