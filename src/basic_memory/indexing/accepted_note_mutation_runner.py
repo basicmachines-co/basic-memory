@@ -803,6 +803,7 @@ async def _run_accepted_note_create(
     dependencies: AcceptedNoteMutationDependencies,
 ) -> AcceptedNoteMutationResult:
     ensure_accepted_note_markdown_entity(request.data)
+    ensure_accepted_note_file_path_in_project(request.data)
 
     now = accepted_note_mutation_utc_now()
     user_profile_value = (
@@ -898,6 +899,7 @@ async def _run_accepted_note_update(
     dependencies: AcceptedNoteMutationDependencies,
 ) -> AcceptedNoteMutationResult:
     ensure_accepted_note_markdown_entity(request.data)
+    ensure_accepted_note_file_path_in_project(request.data)
 
     now = accepted_note_mutation_utc_now()
     user_profile_value = (
@@ -1579,6 +1581,20 @@ def ensure_accepted_note_markdown_entity(data: EntitySchema) -> None:
             AcceptedNoteMutationRejectKind.unsupported_media_type,
             "Only markdown note writes are supported by the note-content path.",
         )
+
+
+def ensure_accepted_note_file_path_in_project(data: EntitySchema) -> None:
+    """Reject a create or update whose file path would leave the project root.
+
+    sanitize_for_directory keeps dots, so a ".." directory survives into
+    ``file_path``. Moves already refuse such paths with the move destination
+    rule; creates and updates apply the same rule so no write route can accept a
+    note whose path walks out of the project before anything is persisted.
+    """
+    try:
+        normalize_note_move_destination_path(data.file_path)
+    except ValueError as error:
+        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
 
 def reject_accepted_note_file_path_conflict(
