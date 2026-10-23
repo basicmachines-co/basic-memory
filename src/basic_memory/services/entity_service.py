@@ -17,7 +17,10 @@ from basic_memory.indexing.models import (
     indexed_sections_from_markdown,
 )
 from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationAnchor
-from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.indexing.note_content_reconciler import (
+    NoteContentReconciler,
+    local_promotion_confirmation_reader,
+)
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import (
@@ -211,6 +214,7 @@ class EntityService(BaseService[EntityModel]):
         reconciler = NoteContentReconciler(
             note_content_repository=NoteContentRepository(project_id=self.repository.project_id),
             session_maker=self.session_maker,
+            promotion_confirmation_reader=local_promotion_confirmation_reader(self.file_service),
         )
         reconciliation = await reconciler.reconcile(
             entity=entity,

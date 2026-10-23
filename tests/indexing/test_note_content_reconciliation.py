@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from basic_memory.indexing.note_content_reconciliation import (
+    AcceptedNoteContentLineage,
     AcceptedNoteContentVersion,
     MaterializedNoteContentFile,
     NoteContentBootstrap,
@@ -143,6 +144,28 @@ def test_plan_promotes_external_file_change_from_synced_state() -> None:
         last_materialization_error=None,
         last_materialization_attempt_at=None,
     )
+
+
+@pytest.mark.parametrize(
+    ("newest", "matched", "superseded"),
+    [
+        (None, None, False),  # no accepted history: a disk-only note
+        (4, None, False),  # fresh bytes no accepted write ever produced
+        (4, 4, False),  # bytes of the newest accepted version
+        (4, 2, True),  # bytes of a version a newer accepted write replaced
+    ],
+)
+def test_accepted_lineage_flags_only_superseded_observations(
+    newest: int | None,
+    matched: int | None,
+    superseded: bool,
+) -> None:
+    lineage = AcceptedNoteContentLineage(
+        newest_accepted_db_version=newest,
+        matched_accepted_db_version=matched,
+    )
+
+    assert lineage.observation_is_superseded is superseded
 
 
 def test_plan_materialization_publish_marks_current_payload_synced() -> None:

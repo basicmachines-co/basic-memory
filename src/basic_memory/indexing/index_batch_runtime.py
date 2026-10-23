@@ -43,6 +43,7 @@ from basic_memory.repository import (
     ObservationRepository,
     RelationRepository,
 )
+from basic_memory.runtime.note_file_guards import RuntimeFileChecksumReader
 from basic_memory.runtime.storage import ProjectId
 from basic_memory.services import EntityService
 
@@ -152,17 +153,23 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     content_type_provider: IndexContentTypeProvider,
     session_maker: async_sessionmaker[AsyncSession],
     file_reader: NoteContentReconcileFileReader | None = None,
+    promotion_confirmation_reader: RuntimeFileChecksumReader | None = None,
 ) -> IndexBatchRuntime[Entity, FileInfoT]:
     """Compose the default repository-backed batch index runtime.
 
     Hosted and local runtimes still own storage and session lifecycles. This
     factory keeps the product indexing stack together: search indexing,
     frontmatter writes, batch indexing, and note_content reconciliation.
+
+    ``promotion_confirmation_reader`` is the authoritative storage re-read the
+    promotion rollback guard may use. Leave it None unless the storage's reads
+    cannot be stale (a local filesystem); without it, superseded bytes defer.
     """
     note_content_repository = NoteContentRepository(project_id=project_id)
     note_content_reconciler = NoteContentReconciler(
         note_content_repository=note_content_repository,
         session_maker=session_maker,
+        promotion_confirmation_reader=promotion_confirmation_reader,
     )
     # Pass the search writer straight through so the project-scan/batch path
     # search-indexes non-markdown entities (images, PDFs, other files) exactly

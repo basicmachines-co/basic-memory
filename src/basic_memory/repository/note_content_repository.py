@@ -5,11 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import override, Any, Mapping, Optional, Sequence, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basic_memory.models import Entity, NoteContent
+from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent
 from basic_memory.repository.repository import Repository
 
 
@@ -50,6 +50,20 @@ class AcceptedNoteContentWrite:
     db_checksum: str
     last_source: str | None
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteContentVersions:
+    """Accepted-change journal versions relevant to one observed note checksum.
+
+    ``newest_db_version`` is the highest accepted ``db_version`` recorded for the
+    note. ``matched_db_version`` is the highest accepted ``db_version`` whose
+    ``db_checksum`` equals the observed checksum. Either is None when the journal
+    has no such row (for example a note that was only ever edited on disk).
+    """
+
+    newest_db_version: int | None
+    matched_db_version: int | None
 
 
 class NoteContentRepository(Repository[NoteContent]):
@@ -343,6 +357,43 @@ class NoteContentRepository(Repository[NoteContent]):
         if updated is None:  # pragma: no cover
             raise ValueError(f"Can't find NoteContent for entity {entity_id} after update")
         return updated
+
+    async def find_accepted_content_versions(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        checksum: str,
+    ) -> AcceptedNoteContentVersions:
+        """Locate one checksum in the note's accepted-change history.
+
+        One aggregate query answers both questions promotion needs: what is the
+        newest accepted version of this note, and which accepted version (if any)
+        carried exactly these bytes. Rows without a revision (deletes) carry no
+        ``db_version`` and drop out of both aggregates.
+        """
+        accepted_db_version = AcceptedProjectNoteChange.db_version
+        query = select(
+            func.max(accepted_db_version),
+            func.max(
+                case(
+                    (AcceptedProjectNoteChange.db_checksum == checksum, accepted_db_version),
+                    else_=None,
+                )
+            ),
+        ).where(
+            AcceptedProjectNoteChange.project_id == self.project_id,
+            # note_external_id is the journal's indexed note key; entity_id keeps
+            # the match exact to this entity row.
+            AcceptedProjectNoteChange.note_external_id
+            == select(Entity.external_id).where(Entity.id == entity_id).scalar_subquery(),
+            AcceptedProjectNoteChange.entity_id == entity_id,
+            accepted_db_version.is_not(None),
+        )
+        newest_db_version, matched_db_version = (await session.execute(query)).one()
+        return AcceptedNoteContentVersions(
+            newest_db_version=newest_db_version,
+            matched_db_version=matched_db_version,
+        )
 
     async def find_stuck_materializations(self, session: AsyncSession) -> Sequence[NoteContent]:
         """Return accepted notes whose file write never completed.

@@ -86,6 +86,32 @@ class AcceptedNoteContentVersion:
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptedNoteContentLineage:
+    """Where one observed checksum sits in a note's accepted-change history.
+
+    Every accepted note write records its ``db_version`` and ``db_checksum`` in
+    ``accepted_project_note_change``. Promotion uses that history to recognise an
+    observation that reproduces a version a newer accepted write already replaced.
+    """
+
+    newest_accepted_db_version: int | None
+    matched_accepted_db_version: int | None
+
+    @property
+    def observation_is_superseded(self) -> bool:
+        """Whether the observed bytes equal an accepted version a newer one replaced.
+
+        This is the signature of a stale storage read: object storage served an
+        older generation of the file, and promoting it would roll the note back.
+        An observation that matches the newest accepted version, or matches no
+        accepted version at all, is not superseded.
+        """
+        if self.matched_accepted_db_version is None or self.newest_accepted_db_version is None:
+            return False
+        return self.matched_accepted_db_version < self.newest_accepted_db_version
+
+
+@dataclass(frozen=True, slots=True)
 class MaterializedNoteContentFile:
     """One file object written from a DB-accepted note_content version."""
 
@@ -240,6 +266,10 @@ def plan_existing_note_content_reconciliation(
     - observed checksum == previous file checksum while versions differ: DB stays ahead
     - an unrelated observation can advance DB only from fully synchronized state
     - otherwise: defer until the accepted DB/file lineage is stable
+
+    A promotion plan is not yet safe to apply: the reconciler must still check it
+    against the accepted-change history (``AcceptedNoteContentLineage``) so a
+    stale storage read cannot roll the note back to a superseded version.
     """
     if observed.checksum == current.db_checksum:
         return NoteContentFileSynced(
