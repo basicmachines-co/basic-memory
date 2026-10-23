@@ -280,6 +280,11 @@ async def test_non_note_files_are_refused(
         ({"command": "replace_section", "content": "x"}, "needs `section`"),
         ({"command": "append", "content": "x", "section": "A"}, "only for section commands"),
         ({"command": "append", "content": "x", "metadata": {"a": None}}, "cannot be null"),
+        ({"command": "set_metadata", "metadata": {"title": "New"}}, "cannot change title"),
+        (
+            {"command": "set_metadata", "metadata": {"permalink": "p", "status": "x"}},
+            "cannot change permalink",
+        ),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, message):

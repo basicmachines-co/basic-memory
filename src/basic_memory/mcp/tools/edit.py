@@ -216,3 +216,16 @@ def _check_arguments(
         raise invalid(
             f"metadata values cannot be null (removing keys is not supported): {null_keys}"
         )
+    # The frontmatter merge keeps a note's identity out of `metadata`, so these keys
+    # would be acknowledged and never applied.
+    identity_keys = sorted({"title", "permalink"} & set(metadata or {}))
+    if identity_keys:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            f"metadata cannot change {', '.join(identity_keys)}; those are the note's identity.",
+            try_instead=(
+                "bm_move to rename the file, or edit the title in the note text "
+                "(command='find_replace')"
+            ),
+            output_format=output_format,
+        )
