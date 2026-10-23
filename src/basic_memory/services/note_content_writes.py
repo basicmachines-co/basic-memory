@@ -783,8 +783,13 @@ class NoteContentMutationService:
         source: str,
         actor_kind: str | None = None,
         actor_name: str | None = None,
+        base_checksum: str | None = None,
     ) -> AcceptedNoteChange:
-        """Move a note by accepting the new path before runtime materialization."""
+        """Move a note by accepting the new path before runtime materialization.
+
+        ``base_checksum`` is the optional db_checksum the caller last read; a stale
+        value refuses the move with the same structured 409 edits use.
+        """
         actor_context = self._resolve_actor(
             "move",
             user_profile_id=user_profile_id,
@@ -815,6 +820,7 @@ class NoteContentMutationService:
                                 author=actor_context.author,
                             ),
                             source=actor_context.source,
+                            base_checksum=base_checksum,
                         ),
                         dependencies=self.mutation_dependencies,
                     )
@@ -832,6 +838,7 @@ class NoteContentMutationService:
         source: str = ACCEPTED_NOTE_DELETE_SOURCE,
         actor_kind: str | None = None,
         actor_name: str | None = None,
+        base_checksum: str | None = None,
     ) -> AcceptedNoteChange:
         """DELETE the DB note and return the runtime follow-up change.
 
@@ -839,6 +846,9 @@ class NoteContentMutationService:
         actor writes the same journal row it always has. The resolver sees
         ``source`` like every other mutation, but the journal keeps recording
         deletes under ``ACCEPTED_NOTE_DELETE_SOURCE``: only the actor is new here.
+
+        ``base_checksum`` is the optional db_checksum the caller last read. A stale
+        value, or a note that is already gone, refuses the delete with a 409.
         """
         actor_context = self._resolve_actor(
             "delete",
@@ -868,6 +878,7 @@ class NoteContentMutationService:
                                 actor_name=actor_context.actor_name,
                                 author=actor_context.author,
                             ),
+                            base_checksum=base_checksum,
                         ),
                         dependencies=self.mutation_dependencies,
                     )

@@ -1620,6 +1620,70 @@ async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url
     assert delete_response.deleted is False
 
 
+async def _create_guarded_note(
+    client: AsyncClient, session_maker, project: Project, v2_project_url: str, title: str
+) -> tuple[EntityResponseV2, str]:
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": title, "directory": "guarded", "content": "Original"},
+    )
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, project.id, entity.id)
+    assert note_content is not None
+    return entity, note_content.db_checksum
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_with_stale_base_checksum_returns_409(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    """A pinned revision guards deletes the way it guards edits (SPEC-35.2 C9)."""
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Delete Guard"
+    )
+    url = f"{v2_project_url}/knowledge/entities/{entity.external_id}"
+
+    stale = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale"})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["db_checksum"] == checksum
+
+    current = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum})
+    assert current.status_code == 202
+    assert current.json()["deleted"] is True
+
+    # The note is gone now, so the same pinned revision is a conflict, not a no-op.
+    gone = await client.delete(url, headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum})
+    assert gone.status_code == 409
+    assert gone.json()["detail"]["db_checksum"] is None
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_stale_base_checksum_returns_409(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Move Guard"
+    )
+    url = f"{v2_project_url}/knowledge/entities/{entity.external_id}/move"
+
+    stale = await client.put(
+        url,
+        json={"destination_path": "moved/Move Guard.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["db_checksum"] == checksum
+
+    current = await client.put(
+        url,
+        json={"destination_path": "moved/Move Guard.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum},
+    )
+    assert current.status_code == 202
+    assert current.json()["file_path"] == "moved/Move Guard.md"
+
+
 @pytest.mark.asyncio
 async def test_delete_entity_by_id_non_markdown_file_entity(
     client: AsyncClient,

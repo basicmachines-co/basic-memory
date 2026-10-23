@@ -1185,6 +1185,15 @@ async def delete_entity_by_id(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
+    base_checksum: Annotated[
+        str | None,
+        Header(
+            alias=NOTE_CONTENT_BASE_CHECKSUM_HEADER,
+            description="Optional optimistic-concurrency precondition: the "
+            "db_checksum the caller last read. A stale value rejects the delete "
+            "with a structured 409.",
+        ),
+    ] = None,
 ) -> DeleteEntitiesResponse:
     """Delete an entity by external ID.
 
@@ -1194,7 +1203,8 @@ async def delete_entity_by_id(
     Returns:
         Deletion status
 
-    Note: Returns deleted=False if entity doesn't exist (idempotent)
+    Note: Returns deleted=False if entity doesn't exist (idempotent), unless
+    base_checksum pins a revision, which then refuses with a 409.
     """
     with logfire.span(
         "api.request.knowledge.delete_entity",
@@ -1210,6 +1220,7 @@ async def delete_entity_by_id(
                 entity_external_id=entity_id,
                 user_profile_id=None,
                 source="api",
+                base_checksum=base_checksum,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
@@ -1240,6 +1251,15 @@ async def move_entity(
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
+    base_checksum: Annotated[
+        str | None,
+        Header(
+            alias=NOTE_CONTENT_BASE_CHECKSUM_HEADER,
+            description="Optional optimistic-concurrency precondition: the "
+            "db_checksum the caller last read. A stale value rejects the move "
+            "with a structured 409.",
+        ),
+    ] = None,
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
 
@@ -1271,6 +1291,7 @@ async def move_entity(
                 destination_path=data.destination_path,
                 user_profile_id=None,
                 source="api",
+                base_checksum=base_checksum,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

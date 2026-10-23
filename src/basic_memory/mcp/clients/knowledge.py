@@ -295,22 +295,22 @@ class KnowledgeClient:
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}",
                 json=patch_data,
-                headers=(
-                    {NOTE_CONTENT_BASE_CHECKSUM_HEADER: base_checksum}
-                    if base_checksum is not None
-                    else None
-                ),
+                headers=_base_checksum_headers(base_checksum),
                 client_name="knowledge",
                 operation="patch_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
             )
         return EntityResponseV2.model_validate(response.json())
 
-    async def delete_entity(self, entity_id: str) -> DeleteEntitiesResponse:
+    async def delete_entity(
+        self, entity_id: str, *, base_checksum: str | None = None
+    ) -> DeleteEntitiesResponse:
         """Delete an entity.
 
         Args:
             entity_id: Entity external_id (UUID)
+            base_checksum: Optional accepted-revision checksum; a stale one, or a
+                note that is already gone, makes the server refuse with a 409
 
         Returns:
             DeleteEntitiesResponse confirming deletion
@@ -328,18 +328,23 @@ class KnowledgeClient:
             response = await call_delete(
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}",
+                headers=_base_checksum_headers(base_checksum),
                 client_name="knowledge",
                 operation="delete_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
             )
         return DeleteEntitiesResponse.model_validate(response.json())
 
-    async def move_entity(self, entity_id: str, destination_path: str) -> EntityResponse:
+    async def move_entity(
+        self, entity_id: str, destination_path: str, *, base_checksum: str | None = None
+    ) -> EntityResponse:
         """Move an entity to a new location.
 
         Args:
             entity_id: Entity external_id (UUID)
             destination_path: New file path for the entity
+            base_checksum: Optional accepted-revision checksum; a stale one makes the
+                server refuse the move with a structured 409
 
         Returns:
             EntityResponse with updated entity details
@@ -358,6 +363,7 @@ class KnowledgeClient:
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}/move",
                 json={"destination_path": destination_path},
+                headers=_base_checksum_headers(base_checksum),
                 client_name="knowledge",
                 operation="move_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}/move",
@@ -589,3 +595,10 @@ class KnowledgeClient:
         """Resolve a string identifier to an entity external_id."""
         data = await self._resolve_entity_data(identifier, strict=strict)
         return data["external_id"]
+
+
+def _base_checksum_headers(base_checksum: str | None) -> dict[str, str] | None:
+    """The revision-precondition header, when the caller pinned a revision."""
+    if base_checksum is None:
+        return None
+    return {NOTE_CONTENT_BASE_CHECKSUM_HEADER: base_checksum}
