@@ -37,8 +37,12 @@ from basic_memory.mcp.tools.posix_tools import cat, find, grep, ls, man, tail
 # Schema tools
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 
+# 1.0 tool surface (SPEC-35.2, #1827). Registered next to the tools they replace until #1833.
+from basic_memory.mcp.tools.read import bm_read
+
 __all__ = [
     "basic_memory_diagnostics",
+    "bm_read",
     "build_context",
     "cat",
     "create_memory_project",

@@ -90,6 +90,19 @@ def parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]
     return body_content, parsed
 
 
+def format_note_metadata(metadata: dict[str, Any]) -> str:
+    """Format a metadata-only read as plain key/value lines.
+
+    The checksum is printed in full: it is the token edit_note and write_note take
+    as expected_checksum, so a truncated one would be useless.
+    """
+    lines = ["# Note metadata"]
+    lines.extend(
+        f"{key}: {value if value is not None else 'unknown'}" for key, value in metadata.items()
+    )
+    return "\n".join(lines)
+
+
 async def read_note_json_by_external_id(
     *,
     knowledge_client: KnowledgeEntityReader,

@@ -28,11 +28,12 @@ async def test_resolves_a_note_by_path_in_the_named_project(client, test_project
     await _write_plan(test_project.name)
 
     async with open_project_target("notes/Plan.md", test_project.name, None) as target:
-        external_id = await resolve_note(target, "notes/Plan.md")
+        note = await resolve_note(target, "notes/Plan.md")
 
     assert target.project.name == test_project.name
     assert target.route.path == "notes/Plan.md"
-    assert external_id
+    assert note.file_path == "notes/Plan.md"
+    assert note.external_id
 
 
 @pytest.mark.asyncio
@@ -40,10 +41,10 @@ async def test_project_external_id_routes_like_the_name(client, test_project):
     await _write_plan(test_project.name)
 
     async with open_project_target("Plan", test_project.external_id, None) as target:
-        external_id = await resolve_note(target, "Plan")
+        note = await resolve_note(target, "Plan")
 
     assert target.project.external_id == test_project.external_id
-    assert external_id
+    assert note.title == "Plan"
 
 
 @pytest.mark.asyncio
@@ -139,7 +140,7 @@ async def test_other_resolution_failures_pass_through(client, test_project, monk
     async def failing_resolve(self, identifier, *, strict=False):
         raise ToolError("backend unavailable")
 
-    monkeypatch.setattr(KnowledgeClient, "resolve_entity", failing_resolve)
+    monkeypatch.setattr(KnowledgeClient, "resolve_entity_response", failing_resolve)
 
     async with open_project_target("notes/Plan.md", test_project.name, None) as target:
         with pytest.raises(ToolError, match="backend unavailable"):
