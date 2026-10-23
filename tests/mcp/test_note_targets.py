@@ -158,9 +158,9 @@ async def test_an_identifier_can_be_a_title_that_looks_like_a_path(client, test_
     async with open_project_target(
         "Home ~ Plan", test_project.name, None, kind="identifier"
     ) as target:
-        external_id = await resolve_note(target, "Home ~ Plan")
+        note = await resolve_note(target, "Home ~ Plan")
 
-    assert external_id
+    assert note.title == "Home ~ Plan"
     with pytest.raises(ToolError, match="^OUTSIDE_PROJECT:"):
         async with open_project_target("~/x", test_project.name, None):
             pass

@@ -114,7 +114,7 @@ async def bm_read(
         )
 
     async with open_project_target(
-        identifier, project, context, output_format=output_format
+        identifier, project, context, kind="identifier", output_format=output_format
     ) as target:
         note = await resolve_note(target, identifier, output_format=output_format)
         knowledge_client = KnowledgeClient(target.client, target.project.external_id)

@@ -3,11 +3,9 @@
 These run the real ASGI stack through the shared `client` fixture.
 """
 
-import json
 from typing import Any
 
 import pytest
-from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import bm_context, write_note
 
@@ -85,11 +83,14 @@ async def test_compact_json_drops_bodies(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_outside_the_project_is_refused(client, test_project):
-    # bm_context defaults to JSON, so its refusals are JSON too.
-    with pytest.raises(ToolError) as refused:
-        await bm_context(identifier="../graph/node-a", project=test_project.name)
-    assert json.loads(str(refused.value))["error"] == "OUTSIDE_PROJECT"
+async def test_an_identifier_cannot_reach_outside_the_project(client, test_project):
+    """Identifiers resolve inside the project: a '../' spelling finds a project note."""
+    await _seed(test_project.name)
+
+    graph = await context_json(identifier="../graph/node-a", project=test_project.name)
+
+    paths = [result["primary_result"]["file_path"] for result in graph["results"]]
+    assert paths == ["graph/Node A.md"]
 
 
 @pytest.mark.asyncio

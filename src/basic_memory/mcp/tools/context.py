@@ -93,7 +93,7 @@ async def bm_context(
 ) -> str | dict[str, Any]:
     """Build graph context from a starting note or pattern."""
     async with open_project_target(
-        identifier, project, context, output_format=output_format
+        identifier, project, context, kind="identifier", output_format=output_format
     ) as target:
         # Trigger: every starting point, exact path or pattern.
         # Why: the context API matches permalinks in their index form, which carries
