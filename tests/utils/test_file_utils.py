@@ -1,5 +1,6 @@
 """Tests for file utilities."""
 
+import unicodedata
 import random
 import stat
 import string
@@ -735,3 +736,10 @@ def test_remove_frontmatter_keeps_a_fenced_block_that_is_not_a_yaml_mapping():
     assert remove_frontmatter(scalar, strip=False) == scalar
     # An empty block is still frontmatter: every reader accepts it as {}.
     assert remove_frontmatter("---\n---\n\nbody\n") == "body"
+
+
+def test_sanitize_for_directory_keeps_combining_marks():
+    """An NFD name keeps its accents; dropping U+0301 turned 'café' into 'cafe' (#1796)."""
+    nfd = unicodedata.normalize("NFD", "café/menús")
+
+    assert sanitize_for_directory(nfd) == nfd
