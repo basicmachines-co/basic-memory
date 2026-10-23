@@ -159,3 +159,20 @@ async def get_project_info(project: str):
         else:
             console.print(f"[red]Project info failed: {literal(e)}[/red]")
         raise typer.Exit(1)
+
+
+def run_schema_tool(call: Coroutine[Any, Any, Any]) -> Any:
+    """Run a schema tool; nothing to report keeps the CLI's {"error": message} result.
+
+    The MCP tools refuse "no schemas yet" and "no notes of this type" as NOT_FOUND.
+    For the CLI that is not a failure: the command prints the message and exits 0.
+    """
+    # Deferred: refusals imports fastmcp, which must not load at CLI startup (#886).
+    from basic_memory.mcp.refusals import Refusal
+
+    try:
+        return run_with_cleanup(call)
+    except Refusal as refused:
+        if refused.code != "NOT_FOUND":
+            raise
+        return {"error": refused.message}

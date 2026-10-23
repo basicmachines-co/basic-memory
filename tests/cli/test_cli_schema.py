@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from basic_memory.cli.commands.schema import _run_schema_tool
+from basic_memory.cli.commands.command_utils import run_schema_tool
 from basic_memory.cli.main import app as cli_app
 from basic_memory.mcp.refusals import Refusal, refusal
 
@@ -314,6 +314,6 @@ def test_run_schema_tool_keeps_nothing_to_report_and_reraises_the_rest():
     async def broken() -> None:
         raise refusal("INVALID_ARGUMENTS", "bad", output_format="json")
 
-    assert _run_schema_tool(nothing()) == {"error": "No schemas defined in this project"}
+    assert run_schema_tool(nothing()) == {"error": "No schemas defined in this project"}
     with pytest.raises(Refusal):
-        _run_schema_tool(broken())
+        run_schema_tool(broken())

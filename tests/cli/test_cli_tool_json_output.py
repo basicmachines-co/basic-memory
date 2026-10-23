@@ -7,10 +7,12 @@ Tests mock the MCP tool functions directly.
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
+from basic_memory.mcp.refusals import refusal
 
 runner = CliRunner()
 
@@ -907,6 +909,22 @@ def test_schema_validate_json_output(mock_mcp):
     assert data["total_notes"] == 2
     mock_mcp.assert_called_once()
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
+
+
+@pytest.mark.parametrize("command", ["schema-validate", "schema-infer", "schema-diff"])
+def test_schema_commands_print_nothing_to_report_and_exit_zero(command):
+    """A NOT_FOUND refusal is "nothing to report" for the CLI, not a failure."""
+    tool = {
+        "schema-validate": "schema_validate",
+        "schema-infer": "schema_infer",
+        "schema-diff": "schema_diff",
+    }[command]
+    nothing = refusal("NOT_FOUND", "No schemas defined in this project", output_format="json")
+    with patch(f"basic_memory.mcp.tools.{tool}", new_callable=AsyncMock, side_effect=nothing):
+        result = runner.invoke(cli_app, ["tool", command, "person"])
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert json.loads(result.output) == {"error": "No schemas defined in this project"}
 
 
 @patch(
