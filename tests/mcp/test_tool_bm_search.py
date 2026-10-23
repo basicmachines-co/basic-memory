@@ -240,6 +240,7 @@ def test_query_terms(query, terms):
             "filters cannot apply",
         ),
         ({"query": "x", "identifier": "a.md", "mode": "text", "compact": True}, "mode, compact"),
+        ({"query": "x", "identifier": "a.md", "page": 2}, "page cannot apply"),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, message):
@@ -324,3 +325,13 @@ async def test_unindexed_projects_keep_the_json_shape(client, test_project, monk
     payload = await search_json(query="deploy", all_projects=True)
 
     assert payload == {"results": [], "guidance": "Index the project first."}
+
+
+@pytest.mark.asyncio
+async def test_a_project_qualified_memory_url_routes_the_search(client, test_project):
+    """'memory://<project>/...' searches the project it names, as a read would."""
+    await _seed(test_project.name)
+
+    payload = await search_json(query=f"memory://{test_project.permalink}/tasks/*")
+
+    assert [row["title"] for row in payload["results"]] == ["Deploy Plan"]
