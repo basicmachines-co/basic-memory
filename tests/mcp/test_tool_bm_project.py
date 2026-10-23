@@ -222,6 +222,27 @@ PERSON_SCHEMA = (
 
 
 @pytest.mark.asyncio
+async def test_schema_api_refusals_honor_the_output_format(client, test_project):
+    """An invalid inline schema is refused by the API; JSON keeps the refusal shape."""
+    await bm_write(
+        identifier="people/odd.md",
+        content=(
+            "---\ntype: invalid_mode\nschema:\n  name: string\nsettings:\n"
+            "  validation: banana\n---\n\n- [name] Odd"
+        ),
+        project=test_project.name,
+    )
+
+    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
+        await bm_schema(
+            command="validate",
+            identifier="people/odd.md",
+            output_format="json",
+            project=test_project.name,
+        )
+
+
+@pytest.mark.asyncio
 async def test_schema_reports_once_a_schema_exists(client, test_project):
     await bm_write(identifier="schemas/person.md", content=PERSON_SCHEMA, project=test_project.name)
     await bm_write(

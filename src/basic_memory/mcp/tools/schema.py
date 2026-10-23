@@ -11,7 +11,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_project_client
-from basic_memory.mcp.refusals import refusal
+from basic_memory.mcp.refusals import api_refusals, refusal
 from basic_memory.mcp.tool_params import OutputFormat
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
@@ -328,10 +328,12 @@ async def schema_validate(
         from basic_memory.mcp.clients.schema import SchemaClient
 
         schema_client = SchemaClient(client, active_project.external_id)
-        result = await schema_client.validate(
-            note_type=note_type,
-            identifier=identifier,
-        )
+        # The API refuses an invalid schema definition with a 400.
+        with api_refusals(output_format):
+            result = await schema_client.validate(
+                note_type=note_type,
+                identifier=identifier,
+            )
 
         logger.debug(
             f"MCP tool response: tool=schema_validate project={active_project.name} "
@@ -456,7 +458,8 @@ async def schema_infer(
         from basic_memory.mcp.clients.schema import SchemaClient
 
         schema_client = SchemaClient(client, active_project.external_id)
-        result = await schema_client.infer(note_type, threshold=threshold)
+        with api_refusals(output_format):
+            result = await schema_client.infer(note_type, threshold=threshold)
 
         logger.debug(
             f"MCP tool response: tool=schema_infer project={active_project.name} "
@@ -572,7 +575,9 @@ async def schema_diff(
         from basic_memory.mcp.clients.schema import SchemaClient
 
         schema_client = SchemaClient(client, active_project.external_id)
-        result = await schema_client.diff(note_type)
+        # The API refuses an invalid schema definition with a 400.
+        with api_refusals(output_format):
+            result = await schema_client.diff(note_type)
 
         logger.debug(
             f"MCP tool response: tool=schema_diff project={active_project.name} "
