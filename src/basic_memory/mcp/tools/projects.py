@@ -168,12 +168,15 @@ async def bm_project_delete(
 ) -> str | dict[str, Any]:
     """Delete one project."""
     try:
-        message = await delete_project(
-            project_name=name, delete_notes=delete_notes, workspace=workspace, context=context
+        return await delete_project(
+            project_name=name,
+            delete_notes=delete_notes,
+            workspace=workspace,
+            output_format=output_format,
+            context=context,
         )
-    except Refusal as refused:
-        # delete_project has no output_format; its refusals are re-rendered here.
-        raise refused.rendered_as(output_format) from refused
+    except Refusal:
+        raise
     except ToolError as error:
         # The API's own refusals (deleting the default project) arrive as client errors.
         refused_by_api = api_refusal(error)
@@ -182,15 +185,6 @@ async def bm_project_delete(
         raise refusal(
             refused_by_api.code, refused_by_api.message, output_format=output_format
         ) from error
-    # delete_project reports in prose; JSON callers get the same facts as fields.
-    if output_format == "json":
-        return {
-            "action": "deleted",
-            "name": name,
-            "delete_notes": delete_notes,
-            "message": message,
-        }
-    return message
 
 
 # Hidden until the composition root reads enable_project_delete at startup.

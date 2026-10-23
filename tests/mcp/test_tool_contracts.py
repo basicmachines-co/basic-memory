@@ -166,7 +166,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
     ],
     "delete_note": ["identifier", "is_directory", "project", "project_id", "output_format"],
-    "delete_project": ["project_name", "delete_notes", "workspace"],
+    "delete_project": ["project_name", "delete_notes", "workspace", "output_format"],
     "edit_note": [
         "identifier",
         "operation",

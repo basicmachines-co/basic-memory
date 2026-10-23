@@ -779,8 +779,9 @@ async def delete_project(
     project_name: str,
     delete_notes: bool = False,
     workspace: str | None = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict[str, Any]:
     """Delete a Basic Memory project.
 
     Removes a project from Basic Memory's configuration and database records.
@@ -827,6 +828,7 @@ async def delete_project(
             f"Project deletion disabled - MCP server is constrained to project "
             f"'{constrained_project}'.",
             try_instead=f'the CLI: basic-memory project remove "{project_name}"',
+            output_format=output_format,
         )
 
     workspace_id = await _resolve_workspace_routing(workspace, context)
@@ -860,6 +862,7 @@ async def delete_project(
                 "NOT_FOUND",
                 f"Project '{project_name}' not found. Available projects: "
                 f"{', '.join(available_projects)}",
+                output_format=output_format,
             )
 
         # Trigger: the delete is served by a cloud backend.
@@ -879,6 +882,20 @@ async def delete_project(
         from basic_memory.mcp.project_context import invalidate_project_caches
 
         await invalidate_project_caches(context)
+
+        # The backend's own account of what happened: a Cloud delete can be queued,
+        # and its note files are always deleted whatever delete_notes said.
+        if output_format == "json":
+            return {
+                "action": "deleted",
+                "name": target_project.name,
+                "external_id": target_project.external_id,
+                "delete_notes": files_deleted,
+                "deletion_status": status_response.deletion_status,
+                "file_delete_status": status_response.file_delete_status if files_deleted else None,
+                "job_id": status_response.job_id,
+                "message": status_response.message,
+            }
 
         result = f"✓ {status_response.message}\n\n"
 
