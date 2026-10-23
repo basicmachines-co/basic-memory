@@ -8,7 +8,6 @@ import os
 from typing import Any, Literal
 
 from fastmcp import Context
-from fastmcp.exceptions import ToolError
 from loguru import logger
 
 from basic_memory.config import (
@@ -29,7 +28,7 @@ from basic_memory.mcp.project_context import (
     ensure_workspace_project_index,
     resolve_workspace_parameter,
 )
-from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.refusals import api_refusals, refusal
 from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
@@ -680,7 +679,10 @@ async def create_memory_project(
                 )
             return result
 
-        status_response = await project_client.create_project(project_request.model_dump())
+        # The API refuses some creates (a path inside another project, a name whose
+        # permalink collides).
+        with api_refusals(output_format):
+            status_response = await project_client.create_project(project_request.model_dump())
         from basic_memory.mcp.project_context import invalidate_project_caches
 
         await invalidate_project_caches(context)
@@ -884,21 +886,11 @@ async def delete_project(
         cloud_routed = _routes_to_cloud(workspace_id)
         files_deleted = delete_notes or cloud_routed
 
-        # Trigger: the API refuses the delete (the default project, for one).
-        # Why: its refusal arrives as a client ToolError in plain text; every tool
-        #   that runs this implementation promises refusals in output_format.
-        # Outcome: the API's code and message, rendered in the requested format.
-        try:
+        # The API refuses some deletes (the default project, for one).
+        with api_refusals(output_format):
             status_response = await project_client.delete_project(
                 target_project.external_id, delete_notes=files_deleted
             )
-        except ToolError as error:
-            refused_by_api = api_refusal(error)
-            if refused_by_api is None:
-                raise
-            raise refusal(
-                refused_by_api.code, refused_by_api.message, output_format=output_format
-            ) from error
         from basic_memory.mcp.project_context import invalidate_project_caches
 
         await invalidate_project_caches(context)

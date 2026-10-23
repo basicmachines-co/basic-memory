@@ -9,6 +9,8 @@ instead.
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -143,6 +145,27 @@ def api_refusal(error: ToolError) -> ApiRefusal | None:
         revision_conflict=isinstance(detail, dict) and "db_checksum" in detail,
         current_checksum=detail.get("db_checksum") if isinstance(detail, dict) else None,
     )
+
+
+@contextmanager
+def api_refusals(output_format: OutputFormat) -> Iterator[None]:
+    """Re-render the API's own refusals in the requested format.
+
+    A typed client raises an API refusal as a plain-text ToolError; inside this
+    block it becomes a refusal in `output_format`. Refusals raised here already
+    and failures with an unknown outcome pass through unchanged.
+    """
+    try:
+        yield
+    except Refusal:
+        raise
+    except ToolError as error:
+        refused_by_api = api_refusal(error)
+        if refused_by_api is None:
+            raise
+        raise refusal(
+            refused_by_api.code, refused_by_api.message, output_format=output_format
+        ) from error
 
 
 # --- Failed note changes ---

@@ -128,6 +128,15 @@ async def test_constrained_server_refuses_project_changes(monkeypatch):
         await bm_project_delete(name="x", output_format="json")
 
 
+@pytest.mark.asyncio
+async def test_create_api_refusals_honor_the_output_format(app, test_project):
+    """The API refuses a project nested inside another; JSON keeps the refusal shape."""
+    nested = f"{test_project.path}/nested"
+
+    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
+        await bm_project(command="create", name="Nested", path=nested, output_format="json")
+
+
 # --- bm_schema ---
 
 
