@@ -18,7 +18,7 @@ from typing import Literal
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from httpx import AsyncClient, HTTPStatusError
+from httpx import AsyncClient, HTTPStatusError, Response
 
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient
@@ -95,10 +95,18 @@ async def open_project_target(
         yield ProjectTarget(client=client, project=active_project, route=route)
 
 
-def _is_not_found(error: ToolError) -> bool:
-    """True when a typed-client failure wraps an HTTP 404 from the API."""
+def _api_answer(error: ToolError) -> Response | None:
+    """The API's HTTP answer behind a typed-client failure, or None if it never answered."""
     cause = error.__cause__
-    return isinstance(cause, HTTPStatusError) and cause.response.status_code == 404
+    return cause.response if isinstance(cause, HTTPStatusError) else None
+
+
+def _detail(answer: Response) -> str:
+    """The `detail` FastAPI put in an error answer, as text."""
+    if "application/json" not in answer.headers.get("content-type", ""):
+        return answer.text
+    detail = answer.json().get("detail")
+    return detail if isinstance(detail, str) else str(detail)
 
 
 async def resolve_note(
@@ -127,11 +135,23 @@ async def resolve_note(
     try:
         return await knowledge_client.resolve_entity(target.route.path, strict=True)
     except ToolError as error:
-        if not _is_not_found(error):
-            raise
-        raise refusal(
-            "NOT_FOUND",
-            f"No note matches '{identifier}' in project '{target.project.name}'.",
-            try_instead=f"bm_search(query='{identifier}')",
-            output_format=output_format,
-        ) from error
+        answer = _api_answer(error)
+        match answer.status_code if answer is not None else None:
+            case 404:
+                raise refusal(
+                    "NOT_FOUND",
+                    f"No note matches '{identifier}' in project '{target.project.name}'.",
+                    try_instead=f"bm_search(query='{identifier}')",
+                    output_format=output_format,
+                ) from error
+            # Several notes match exactly (two notes with one title); the API's
+            # detail names them, and the caller has to pick one.
+            case 409 if answer is not None:
+                raise refusal(
+                    "AMBIGUOUS",
+                    _detail(answer),
+                    try_instead="a file path or permalink that names one note",
+                    output_format=output_format,
+                ) from error
+            case _:
+                raise
