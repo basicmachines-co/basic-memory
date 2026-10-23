@@ -242,9 +242,7 @@ async def test_create_memory_project_json_output_is_idempotent(
             "create_memory_project",
             {
                 "project_name": project_name,
-                "project_path": str(
-                    tmp_path.parent / (tmp_path.name + "-projects") / "json-int-created-second"
-                ),
+                "project_path": project_path,
                 "output_format": "json",
             },
         )
