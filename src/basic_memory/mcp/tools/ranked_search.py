@@ -280,6 +280,8 @@ async def bm_search(
                 ("valid_overlaps", valid_overlaps),
                 ("time_kind", time_kind),
                 ("min_similarity", min_similarity),
+                ("page", page if page != 1 else None),
+                ("page_size", page_size if page_size != 10 else None),
             )
             if value is not None
         ] + (["compact"] if compact else [])
@@ -346,12 +348,20 @@ async def bm_search(
                 raise _nothing_to_search(output_format)
 
     # --- One project ---
+    # Trigger: the query is a memory:// URL and no folder scope was given.
+    # Why: the URL may name its project ('memory://research/foo'), which must route
+    #      the search the way it routes a read, not fall to the active project.
+    # Outcome: the URL is the routed target; its project-relative path is the query.
+    memory_query = query is not None and query.startswith("memory://") and path is None
+    routed = query if memory_query and query is not None else path or ""
+    kind = "identifier" if memory_query else "path"
     async with open_project_target(
-        path or "", project, context, output_format=output_format
+        routed, project, context, kind=kind, output_format=output_format
     ) as target:
-        # A memory:// query names a note by permalink.
         search_mode: str = mode or _search_type_for(None, query, [target.project.name])
-        if query is not None and query.startswith("memory://"):
+        if memory_query:
+            query, search_mode = memory_url_path(target.route.path), "permalink"
+        elif query is not None and query.startswith("memory://"):
             query, search_mode = memory_url_path(query), "permalink"
         # Trigger: a permalink search ('core/*' or an exact permalink).
         # Why: permalinks are stored in index form, with the project prefix when
@@ -380,7 +390,8 @@ async def bm_search(
             valid_at=valid_at,
             valid_overlaps=valid_overlaps,
             time_kind=time_kind,
-            file_path_prefix=target.route.path or None,
+            # A memory:// target is the note itself, not a folder to scope by.
+            file_path_prefix=None if memory_query else target.route.path or None,
         )
         if search_query is None:
             raise _nothing_to_search(output_format)
