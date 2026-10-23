@@ -121,6 +121,14 @@ class EditEntityRequest(BaseModel):
             raise ValueError("metadata is required for set_metadata")
         if self.content:
             raise ValueError("set_metadata changes frontmatter only; content must be empty")
+        # The frontmatter merge keeps a note's identity out of metadata, so these keys
+        # would be acknowledged and never applied.
+        identity_keys = sorted({"title", "permalink"} & set(self.metadata))
+        if identity_keys:
+            raise ValueError(
+                f"set_metadata cannot change {', '.join(identity_keys)}; those are the "
+                "note's identity"
+            )
         return self
 
 

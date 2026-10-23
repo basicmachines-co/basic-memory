@@ -750,3 +750,7 @@ def test_set_metadata_edit_needs_metadata_and_no_content():
         EditEntityRequest(operation="set_metadata", content="")
     with pytest.raises(ValidationError, match="content must be empty"):
         EditEntityRequest(operation="set_metadata", content="x", metadata={"a": 1})
+    with pytest.raises(ValidationError, match="cannot change permalink, title"):
+        EditEntityRequest(
+            operation="set_metadata", content="", metadata={"title": "T", "permalink": "p"}
+        )

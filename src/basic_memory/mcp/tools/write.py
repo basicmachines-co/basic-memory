@@ -412,7 +412,13 @@ async def _similar_notes(
             content=content,
             exclude_file_path=written.file_path,
             exclude_permalink=written.permalink,
-            min_similarity=similar_notes_min_similarity(ConfigManager().config),
+            # The measured floor describes this process's embedding model, so it applies
+            # only to a local project; a routed (Cloud) project uses its server's floor.
+            min_similarity=(
+                similar_notes_min_similarity(ConfigManager().config)
+                if local_project_path(target.client, target.project) is not None
+                else None
+            ),
         )
     except ToolError as probe_error:
         # The note is already written, so a failed probe must not fail the call.

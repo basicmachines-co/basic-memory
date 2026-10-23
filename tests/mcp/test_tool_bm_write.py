@@ -9,6 +9,7 @@ import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.similar_notes import SimilarNote
 from basic_memory.mcp.tools import bm_read, bm_write
@@ -368,3 +369,23 @@ async def test_existing_note_hint_names_the_qualified_path(client, test_project)
 
     with pytest.raises(ToolError, match=f"bm_edit\\(identifier='{prefix}/notes/a.md'"):
         await bm_write(identifier=f"{prefix}/notes/a.md", content="Two", overwrite=False)
+
+
+@pytest.mark.asyncio
+async def test_similarity_floor_is_local_only(client, test_project, monkeypatch):
+    """The measured floor fits this process's model; a routed project uses its server's."""
+    floors: list[float | None] = []
+
+    async def capture(
+        *_args: Any, min_similarity: float | None, **_kwargs: Any
+    ) -> list[SimilarNote]:
+        floors.append(min_similarity)
+        return []
+
+    monkeypatch.setattr(write_module, "find_similar_notes", capture)
+    await bm_write(identifier="notes/local.md", content="Body", project=test_project.name)
+    monkeypatch.setattr(write_module, "local_project_path", lambda *_args: None)
+    await bm_write(identifier="notes/routed.md", content="Body", project=test_project.name)
+
+    assert floors[1] is None
+    assert floors[0] == write_module.similar_notes_min_similarity(ConfigManager().config)
