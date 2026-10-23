@@ -31,7 +31,7 @@ from basic_memory.mcp.tools.project_management import (
     delete_project,
     list_memory_projects,
 )
-from basic_memory.mcp.tools.recent_activity import recent_activity
+from basic_memory.mcp.tools.recent_activity import RecentRows, recent_activity_page
 
 type ProjectCommand = Literal["list", "create", "recent"]
 
@@ -111,9 +111,10 @@ async def bm_project(
             )
         case "recent":
             project_name, project_id = routing_arguments(parse_project(project))
-            activity = await recent_activity(
+            activity = await recent_activity_page(
                 # recent_activity names whole notes "entity", the API's word.
                 type=["entity" if item == "note" else item for item in items] if items else "",
+                depth=1,
                 timeframe=since,
                 page=page,
                 page_size=page_size,
@@ -122,13 +123,19 @@ async def bm_project(
                 output_format=output_format,
                 context=context,
             )
-            if output_format == "text":
-                return activity
-            # One JSON shape, as bm_search has: rows, or no rows plus the reason the
-            # miss is not final (a project that was never indexed).
+            # Text is returned as rendered. JSON has one shape, as bm_search has: rows
+            # with paging, or no rows plus the reason the miss is not final (a project
+            # that was never indexed).
             match activity:
-                case list() as rows:
-                    return {"results": rows}
+                case str() as text if output_format == "text":
+                    return text
+                case RecentRows() as recent:
+                    return {
+                        "results": recent.rows,
+                        "page": recent.page,
+                        "page_size": recent.page_size,
+                        "has_more": recent.has_more,
+                    }
                 case str() as guidance:
                     return {"results": [], "guidance": guidance}
 

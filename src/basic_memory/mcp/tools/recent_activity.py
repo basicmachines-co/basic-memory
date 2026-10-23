@@ -1,5 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
+from dataclasses import dataclass
 from datetime import timezone
 from pathlib import PurePosixPath
 from typing import Any, Annotated, List, Union, Optional, Literal
@@ -149,6 +150,50 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
+    page_result = await recent_activity_page(
+        type=type,
+        depth=depth,
+        timeframe=timeframe,
+        page=page,
+        page_size=page_size,
+        project=project,
+        project_id=project_id,
+        output_format=output_format,
+        context=context,
+    )
+    match page_result:
+        case RecentRows(rows=rows):
+            return rows
+        case str() as text:
+            return text
+
+
+@dataclass(frozen=True, slots=True)
+class RecentRows:
+    """One page of recent activity as rows, and whether another page follows.
+
+    In discovery mode `has_more` is true when any project has another page.
+    """
+
+    rows: list[dict[str, Any]]
+    page: int
+    page_size: int
+    has_more: bool
+
+
+async def recent_activity_page(
+    *,
+    type: str | list[str],
+    depth: int,
+    timeframe: str,
+    page: int,
+    page_size: int,
+    project: str | None,
+    project_id: str | None,
+    output_format: Literal["text", "json"],
+    context: Context | None,
+) -> str | RecentRows:
+    """Recent activity as text, or as rows with paging for JSON callers."""
     # Validate pagination arguments before they reach the API layer,
     # where negative offset would cause a database error.
     if page < 1:
@@ -264,7 +309,12 @@ async def recent_activity(
             rows: list[dict[str, Any]] = []
             for project_name, project_activity in projects_activity.items():
                 rows.extend(_extract_recent_rows(project_activity.activity, project_name))
-            return rows
+            return RecentRows(
+                rows=rows,
+                page=page,
+                page_size=page_size,
+                has_more=any(activity.activity.has_more for activity in projects_activity.values()),
+            )
 
         # Build summary stats
         summary = ActivityStats(
@@ -330,7 +380,12 @@ async def recent_activity(
                     return guidance
 
             if output_format == "json":
-                return _extract_recent_rows(activity_data)
+                return RecentRows(
+                    rows=_extract_recent_rows(activity_data),
+                    page=page,
+                    page_size=page_size,
+                    has_more=activity_data.has_more,
+                )
 
             # Format project-specific mode output. Pass the external id so onboarding examples
             # route by id, not by a name that can collide across cloud workspaces.

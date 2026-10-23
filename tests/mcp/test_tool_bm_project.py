@@ -104,6 +104,21 @@ async def test_recent_maps_items_and_since(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_recent_json_carries_paging(client, test_project):
+    """A full page says another follows, so JSON callers know to ask for page 2."""
+    for name in ("one", "two"):
+        await bm_write(identifier=f"notes/{name}.md", content="# x", project=test_project.name)
+
+    first = await bm_project(
+        command="recent", page_size=1, output_format="json", project=test_project.name
+    )
+
+    assert isinstance(first, dict)
+    assert (first["page"], first["page_size"], first["has_more"]) == (1, 1, True)
+    assert len(first["results"]) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
@@ -258,7 +273,7 @@ async def test_recent_guidance_keeps_the_json_shape(client, test_project, monkey
     async def not_indexed(**_kwargs: Any) -> str:
         return "Index the project first."
 
-    monkeypatch.setattr(projects_module, "recent_activity", not_indexed)
+    monkeypatch.setattr(projects_module, "recent_activity_page", not_indexed)
     payload = await bm_project(command="recent", output_format="json", project=test_project.name)
 
     assert payload == {"results": [], "guidance": "Index the project first."}
