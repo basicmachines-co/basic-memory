@@ -66,9 +66,13 @@ async def test_create_and_delete(app, tmp_path_factory):
 
     created = await bm_project(command="create", name="Scratch", path=str(project_root))
     deleted = await bm_project_delete(name="Scratch")
+    await bm_project(command="create", name="Scratch Two", path=str(project_root))
+    deleted_json = await bm_project_delete(name="Scratch Two", output_format="json")
 
     assert isinstance(created, str) and created.startswith("✓")
     assert isinstance(deleted, str) and deleted.startswith("✓")
+    assert isinstance(deleted_json, dict)
+    assert deleted_json["action"] == "deleted" and deleted_json["name"] == "Scratch Two"
 
 
 @pytest.mark.asyncio
@@ -181,6 +185,12 @@ async def test_schema_reports_once_a_schema_exists(client, test_project):
     assert isinstance(text, str) and isinstance(note, str)
     assert isinstance(drift, dict) and drift["schema_found"] is True
     assert isinstance(drift_text, str) and isinstance(inferred_text, str)
+
+
+@pytest.mark.asyncio
+async def test_infer_with_no_notes_of_the_type(client, test_project):
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Notes Found of Type 'robot'"):
+        await bm_schema(command="infer", note_type="robot", project=test_project.name)
 
 
 @pytest.mark.asyncio
