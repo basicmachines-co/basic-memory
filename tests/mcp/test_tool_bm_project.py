@@ -1,10 +1,13 @@
 """bm_project and bm_schema: one name per group, commands delegate (#1832)."""
 
+from typing import Any
+
 import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.server import lifespan, mcp, set_project_delete_visibility
 from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_schema, bm_write
+from basic_memory.mcp.tools import projects as projects_module
 
 
 async def _listed_names() -> set[str]:
@@ -94,9 +97,9 @@ async def test_recent_maps_items_and_since(client, test_project):
         command="recent", items=["observation"], output_format="json", project=test_project.name
     )
 
-    assert isinstance(notes, list) and isinstance(observations, list)
-    assert any(row["title"] == "fresh" for row in notes)
-    assert all(row["type"] == "observation" for row in observations)
+    assert isinstance(notes, dict) and isinstance(observations, dict)
+    assert any(row["title"] == "fresh" for row in notes["results"])
+    assert all(row["type"] == "observation" for row in observations["results"])
 
 
 @pytest.mark.asyncio
@@ -237,3 +240,21 @@ async def test_diff_without_notes_is_not_a_clean_diff(client, test_project):
 async def test_deleting_a_missing_project_is_not_found(app):
     with pytest.raises(ToolError, match='"error": "NOT_FOUND"'):
         await bm_project_delete(name="no-such-project", output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_recent_guidance_keeps_the_json_shape(client, test_project, monkeypatch):
+    async def not_indexed(**_kwargs: Any) -> str:
+        return "Index the project first."
+
+    monkeypatch.setattr(projects_module, "recent_activity", not_indexed)
+    payload = await bm_project(command="recent", output_format="json", project=test_project.name)
+
+    assert payload == {"results": [], "guidance": "Index the project first."}
+
+
+@pytest.mark.asyncio
+async def test_api_refusals_honor_the_output_format(app, test_project):
+    """Deleting the default project is refused by the API; JSON keeps the refusal shape."""
+    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
+        await bm_project_delete(name=test_project.name, output_format="json")

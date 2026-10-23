@@ -12,9 +12,10 @@ tools give them one `command` parameter and the shared parameter types.
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
-from basic_memory.mcp.refusals import Refusal, refusal
+from basic_memory.mcp.refusals import Refusal, api_refusal, refusal
 from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp, set_project_delete_visibility
 from basic_memory.mcp.tool_params import (
     Items,
@@ -111,7 +112,7 @@ async def bm_project(
             )
         case "recent":
             project_name, project_id = routing_arguments(parse_project(project))
-            return await recent_activity(
+            activity = await recent_activity(
                 # recent_activity names whole notes "entity", the API's word.
                 type=["entity" if item == "note" else item for item in items] if items else "",
                 timeframe=since,
@@ -122,6 +123,15 @@ async def bm_project(
                 output_format=output_format,
                 context=context,
             )
+            if output_format == "text":
+                return activity
+            # One JSON shape, as bm_search has: rows, or no rows plus the reason the
+            # miss is not final (a project that was never indexed).
+            match activity:
+                case list() as rows:
+                    return {"results": rows}
+                case str() as guidance:
+                    return {"results": [], "guidance": guidance}
 
 
 @mcp.tool(
@@ -164,6 +174,14 @@ async def bm_project_delete(
     except Refusal as refused:
         # delete_project has no output_format; its refusals are re-rendered here.
         raise refused.rendered_as(output_format) from refused
+    except ToolError as error:
+        # The API's own refusals (deleting the default project) arrive as client errors.
+        refused_by_api = api_refusal(error)
+        if refused_by_api is None:
+            raise
+        raise refusal(
+            refused_by_api.code, refused_by_api.message, output_format=output_format
+        ) from error
     # delete_project reports in prose; JSON callers get the same facts as fields.
     if output_format == "json":
         return {
