@@ -12,10 +12,9 @@ tools give them one `command` parameter and the shared parameter types.
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
-from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
-from basic_memory.mcp.refusals import Refusal, api_refusal, refusal
+from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp, set_project_delete_visibility
 from basic_memory.mcp.tool_params import (
     Items,
@@ -167,24 +166,13 @@ async def bm_project_delete(
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Delete one project."""
-    try:
-        return await delete_project(
-            project_name=name,
-            delete_notes=delete_notes,
-            workspace=workspace,
-            output_format=output_format,
-            context=context,
-        )
-    except Refusal:
-        raise
-    except ToolError as error:
-        # The API's own refusals (deleting the default project) arrive as client errors.
-        refused_by_api = api_refusal(error)
-        if refused_by_api is None:
-            raise
-        raise refusal(
-            refused_by_api.code, refused_by_api.message, output_format=output_format
-        ) from error
+    return await delete_project(
+        project_name=name,
+        delete_notes=delete_notes,
+        workspace=workspace,
+        output_format=output_format,
+        context=context,
+    )
 
 
 # Hidden until the composition root reads enable_project_delete at startup.

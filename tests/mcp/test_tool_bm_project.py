@@ -8,6 +8,7 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp.server import lifespan, mcp, set_project_delete_visibility
 from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_schema, bm_write
 from basic_memory.mcp.tools import projects as projects_module
+from basic_memory.mcp.tools.project_management import delete_project
 
 
 async def _listed_names() -> set[str]:
@@ -256,6 +257,11 @@ async def test_recent_guidance_keeps_the_json_shape(client, test_project, monkey
 
 @pytest.mark.asyncio
 async def test_api_refusals_honor_the_output_format(app, test_project):
-    """Deleting the default project is refused by the API; JSON keeps the refusal shape."""
+    """Deleting the default project is refused by the API; JSON keeps the refusal shape.
+
+    The legacy delete_project runs the same implementation, so it honors the format too.
+    """
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
         await bm_project_delete(name=test_project.name, output_format="json")
+    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
+        await delete_project(project_name=test_project.name, output_format="json")
