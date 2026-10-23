@@ -35,7 +35,7 @@ PROJECT_DELETE_TAG = "project-delete"
 
 
 def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
-    """Show or hide bm_project_delete (#1832).
+    """Show or hide the project-delete tools (bm_project_delete, delete_project).
 
     Like set_posix_tools_visibility, the last mark appended wins, so this is safe
     to call at import, at each lifespan start, and in tests.

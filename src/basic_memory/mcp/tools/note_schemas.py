@@ -1,8 +1,7 @@
-"""bm_schema: validate notes against their schemas, infer schemas, find drift (#1832).
+"""bm_schema: validate notes against their schemas, infer schemas, find drift.
 
-Replaces schema_validate, schema_infer and schema_diff (SPEC-35.2). Each command
-delegates to the implementation of the tool it replaces; this tool gives them the
-1.0 name, one `command` parameter and the shared parameter types.
+Each command runs the schema tool implementation of the same purpose; this tool
+gives them one `command` parameter and the shared parameter types.
 """
 
 from typing import Annotated, Any, Literal

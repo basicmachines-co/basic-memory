@@ -170,9 +170,8 @@ def _render_diff_output(data: dict[str, Any]) -> None:
 def _run_schema_tool(call: Coroutine[Any, Any, Any]) -> Any:
     """Run a schema tool; nothing to report keeps the CLI's {"error": message} result.
 
-    The MCP tools refuse "no schemas yet" and "no notes of this type" as NOT_FOUND
-    (#1813). For the CLI that is not a failure: the command prints the message and
-    exits 0, as it always has.
+    The MCP tools refuse "no schemas yet" and "no notes of this type" as NOT_FOUND.
+    For the CLI that is not a failure: the command prints the message and exits 0.
     """
     from basic_memory.mcp.refusals import Refusal
 

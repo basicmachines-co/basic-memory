@@ -1,13 +1,12 @@
-"""bm_project and bm_project_delete: projects and workspaces (SPEC-35.2, #1832).
+"""bm_project and bm_project_delete: projects and workspaces.
 
-bm_project replaces list_memory_projects (which already groups projects by
-workspace), create_memory_project and recent_activity. bm_project_delete replaces
-delete_project, as its own tool so bm_project never needs a destructive annotation.
-It is hidden unless the enable_project_delete setting turns it on (see
-mcp.server.set_project_delete_visibility).
+bm_project lists projects (grouped by workspace), creates them, and shows what
+changed recently. bm_project_delete removes one; it is its own tool so bm_project
+is never destructive, and it is hidden unless the enable_project_delete setting
+turns it on (see mcp.server.set_project_delete_visibility).
 
-Each command delegates to the implementation of the tool it replaces; these tools
-give them the 1.0 names, one `command` parameter and the shared parameter types.
+Each command runs the project tool implementation of the same purpose; these
+tools give them one `command` parameter and the shared parameter types.
 """
 
 from typing import Annotated, Any, Literal

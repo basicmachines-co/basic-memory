@@ -167,7 +167,8 @@ def _format_drift_report(report: DriftReport) -> str:
 def _nothing_to_report(output_format: OutputFormat, message: str, guidance: str) -> ToolError:
     """A NOT_FOUND refusal: the short message in JSON, the full guidance as text (C11).
 
-    These cases used to return as successful results describing a failure (#1813).
+    A success that describes a failure reads as success to a client that checks
+    isError, so "nothing to report" is a refusal.
     """
     text = message if output_format == "json" else guidance
     return refusal("NOT_FOUND", text, output_format=output_format)

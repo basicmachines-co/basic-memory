@@ -586,8 +586,7 @@ async def create_memory_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: an UNSUPPORTED refusal before opening a routed client; it used to
-    #          return as a success describing the failure (#1813).
+    # Outcome: an UNSUPPORTED refusal before opening a routed client.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
         raise refusal(
@@ -767,7 +766,7 @@ def _format_note_file_delete_result(
 
 @mcp.tool(
     title="Delete Project",
-    # Hidden unless enable_project_delete is on, like bm_project_delete (#1832).
+    # Hidden unless enable_project_delete is on, like bm_project_delete.
     tags={"projects", PROJECT_DELETE_TAG},
     annotations={
         "title": "Delete Project",
@@ -820,8 +819,7 @@ async def delete_project(
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot delete projects, and workspace selectors
     # may be invalid or unavailable in that locked context.
-    # Outcome: an UNSUPPORTED refusal before opening a routed client; it used to
-    #          return as a success describing the failure (#1813).
+    # Outcome: an UNSUPPORTED refusal before opening a routed client.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
         raise refusal(
