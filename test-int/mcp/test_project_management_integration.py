@@ -6,6 +6,7 @@ Tests the complete project management workflow: MCP client -> MCP server -> Fast
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 # These tests delete projects through the MCP client, which needs the opt-in.
 pytestmark = pytest.mark.usefixtures("project_delete_enabled")
@@ -138,39 +139,16 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
             },
         )
 
-        mismatch = await client.call_tool(
-            "create_memory_project",
-            {
-                "project_name": "duplicate-test",
-                "project_path": other_path,
-            },
-        )
-        mismatch_text = mismatch.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "# Error" in mismatch_text
-        assert "different path" in mismatch_text
-        assert "Existing:" in mismatch_text
-        assert "Requested:" in mismatch_text
-        assert original_path in mismatch_text
-        assert other_path in mismatch_text
-        assert "✓" not in mismatch_text
-
-        mismatch_json = await client.call_tool(
-            "create_memory_project",
-            {
-                "project_name": "duplicate-test",
-                "project_path": other_path,
-                "output_format": "json",
-            },
-        )
-        mismatch_json_text = mismatch_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "PATH_MISMATCH" in mismatch_json_text
-        assert original_path in mismatch_json_text
-        assert other_path in mismatch_json_text
-        assert (
-            '"already_exists":false' in mismatch_json_text
-            or '"already_exists": false' in mismatch_json_text
-        )
-        assert '"created":false' in mismatch_json_text or '"created": false' in mismatch_json_text
+        # A different directory is a refusal, which MCP clients receive as a tool error.
+        with pytest.raises(ToolError, match="^ALREADY_EXISTS: Project 'duplicate-test'") as refused:
+            await client.call_tool(
+                "create_memory_project",
+                {
+                    "project_name": "duplicate-test",
+                    "project_path": other_path,
+                },
+            )
+        assert f"already exists at {original_path}, not {other_path}." in str(refused.value)
 
         same = await client.call_tool(
             "create_memory_project",
@@ -182,7 +160,6 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
         same_text = same.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "✓" in same_text
         assert "already exists" in same_text.lower()
-        assert "different path" not in same_text
 
         same_json = await client.call_tool(
             "create_memory_project",
