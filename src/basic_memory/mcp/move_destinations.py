@@ -1,8 +1,8 @@
-"""Refuse a move whose destination names another project (#881, #1607).
+"""Refuse a move whose destination names another project.
 
 A destination such as 'other-project/file.md' reads as a move into another project,
 which no move tool can do: the API would quietly create a nested folder named after
-the project instead. Shared by move_note and bm_move.
+the project instead.
 """
 
 from pathlib import PurePosixPath, PureWindowsPath
@@ -60,14 +60,14 @@ async def project_named_by_destination(
     # Trigger: the leading folder already holds content in the active project.
     # Why: a knowledge base organised by domain routinely has folders named after
     #      sibling projects; an existing local folder is evidence of local intent,
-    #      and rejecting it left `git mv` as the only way in (#1607).
+    #      and rejecting it would leave `git mv` as the only way in.
     # Outcome: the move proceeds as an ordinary same-project move.
     # Trigger: the folder lookup itself fails after a project name matched.
     # Why: the name match already signals routing intent; allowing the move
     #      unverified is the silent misroute this guard exists to prevent.
     # Outcome: keep the cross-project rejection.
-    # The server resolves a destination folder to an existing folder's casing
-    # (#1326), so "schemas/" lands in "Schemas/"; resolve the same way here.
+    # The server resolves a destination folder to an existing folder's casing,
+    # so "schemas/" lands in "Schemas/"; resolve the same way here.
     try:
         directory_client = DirectoryClient(client, active_project.external_id)
         root_folders: list[str] = []

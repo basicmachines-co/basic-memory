@@ -1,8 +1,8 @@
-"""bm_edit: change part of a note (SPEC-35.2, #1831).
+"""bm_edit: change part of a note.
 
-Replaces edit_note. The note must already exist and resolve exactly: bm_edit never
-creates a note (bm_write does) and never edits a near match. `section` uses the
-selector bm_read takes, so a section read and a section edit name it the same way.
+The note must already exist and resolve exactly: bm_edit never creates a note
+(bm_write does) and never edits a near match. `section` uses the selector bm_read
+takes, so a section read and a section edit name it the same way.
 """
 
 from typing import Annotated, Any, Literal
@@ -13,7 +13,7 @@ from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.note_targets import open_project_target, resolve_note
-from basic_memory.mcp.note_writes import format_note_change, note_change_result
+from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import api_refusal, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
@@ -168,13 +168,10 @@ async def bm_edit(
         except ToolError as error:
             raise _edit_refusal(error, note.file_path, output_format) from error
 
-    result = note_change_result(edited, action="edited", paths=target.paths)
-    result["command"] = command
+    change = NoteChange.of(edited, action="edited", paths=target.paths)
     if output_format == "json":
-        return result
-    return "\n".join(
-        format_note_change(result, headline=f"Edited {result['file_path']} ({command})")
-    )
+        return {**change.as_json(), "command": command}
+    return "\n".join(change.text_lines(detail=command))
 
 
 def _check_arguments(

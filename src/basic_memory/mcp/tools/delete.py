@@ -1,8 +1,8 @@
-"""bm_delete: delete a note or a directory (SPEC-35.2, #1831).
+"""bm_delete: delete a note or a directory.
 
-Replaces delete_note. Deleting a note that does not exist is an error (C11): the
-caller asked for a change that did not happen. A directory delete must say
-`recursive=true`, because it removes every file under the directory.
+Deleting a note that does not exist is an error: the caller asked for a change
+that did not happen. A directory delete must say `recursive=true`, because it
+removes every file under the directory.
 """
 
 from typing import Annotated, Any

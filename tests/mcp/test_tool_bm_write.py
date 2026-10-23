@@ -107,6 +107,17 @@ async def test_write_into_existing_folder_spelling(client, test_project):
     assert "requested: plans/q5.md" in text
 
 
+@pytest.mark.asyncio
+async def test_requested_path_is_qualified_like_the_request(client, test_project):
+    await bm_write(identifier="Plans/seed.md", content="Seed", project=test_project.name)
+    prefix = test_project.permalink
+
+    result = await write_json(identifier=f"{prefix}/plans/q4.md", content="Body")
+
+    assert result["file_path"] == f"{prefix}/Plans/q4.md"
+    assert result["requested_file_path"] == f"{prefix}/plans/q4.md"
+
+
 # --- Overwrite and revision guards ---
 
 

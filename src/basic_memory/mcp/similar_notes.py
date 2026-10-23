@@ -1,8 +1,7 @@
-"""Similar-note advisory: after a create, list the existing notes nearest to it (#1259).
+"""Similar-note advisory: after a create, list the existing notes nearest to it.
 
-Shared by write_note and bm_write. Agents writing across sessions know the topic but
-not whether a note on it already exists; the closest notes are surfaced and the
-decision stays with the caller.
+Agents writing across sessions know the topic but not whether a note on it already
+exists; the closest notes are surfaced and the decision stays with the caller.
 """
 
 import asyncio

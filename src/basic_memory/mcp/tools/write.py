@@ -1,14 +1,14 @@
-"""bm_write: create or replace a note (SPEC-35.2, #1831).
+"""bm_write: create or replace a note.
 
-Replaces write_note. A note is addressed one of two ways:
+A note is addressed one of two ways:
 
 - by path (`identifier="notes/plan.md"`): the file lands exactly there, and its title
   comes from the content's frontmatter, then `title`, then the file name;
-- by `title` + `directory`: the file name is derived from the title, as write_note did.
+- by `title` + `directory`: the file name is derived from the title.
 
 bm_write is the only tool that creates notes. The API resolves the folder against the
-folders that already exist (#1796), so `plans/` beside an existing `Plans/` writes
-into `Plans/`; the result reports the path actually written.
+folders that already exist, so `plans/` beside an existing `Plans/` writes into
+`Plans/`; the result reports the path actually written.
 """
 
 import dataclasses
@@ -25,7 +25,7 @@ from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatt
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 from basic_memory.mcp.note_targets import ProjectTarget, open_project_target
-from basic_memory.mcp.note_writes import format_note_change, note_change_result
+from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import api_refusal, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import (
@@ -276,17 +276,21 @@ async def bm_write(
             else []
         )
 
-    requested_path = _requested_path(placement)
-    result = note_change_result(written, action=action, paths=target.paths)
-    result["similar_notes"] = [dataclasses.asdict(similar) for similar in similar_notes]
-    # Trigger: the API wrote into an existing folder's spelling (#1796).
+    # Trigger: the API wrote into an existing folder's spelling.
     # Why: the caller should learn the real path rather than keep using its guess.
     # Outcome: the result names the path that was asked for next to the one written.
-    if requested_path is not None and requested_path != written.file_path:
-        result["requested_file_path"] = requested_path
+    change = NoteChange.of(
+        written,
+        action=action,
+        paths=target.paths,
+        requested_file_path=_requested_path(placement),
+    )
     if output_format == "json":
-        return result
-    return _format_text(result, similar_notes)
+        return {
+            **change.as_json(),
+            "similar_notes": [dataclasses.asdict(similar) for similar in similar_notes],
+        }
+    return _format_text(change, similar_notes)
 
 
 def _write_failure(error: ToolError, file_path: str, output_format: OutputFormat) -> ToolError:
@@ -391,7 +395,7 @@ async def _similar_notes(
     written: EntityResponseV2,
     content: str,
 ) -> list[SimilarNote]:
-    """List existing notes near a newly created one (#1259); advisory only.
+    """List existing notes near a newly created one; advisory only.
 
     The probe is always attempted: whether semantic search is on is the routed
     server's setting, and its refusal (a ToolError) only means there is no advisory.
@@ -413,16 +417,11 @@ async def _similar_notes(
         return []
 
 
-def _format_text(result: dict[str, Any], similar_notes: list[SimilarNote]) -> str:
+def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
     """The text result: what was written, where, and the checksum to pass back."""
-    lines = format_note_change(
-        result, headline=f"{result['action'].capitalize()} {result['file_path']}"
-    )
-    if requested := result.get("requested_file_path"):
-        # The folder already existed under another spelling (#1796).
-        lines.insert(1, f"requested: {requested}")
+    lines = change.text_lines()
     if similar_notes:
-        new_note = result["permalink"] or result["file_path"]
+        new_note = change.permalink or change.file_path
         lines.append(
             format_similar_notes_section(
                 similar_notes,

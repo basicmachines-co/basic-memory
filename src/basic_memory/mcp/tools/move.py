@@ -1,9 +1,8 @@
-"""bm_move: move or rename a note or a directory within a project (SPEC-35.2, #1831).
+"""bm_move: move or rename a note or a directory within a project.
 
-Replaces move_note. `identifier` names a note and `path` a directory; one
-`destination` replaces destination_path and destination_folder, and a trailing '/'
-on it keeps the note's file name. Moves stay inside one project; a destination
-whose first folder names another project is refused.
+`identifier` names a note and `path` a directory. A trailing '/' on `destination`
+moves into that folder under the current name. Moves stay inside one project; a
+destination whose first folder names another project is refused.
 """
 
 from pathlib import PurePosixPath, PureWindowsPath
@@ -21,7 +20,7 @@ from basic_memory.mcp.note_targets import (
     open_project_target,
     resolve_note,
 )
-from basic_memory.mcp.note_writes import format_note_change, note_change_result
+from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import api_refusal, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
@@ -190,20 +189,16 @@ async def _move_note(
     except ToolError as error:
         raise _move_failure(error, note.file_path, str(destination_path), output_format) from error
 
-    result = note_change_result(moved, action="moved", paths=target.paths)
-    result["previous_file_path"] = target.paths.path(note.file_path)
-    # Trigger: the API moved into an existing folder's spelling (#1326, #1796).
-    # Outcome: the result names the requested path next to the actual one.
-    if moved.file_path != str(destination_path):
-        result["requested_file_path"] = target.paths.path(str(destination_path))
-    if output_format == "json":
-        return result
-    lines = format_note_change(
-        result, headline=f"Moved {result['previous_file_path']} to {result['file_path']}"
+    # The API moves into an existing folder's spelling; the result then names the
+    # requested path next to the actual one.
+    change = NoteChange.of(
+        moved,
+        action="moved",
+        paths=target.paths,
+        requested_file_path=str(destination_path),
+        previous_file_path=note.file_path,
     )
-    if requested := result.get("requested_file_path"):
-        lines.insert(1, f"requested: {requested}")
-    return "\n".join(lines)
+    return change.as_json() if output_format == "json" else "\n".join(change.text_lines())
 
 
 def _check_note_destination(
