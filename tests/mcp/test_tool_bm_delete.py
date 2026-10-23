@@ -85,7 +85,7 @@ async def test_note_gone_by_the_time_the_delete_arrives(client, test_project, mo
 @pytest.mark.parametrize(
     ("status_code", "detail", "pattern"),
     [
-        (409, {"message": "gone", "db_checksum": None}, "^REVISION_CONFLICT: .*already deleted"),
+        (409, {"message": "gone", "db_checksum": None}, "^REVISION_CONFLICT: .*was deleted"),
         (423, "Note is locked", "^LOCKED: Note is locked. Nothing was deleted."),
     ],
 )

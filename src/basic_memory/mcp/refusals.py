@@ -116,3 +116,84 @@ def api_refusal(error: ToolError) -> ApiRefusal | None:
         revision_conflict=isinstance(detail, dict) and "db_checksum" in detail,
         current_checksum=detail.get("db_checksum") if isinstance(detail, dict) else None,
     )
+
+
+# --- Failed note changes ---
+# bm_write, bm_edit, bm_move and bm_delete fail the same few ways, so one place
+# words them. Every path given here is already qualified the way the call
+# addressed its project, so each suggested call reaches the same note.
+
+
+def revision_conflict(
+    address: str,
+    current_checksum: str | None,
+    *,
+    unchanged: str,
+    output_format: OutputFormat,
+    if_deleted: str = "bm_search to find where its content went",
+) -> ToolError:
+    """A failed expected_checksum: the note changed since it was read, or it is gone.
+
+    `unchanged` says what did not happen ("Nothing was moved."); `if_deleted` is
+    the way forward when the note no longer exists.
+    """
+    if current_checksum is None:
+        return refusal(
+            "REVISION_CONFLICT",
+            f"'{address}' was deleted since you read it. {unchanged}",
+            try_instead=if_deleted,
+            output_format=output_format,
+        )
+    return refusal(
+        "REVISION_CONFLICT",
+        f"'{address}' changed since you read it (current checksum {current_checksum}). {unchanged}",
+        try_instead=(
+            f"bm_read(identifier='{address}'), then retry with "
+            f"expected_checksum='{current_checksum}'"
+        ),
+        output_format=output_format,
+    )
+
+
+def note_change_failure(
+    error: ToolError,
+    *,
+    action: str,
+    address: str,
+    unchanged: str,
+    output_format: OutputFormat,
+    occupied: str | None = None,
+) -> ToolError:
+    """Explain a note change the API refused, or one whose outcome is unknown.
+
+    `action` names the change ("edit", "move"); `occupied` is the destination of a
+    move, where a plain 409 means a file is already there.
+    """
+    refused = api_refusal(error)
+    if refused is None:
+        # Trigger: the request left and no 4xx came back (no response, or a 5xx).
+        # Why: the server may have applied it; retrying an append would apply it twice.
+        # Outcome: an error that says to read the note before retrying.
+        return refusal(
+            "OUTCOME_UNKNOWN",
+            f"The {action} of '{address}' may or may not have happened: {error}",
+            try_instead=f"bm_read(identifier='{occupied or address}') before retrying",
+            output_format=output_format,
+        )
+    if refused.revision_conflict:
+        return revision_conflict(
+            address, refused.current_checksum, unchanged=unchanged, output_format=output_format
+        )
+    if occupied is not None and refused.code == "REVISION_CONFLICT":
+        return refusal(
+            "ALREADY_EXISTS",
+            refused.with_outcome(unchanged),
+            try_instead=f"bm_read(identifier='{occupied}') to see what is there",
+            output_format=output_format,
+        )
+    return refusal(
+        refused.code,
+        refused.with_outcome(unchanged),
+        try_instead=f"bm_read(identifier='{address}') to see the note as it is",
+        output_format=output_format,
+    )

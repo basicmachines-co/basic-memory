@@ -21,7 +21,7 @@ from basic_memory.mcp.note_targets import (
     resolve_note,
 )
 from basic_memory.mcp.note_writes import NoteChange
-from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.refusals import note_change_failure, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
@@ -190,18 +190,22 @@ async def _move_note(
         destination_path = PurePosixPath(destination.rstrip("/")) / source.name
     else:
         destination_path = PurePosixPath(destination)
-    _check_note_destination(source, destination_path, destination, output_format)
+    _check_note_destination(
+        source, destination_path, destination, target.paths.path(note.file_path), output_format
+    )
 
     try:
         moved = await KnowledgeClient(target.client, target.project.external_id).move_entity(
             note.external_id, str(destination_path), base_checksum=expected_checksum
         )
     except ToolError as error:
-        raise _move_failure(
+        raise note_change_failure(
             error,
-            target.paths.path(note.file_path),
-            target.paths.path(str(destination_path)),
-            output_format,
+            action="move",
+            address=target.paths.path(note.file_path),
+            unchanged="Nothing was moved.",
+            occupied=target.paths.path(str(destination_path)),
+            output_format=output_format,
         ) from error
 
     # The API moves into an existing folder's spelling; the result then names the
@@ -220,13 +224,14 @@ def _check_note_destination(
     source: PurePosixPath,
     destination_path: PurePosixPath,
     destination: str,
+    address: str,
     output_format: OutputFormat,
 ) -> None:
     """Refuse a note destination that is the same file or another kind of file."""
     if destination_path == source:
         raise refusal(
             "INVALID_ARGUMENTS",
-            f"The note is already at '{source}'.",
+            f"The note is already at '{address}'.",
             output_format=output_format,
         )
     # Trigger: no extension, as in 'archive/2025'.
@@ -254,41 +259,6 @@ def _check_note_destination(
             try_instead=f"'{destination_path.with_suffix(source.suffix)}'",
             output_format=output_format,
         )
-
-
-def _move_failure(
-    error: ToolError, source: str, destination: str, output_format: OutputFormat
-) -> ToolError:
-    """Explain a move the API refused, or one whose outcome is unknown."""
-    refused = api_refusal(error)
-    if refused is None:
-        return refusal(
-            "OUTCOME_UNKNOWN",
-            f"The move of '{source}' may or may not have happened: {error}",
-            try_instead=f"bm_read(identifier='{destination}') before retrying",
-            output_format=output_format,
-        )
-    if refused.revision_conflict:
-        return refusal(
-            "REVISION_CONFLICT",
-            f"'{source}' changed since you read it (current checksum "
-            f"{refused.current_checksum}). Nothing was moved.",
-            try_instead=(
-                f"bm_read(identifier='{source}'), then retry with "
-                f"expected_checksum='{refused.current_checksum}'"
-            ),
-            output_format=output_format,
-        )
-    # A 409 that is not a revision guard is a file already at the destination.
-    code = "ALREADY_EXISTS" if refused.code == "REVISION_CONFLICT" else refused.code
-    return refusal(
-        code,
-        refused.with_outcome("Nothing was moved."),
-        try_instead=f"bm_read(identifier='{destination}') to see what is there"
-        if code == "ALREADY_EXISTS"
-        else None,
-        output_format=output_format,
-    )
 
 
 # --- Directories ---
@@ -319,15 +289,20 @@ async def _move_directory(
             source, destination
         )
     except ToolError as error:
-        raise _move_failure(
-            error, target.paths.path(source), target.paths.path(destination), output_format
+        raise note_change_failure(
+            error,
+            action="move",
+            address=target.paths.path(source),
+            unchanged="Nothing was moved.",
+            occupied=target.paths.path(destination),
+            output_format=output_format,
         ) from error
 
     if moved.total_files == 0:
         raise refusal(
             "NOT_FOUND",
-            f"No files under '{source}' in project '{target.project.name}'.",
-            try_instead=f"bm_list(path='{source.rpartition('/')[0] or '/'}')",
+            f"No files under '{target.paths.path(source)}' in project '{target.project.name}'.",
+            try_instead=f"bm_list(path='{target.paths.path(source.rpartition('/')[0]) or '/'}')",
             output_format=output_format,
         )
     result: dict[str, Any] = {

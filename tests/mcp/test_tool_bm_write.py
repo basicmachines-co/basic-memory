@@ -166,7 +166,7 @@ async def test_expected_checksum_replaces_only_the_revision_read(client, test_pr
 
 @pytest.mark.asyncio
 async def test_expected_checksum_for_a_missing_note(client, test_project):
-    with pytest.raises(ToolError, match="^REVISION_CONFLICT: No note exists"):
+    with pytest.raises(ToolError, match="^REVISION_CONFLICT: .*was deleted since you read it"):
         await bm_write(
             identifier="notes/new.md",
             content="Body",
@@ -261,7 +261,7 @@ async def test_unanswered_write_is_an_unknown_outcome(client, test_project, monk
             NoteTargetMoved(
                 external_id="abc", title="A", file_path="moved/a.md", permalink="moved/a"
             ),
-            r"^ALREADY_EXISTS: .*moved to 'moved/a.md'.*\nTry instead: bm_read\(identifier='abc'\)",
+            r"^ALREADY_EXISTS: .*moved to 'moved/a.md'.*\nTry instead: bm_read\(identifier='moved/a.md'\)",
         ),
         (NoteLocked(message="Note is locked for review."), "^LOCKED: Note is locked"),
     ],
@@ -348,3 +348,21 @@ async def test_a_failed_probe_does_not_fail_the_write(client, test_project, monk
 async def test_invalid_arguments(client, test_project, arguments, code, message):
     with pytest.raises(ToolError, match=f"^{code}: .*{message}"):
         await bm_write(content="Body", project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_markdown_suffix_is_kept(client, test_project):
+    result = await write_json(
+        identifier="notes/plan.markdown", content="Body", project=test_project.name
+    )
+
+    assert result["file_path"] == "notes/plan.markdown"
+
+
+@pytest.mark.asyncio
+async def test_existing_note_hint_names_the_qualified_path(client, test_project):
+    prefix = test_project.permalink
+    await bm_write(identifier=f"{prefix}/notes/a.md", content="One")
+
+    with pytest.raises(ToolError, match=f"bm_edit\\(identifier='{prefix}/notes/a.md'"):
+        await bm_write(identifier=f"{prefix}/notes/a.md", content="Two", overwrite=False)

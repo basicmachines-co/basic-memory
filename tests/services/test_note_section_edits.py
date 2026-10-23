@@ -131,3 +131,16 @@ def test_an_edit_at_the_end_keeps_the_final_newline_state():
     assert replace_section_content("## A\nold", "A", "new") == "## A\nnew"
     assert replace_section_content("## A\nold\n", "A", "new") == "## A\nnew\n"
     assert insert_relative_to_section("## A", "A", "first", "after") == "## A\nfirst"
+
+
+def test_restated_heading_in_any_spelling_is_dropped():
+    """A replacement copied from bm_read may restate the heading with closing hashes."""
+    note = "## Decisions\nold\n## Next\n"
+
+    assert replace_section_content(note, "Decisions", "## Decisions ##\nnew") == (
+        "## Decisions\nnew\n## Next\n"
+    )
+    setext = "Decisions\n---------\nold\n## Next\n"
+    assert replace_section_content(setext, "Decisions", "Decisions\n---\nnew") == (
+        "Decisions\n---------\nnew\n## Next\n"
+    )

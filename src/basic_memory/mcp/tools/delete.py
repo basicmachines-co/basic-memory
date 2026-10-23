@@ -17,7 +17,7 @@ from basic_memory.mcp.note_targets import (
     open_project_target,
     resolve_note,
 )
-from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.refusals import note_change_failure, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.schemas.memory import memory_url_path
@@ -117,7 +117,13 @@ async def _delete_note(
             note.external_id, base_checksum=expected_checksum
         )
     except ToolError as error:
-        raise _delete_failure(error, target.paths.path(note.file_path), output_format) from error
+        raise note_change_failure(
+            error,
+            action="delete",
+            address=target.paths.path(note.file_path),
+            unchanged="Nothing was deleted.",
+            output_format=output_format,
+        ) from error
     file_path = target.paths.path(note.file_path)
     # Trigger: the note resolved, then was gone when the delete arrived.
     # Why: another writer removed it first; this call deleted nothing (C11).
@@ -131,38 +137,6 @@ async def _delete_note(
     if output_format == "json":
         return {"action": "deleted", "title": note.title, "file_path": file_path}
     return f"Deleted {file_path}"
-
-
-def _delete_failure(error: ToolError, file_path: str, output_format: OutputFormat) -> ToolError:
-    """Explain a delete the API refused, or one whose outcome is unknown."""
-    refused = api_refusal(error)
-    if refused is None:
-        return refusal(
-            "OUTCOME_UNKNOWN",
-            f"The delete of '{file_path}' may or may not have happened: {error}",
-            try_instead=f"bm_read(identifier='{file_path}') to check",
-            output_format=output_format,
-        )
-    if refused.revision_conflict and refused.current_checksum is None:
-        return refusal(
-            "REVISION_CONFLICT",
-            f"'{file_path}' was already deleted by someone else.",
-            output_format=output_format,
-        )
-    if refused.revision_conflict:
-        return refusal(
-            "REVISION_CONFLICT",
-            f"'{file_path}' changed since you read it (current checksum "
-            f"{refused.current_checksum}). Nothing was deleted.",
-            try_instead=(
-                f"bm_read(identifier='{file_path}'), then retry with "
-                f"expected_checksum='{refused.current_checksum}'"
-            ),
-            output_format=output_format,
-        )
-    return refusal(
-        refused.code, refused.with_outcome("Nothing was deleted."), output_format=output_format
-    )
 
 
 async def _delete_directory(
@@ -203,7 +177,13 @@ async def _delete_directory(
             directory
         )
     except ToolError as error:
-        raise _delete_failure(error, shown, output_format) from error
+        raise note_change_failure(
+            error,
+            action="delete",
+            address=shown,
+            unchanged="Nothing was deleted.",
+            output_format=output_format,
+        ) from error
     if deleted.total_files == 0:
         raise refusal(
             "NOT_FOUND",

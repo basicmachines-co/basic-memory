@@ -278,3 +278,36 @@ async def test_destination_naming_another_project(client, test_project, second_p
             destination=f"{second_project.permalink}/plan.md",
             project=test_project.name,
         )
+
+
+@pytest.mark.asyncio
+async def test_guarded_move_of_a_deleted_note(client, test_project, monkeypatch):
+    """A vanished revision says so; it never suggests expected_checksum='None'."""
+    written = await _note(test_project.name)
+
+    async def deleted(*_args: Any, **_kwargs: Any) -> None:
+        request = httpx.Request("PUT", "http://test")
+        answer = httpx.Response(
+            409, request=request, json={"detail": {"message": "gone", "db_checksum": None}}
+        )
+        error = ToolError("conflict")
+        error.__cause__ = httpx.HTTPStatusError("409", request=request, response=answer)
+        raise error
+
+    monkeypatch.setattr(KnowledgeClient, "move_entity", deleted)
+    with pytest.raises(ToolError, match="^REVISION_CONFLICT: .*was deleted") as refused:
+        await bm_move(
+            identifier="notes/plan.md",
+            destination="archive/",
+            expected_checksum=written["checksum"],
+            project=test_project.name,
+        )
+    assert "None" not in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_missing_directory_hint_is_qualified(client, test_project):
+    prefix = test_project.permalink
+
+    with pytest.raises(ToolError, match=f"bm_list\\(path='{prefix}'\\)"):
+        await bm_move(path=f"{prefix}/nope", destination=f"{prefix}/archive")

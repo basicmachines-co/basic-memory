@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BeforeValidator, Field
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.note_targets import open_project_target, resolve_note
 from basic_memory.mcp.note_writes import NoteChange
-from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.refusals import note_change_failure, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
@@ -158,7 +158,8 @@ async def bm_edit(
         if not runtime_file_path_is_markdown_note(note.file_path):
             raise refusal(
                 "UNSUPPORTED",
-                f"'{note.file_path}' is not a Markdown note; bm_edit changes notes only.",
+                f"'{target.paths.path(note.file_path)}' is not a Markdown note; bm_edit changes "
+                "notes only.",
                 output_format=output_format,
             )
         try:
@@ -166,7 +167,13 @@ async def bm_edit(
                 note.external_id, edit, base_checksum=expected_checksum
             )
         except ToolError as error:
-            raise _edit_refusal(error, target.paths.path(note.file_path), output_format) from error
+            raise note_change_failure(
+                error,
+                action="edit",
+                address=target.paths.path(note.file_path),
+                unchanged="Nothing was changed.",
+                output_format=output_format,
+            ) from error
 
     change = NoteChange.of(edited, action="edited", paths=target.paths)
     if output_format == "json":
@@ -209,43 +216,3 @@ def _check_arguments(
         raise invalid(
             f"metadata values cannot be null (removing keys is not supported): {null_keys}"
         )
-
-
-def _edit_refusal(error: ToolError, file_path: str, output_format: OutputFormat) -> ToolError:
-    """Explain a failed PATCH: a refusal changed nothing; no answer is an unknown outcome."""
-    refused = api_refusal(error)
-    if refused is None:
-        # Trigger: the request left and no 4xx came back (no response, or a 5xx).
-        # Why: the server may have applied the edit; retrying an append would apply
-        #      it twice.
-        # Outcome: an error that says to read the note before retrying.
-        return refusal(
-            "OUTCOME_UNKNOWN",
-            f"The edit to '{file_path}' may or may not have been applied: {error}",
-            try_instead=f"bm_read(identifier='{file_path}') before retrying",
-            output_format=output_format,
-        )
-    if refused.revision_conflict and refused.current_checksum is None:
-        return refusal(
-            "REVISION_CONFLICT",
-            f"'{file_path}' was deleted since you read it. Nothing was changed.",
-            try_instead="bm_search to find where its content went",
-            output_format=output_format,
-        )
-    if refused.revision_conflict:
-        return refusal(
-            "REVISION_CONFLICT",
-            f"'{file_path}' changed since you read it (current checksum "
-            f"{refused.current_checksum}). Nothing was changed.",
-            try_instead=(
-                f"bm_read(identifier='{file_path}'), then retry with "
-                f"expected_checksum='{refused.current_checksum}'"
-            ),
-            output_format=output_format,
-        )
-    return refusal(
-        refused.code,
-        refused.with_outcome("Nothing was changed."),
-        try_instead=f"bm_read(identifier='{file_path}') to see the note as it is",
-        output_format=output_format,
-    )

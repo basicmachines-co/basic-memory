@@ -42,6 +42,7 @@ from basic_memory.markdown.sections import (
     document_lines,
     locate_section,
     parse_section_selector,
+    scan_sections,
     setext_heading_underlined_at,
 )
 from basic_memory.markdown.utils import schema_to_markdown
@@ -640,10 +641,19 @@ def _trim_blank_edges(lines: list[str]) -> list[str]:
     return lines[start:end]
 
 
-def _repeats_heading(line: str, span: SectionSpan) -> bool:
-    """True when a replacement's first line restates the section's own heading."""
-    level = _markdown_heading_level(line)
-    return level == span.level and line.strip()[level:].strip() == span.heading
+def _restated_heading_lines(replacement: list[str], span: SectionSpan) -> int:
+    """How many opening lines of a replacement restate the section's own heading.
+
+    The scanner reads the heading, so the closing-hash ('## Decisions ##') and
+    setext ('Decisions' over '---') spellings match the same heading text.
+    """
+    sections = scan_sections("\n".join(replacement))
+    if not sections:
+        return 0
+    first = sections[0]
+    if first.start_line != 1 or first.level != span.level or first.heading != span.heading:
+        return 0
+    return first.heading_end_line
 
 
 def replace_section_content(
@@ -657,8 +667,9 @@ def replace_section_content(
     end = span.end if replace_subsections else span.subsections_start
     replacement = _trim_blank_edges(_LINE_TERMINATOR.split(new_content))
     # Models often send the heading back with its new body; the heading stays once.
-    if replacement and _repeats_heading(replacement[0], span):
-        replacement = _trim_blank_edges(replacement[1:])
+    restated = _restated_heading_lines(replacement, span)
+    if restated:
+        replacement = _trim_blank_edges(replacement[restated:])
     # Trigger: the replaced span opened or closed with a blank line.
     # Why: the blank line under a heading and the one before the next heading are
     #      the section's layout, not its content; dropping them glues a table to

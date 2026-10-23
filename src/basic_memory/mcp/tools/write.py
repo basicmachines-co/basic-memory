@@ -26,7 +26,7 @@ from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 from basic_memory.mcp.note_targets import ProjectTarget, open_project_target
 from basic_memory.mcp.note_writes import NoteChange
-from basic_memory.mcp.refusals import api_refusal, refusal
+from basic_memory.mcp.refusals import note_change_failure, refusal, revision_conflict
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import (
     SimilarNote,
@@ -36,6 +36,7 @@ from basic_memory.mcp.similar_notes import (
     similar_notes_min_similarity,
 )
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.v2.entity import EntityResponseV2
@@ -218,7 +219,13 @@ async def bm_write(
                 note, overwrite=effective_overwrite, expected_checksum=expected_checksum
             )
         except ToolError as error:
-            raise _write_failure(error, target.paths.path(note.file_path), output_format) from error
+            raise note_change_failure(
+                error,
+                action="write",
+                address=target.paths.path(note.file_path),
+                unchanged="Nothing was written.",
+                output_format=output_format,
+            ) from error
 
         # --- Outcomes ---
         match outcome:
@@ -226,49 +233,36 @@ async def bm_write(
                 action = "created"
             case NoteUpdated(entity=written):
                 action = "updated"
-            case NoteAlreadyExists(file_path=file_path, permalink=permalink):
+            case NoteAlreadyExists(file_path=file_path):
                 shown = target.paths.path(file_path)
-                existing = permalink or shown
                 raise refusal(
                     "ALREADY_EXISTS",
                     f"A note already exists at '{shown}'. Nothing was written.",
                     try_instead=(
-                        f"bm_edit(identifier='{existing}', command='append', content='...') to "
+                        f"bm_edit(identifier='{shown}', command='append', content='...') to "
                         "add to it, or bm_write(..., overwrite=true) to replace it"
                     ),
                     output_format=output_format,
                 )
-            case NoteTargetMoved(file_path=file_path, external_id=external_id):
+            case NoteTargetMoved(file_path=file_path):
                 shown = target.paths.path(file_path)
                 raise refusal(
                     "ALREADY_EXISTS",
                     f"The note this path names has moved to '{shown}'. Nothing was written.",
                     try_instead=(
-                        f"bm_read(identifier='{external_id}') to work on that note, or "
+                        f"bm_read(identifier='{shown}') to work on that note, or "
                         "overwrite=false to create a separate note at this path"
                     ),
                     output_format=output_format,
                 )
             case NoteLocked(message=message):
                 raise refusal("LOCKED", message, output_format=output_format)
-            case NoteRevisionConflict(file_path=file_path, db_checksum=None):
-                shown = target.paths.path(file_path)
-                raise refusal(
-                    "REVISION_CONFLICT",
-                    f"No note exists at '{shown}' any more, so nothing was replaced.",
-                    try_instead="bm_write without expected_checksum to create it",
-                    output_format=output_format,
-                )
             case NoteRevisionConflict(file_path=file_path, db_checksum=current_checksum):
-                shown = target.paths.path(file_path)
-                raise refusal(
-                    "REVISION_CONFLICT",
-                    f"'{shown}' changed since you read it (current checksum "
-                    f"{current_checksum}). Nothing was replaced.",
-                    try_instead=(
-                        f"bm_read(identifier='{shown}'), then retry with "
-                        f"expected_checksum='{current_checksum}'"
-                    ),
+                raise revision_conflict(
+                    target.paths.path(file_path),
+                    current_checksum,
+                    unchanged="Nothing was replaced.",
+                    if_deleted="bm_write without expected_checksum to create it",
                     output_format=output_format,
                 )
             case _:  # pragma: no cover
@@ -300,22 +294,6 @@ async def bm_write(
             "similar_notes": [dataclasses.asdict(similar) for similar in similar_notes],
         }
     return _format_text(change, similar_notes)
-
-
-def _write_failure(error: ToolError, file_path: str, output_format: OutputFormat) -> ToolError:
-    """Explain a write the API did not answer with a typed outcome."""
-    refused = api_refusal(error)
-    if refused is None:
-        # The request left and no 4xx came back, so the note may have been written.
-        return refusal(
-            "OUTCOME_UNKNOWN",
-            f"The write to '{file_path}' may or may not have landed: {error}",
-            try_instead=f"bm_read(identifier='{file_path}') before retrying",
-            output_format=output_format,
-        )
-    return refusal(
-        refused.code, refused.with_outcome("Nothing was written."), output_format=output_format
-    )
 
 
 def _place_note(
@@ -354,16 +332,21 @@ def _place_note(
             try_instead=f"bm_write(identifier='{identifier.rstrip('/')}/<file>.md', ...)",
             output_format=output_format,
         )
-    # Trigger: the name has some other extension ('data.json', 'v1.2').
+    # Trigger: the name has an extension other than '.md' or '.markdown' ('data.json',
+    #          'v1.2').
     # Why: bm_write writes Markdown notes; silently making 'data.json.md' would hide
     #      the mistake, and writing JSON as a note would index it as Markdown.
     # Outcome: a name without an extension gets '.md'; any other extension is refused.
-    if path.suffix.lower() != MARKDOWN_SUFFIX:
+    if path.suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES:
         if path.suffix:
             raise refusal(
                 "UNSUPPORTED",
-                f"'{path.name}' is not a Markdown file name; bm_write writes '.md' notes.",
-                try_instead=f"bm_write(identifier='{path.with_name(path.name + MARKDOWN_SUFFIX)}')",
+                f"'{path.name}' is not a Markdown file name; bm_write writes '.md' or "
+                "'.markdown' notes.",
+                try_instead=(
+                    "bm_write(identifier="
+                    f"'{target.paths.path(str(path.with_name(path.name + MARKDOWN_SUFFIX)))}')"
+                ),
                 output_format=output_format,
             )
         path = path.with_name(path.name + MARKDOWN_SUFFIX)
