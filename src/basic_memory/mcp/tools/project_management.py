@@ -856,8 +856,10 @@ async def delete_project(
 
         if not target_project:
             available_projects = [p.name for p in project_list.projects]
-            raise ValueError(
-                f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
+            raise refusal(
+                "NOT_FOUND",
+                f"Project '{project_name}' not found. Available projects: "
+                f"{', '.join(available_projects)}",
             )
 
         # Trigger: the delete is served by a cloud backend.

@@ -593,6 +593,17 @@ async def schema_diff(
                 _no_schema_guidance(note_type, "schema_diff"),
             )
 
+        # --- No notes guard ---
+        # Trigger: a schema exists but no notes of the type do.
+        # Why: an empty comparison reads as "no drift", a comparison that never ran.
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type.
+        if result.notes_compared == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{note_type}'",
+                _no_notes_guidance(note_type, "schema_diff"),
+            )
+
         if output_format == "json":
             return result.model_dump(mode="json", exclude_none=True)
 

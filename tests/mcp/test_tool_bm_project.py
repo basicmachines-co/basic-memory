@@ -222,3 +222,18 @@ async def test_infer_below_the_threshold(client, test_project):
 async def test_schema_argument_refusals(client, test_project, arguments, message):
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: {message}"):
         await bm_schema(project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_diff_without_notes_is_not_a_clean_diff(client, test_project):
+    """A schema with no notes of its type compares nothing; that is not "no drift"."""
+    await bm_write(identifier="schemas/person.md", content=PERSON_SCHEMA, project=test_project.name)
+
+    with pytest.raises(ToolError, match="^NOT_FOUND: # No Notes Found of Type 'person'"):
+        await bm_schema(command="diff", note_type="person", project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_missing_project_is_not_found(app):
+    with pytest.raises(ToolError, match='"error": "NOT_FOUND"'):
+        await bm_project_delete(name="no-such-project", output_format="json")

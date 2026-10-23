@@ -140,3 +140,10 @@ class DriftReport(BaseModel):
         description="Fields in schema but rare in notes",
     )
     cardinality_changes: list[str] = Field(default_factory=list)
+    notes_compared: int | None = Field(
+        default=None,
+        description=(
+            "How many notes of the type were compared with the schema; null from a server "
+            "that predates the field."
+        ),
+    )
