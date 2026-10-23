@@ -207,32 +207,35 @@ async def bm_search(
         "all_projects": all_projects or None,
     }
     # --- Argument combinations, before any I/O ---
-    if identifier is not None and path is not None:
-        raise refusal(
-            "INVALID_ARGUMENTS",
-            "`identifier` and `path` both scope the search; give one.",
-            output_format=output_format,
+    # Trigger: more than one argument says where to search.
+    # Why: each names a location (one note, one folder, the place a memory:// URL
+    #      names, some or all projects), two can disagree, and honoring one would
+    #      silently search somewhere the caller did not ask.
+    # Outcome: a refusal naming the scopes given.
+    memory_query = query is not None and query.startswith("memory://")
+    scopes = [
+        name
+        for name, given in (
+            ("`identifier`", identifier is not None),
+            ("`path`", path is not None),
+            ("a memory:// query", memory_query),
+            ("`projects`", bool(projects)),
+            ("`all_projects`", all_projects),
         )
-    # A memory:// URL names its own project and location, and a folder `path` could
-    # name another project; one location keeps the routing unambiguous.
-    if path is not None and query is not None and query.startswith("memory://"):
+        if given
+    ]
+    if len(scopes) > 1:
         raise refusal(
             "INVALID_ARGUMENTS",
-            "A memory:// query names its own location, and `path` names a folder; give one.",
-            try_instead="put the folder in the URL, such as 'memory://research/specs/*'",
-            output_format=output_format,
-        )
-    if all_projects and projects:
-        raise refusal(
-            "INVALID_ARGUMENTS",
-            "`all_projects` searches every project and `projects` names some; give one.",
+            f"{' and '.join(scopes)} each say where to search; give one.",
+            try_instead="one scope; a folder can go in the URL, as 'memory://research/specs/*'",
             output_format=output_format,
         )
     several_projects = all_projects or bool(projects)
-    if several_projects and (identifier is not None or path is not None or lines is not None):
+    if several_projects and lines is not None:
         raise refusal(
             "INVALID_ARGUMENTS",
-            "`identifier`, `path` and `lines` search one project, not several.",
+            "`lines` matches lines in one project, not several.",
             output_format=output_format,
         )
     if several_projects and project is not None:
@@ -390,11 +393,10 @@ async def bm_search(
                 raise _nothing_to_search(output_format)
 
     # --- One project ---
-    # Trigger: the query is a memory:// URL (a folder `path` was refused above).
+    # Trigger: the query is a memory:// URL (no other scope, as checked above).
     # Why: the URL may name its project ('memory://research/foo'), which must route
     #      the search the way it routes a read, not fall to the active project.
     # Outcome: the URL is the routed target; its project-relative path is the query.
-    memory_query = query is not None and query.startswith("memory://")
     routed = query if memory_query and query is not None else path or ""
     kind = "identifier" if memory_query else "path"
     async with open_project_target(

@@ -14,6 +14,7 @@ from pydantic import AliasChoices, Field
 from basic_memory.mcp.clients import DirectoryClient
 from basic_memory.mcp.directory_listing import format_listing_text, project_mount_listing
 from basic_memory.mcp.note_targets import open_project_target
+from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
     Pagination,
@@ -75,6 +76,14 @@ async def bm_list(
         and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         and not path.strip().strip("/")
     ):
+        # The projects are folders, which `glob` and `sort` never apply to.
+        if glob is not None or sort is not None:
+            raise refusal(
+                "INVALID_ARGUMENTS",
+                "'/' lists projects; `glob` and `sort` apply to files in a folder.",
+                try_instead="bm_list(path='<project>', glob=...), or bm_find to search by name",
+                output_format=output_format,
+            )
         mounts = await project_mount_listing(page=page, page_size=page_size, context=context)
         if output_format == "json":
             return mounts
