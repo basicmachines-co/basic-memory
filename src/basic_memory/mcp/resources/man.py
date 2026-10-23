@@ -7,7 +7,6 @@ accepts any spelling of a page reference — ``search-notes(3)``, ``3/search-not
 ``search_notes`` — so an agent's first guess resolves.
 """
 
-from fastmcp import Context
 from fastmcp.exceptions import ResourceError
 from fastmcp.resources import FileResource
 from pydantic import AnyUrl
@@ -42,7 +41,7 @@ async def manual_index() -> str:
     ),
     mime_type="text/markdown",
 )
-async def manual_page(ref: str, context: Context | None = None) -> str:
+async def manual_page(ref: str) -> str:
     try:
         page_ref = parse_page_ref(ref)
     except ValueError as error:
@@ -53,21 +52,9 @@ async def manual_page(ref: str, context: Context | None = None) -> str:
         miss = ResourceError(
             f"No manual entry for {page_ref.display}; read {MANUAL_INDEX_URI} for the index"
         )
-    if page is not None:
-        return page.read()
-
-    # This template registers first and wins ties for memory://man/... over the
-    # notes template, and nothing reserves `man` as a project name — so when no
-    # page matches, the URI may be a note in a project really named man.
-    # Deferred import: notes.py imports this module.
-    from basic_memory.mcp.resources.notes import NoteNotFoundError, read_note_markdown
-
-    try:
-        return await read_note_markdown(f"man/{ref}", context)
-    except NoteNotFoundError:
-        # Neither a page nor a note — the manual's hint is the useful one; an
-        # operational note failure keeps its own cause instead.
-        raise miss from None
+    if page is None:
+        raise miss
+    return page.read()
 
 
 # Concrete resources are what clients list; the template only answers reads.

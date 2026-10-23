@@ -119,7 +119,7 @@ error it is rather than as a server error.
 
 Keys accept dot-paths into nested frontmatter (`review.approved`), and
 `note_type` is accepted as a spelling of the frontmatter `type` key, matching
-`search-notes(3)`. A key is dot-separated names of letters, digits, `_` or
+`bm-search(3)`. A key is dot-separated names of letters, digits, `_` or
 `-`, so a doubled, leading or trailing dot (`review..approved`, `.owner`,
 `owner.`) is refused by the grammar rather than spent as a request the
 search API will reject. Any other operator (`!=` among them — the search
@@ -170,5 +170,5 @@ bm find --meta "status=active" --fields title --plain
 - see_also [[ls(1)]]
 - see_also [[tree(1)]]
 - see_also [[grep(1)]]
-- see_also [[list-directory(3)]]
-- see_also [[search-notes(3)]]
+- see_also [[bm-find(3)]]
+- see_also [[bm-search(3)]]

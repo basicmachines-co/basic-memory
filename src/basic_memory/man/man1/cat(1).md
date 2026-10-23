@@ -70,4 +70,4 @@ bm cat specs/search --section Decisions --max-tokens 500
 
 - see_also [[head(1)]]
 - see_also [[grep(1)]]
-- see_also [[read-note(3)]]
+- see_also [[bm-read(3)]]

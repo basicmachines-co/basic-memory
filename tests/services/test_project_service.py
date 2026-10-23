@@ -460,6 +460,18 @@ async def test_set_default_project_config_db_mismatch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["man", "Man", "MAN"])
+async def test_add_project_refuses_the_reserved_man_name(
+    project_service: ProjectService, tmp_path, name
+):
+    """memory://man/ is the bundled manual, so no project may be addressed as man."""
+    with pytest.raises(ValueError, match=f"Project name '{name}' is reserved"):
+        await project_service.add_project(name, str(tmp_path / "man-project"))
+
+    assert name not in project_service.projects
+
+
+@pytest.mark.asyncio
 async def test_add_project_with_set_default_true(project_service: ProjectService, test_project):
     """Test adding a project with set_default=True enforces single default."""
     test_project_name = f"test-default-true-{os.urandom(4).hex()}"

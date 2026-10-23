@@ -39,11 +39,15 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator
 
-from basic_memory.config import ConfigManager, has_cloud_credentials
-from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
+from basic_memory.man import (
+    bundled_pages,
+    find_page,
+    parse_page_ref,
+    render_index,
+    search_pages,
+)
 from basic_memory.markdown.line_scanning import scan_literal_lines
 from basic_memory.markdown.sections import document_lines, line_range_past_end
-from basic_memory.mcp.async_client import is_factory_mode
 from basic_memory.mcp.directory_listing import project_mount_listing
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.metadata_find import find_by_metadata, parse_field_paths
@@ -65,10 +69,6 @@ from basic_memory.schemas.directory import (
 from basic_memory.schemas.memory import EntitySummary
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 from basic_memory.utils import coerce_list, generate_permalink
-
-# The manual project holds the non-bundled manual pages as ordinary notes;
-# `man` falls back to it for page reads and searches it in query mode.
-_MANUAL_PROJECT = "manual"
 
 # API bound on directory recursion (directory_router depth query: ge=1, le=10).
 _MAX_FIND_DEPTH = 10
@@ -998,19 +998,18 @@ async def man(
 
     Modes:
     - No arguments: the manual index (apropos view), as markdown.
-    - page: one page — a bundled page by reference (e.g. "search-notes(3)"),
-      else a note read from the manual project.
-    - query: search notes of type "manpage" in the manual project.
+    - page: one bundled page by reference (e.g. "search-notes(3)").
+    - query: the bundled pages that mention every word of the query.
 
     Args:
         page: Page reference, e.g. "search-notes(3)". Any common spelling works.
-        query: Apropos search text over manpage notes. Mutually exclusive with `page`.
-        project: Manual project name (default: "manual"). Bundled pages need no project.
-        project_id: Project external_id (UUID); takes precedence over `project`.
+        query: Apropos search text. Mutually exclusive with `page`.
+        project: Ignored; the manual is bundled with the package.
+        project_id: Ignored; the manual is bundled with the package.
         context: Optional FastMCP context.
 
     Returns:
-        Markdown (index or one page) or a search response as JSON.
+        Markdown (index or one page), or the matching pages as JSON.
     """
     if page is not None and query is not None:
         raise ValueError("man: pass either 'page' or 'query', not both")
@@ -1021,80 +1020,27 @@ async def man(
         tools = await mcp.list_tools(run_middleware=False)
         return render_index(bundled_pages(), frozenset(tool.name for tool in tools))
 
-    manual_project = project or _MANUAL_PROJECT
-
-    # Trigger: no project was named, and this install has neither a local
-    #   "manual" project nor any cloud route to one.
-    # Why: the manual project holds the non-bundled pages in cloud workspaces.
-    #   Without it, the fallback could only fail, and it failed by asking a
-    #   local user for cloud credentials (#1628).
-    # Outcome: page reads stop at the bundled pages, and query mode says what
-    #   it would need instead of routing anywhere.
-    manual_reachable = (
-        project is not None
-        or project_id is not None
-        or is_factory_mode()
-        or ConfigManager().config.project_entry(_MANUAL_PROJECT) is not None
-        or has_cloud_credentials(ConfigManager().config)
-    )
-
+    # The manual is the bundled pages. A fallback to a "manual" project failed for
+    # nearly every hosted caller, whose workspaces have no such project (about 90% of
+    # man's production errors, 2026-10); `project` and `project_id` are accepted and
+    # ignored so existing callers keep working.
     if page is not None:
         try:
-            page_ref = parse_page_ref(page)
+            bundled = find_page(parse_page_ref(page))
         except ValueError:
             bundled = None
-        else:
-            bundled = find_page(page_ref)
-        if bundled is not None:
-            return bundled.read()
-        if not manual_reachable:
-            raise ToolError(f"No manual entry for {page}")
+        if bundled is None:
+            raise ToolError(f"No manual entry for {page}. Call man() for the index.")
+        return bundled.read()
 
-        # Not a bundled page — the reference may name a manual note (the
-        # non-bundled sections live as notes in the manual project), mirroring
-        # the memory://man resource fallback.
-        async with get_project_client(manual_project, context=context, project_id=project_id) as (
-            client,
-            active_project,
-        ):
-            # Import here to avoid circular import
-            from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
-
-            knowledge_client = KnowledgeClient(client, active_project.external_id)
-            resource_client = ResourceClient(client, active_project.external_id)
-            try:
-                entity_id = await knowledge_client.resolve_entity(page, strict=True)
-            except ToolError as error:
-                # Neither a bundled page nor a manual note — the manual's hint
-                # is the useful error, not the raw resolution failure. Only the
-                # resolve miss means "no such entry"; a failed read of a note
-                # that DID resolve is an operational error and propagates as-is.
-                raise ToolError(f"No manual entry for {page}") from error
-            response = await resource_client.read(entity_id)
-            return response.text
-
-    if not manual_reachable:
-        raise ToolError(
-            f"man: query mode searches the '{_MANUAL_PROJECT}' project, which this "
-            "install does not have. Call man() for the index of bundled pages, or "
-            "man(page=...) to read one."
-        )
-
-    search_query = SearchQuery(
-        text=query,
-        note_types=["manpage"],
-        entity_types=[SearchItemType.ENTITY],
-    )
-    async with get_project_client(manual_project, context=context, project_id=project_id) as (
-        client,
-        active_project,
-    ):
-        # Import here to avoid circular import
-        from basic_memory.mcp.clients import SearchClient
-
-        search_client = SearchClient(client, active_project.external_id)
-        response = await search_client.search(search_query.model_dump(), page=1, page_size=10)
-        return response.model_dump(mode="json", exclude_none=True)
+    assert query is not None
+    matches = search_pages(query)
+    return {
+        "results": [
+            {"title": match.title, "summary": match.summary, "uri": match.uri} for match in matches
+        ],
+        "total": len(matches),
+    }
 
 
 # Hidden until the composition root reads config, so importing tools never

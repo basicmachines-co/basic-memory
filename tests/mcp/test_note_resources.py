@@ -157,34 +157,11 @@ async def test_client_is_opened_for_the_uris_own_project(
 
 
 @pytest.mark.asyncio
-async def test_a_project_named_man_is_reachable_behind_the_manual(
-    app, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The manual answers first, but nothing reserves the name: when no page
-    # matches, the URI falls through to a note in a project really named man.
-    async def note_read(identifier, context):
-        assert identifier == "man/guides/setup"
-        return "note content from the man project"
-
-    monkeypatch.setattr(notes_module, "read_note_markdown", note_read)
-    assert await note_resource(project="man", path="guides/setup") == (
-        "note content from the man project"
-    )
-
-    async def note_miss(identifier, context):
-        raise notes_module.NoteNotFoundError("No note")
-
-    monkeypatch.setattr(notes_module, "read_note_markdown", note_miss)
-    with pytest.raises(ResourceError, match="read memory://man for the index"):
-        await note_resource(project="man", path="guides/setup")
-
-    async def note_error(identifier, context):
-        raise ResourceError("Authentication required: x")
-
-    # An operational note failure keeps its cause instead of the manual's hint.
-    monkeypatch.setattr(notes_module, "read_note_markdown", note_error)
-    with pytest.raises(ResourceError, match="Authentication required"):
-        await note_resource(project="man", path="guides/setup")
+async def test_a_man_uri_that_is_no_page_is_a_manual_miss(app) -> None:
+    # No project may be named man, so the notes template answers memory://man/...
+    # exactly as the manual does: a page, or the manual's index hint.
+    with pytest.raises(ResourceError, match="No manual entry for guides; read memory://man"):
+        await note_resource(project="man", path="guides")
 
 
 @pytest.mark.asyncio

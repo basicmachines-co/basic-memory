@@ -50,3 +50,4 @@ bm head specs/search -n 3 --plain
 
 - see_also [[cat(1)]]
 - see_also [[tail(1)]]
+- see_also [[bm-read(3)]]

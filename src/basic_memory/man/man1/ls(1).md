@@ -65,4 +65,4 @@ bm ls /notes --plain
 
 - see_also [[find(1)]]
 - see_also [[tree(1)]]
-- see_also [[list-directory(3)]]
+- see_also [[bm-list(3)]]

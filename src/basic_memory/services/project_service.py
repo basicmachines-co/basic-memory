@@ -116,6 +116,10 @@ def project_permalink(name: str, *, top_level: bool) -> str:
     return permalink
 
 
+# Project permalinks the server already uses as memory:// namespaces.
+RESERVED_PROJECT_PERMALINKS = frozenset({"man"})
+
+
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -295,6 +299,14 @@ class ProjectService:
 
         else:
             resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+
+        # memory://man/... is the bundled manual, so a project addressed as `man` would
+        # be ambiguous with it.
+        if name_permalink in RESERVED_PROJECT_PERMALINKS:
+            raise ValueError(
+                f"Project name '{name}' is reserved: memory://{name_permalink}/ is the manual. "
+                "Choose another name."
+            )
 
         async with db.scoped_session(self.session_maker) as session:
             existing_projects = await self.repository.find_all(session, use_load_options=False)

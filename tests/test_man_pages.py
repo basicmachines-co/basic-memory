@@ -31,6 +31,7 @@ from basic_memory.man import (
     replace_mcp_synopsis,
     replace_options,
     replace_parameters,
+    search_pages,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
@@ -46,6 +47,7 @@ update_man_pages = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(update_man_pages)
 regenerate_page = update_man_pages.regenerate_page
 regenerate_cli_page = update_man_pages.regenerate_cli_page
+scaffold_page = update_man_pages.scaffold_page
 
 
 def _has_parameters_block(page_text: str) -> bool:
@@ -133,7 +135,6 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 # (or a page for a retired tool) shows up here instead of going unnoticed.
 # The POSIX read-side tools (#1399) ship without section-3 pages for now; the
 # manual campaign adds them next. Their wire descriptions stay one-liners.
-# The 1.0 bm_* tools get their pages with bm_man (SPEC-35.2, #1832).
 TOOLS_WITHOUT_PAGES: set[str] = {
     "cat",
     "find",
@@ -141,18 +142,6 @@ TOOLS_WITHOUT_PAGES: set[str] = {
     "ls",
     "man",
     "tail",
-    "bm_context",
-    "bm_delete",
-    "bm_edit",
-    "bm_find",
-    "bm_list",
-    "bm_move",
-    "bm_project",
-    "bm_project_delete",
-    "bm_read",
-    "bm_schema",
-    "bm_search",
-    "bm_write",
 }
 PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
@@ -503,10 +492,11 @@ def test_render_options_preserves_aliases_and_boolean_pairs() -> None:
 
 def test_render_cli_synopsis_groups_mutually_exclusive_options() -> None:
     # --json/--plain and --local/--cloud are rejected in combination by the CLI
-    # (test_cli_man_lookup asserts exit 1 for both pairs), so the SYNOPSIS must show
-    # each pair as a single `|` alternative, not two freely-combinable tokens.
-    apropos_path, apropos = _cli_command(find_page(PageRef("apropos", 1)))
-    synopsis = render_cli_synopsis(apropos_path, apropos)
+    # (validate_routing_flags / _validate_output_flags exit 1 for both pairs), so the
+    # SYNOPSIS must show each pair as a single `|` alternative, not two freely-
+    # combinable tokens.
+    grep_path, grep = _cli_command(find_page(PageRef("grep", 1)))
+    synopsis = render_cli_synopsis(grep_path, grep)
     assert "[--json | --plain]" in synopsis
     assert "[--local | --cloud]" in synopsis
     # never the flattened, freely-combinable spelling the constraint forbids
@@ -608,8 +598,8 @@ def test_render_excludes_hidden_options_from_synopsis_and_options() -> None:
 def test_render_options_is_not_grouped_for_mutually_exclusive_pairs() -> None:
     # The mutex grouping is a SYNOPSIS-only concern: OPTIONS still documents every
     # option as its own bullet, so each flag keeps its own description.
-    apropos_path, apropos = _cli_command(find_page(PageRef("apropos", 1)))
-    options = render_options(apropos)
+    _, grep = _cli_command(find_page(PageRef("grep", 1)))
+    options = render_options(grep)
     for flag in ("--json", "--plain", "--local", "--cloud"):
         assert f"- **{flag}**" in options
 
@@ -731,3 +721,34 @@ def test_comark_page_lists_the_component_references_vocabulary() -> None:
     )
     assert len(registered) == 39
     assert listed == registered
+
+
+# --- apropos and scaffolding ---
+
+
+def test_search_pages_needs_every_word_and_ranks_name_matches_first() -> None:
+    matches = search_pages("FRONTMATTER recursively")
+    titles = [page.title for page in matches]
+
+    # Both summaries carry the words, so both lead the body-only matches.
+    assert titles[:2] == ["find(1)", "bm-find(3)"]
+    assert all(
+        "frontmatter" in page.read().casefold() and "recursively" in page.read().casefold()
+        for page in matches
+    )
+    assert search_pages("   ") == ()
+    assert search_pages("zzz-no-such-word") == ()
+
+
+def test_scaffold_page_renders_a_well_formed_registry_page() -> None:
+    schema = {"required": ["query"], "properties": {"query": {"type": "string"}}}
+
+    text = scaffold_page("bm_demo", "Find things: fast. Then more detail.", schema)
+
+    assert text.startswith("---\ntitle: bm-demo(3)\n")
+    # A summary holding ': ' is quoted, so the frontmatter stays valid YAML.
+    assert "summary: 'find things: fast'" in text
+    assert "## SYNOPSIS\n\n```\nbm_demo(query)\n```" in text
+    assert "## DESCRIPTION\n\nThen more detail." in text
+    assert extract_parameters(text).startswith("- **query** (string, required)")
+    assert text.rstrip().endswith("## SEE ALSO")

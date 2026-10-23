@@ -50,4 +50,4 @@ bm tail --plain | cut -f3
 ## SEE ALSO
 
 - see_also [[head(1)]]
-- see_also [[recent-activity(3)]]
+- see_also [[bm-project(3)]]
