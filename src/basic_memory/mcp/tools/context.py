@@ -1,9 +1,9 @@
-"""bm_context: follow the knowledge graph from a note or pattern (SPEC-35.2, #1830).
+"""bm_context: follow the knowledge graph from a note or pattern.
 
-Replaces build_context. The starting point routes through the shared resolver, so
-an explicit `project` is never re-resolved from the identifier's first segment
-(#1814), and '<project>/path' and memory:// URLs work as everywhere else. Output
-defaults to JSON because the result is a graph (C4).
+The starting point routes through the shared resolver, so an explicit `project` is
+never re-resolved from the identifier's first segment, and '<project>/path' and
+memory:// URLs work as everywhere else. Output defaults to JSON because the result
+is a graph.
 """
 
 from typing import Annotated, Any
@@ -99,8 +99,8 @@ async def bm_context(
         # Why: the context API matches permalinks in their index form, which carries
         #      the project prefix when permalinks_include_project is on (and the
         #      workspace form in Cloud). Routing has already stripped a project
-        #      prefix the caller wrote, so a relative pattern such as 'specs/*'
-        #      matched nothing (#1812).
+        #      prefix the caller wrote, and a relative pattern such as 'specs/*'
+        #      matches no index-form permalink.
         # Outcome: the path is put back into index form, as memory:// reads are.
         index_path = canonical_memory_path_for_active_route(
             target.project,

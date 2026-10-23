@@ -1,8 +1,8 @@
-"""Directory listings shared by bm_list and the legacy listing tools (#1830).
+"""Directory listings: the project mount view and the text rendering of a page.
 
 The mount view lists the addressable projects as directories, so `bm_list("/")`
 doubles as project discovery. The text formatter renders any listing page the
-same way, with a continuation call when more pages exist.
+same way, with the next-page call when more pages exist.
 """
 
 from datetime import datetime

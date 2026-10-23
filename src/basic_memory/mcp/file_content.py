@@ -1,9 +1,9 @@
-"""Turn a file read from the resource API into something an MCP client can show (#1830).
+"""Turn a file read from the resource API into something an MCP client can show.
 
-`bm_read` and the legacy `read_content` tool both read non-note files: images, PDFs,
-JSON, plain text. `classify_file_response` decides once what a response is, and each
-tool presents the result its own way. Images are re-encoded as JPEG under the inline
-size budget; other binaries go out as they are, up to that budget.
+`classify_file_response` decides once what a response is (text, image, document,
+or one that cannot be shown), and each tool presents the result its own way.
+Images are re-encoded as JPEG under the inline size budget; other binaries go out
+as they are, up to that budget.
 """
 
 import io

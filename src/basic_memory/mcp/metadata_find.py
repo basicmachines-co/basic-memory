@@ -1,12 +1,11 @@
-"""Find notes by frontmatter, with optional field projection (#1830).
+"""Find notes by frontmatter, with optional field projection.
 
-The metadata arm shared by bm_find and the legacy find tool. One search call
-answers the filters, scoped server-side by file path; `fields` then projects each
-hit down to the note's identity plus the requested frontmatter values, hydrated
-from the canonical Markdown so YAML types survive.
+One search call answers the filters, scoped server-side by file path. With
+`fields`, each hit is projected down to the note's identity plus the requested
+frontmatter values, read from the accepted Markdown so YAML types survive.
 """
 
-import asyncio
+from dataclasses import dataclass
 from typing import Any
 
 from fastmcp.exceptions import ToolError
@@ -14,20 +13,17 @@ from pydantic import TypeAdapter
 
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.mcp.note_targets import ProjectTarget, qualify_search_paths
+from basic_memory.mcp.note_targets import ProjectTarget
 from basic_memory.repository.metadata_filters import MetadataPath, parse_metadata_path
-from basic_memory.schemas.search import SearchItemType, SearchQuery
-
-# In-flight entity reads while projecting `find --fields`. The knowledge API has
-# no bulk entity read, so a full page costs page_size GETs; this bounds how many
-# are open at once — enough to hide per-request latency on a cloud-routed
-# project, small enough not to flood the API with one tool call's fan-out.
-# Deliberately not max_tokens-sliced: a slice param 404s on an entity with no
-# markdown content (knowledge_router._apply_note_slice), which would turn a
-# projected row into a failed find.
-FIELD_PROJECTION_CONCURRENCY = 8
+from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResult
 
 FRONTMATTER_JSON_ADAPTER = TypeAdapter(dict[str, Any])
+
+# A projected row is the note's identity plus the requested fields. A whole search
+# hit also carries up to 4000 characters of the note body, which is the cost
+# `fields` exists to remove, so the row is a whitelist: a hit that grows another
+# column cannot leak into it.
+PROJECTED_ROW_KEYS = ("title", "permalink", "file_path", "external_id", "updated_at")
 
 
 def parse_field_paths(fields: list[str]) -> list[MetadataPath]:
@@ -52,22 +48,49 @@ def parse_field_paths(fields: list[str]) -> list[MetadataPath]:
     return paths
 
 
-def project_metadata_fields(
-    entity_metadata: dict[str, Any] | None, fields: list[MetadataPath]
-) -> dict[str, Any]:
-    """Project requested frontmatter fields out of an entity's metadata.
+# --- The search ---
 
-    Field names are echoed verbatim as keys (dot-paths walk nested dicts). A
-    missing key or non-dict intermediate yields None — never a dropped row.
 
-    Takes parsed paths rather than strings because null here is a real answer
-    ("this note has no such field"), so a malformed path that walked to null
-    would be indistinguishable from data. Requiring MetadataPath moves that
-    refusal to the one parse that can tell the two apart.
+@dataclass(frozen=True, slots=True)
+class MetadataSearch:
+    """Frontmatter filters split into what the search API takes for each.
+
+    The note type is matched on the normalized `note_type` column, the same value
+    search hits display, so a type copied from a hit finds its notes again (#1428).
+    The other filters run as frontmatter predicates.
+    """
+
+    note_types: list[str] | None
+    filters: dict[str, Any]
+
+
+def split_type_filter(filters: dict[str, Any]) -> MetadataSearch:
+    """Move an equality or `$in` filter on `type` onto the note_type column."""
+    match filters.get("type"):
+        case str() as note_type:
+            note_types = [note_type]
+        case {"$in": [*values]} if values and all(isinstance(value, str) for value in values):
+            note_types = values
+        case _:
+            # Other operators ($exists, $gt, ...) stay frontmatter predicates.
+            return MetadataSearch(note_types=None, filters=filters)
+    rest = {key: value for key, value in filters.items() if key != "type"}
+    return MetadataSearch(note_types=note_types, filters=rest)
+
+
+# --- Field projection ---
+
+
+def project_metadata_fields(metadata: dict[str, Any], fields: list[MetadataPath]) -> dict[str, Any]:
+    """Pick the requested fields out of a note's metadata, keyed by the field name.
+
+    Dot-paths walk nested mappings. A missing key or a non-mapping on the way is
+    None, never a dropped row: null is a real answer here, which is why the
+    paths are parsed before any of this runs.
     """
     projected: dict[str, Any] = {}
     for field in fields:
-        value: Any = entity_metadata
+        value: Any = metadata
         for part in field.parts:
             if not isinstance(value, dict):
                 value = None
@@ -77,71 +100,37 @@ def project_metadata_fields(
     return projected
 
 
-def projection_metadata(
-    content: str | None, normalized_metadata: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    """Return frontmatter values with their YAML scalar and collection types intact.
+def projection_metadata(content: str | None, identity: dict[str, Any]) -> dict[str, Any]:
+    """A note's frontmatter with YAML types intact, over its indexed identity.
 
-    ``entity_metadata`` is the searchable projection and intentionally stores
-    scalar values as strings for compatibility. Field projection is a read of
-    the canonical note, so parse its frontmatter instead. Pydantic's JSON-mode
-    dump keeps numbers, booleans, lists, and mappings typed while spelling YAML
-    dates as ISO strings, which are the only representation JSON can carry.
-
-    Start from indexed metadata so parser-supplied defaults and malformed or
-    frontmatter-free notes retain their normal representation. Valid authored
-    fields then replace those normalized values with their YAML-native types.
+    `identity` is the title and type the index holds; they win over the
+    frontmatter's own, because the index is what search displays and filters on.
+    A note without frontmatter (or with malformed frontmatter, or a non-Markdown
+    file with no accepted content) projects its identity alone. The JSON-mode
+    dump keeps numbers, booleans, lists and mappings typed and spells YAML dates
+    as ISO strings, the only form JSON can carry.
     """
     if content is None or not has_frontmatter(content):
-        return normalized_metadata
+        return identity
     try:
-        authored_metadata = parse_frontmatter(content)
+        authored = parse_frontmatter(content)
     except ParseError:
-        return normalized_metadata
-
-    projection_metadata = dict(normalized_metadata or {})
-    projection_metadata.update(authored_metadata)
-    for required_string_field in ("title", "type"):
-        if normalized_metadata and required_string_field in normalized_metadata:
-            projection_metadata[required_string_field] = normalized_metadata[required_string_field]
-    return FRONTMATTER_JSON_ADAPTER.dump_python(projection_metadata, mode="json")
+        return identity
+    return FRONTMATTER_JSON_ADAPTER.dump_python({**authored, **identity}, mode="json")
 
 
-# --- What a projected row carries ---
-# `fields` is the SELECT to the predicates' WHERE, and a SELECT answers with the
-# columns asked for. A whole SearchResult carries the note body too — up to
-# SearchIndexRow.CONTENT_DISPLAY_LIMIT (4000) characters of it — so the 200-row
-# inventory call the literary-analysis skill documents answered a request for two
-# frontmatter values with most of a megabyte of prose, which is the exact cost
-# `fields` exists to remove.
-#
-# A whitelist rather than a content blocklist: the row is the note's identity —
-# how to name it (title), read it (permalink, file_path) and deep-link it
-# (external_id, #1423) — plus when it last changed and the projection itself. A
-# SearchResult that later grows another bulky column therefore cannot leak into a
-# projected response. What is left out is a body (content, matched_chunk), a
-# ranking no text query produced (score, -0.0 on every metadata hit), a second
-# spelling of an identity already here (entity, entity_id), or index-row metadata
-# a caller can name as a field instead ("type").
-#
-# Only projection mode narrows. Without `fields`, `meta` still answers with the
-# full search response grep's renderers read, because there the hit *is* the
-# answer.
-PROJECTED_ROW_KEYS = ("title", "permalink", "file_path", "external_id", "updated_at")
+def _hit_external_id(hit: SearchResult) -> str:
+    if hit.external_id is None:
+        raise ToolError("Search hits carry no external_id; this server is too old for `fields`.")
+    return hit.external_id
 
 
-def projected_row(
-    row: dict[str, Any], entity_metadata: dict[str, Any] | None, fields: list[MetadataPath]
-) -> dict[str, Any]:
-    """One projected hit: the note's identity, plus the fields the caller asked for.
-
-    Takes the already-dumped row so the identity values keep the response's own
-    JSON serialization (`updated_at` as an ISO string), and `fields` is injected
-    post-dump so a null field value survives the response's exclude_none.
-    """
-    projected = {key: row[key] for key in PROJECTED_ROW_KEYS if key in row}
-    projected["fields"] = project_metadata_fields(entity_metadata, fields)
-    return projected
+def _hit_identity(hit: SearchResult) -> dict[str, Any]:
+    identity: dict[str, Any] = {"title": hit.title}
+    note_type = (hit.metadata or {}).get("note_type")
+    if note_type is not None:
+        identity["type"] = note_type
+    return identity
 
 
 async def find_by_metadata(
@@ -152,103 +141,42 @@ async def find_by_metadata(
     page: int,
     page_size: int,
 ) -> dict[str, Any]:
-    """The metadata arm of find: one search call, plus per-hit field projection.
+    """One search for notes matching the filters, under the target's path.
 
-    The listing arm's counterpart to ``find_listing``; `find` has already bounded
-    the pagination and refused `name` and `depth` against `meta`.
-
-    The path scope is ``target.route.path`` — the caller's input verbatim when no
-    project prefix was recognized, so one value covers both routed and raw
-    spellings. ``SearchQuery.file_path_prefix`` is the boundary parser for it: it
-    reads "./specs" the way the directory listing does, and collapses every root
-    spelling — including the "" a bare '<project>' routes to, a mount point
-    rather than a subtree — onto "no scope". It composes server-side as a
-    file-path prefix — the indexed `file_path`, which is where the note actually
-    lives, not its permalink, which stops mirroring that path once a note pins
-    one in frontmatter or is moved with update_permalinks_on_move disabled (the
-    default). It ANDs with the metadata filters in the same WHERE, so the total
-    the server reports is the real match count for the scope that ran, and every
-    page of it is reachable.
+    The path scope is `target.route.path`; `SearchQuery.file_path_prefix`
+    normalizes it and maps every root spelling to "no scope". It is a prefix of
+    the indexed file path, where the note lives, not of its permalink, and it ANDs
+    with the filters server-side, so the reported total is the real count and
+    every page of it is reachable.
     """
-    client, active_project, route = target.client, target.project, target.route
-
-    # Type equality/membership must use the same normalization as the type
-    # displayed in search hits. Raw frontmatter comparisons made those
-    # displayed values fail when fed back into find (#1428).
-    note_types: list[str] | None = None
-    type_filter = metadata_filters.get("type")
-    if isinstance(type_filter, str):
-        note_types = [type_filter]
-    elif isinstance(type_filter, dict) and "$in" in type_filter:
-        values = type_filter["$in"]
-        if isinstance(values, list) and values and all(isinstance(v, str) for v in values):
-            note_types = values
-    if note_types is not None:
-        metadata_filters = {key: value for key, value in metadata_filters.items() if key != "type"}
-
+    search = split_type_filter(metadata_filters)
     query = SearchQuery(
-        # Normalized by the field validator, which maps every root spelling
-        # onto None: the predicates are then the whole WHERE.
-        file_path_prefix=route.path,
-        metadata_filters=metadata_filters,
-        note_types=note_types,
+        file_path_prefix=target.route.path,
+        metadata_filters=search.filters,
+        note_types=search.note_types,
         entity_types=[SearchItemType.ENTITY],
     )
-    search_client = SearchClient(client, active_project.external_id)
-    response = await search_client.search(query.model_dump(), page=page, page_size=page_size)
-    # Re-qualified before anything reads the rows, so the projection below
-    # carries the same addresses the unprojected response does — the two arms
-    # of one response shape cannot answer with different spellings.
-    payload = qualify_search_paths(response.model_dump(mode="json", exclude_none=True), route)
+    response = await SearchClient(target.client, target.project.external_id).search(
+        query.model_dump(), page=page, page_size=page_size
+    )
+    # Qualified before the rows are read, so projected and unprojected rows carry
+    # the same addresses.
+    payload = target.paths.search(response.model_dump(mode="json", exclude_none=True))
     if not fields:
         return payload
 
-    # Field projection hydrates from the entity's canonical Markdown,
-    # because its searchable entity_metadata intentionally normalizes
-    # scalar values to strings. The search hit's own `metadata` is index-row
-    # metadata, not the canonical projection source. One GET per hit is unavoidable
-    # (the knowledge API has no bulk entity read), so the cost that matters
-    # is whether they serialize: page_size is capped at
-    # MAX_DIRECTORY_PAGE_SIZE, and under per-project cloud routing that
-    # would be up to 200 round trips end to end inside one find call.
-    # Bounded concurrency turns the wall time into ceil(hits / limit)
-    # round trips while keeping the server load predictable.
-    knowledge_client = KnowledgeClient(client, active_project.external_id)
-    hit_ids: list[str] = []
-    for result in response.results:
-        if result.external_id is None:
-            raise ToolError(
-                "find: search hit carries no external_id — server too old for field projection"
-            )
-        hit_ids.append(result.external_id)
-
-    limiter = asyncio.Semaphore(FIELD_PROJECTION_CONCURRENCY)
-
-    async def entity_metadata(entity_external_id: str) -> dict[str, Any] | None:
-        async with limiter:
-            entity = await knowledge_client.get_entity(entity_external_id)
-        return projection_metadata(entity.content, entity.entity_metadata)
-
-    # Trigger: any one projection read fails — a hit deleted between the
-    #          search and its hydration, or a cloud-routed GET erroring.
-    # Why: gather raises the first failure but leaves its siblings running,
-    #      and the caller then unwinds out of its project client, which
-    #      closes the client underneath them. Every read still queued behind
-    #      the semaphore would fire against a closed client and raise into a
-    #      task nobody awaits — background work outliving the resource that
-    #      owns it, and a log full of secondary errors hiding the real one.
-    # Outcome: the siblings are cancelled and drained inside the client's
-    #          lifetime; the first failure is still what reaches the caller.
-    #          On success the cancels are no-ops on already-finished tasks.
-    reads = [asyncio.create_task(entity_metadata(hit_id)) for hit_id in hit_ids]
-    try:
-        hydrated = await asyncio.gather(*reads)
-    finally:
-        for read in reads:
-            read.cancel()
-        await asyncio.gather(*reads, return_exceptions=True)
+    hit_ids = [_hit_external_id(hit) for hit in response.results]
+    contents = await KnowledgeClient(
+        target.client, target.project.external_id
+    ).accepted_note_contents(hit_ids)
+    # `fields` is set after the dump, so a null value survives exclude_none.
     payload["results"] = [
-        projected_row(row, metadata, fields)
-        for row, metadata in zip(payload["results"], hydrated, strict=True)
+        {
+            **{key: row[key] for key in PROJECTED_ROW_KEYS if key in row},
+            "fields": project_metadata_fields(
+                projection_metadata(contents.get(hit_id), _hit_identity(hit)), fields
+            ),
+        }
+        for row, hit, hit_id in zip(payload["results"], response.results, hit_ids, strict=True)
     ]
     return payload

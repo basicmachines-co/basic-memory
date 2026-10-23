@@ -1,9 +1,8 @@
-"""bm_read: read a note or file (SPEC-35.2, #1830).
+"""bm_read: read a note or file.
 
-Replaces read_note, cat, view_note and read_content. A Markdown note comes back as
-its text, whole or sliced by section, line range or token budget. Any other file
-comes back the way an MCP client can show it: text as text, images as image
-content, other binaries as an embedded document.
+A Markdown note comes back as its text, whole or sliced by section, line range or
+token budget. Any other file comes back the way an MCP client can show it: text as
+text, images as image content, other binaries as an embedded document.
 """
 
 from pathlib import PurePosixPath
@@ -26,7 +25,7 @@ from basic_memory.mcp.file_content import (
     classify_file_response,
 )
 from basic_memory.mcp.note_reads import format_note_metadata, read_note_json_by_external_id
-from basic_memory.mcp.note_targets import open_project_target, qualify_note_paths, resolve_note
+from basic_memory.mcp.note_targets import open_project_target, resolve_note
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
@@ -131,7 +130,7 @@ async def bm_read(
                 "updated_at": entity.updated_at.isoformat(),
             }
             if output_format == "json":
-                return qualify_note_paths(metadata, target.route)
+                return target.paths.note(metadata)
             return format_note_metadata(metadata)
 
         resource_client = ResourceClient(target.client, target.project.external_id)
@@ -154,7 +153,7 @@ async def bm_read(
                 classify_file_response(response), note.file_path, note.title, output_format
             )
             if isinstance(presented, dict):
-                return qualify_note_paths(presented, target.route)
+                return target.paths.note(presented)
             return presented
 
         # --- Markdown notes ---
@@ -172,11 +171,7 @@ async def bm_read(
         )
 
     if not sliced:
-        return (
-            qualify_note_paths(payload, target.route)
-            if output_format == "json"
-            else payload["content"]
-        )
+        return target.paths.note(payload) if output_format == "json" else payload["content"]
 
     first, last, total = payload["start_line"], payload["end_line"], payload["total_lines"]
     if output_format == "json":
@@ -184,7 +179,7 @@ async def bm_read(
         payload["has_more"] = last < total
         payload["next_start_line"] = last + 1 if last < total else None
         payload["next_end_line"] = min(total, last + width) if last < total else None
-        return qualify_note_paths(payload, target.route)
+        return target.paths.note(payload)
     # Trigger: max_tokens cut the content.
     # Why: the cut content ends with an ellipsis marker, so its lines no longer match
     #      the coordinates one for one and cannot be numbered.

@@ -3,6 +3,8 @@
 Encapsulates all /v2/projects/{project_id}/knowledge/* endpoints.
 """
 
+from collections.abc import Sequence
+from itertools import batched
 from typing import Any
 
 from httpx import AsyncClient, HTTPStatusError
@@ -26,7 +28,10 @@ from basic_memory.schemas.v2.entity import (
     EntityResponseV2,
     LinkResolveResponse,
 )
-from basic_memory.schemas.v2.accepted_content import AcceptedNoteContentBatchResponse
+from basic_memory.schemas.v2.accepted_content import (
+    MAX_ACCEPTED_CONTENT_BATCH,
+    AcceptedNoteContentBatchResponse,
+)
 from basic_memory.schemas.v2.note_placement import (
     AmbiguousNotePlacementResponse,
     NoteCreatePlacementResponse,
@@ -242,6 +247,18 @@ class KnowledgeClient:
                 path_template="/v2/projects/{project_id}/knowledge/entities/batch",
             )
         return AcceptedNoteContentBatchResponse.model_validate(response.json())
+
+    async def accepted_note_contents(self, entity_ids: Sequence[str]) -> dict[str, str]:
+        """Accepted Markdown by external id, for any number of notes.
+
+        Reads in batches of MAX_ACCEPTED_CONTENT_BATCH. Ids with no accepted
+        content (files that are not notes) are absent from the result.
+        """
+        contents: dict[str, str] = {}
+        for chunk in batched(entity_ids, MAX_ACCEPTED_CONTENT_BATCH):
+            response = await self.get_accepted_note_contents(list(chunk))
+            contents.update({item.external_id: item.content for item in response.items})
+        return contents
 
     async def patch_entity(
         self,

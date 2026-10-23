@@ -1,15 +1,14 @@
-"""bm_search: ranked search over notes, observations and relations (SPEC-35.2, #1830).
+"""bm_search: ranked search over notes, observations and relations.
 
-Replaces search_notes and grep. It runs the same query pipeline as search_notes
-(`_build_search_query`, the same tag: shorthand, the same default search mode) and
-adds three things:
+The query pipeline is search_notes's (`_build_search_query`, the tag: shorthand,
+the default search mode), plus three scopes and views:
 
-- `lines`: grep's matching-line windows, built by scanning each ranked hit's body
-  for the query's terms, in any search mode;
-- `path`: limit the search to a folder subtree;
-- `identifier`: search one note, which is grep on a single file.
+- `lines`: matching-line windows, built by scanning each ranked hit's body for the
+  query's terms, in any search mode;
+- `path`: a folder subtree;
+- `identifier`: one note, which is grep on a single file.
 
-Unlike search_notes, every failure is a tool error (#1813).
+Every failure is a tool error.
 """
 
 import re
@@ -21,13 +20,11 @@ from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.markdown.line_scanning import LiteralLineScan, scan_lines
-from basic_memory.mcp.clients import KnowledgeClient, ResourceClient, SearchClient
+from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 from basic_memory.mcp.index_readiness import project_index_required
-from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.note_targets import (
     ProjectTarget,
     open_project_target,
-    qualify_search_paths,
     resolve_note,
 )
 from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
@@ -54,7 +51,8 @@ from basic_memory.mcp.tools.search import (
 )
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.schemas.search import SearchResponse
+from basic_memory.schemas.search import SearchResponse, SearchResult
+from basic_memory.schemas.v2.entity import EntityResolveResponse
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 from basic_memory.utils import parse_str_list
 
@@ -290,8 +288,8 @@ async def bm_search(
             query, search_mode = memory_url_path(query), "permalink"
         # Trigger: a permalink search ('core/*' or an exact permalink).
         # Why: permalinks are stored in index form, with the project prefix when
-        #      permalinks_include_project is on (and the workspace form in Cloud), so
-        #      a project-relative pattern matched nothing (#1812).
+        #      permalinks_include_project is on (and the workspace form in Cloud), and
+        #      a project-relative pattern matches none of them.
         # Outcome: the permalink is put into index form before it is matched.
         if search_mode == "permalink" and query is not None:
             query = canonical_memory_path_for_active_route(
@@ -346,7 +344,7 @@ async def bm_search(
                 response = _compact_search_response(response)
             payload = response.model_dump(mode="json", exclude_none=True)
 
-    payload = qualify_search_paths(payload, target.route)
+    payload = target.paths.search(payload)
     if output_format == "json":
         return payload
     next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
@@ -383,36 +381,39 @@ async def _with_matching_lines(
     context_lines: int,
     max_matches: int,
 ) -> dict[str, Any]:
-    """Replace each hit's excerpt with the matching lines of its accepted content."""
-    knowledge_client = KnowledgeClient(target.client, target.project.external_id)
-    resource_client = ResourceClient(target.client, target.project.external_id)
+    """Replace each hit's excerpt with the matching lines of its accepted Markdown.
+
+    Line numbers count the whole document, frontmatter included, as bm_read's do.
+    Hits with no accepted Markdown (files that are not notes) have no lines to show.
+    """
+    note_hits = [hit for hit in response.results if hit.external_id is not None]
+    contents = await KnowledgeClient(
+        target.client, target.project.external_id
+    ).accepted_note_contents([hit.external_id for hit in note_hits if hit.external_id])
     payload = response.model_dump(mode="json", exclude_none=True)
-    rows: list[dict[str, Any]] = []
-    for hit in response.results:
-        # Observations and relations are lines of their note; a hit without a note
-        # id has no body to scan.
-        if hit.external_id is None:
-            continue
-        note = await read_note_json_by_external_id(
-            knowledge_client=knowledge_client,
-            resource_client=resource_client,
-            entity_external_id=hit.external_id,
-            include_frontmatter=True,
+    payload["results"] = [
+        _line_row(
+            hit,
+            scan_lines(
+                contents[hit.external_id],
+                terms,
+                context_lines=context_lines,
+                max_matches=max_matches,
+            ),
         )
-        scan = scan_lines(
-            note["content"], terms, context_lines=context_lines, max_matches=max_matches
-        )
-        rows.append(_line_row(note, hit.external_id, scan))
-    payload["results"] = rows
+        for hit in note_hits
+        if hit.external_id in contents
+    ]
     return payload
 
 
-def _line_row(note: Any, external_id: str, scan: LiteralLineScan) -> dict[str, Any]:
+def _line_row(note: SearchResult | EntityResolveResponse, scan: LiteralLineScan) -> dict[str, Any]:
+    """A note's identity plus its matching-line windows."""
     return {
-        "title": note["title"],
-        "permalink": note["permalink"],
-        "file_path": note["file_path"],
-        "external_id": external_id,
+        "title": note.title,
+        "permalink": note.permalink,
+        "file_path": note.file_path,
+        "external_id": note.external_id,
         **asdict(scan),
     }
 
@@ -431,19 +432,24 @@ async def _search_one_note(
     async with open_project_target(
         identifier, project, context, output_format=output_format
     ) as target:
-        note_ref = await resolve_note(target, identifier, output_format=output_format)
-        note = await read_note_json_by_external_id(
-            knowledge_client=KnowledgeClient(target.client, target.project.external_id),
-            resource_client=ResourceClient(target.client, target.project.external_id),
-            entity_external_id=note_ref.external_id,
-            include_frontmatter=True,
+        note = await resolve_note(target, identifier, output_format=output_format)
+        contents = await KnowledgeClient(
+            target.client, target.project.external_id
+        ).accepted_note_contents([note.external_id])
+    if note.external_id not in contents:
+        raise refusal(
+            "UNSUPPORTED",
+            f"'{note.file_path}' is not a Markdown note, so it has no lines to search.",
+            try_instead=f"bm_read(identifier='{note.file_path}')",
+            output_format=output_format,
         )
     scan = scan_lines(
-        note["content"], _query_terms(query), context_lines=context_lines, max_matches=max_matches
+        contents[note.external_id],
+        _query_terms(query),
+        context_lines=context_lines,
+        max_matches=max_matches,
     )
-    payload = qualify_search_paths(
-        {"results": [_line_row(note, note_ref.external_id, scan)]}, target.route
-    )
+    payload = target.paths.search({"results": [_line_row(note, scan)]})
     if output_format == "json":
         return payload["results"][0]
     # One note is one result: there is no next page.

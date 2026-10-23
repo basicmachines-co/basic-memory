@@ -1,8 +1,8 @@
-"""bm_list: list one directory level (SPEC-35.2, #1830).
+"""bm_list: list one directory level.
 
-Replaces list_directory and ls. `bm_list("/")` with no project lists the projects
-this session can address, so listing doubles as project discovery; any other path
-lists one level of a project. Recursive listing is bm_find's job.
+`bm_list("/")` with no project lists the projects this session can address, so
+listing doubles as project discovery; any other path lists one level of a project.
+Recursive listing is bm_find's job.
 """
 
 import os
@@ -13,7 +13,7 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.clients import DirectoryClient
 from basic_memory.mcp.directory_listing import format_listing_text, project_mount_listing
-from basic_memory.mcp.note_targets import open_project_target, qualify_listing_paths
+from basic_memory.mcp.note_targets import open_project_target
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
     Pagination,
@@ -99,7 +99,7 @@ async def bm_list(
 
     # Paths come back in the spelling that was used to reach them, so a listed
     # entry can be passed straight to bm_read or bm_list.
-    qualified = qualify_listing_paths(listing.model_dump(mode="json"), target.route)
+    qualified = target.paths.listing(listing.model_dump(mode="json"))
     if output_format == "json":
         return qualified
 

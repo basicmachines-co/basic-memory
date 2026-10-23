@@ -5,7 +5,6 @@ use, so these tests run the real ASGI stack via the shared `client` fixture and
 assert on the JSON shapes the canonical `output_format="json"` paths produce.
 """
 
-import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -17,7 +16,9 @@ import pytest_asyncio
 import yaml
 from fastmcp.exceptions import ToolError
 
+import basic_memory.mcp.clients.knowledge as knowledge_client_module
 import basic_memory.mcp.metadata_find as metadata_find
+from basic_memory.mcp.clients import KnowledgeClient
 import basic_memory.mcp.tools.posix_tools as posix_tools
 from basic_memory import db
 from basic_memory.mcp.project_context import (
@@ -1345,20 +1346,17 @@ async def test_find_meta_malformed_field_path_refuses_without_reading_anything(
     `.owner` walked an empty first segment and reported null for every hit even
     though the notes carry `owner`, byte-identical to the null a genuinely
     absent field produces — a typo the caller could not see, paid for with the
-    search plus one entity GET per hit. Nothing is read now.
+    search plus the projection reads. Nothing is read now.
     """
-    # Import here to mirror the tool's own deferred client import.
-    from basic_memory.mcp.clients import KnowledgeClient
-
     reads = 0
-    original = KnowledgeClient.get_entity
+    original = KnowledgeClient.get_accepted_note_contents
 
-    async def counting_get(self, external_id, *args, **kwargs):
+    async def counting_batch(self, entity_ids):
         nonlocal reads
         reads += 1
-        return await original(self, external_id, *args, **kwargs)
+        return await original(self, entity_ids)
 
-    monkeypatch.setattr(KnowledgeClient, "get_entity", counting_get)
+    monkeypatch.setattr(KnowledgeClient, "get_accepted_note_contents", counting_batch)
 
     with pytest.raises(ValueError, match=re.escape(f"malformed field path '{field}'")):
         await find(meta=["status=active"], fields=[field], project=test_project.name)
@@ -1489,82 +1487,28 @@ async def test_find_meta_empty_list_is_not_an_unfiltered_search(client, test_pro
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("limit", "expected_peak"), [(8, 2), (1, 1)])
-async def test_find_meta_fields_hydrates_hits_concurrently(
-    client, test_project, meta_notes, monkeypatch, limit, expected_peak
+async def test_find_meta_fields_reads_accepted_content_in_batches(
+    client, test_project, meta_notes, monkeypatch
 ):
-    """Projection costs one entity GET per hit (no bulk read exists), so the
-    reads must overlap up to the bound instead of serializing — a full page
-    serialized is up to MAX_DIRECTORY_PAGE_SIZE round trips inside one call."""
-    # Import here to mirror the tool's own deferred client import.
-    from basic_memory.mcp.clients import KnowledgeClient
+    """Projection reads accepted Markdown in batches, not one GET per hit."""
+    monkeypatch.setattr(knowledge_client_module, "MAX_ACCEPTED_CONTENT_BATCH", 1)
+    original = KnowledgeClient.get_accepted_note_contents
+    batches: list[list[str]] = []
 
-    monkeypatch.setattr(metadata_find, "FIELD_PROJECTION_CONCURRENCY", limit)
-    original_get_entity = KnowledgeClient.get_entity
-    in_flight = 0
-    peak = 0
+    async def counting_batch(self, entity_ids):
+        batches.append(entity_ids)
+        return await original(self, entity_ids)
 
-    async def counting_get_entity(self, entity_id, **kwargs):
-        nonlocal in_flight, peak
-        in_flight += 1
-        peak = max(peak, in_flight)
-        try:
-            # Yield once so an overlap, if any, is observable deterministically.
-            await asyncio.sleep(0)
-            return await original_get_entity(self, entity_id, **kwargs)
-        finally:
-            in_flight -= 1
-
-    monkeypatch.setattr(KnowledgeClient, "get_entity", counting_get_entity)
+    monkeypatch.setattr(KnowledgeClient, "get_accepted_note_contents", counting_batch)
 
     result = await find(meta=["status=active"], fields=["title"], project=test_project.name)
 
-    assert peak == expected_peak
-    # Order still pairs each hit with its own entity, concurrency notwithstanding.
+    assert [len(batch) for batch in batches] == [1, 1]
+    # Each row is paired with its own note's content.
     assert {row["title"]: row["fields"]["title"] for row in result["results"]} == {
         "Alpha Spec": "Alpha Spec",
         "Gamma Note": "Gamma Note",
     }
-
-
-@pytest.mark.asyncio
-async def test_find_meta_fields_cancels_sibling_reads_when_one_fails(
-    client, test_project, meta_notes, monkeypatch
-):
-    """REGRESSION: no projection read outlives the client it was issued on.
-
-    gather raises the first failure and leaves the rest running, so find used to
-    unwind out of get_project_client — closing the shared client — while sibling
-    GETs were still on the wire or still queued behind the semaphore. Those then
-    raised against a closed client into tasks nobody awaits: background work
-    past the resource's lifetime, and secondary errors burying the real one.
-    """
-    # Import here to mirror the tool's own deferred client import.
-    from basic_memory.mcp.clients import KnowledgeClient
-
-    reads: list[asyncio.Task[dict[str, object] | None]] = []
-
-    async def racing_get_entity(self, entity_id, **kwargs):
-        current = asyncio.current_task()
-        assert current is not None
-        reads.append(current)
-        if len(reads) == 1:
-            # Yield first so the sibling is genuinely in flight when this fails.
-            await asyncio.sleep(0)
-            raise ToolError("hit deleted between search and hydration")
-        # Stands in for a request still awaiting its response.
-        await asyncio.sleep(60)
-        raise AssertionError("sibling read outlived the client that issued it")
-
-    monkeypatch.setattr(KnowledgeClient, "get_entity", racing_get_entity)
-
-    with pytest.raises(ToolError, match="hit deleted between search and hydration"):
-        await find(meta=["status=active"], fields=["title"], project=test_project.name)
-
-    assert len(reads) == 2
-    sibling = reads[1]
-    assert sibling.done()
-    assert sibling.cancelled()
 
 
 @pytest.mark.asyncio
@@ -1608,7 +1552,7 @@ async def test_find_meta_fields_requires_hit_external_ids(client, test_project, 
 
     monkeypatch.setattr(SearchClient, "search", legacy_search)
 
-    with pytest.raises(ToolError, match="server too old for field projection"):
+    with pytest.raises(ToolError, match="too old for `fields`"):
         await find(meta=["status=active"], fields=["title"], project=test_project.name)
 
 

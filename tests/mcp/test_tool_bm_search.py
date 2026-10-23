@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools import bm_search, write_note
 from basic_memory.mcp.tools.ranked_search import _query_terms
 
@@ -177,6 +178,19 @@ async def test_identifier_searches_one_note(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_identifier_that_names_a_non_note_file(
+    client, test_project, test_files, project_repository, session_maker
+):
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository, session_maker=session_maker
+    )
+    await runner.index_project(test_project.id, force_full=True)
+
+    with pytest.raises(ToolError, match="^UNSUPPORTED: .*not a Markdown note"):
+        await bm_search(query="x", identifier=test_files["image"].name, project=test_project.name)
+
+
+@pytest.mark.asyncio
 async def test_identifier_that_names_no_note(client, test_project):
     with pytest.raises(ToolError, match="^NOT_FOUND:"):
         await bm_search(query="deploy", identifier="tasks/Nope.md", project=test_project.name)
@@ -221,3 +235,27 @@ def test_query_terms(query, terms):
 async def test_invalid_arguments(client, test_project, arguments, message):
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: .*{message}"):
         await bm_search(project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_text_results_continue_with_a_bm_search_call(client, test_project):
+    await _seed(test_project.name)
+
+    text = await search_text(query="deploy", mode="text", page_size=1, project=test_project.name)
+
+    assert (
+        f"Call bm_search(query='deploy', mode='text', project='{test_project.name}', "
+        "page=2, page_size=1) to continue."
+    ) in text
+
+
+@pytest.mark.asyncio
+async def test_identifier_text_shows_the_note_lines(client, test_project):
+    await _seed(test_project.name)
+
+    text = await search_text(
+        query="rollback", identifier="tasks/Deploy Plan.md", project=test_project.name
+    )
+
+    assert ": Rollback is manual." in text
+    assert "to continue" not in text
