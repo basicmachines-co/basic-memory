@@ -477,8 +477,13 @@ def _format_constrained_text(constrained_project: str) -> str:
 async def _resolve_workspace_routing(
     workspace: str | None,
     context: Context | None,
+    output_format: Literal["text", "json"],
 ) -> str | None:
-    """Resolve an optional workspace selector to the routing tenant id."""
+    """Resolve an optional workspace selector to the routing tenant id.
+
+    An unknown or ambiguous selector is an INVALID_ARGUMENTS refusal in the
+    caller's output format, naming the workspaces it could have meant.
+    """
     if workspace is None:
         return None
 
@@ -500,7 +505,10 @@ async def _resolve_workspace_routing(
     #   uses X-Workspace-ID with the tenant id as its routing authority.
     # Outcome: resolve once before the project-management request and pass only
     #   the tenant id downstream.
-    resolved_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    try:
+        resolved_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    except ValueError as error:
+        raise refusal("INVALID_ARGUMENTS", str(error), output_format=output_format) from error
     return resolved_workspace.tenant_id
 
 
@@ -597,7 +605,7 @@ async def create_memory_project(
             output_format=output_format,
         )
 
-    workspace_id = await _resolve_workspace_routing(workspace, context)
+    workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
 
     # workspace targets a non-default cloud workspace at create time.
     # Trigger: caller passed workspace (e.g. a slug discovered via list_workspaces).
@@ -831,7 +839,7 @@ async def delete_project(
             output_format=output_format,
         )
 
-    workspace_id = await _resolve_workspace_routing(workspace, context)
+    workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
     async with get_client(workspace=workspace_id) as client:
         if context:  # pragma: no cover
             await context.info(f"Deleting project: {project_name}")

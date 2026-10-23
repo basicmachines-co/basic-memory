@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import json
+
 import pytest
 from fastmcp.exceptions import ToolError
 from sqlalchemy import select
@@ -1449,3 +1451,25 @@ async def test_list_memory_projects_aggregates_without_config_workspace(app, tes
 
     mock_index.assert_awaited_once()
     assert "- cloud-proj (cloud) [00000000-0000-0000-0000-000000000001]" in result
+
+
+@pytest.mark.asyncio
+async def test_unknown_workspace_is_a_refusal_in_the_requested_format():
+    """A workspace selector that names no workspace refuses; JSON keeps the shape."""
+    with (
+        patch(
+            "basic_memory.mcp.tools.project_management.is_factory_mode",
+            return_value=True,
+        ),
+        patch(
+            "basic_memory.mcp.tools.project_management.resolve_workspace_parameter",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Workspace 'nope' not found. Available: team-paul"),
+        ),
+    ):
+        with pytest.raises(ToolError) as refused:
+            await delete_project("Any Project", workspace="nope", output_format="json")
+
+    payload = json.loads(str(refused.value))
+    assert payload["error"] == "INVALID_ARGUMENTS"
+    assert "Workspace 'nope' not found" in payload["message"]
