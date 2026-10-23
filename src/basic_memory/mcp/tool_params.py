@@ -37,6 +37,8 @@ NoteIdentifier = Annotated[
 DirectoryPath = Annotated[
     str,
     Field(
+        # list_directory's `dir_name`, and the word models most often reach for.
+        validation_alias=AliasChoices("path", "dir_name", "folder"),
         description=(
             "A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the "
             "project root; '<project>/path' addresses another project."

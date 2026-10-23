@@ -14,7 +14,7 @@ deletes must never act on a near match.
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -35,7 +35,7 @@ from basic_memory.mcp.tool_params import OutputFormat, parse_project, routing_ar
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.v2.entity import EntityResolveResponse
-from basic_memory.utils import validate_project_path
+from basic_memory.utils import generate_permalink, validate_project_path
 
 
 type TargetKind = Literal["path", "identifier"]
@@ -176,3 +176,108 @@ async def resolve_note(
                 ) from error
             case _:
                 raise
+
+
+# --- Round-trip coherence ---
+# A path a routed verb returns must be a path the resolver accepts. When a call
+# addresses its project in the path ('ls research/notes'), the project prefix is
+# stripped before the project-scoped API sees it, so that API answers in
+# project-relative paths — '/notes'. Handing those back unchanged breaks the
+# navigation loop the mount model promises: feeding '/notes' into `ls` refuses as
+# unqualified, or worse, opens a *different* project that happens to be mounted
+# as 'notes'.
+#
+# One rule decides *whether* and *with what* (_route_prefix); each response
+# schema says *where*. That split is deliberate. Rewriting by key name anywhere
+# in the payload also rewrote a note's own frontmatter when the author happened
+# to use a `file_path:` key, so a routed `cat` returned frontmatter that
+# disagreed with both its own `content` and the stored file. Transport metadata
+# and note content are different things that can spell a key the same way, and
+# only position tells them apart.
+
+
+def _route_prefix(route: ProjectPathRoute) -> str | None:
+    """The prefix a routed response must re-attach, or None if nothing was stripped.
+
+    None means the caller addressed the project some other way (an explicit
+    param, or a single-project session), so the project-relative paths it gets
+    back are already the ones it can feed back.
+    """
+    if not route.stripped or route.project is None:
+        return None
+    # The permalink form is the spelling `ls "/"` advertises and the resolver
+    # normalizes to, so it round-trips for display names too ('My Research').
+    return generate_permalink(route.project)
+
+
+def _requalified_path(value: str, prefix: str) -> str:
+    """Re-attach a stripped project prefix, preserving the field's slash shape."""
+    if value.startswith("/"):
+        return f"/{prefix}" if value == "/" else f"/{prefix}{value}"
+    return f"{prefix}/{value}" if value else prefix
+
+
+def qualify_note_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a note payload's transport path.
+
+    ``file_path`` is the note's address and is re-qualified. ``frontmatter`` is
+    the note's own YAML — canonical content that must come back byte for byte,
+    even when it carries keys named like transport fields — and ``permalink`` is
+    an identity with its own canonical form; neither is touched.
+    """
+    prefix = _route_prefix(route)
+    if prefix is None:
+        return payload
+    return {**payload, "file_path": _requalified_path(payload["file_path"], prefix)}
+
+
+def _requalified_directory_node(node: dict[str, Any], prefix: str) -> dict[str, Any]:
+    """Re-qualify one DirectoryNode's addressing fields, and its children."""
+    requalified = dict(node)
+    directory_path = node.get("directory_path")
+    if isinstance(directory_path, str):
+        requalified["directory_path"] = _requalified_path(directory_path, prefix)
+    # file_path is Optional on DirectoryNode: directory rows carry no file.
+    file_path = node.get("file_path")
+    if isinstance(file_path, str):
+        requalified["file_path"] = _requalified_path(file_path, prefix)
+    children = node.get("children")
+    if children:
+        requalified["children"] = [_requalified_directory_node(child, prefix) for child in children]
+    return requalified
+
+
+def qualify_listing_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a directory listing's node addressing fields."""
+    prefix = _route_prefix(route)
+    if prefix is None:
+        return payload
+    return {
+        **payload,
+        "nodes": [_requalified_directory_node(node, prefix) for node in payload["nodes"]],
+    }
+
+
+def qualify_search_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a search response's per-hit transport paths.
+
+    The third response shape a routed verb can answer with. `find --meta` returns
+    search hits rather than listing nodes, and the rule is per response shape,
+    not per verb: the metadata arm shipped without it and handed back
+    project-relative paths that `cat` then refused — or, worse, opened in a
+    different project mounted under that name (#1435).
+
+    ``file_path`` is the hit's address, the same field the listing nodes carry;
+    ``permalink`` is an identity with its own canonical form and is left alone,
+    exactly as in ``qualify_note_paths``.
+    """
+    prefix = _route_prefix(route)
+    if prefix is None:
+        return payload
+    return {
+        **payload,
+        "results": [
+            {**row, "file_path": _requalified_path(row["file_path"], prefix)}
+            for row in payload["results"]
+        ],
+    }
