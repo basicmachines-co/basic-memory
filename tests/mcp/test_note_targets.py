@@ -177,3 +177,19 @@ async def test_an_ambiguous_title_is_an_ambiguous_refusal(client, test_project):
             await resolve_note(target, "Twin", output_format="json")
 
     assert json.loads(str(refused.value))["error"] == "AMBIGUOUS"
+
+
+@pytest.mark.asyncio
+async def test_routing_refusals_keep_the_requested_format(client, test_project, second_project):
+    """Routing's own refusals come back in the refusal shape, JSON included."""
+    with pytest.raises(ToolError) as conflict:
+        async with open_project_target(
+            f"{test_project.permalink}/notes/a.md", second_project.name, None, output_format="json"
+        ):
+            pass
+    with pytest.raises(ToolError) as unqualified:
+        async with open_project_target("no-such-folder/a.md", None, None, output_format="json"):
+            pass
+
+    assert json.loads(str(conflict.value))["error"] == "INVALID_ARGUMENTS"
+    assert json.loads(str(unqualified.value))["error"] == "INVALID_ARGUMENTS"

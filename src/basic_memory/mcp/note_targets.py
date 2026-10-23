@@ -23,7 +23,10 @@ from httpx import AsyncClient, HTTPStatusError, Response
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.project_context import (
+    AmbiguousMountError,
     ProjectPathRoute,
+    ProjectPrefixConflictError,
+    UnqualifiedPathRefusedError,
     get_project_client,
     resolve_project_path_route,
 )
@@ -68,9 +71,23 @@ async def open_project_target(
     'Home ~ Plan' is not a path to check.
     """
     project_name, project_id = routing_arguments(parse_project(project))
-    route = await resolve_project_path_route(
-        target, project=project_name, project_id=project_id, context=context
-    )
+    # Routing refuses some targets outright; each refusal keeps the routing's own
+    # message (it names the projects involved) in the caller's output format.
+    try:
+        route = await resolve_project_path_route(
+            target, project=project_name, project_id=project_id, context=context
+        )
+    except ProjectPrefixConflictError as error:
+        raise refusal("INVALID_ARGUMENTS", str(error), output_format=output_format) from error
+    except UnqualifiedPathRefusedError as error:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            str(error),
+            try_instead="'<project>/path', or pass `project`",
+            output_format=output_format,
+        ) from error
+    except AmbiguousMountError as error:
+        raise refusal("AMBIGUOUS", str(error), output_format=output_format) from error
     async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
