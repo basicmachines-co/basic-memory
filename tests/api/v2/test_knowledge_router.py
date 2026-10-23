@@ -1685,6 +1685,27 @@ async def test_move_entity_with_stale_base_checksum_returns_409(
 
 
 @pytest.mark.asyncio
+async def test_guarded_move_of_a_deleted_note_is_a_revision_conflict(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    """A pinned revision that vanished is the structured 409, as for edits."""
+    entity, checksum = await _create_guarded_note(
+        client, session_maker, test_project, v2_project_url, "Gone Move"
+    )
+    deleted = await client.delete(f"{v2_project_url}/knowledge/entities/{entity.external_id}")
+    assert deleted.status_code == 202
+
+    moved = await client.put(
+        f"{v2_project_url}/knowledge/entities/{entity.external_id}/move",
+        json={"destination_path": "moved/Gone Move.md"},
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: checksum},
+    )
+
+    assert moved.status_code == 409
+    assert moved.json()["detail"]["db_checksum"] is None
+
+
+@pytest.mark.asyncio
 async def test_delete_entity_by_id_non_markdown_file_entity(
     client: AsyncClient,
     test_project: Project,

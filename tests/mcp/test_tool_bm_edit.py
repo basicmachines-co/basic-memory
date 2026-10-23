@@ -285,3 +285,18 @@ async def test_non_note_files_are_refused(
 async def test_invalid_arguments(client, test_project, arguments, message):
     with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: .*{message}"):
         await bm_edit(identifier="notes/plan.md", project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_refusal_guidance_keeps_the_project_prefix(client, test_project):
+    """A suggested bm_read must reach the same project the edit addressed."""
+    await _seed(test_project.name)
+    prefix = test_project.permalink
+
+    with pytest.raises(ToolError, match=f"bm_read\\(identifier='{prefix}/notes/plan.md'\\)"):
+        await bm_edit(
+            identifier=f"{prefix}/notes/plan.md",
+            command="append",
+            content="x",
+            expected_checksum="stale",
+        )

@@ -709,6 +709,8 @@ async def run_accepted_note_move(
     """Accept a note move into DB state without materializing its file."""
     try:
         return await _run_accepted_note_move(session, request=request, dependencies=dependencies)
+    except AcceptedNoteMutationRejected as error:
+        reject_guarded_missing_state(error, guarded=request.base_checksum is not None)
     except IntegrityError as error:
         raise AcceptedNoteMutationRejected(accepted_note_integrity_rejection(error)) from error
     except NoteContentVersionConflict as error:

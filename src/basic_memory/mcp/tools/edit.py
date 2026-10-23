@@ -166,7 +166,7 @@ async def bm_edit(
                 note.external_id, edit, base_checksum=expected_checksum
             )
         except ToolError as error:
-            raise _edit_refusal(error, note.file_path, output_format) from error
+            raise _edit_refusal(error, target.paths.path(note.file_path), output_format) from error
 
     change = NoteChange.of(edited, action="edited", paths=target.paths)
     if output_format == "json":

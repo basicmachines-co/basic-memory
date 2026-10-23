@@ -187,7 +187,12 @@ async def _move_note(
             note.external_id, str(destination_path), base_checksum=expected_checksum
         )
     except ToolError as error:
-        raise _move_failure(error, note.file_path, str(destination_path), output_format) from error
+        raise _move_failure(
+            error,
+            target.paths.path(note.file_path),
+            target.paths.path(str(destination_path)),
+            output_format,
+        ) from error
 
     # The API moves into an existing folder's spelling; the result then names the
     # requested path next to the actual one.
@@ -304,7 +309,9 @@ async def _move_directory(
             source, destination
         )
     except ToolError as error:
-        raise _move_failure(error, source, destination, output_format) from error
+        raise _move_failure(
+            error, target.paths.path(source), target.paths.path(destination), output_format
+        ) from error
 
     if moved.total_files == 0:
         raise refusal(

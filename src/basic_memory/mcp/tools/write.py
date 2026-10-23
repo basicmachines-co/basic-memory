@@ -218,7 +218,7 @@ async def bm_write(
                 note, overwrite=effective_overwrite, expected_checksum=expected_checksum
             )
         except ToolError as error:
-            raise _write_failure(error, note.file_path, output_format) from error
+            raise _write_failure(error, target.paths.path(note.file_path), output_format) from error
 
         # --- Outcomes ---
         match outcome:
@@ -227,10 +227,11 @@ async def bm_write(
             case NoteUpdated(entity=written):
                 action = "updated"
             case NoteAlreadyExists(file_path=file_path, permalink=permalink):
-                existing = permalink or file_path
+                shown = target.paths.path(file_path)
+                existing = permalink or shown
                 raise refusal(
                     "ALREADY_EXISTS",
-                    f"A note already exists at '{file_path}'. Nothing was written.",
+                    f"A note already exists at '{shown}'. Nothing was written.",
                     try_instead=(
                         f"bm_edit(identifier='{existing}', command='append', content='...') to "
                         "add to it, or bm_write(..., overwrite=true) to replace it"
@@ -238,9 +239,10 @@ async def bm_write(
                     output_format=output_format,
                 )
             case NoteTargetMoved(file_path=file_path, external_id=external_id):
+                shown = target.paths.path(file_path)
                 raise refusal(
                     "ALREADY_EXISTS",
-                    f"The note this path names has moved to '{file_path}'. Nothing was written.",
+                    f"The note this path names has moved to '{shown}'. Nothing was written.",
                     try_instead=(
                         f"bm_read(identifier='{external_id}') to work on that note, or "
                         "overwrite=false to create a separate note at this path"
@@ -250,19 +252,21 @@ async def bm_write(
             case NoteLocked(message=message):
                 raise refusal("LOCKED", message, output_format=output_format)
             case NoteRevisionConflict(file_path=file_path, db_checksum=None):
+                shown = target.paths.path(file_path)
                 raise refusal(
                     "REVISION_CONFLICT",
-                    f"No note exists at '{file_path}' any more, so nothing was replaced.",
+                    f"No note exists at '{shown}' any more, so nothing was replaced.",
                     try_instead="bm_write without expected_checksum to create it",
                     output_format=output_format,
                 )
             case NoteRevisionConflict(file_path=file_path, db_checksum=current_checksum):
+                shown = target.paths.path(file_path)
                 raise refusal(
                     "REVISION_CONFLICT",
-                    f"'{file_path}' changed since you read it (current checksum "
+                    f"'{shown}' changed since you read it (current checksum "
                     f"{current_checksum}). Nothing was replaced.",
                     try_instead=(
-                        f"bm_read(identifier='{file_path}'), then retry with "
+                        f"bm_read(identifier='{shown}'), then retry with "
                         f"expected_checksum='{current_checksum}'"
                     ),
                     output_format=output_format,

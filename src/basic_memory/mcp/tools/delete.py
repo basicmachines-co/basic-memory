@@ -113,7 +113,7 @@ async def _delete_note(
             note.external_id, base_checksum=expected_checksum
         )
     except ToolError as error:
-        raise _delete_failure(error, note.file_path, output_format) from error
+        raise _delete_failure(error, target.paths.path(note.file_path), output_format) from error
     file_path = target.paths.path(note.file_path)
     # Trigger: the note resolved, then was gone when the delete arrived.
     # Why: another writer removed it first; this call deleted nothing (C11).
@@ -199,7 +199,7 @@ async def _delete_directory(
             directory
         )
     except ToolError as error:
-        raise _delete_failure(error, directory, output_format) from error
+        raise _delete_failure(error, shown, output_format) from error
     if deleted.total_files == 0:
         raise refusal(
             "NOT_FOUND",
