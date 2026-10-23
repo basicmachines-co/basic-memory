@@ -30,9 +30,24 @@ def scan_literal_lines(
     The next omitted match points to a useful follow-up read without copying the
     rest of the note into the response. Inputs are validated by the tool boundary.
     """
+    return scan_lines(content, [pattern], context_lines=context_lines, max_matches=max_matches)
+
+
+def scan_lines(
+    content: str, needles: list[str], *, context_lines: int, max_matches: int
+) -> LiteralLineScan:
+    """Like scan_literal_lines, but a line matches when it contains any of the needles.
+
+    bm_search scans for a query's terms, so "auth flow" finds a line that says
+    "auth" as well as one that says "flow".
+    """
     lines = document_lines(content)
-    needle = pattern.casefold()
-    matches = [number for number, line in enumerate(lines, 1) if needle in line.casefold()]
+    folded_needles = [needle.casefold() for needle in needles]
+    matches = [
+        number
+        for number, line in enumerate(lines, 1)
+        if any(needle in line.casefold() for needle in folded_needles)
+    ]
     ranges: list[tuple[int, int, list[int]]] = []
     for number in matches[:max_matches]:
         first = max(1, number - context_lines)
