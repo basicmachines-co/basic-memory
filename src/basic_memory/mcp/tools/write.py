@@ -37,7 +37,7 @@ from basic_memory.mcp.similar_notes import (
 )
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
-from basic_memory.schemas.base import Entity
+from basic_memory.schemas.base import Entity, NoteType
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.schemas.v2.note_write import (
@@ -118,8 +118,9 @@ async def bm_write(
             description="Folder for a note addressed by title, e.g. 'meetings'; '/' is the root.",
         ),
     ] = None,
+    # NoteType's own validation, so an empty or overlong type is refused as an argument.
     note_type: Annotated[
-        str, Field(description="Frontmatter `type:`. A `type:` in the content wins.")
+        NoteType, Field(description="Frontmatter `type:`. A `type:` in the content wins.")
     ] = "note",
     tags: Annotated[
         list[str] | str | None, Field(description="Tags, as a list or 'a,b,c'.")

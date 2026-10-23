@@ -168,6 +168,9 @@ async def test_refused_directory_delete(client, test_project, monkeypatch):
     monkeypatch.setattr(KnowledgeClient, "delete_directory", refused)
     with pytest.raises(ToolError, match="^LOCKED: A note is locked. Nothing was deleted."):
         await bm_delete(path="drafts", recursive=True, project=test_project.name)
+    # A directory is looked at with bm_list, not bm_read.
+    with pytest.raises(ToolError, match=r"bm_list\(path='drafts'\)"):
+        await bm_delete(path="drafts", recursive=True, project=test_project.name)
 
 
 @pytest.mark.asyncio

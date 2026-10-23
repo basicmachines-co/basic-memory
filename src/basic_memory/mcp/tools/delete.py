@@ -183,6 +183,7 @@ async def _delete_directory(
             address=shown,
             unchanged="Nothing was deleted.",
             output_format=output_format,
+            subject="directory",
         ) from error
     if deleted.total_files == 0:
         raise refusal(

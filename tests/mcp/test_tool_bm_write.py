@@ -7,10 +7,12 @@ from typing import Any
 
 import httpx
 import pytest
+from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import SimilarNote
 from basic_memory.mcp.tools import bm_read, bm_write
 from basic_memory.mcp.tools import write as write_module
@@ -389,3 +391,24 @@ async def test_similarity_floor_is_local_only(client, test_project, monkeypatch)
 
     assert floors[1] is None
     assert floors[0] == write_module.similar_notes_min_similarity(ConfigManager().config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("note_type", ["", "x" * 201])
+async def test_note_type_is_validated_as_an_argument(client, test_project, note_type):
+    """An empty or overlong note_type is an argument error naming the parameter."""
+    async with Client(mcp) as mcp_client:
+        result = await mcp_client.call_tool(
+            "bm_write",
+            {
+                "identifier": "notes/typed.md",
+                "content": "# Typed",
+                "note_type": note_type,
+                "project": test_project.name,
+            },
+            raise_on_error=False,
+        )
+    assert result.is_error
+    assert "note_type" in result.content[0].text  # pyright: ignore[reportAttributeAccessIssue]
+    with pytest.raises(ToolError, match="^NOT_FOUND:"):
+        await bm_read(identifier="notes/typed.md", project=test_project.name)

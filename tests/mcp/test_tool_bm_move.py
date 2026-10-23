@@ -181,6 +181,20 @@ async def test_unanswered_move_is_an_unknown_outcome(client, test_project, monke
         await bm_move(identifier="notes/plan.md", destination="archive/", project=test_project.name)
 
 
+@pytest.mark.asyncio
+async def test_unanswered_directory_move_points_at_bm_list(client, test_project, monkeypatch):
+    """A directory cannot be read with bm_read; listing it shows what moved."""
+
+    async def lost(*_args: Any, **_kwargs: Any) -> None:
+        error = ToolError("timed out")
+        error.__cause__ = httpx.ReadTimeout("timed out")
+        raise error
+
+    monkeypatch.setattr(KnowledgeClient, "move_directory", lost)
+    with pytest.raises(ToolError, match=r"(?s)^OUTCOME_UNKNOWN: .*bm_list\(path='archive'\)"):
+        await bm_move(path="drafts", destination="archive", project=test_project.name)
+
+
 # --- Directories ---
 
 

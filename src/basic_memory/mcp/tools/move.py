@@ -296,6 +296,7 @@ async def _move_directory(
             unchanged="Nothing was moved.",
             occupied=target.paths.path(destination),
             output_format=output_format,
+            subject="directory",
         ) from error
 
     if moved.total_files == 0:

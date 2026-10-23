@@ -163,12 +163,22 @@ def note_change_failure(
     unchanged: str,
     output_format: OutputFormat,
     occupied: str | None = None,
+    subject: Literal["note", "directory"] = "note",
 ) -> ToolError:
     """Explain a note change the API refused, or one whose outcome is unknown.
 
     `action` names the change ("edit", "move"); `occupied` is the destination of a
-    move, where a plain 409 means a file is already there.
+    move, where a plain 409 means a file is already there. `subject` says whether
+    the addresses are notes or directories, which decides how to look at them.
     """
+
+    def look_at(path: str) -> str:
+        match subject:
+            case "note":
+                return f"bm_read(identifier='{path}')"
+            case "directory":
+                return f"bm_list(path='{path}')"
+
     refused = api_refusal(error)
     if refused is None:
         # Trigger: the request left and no 4xx came back (no response, or a 5xx).
@@ -177,7 +187,7 @@ def note_change_failure(
         return refusal(
             "OUTCOME_UNKNOWN",
             f"The {action} of '{address}' may or may not have happened: {error}",
-            try_instead=f"bm_read(identifier='{occupied or address}') before retrying",
+            try_instead=f"{look_at(occupied or address)} before retrying",
             output_format=output_format,
         )
     if refused.revision_conflict:
@@ -188,12 +198,12 @@ def note_change_failure(
         return refusal(
             "ALREADY_EXISTS",
             refused.with_outcome(unchanged),
-            try_instead=f"bm_read(identifier='{occupied}') to see what is there",
+            try_instead=f"{look_at(occupied)} to see what is there",
             output_format=output_format,
         )
     return refusal(
         refused.code,
         refused.with_outcome(unchanged),
-        try_instead=f"bm_read(identifier='{address}') to see the note as it is",
+        try_instead=f"{look_at(address)} to see it as it is",
         output_format=output_format,
     )
