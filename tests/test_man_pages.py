@@ -147,7 +147,9 @@ TOOLS_WITHOUT_PAGES: set[str] = {
     "bm_find",
     "bm_list",
     "bm_move",
+    "bm_project",
     "bm_read",
+    "bm_schema",
     "bm_search",
     "bm_write",
 }

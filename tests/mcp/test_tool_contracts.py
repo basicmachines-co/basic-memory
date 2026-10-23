@@ -9,6 +9,7 @@ from typing import Any, cast
 import pytest
 
 from basic_memory.mcp import tools
+from basic_memory.mcp.tools.projects import bm_project_with_delete
 from basic_memory.mcp.server import mcp
 
 
@@ -74,6 +75,42 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "path",
         "recursive",
         "expected_checksum",
+        "output_format",
+        "project",
+    ],
+    "bm_project": [
+        "command",
+        "name",
+        "path",
+        "set_default",
+        "workspace",
+        "since",
+        "items",
+        "page",
+        "page_size",
+        "output_format",
+        "project",
+    ],
+    # The same tool name with the delete command; shown only with enable_project_delete.
+    "bm_project_with_delete": [
+        "command",
+        "name",
+        "path",
+        "set_default",
+        "workspace",
+        "delete_notes",
+        "since",
+        "items",
+        "page",
+        "page_size",
+        "output_format",
+        "project",
+    ],
+    "bm_schema": [
+        "command",
+        "note_type",
+        "identifier",
+        "threshold",
         "output_format",
         "project",
     ],
@@ -289,6 +326,8 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_edit": {"readOnlyHint": False, "destructiveHint": True},
     "bm_move": {"readOnlyHint": False, "destructiveHint": False},
     "bm_delete": {"readOnlyHint": False, "destructiveHint": True},
+    "bm_project": {"readOnlyHint": False, "destructiveHint": False},
+    "bm_schema": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
     "list_directory": {"readOnlyHint": True, "destructiveHint": False},
@@ -355,6 +394,9 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_edit": tools.bm_edit,
     "bm_move": tools.bm_move,
     "bm_delete": tools.bm_delete,
+    "bm_project": tools.bm_project,
+    "bm_project_with_delete": bm_project_with_delete,
+    "bm_schema": tools.bm_schema,
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
     "cat": tools.cat,

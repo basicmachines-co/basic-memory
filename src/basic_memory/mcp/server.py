@@ -31,6 +31,23 @@ import logfire
 POSIX_TOOLS_TAG = "posix"
 
 
+# bm_project is registered twice under one name (#1832): a version without the
+# delete command and one with it. Exactly one is visible, so tools/list never
+# shows both, and calls route to the visible one.
+BM_PROJECT_TOOL_KEY = "tool:bm_project@core"
+BM_PROJECT_WITH_DELETE_TOOL_KEY = "tool:bm_project@with-delete"
+
+
+def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
+    """Show the bm_project variant with or without the delete command.
+
+    Like set_posix_tools_visibility, the last marks appended win, so this is safe
+    to call at import, at each lifespan start, and in tests.
+    """
+    server.add_transform(Visibility(enabled, keys={BM_PROJECT_WITH_DELETE_TOOL_KEY}))
+    server.add_transform(Visibility(not enabled, keys={BM_PROJECT_TOOL_KEY}))
+
+
 def set_posix_tools_visibility(server: FastMCP, enabled: bool) -> None:
     """Mark the POSIX tool group visible or hidden.
 
@@ -111,6 +128,10 @@ async def lifespan(app: FastMCP):
     #      config decides what clients see (no if-checks inside tool bodies).
     # Outcome: enabled by default; an explicit opt-out hides the POSIX group.
     set_posix_tools_visibility(app, config.enable_posix_tools)
+    # Trigger: the enable_project_delete config flag (off by default).
+    # Why: deleting a project removes it for every client; only the user turns it on.
+    # Outcome: bm_project lists a delete command, and is marked destructive, only then.
+    set_project_delete_visibility(app, config.enable_project_delete)
 
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 
