@@ -70,9 +70,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 permalink, file_path = self.build_import_paths(relative_path)
 
                 # Convert to entity
-                entity = self._format_chat_content(
-                    chat, title, permalink, created_at, modified_at
-                )
+                entity = self._format_chat_content(chat, title, permalink, created_at, modified_at)
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)
