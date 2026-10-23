@@ -568,6 +568,8 @@ async def create_memory_project(
 
     Creates a new project with the specified name and path. The project directory
     will be created if it doesn't exist. Optionally sets the new project as default.
+    Repeating the same name and path is idempotent. The same name with a different
+    path is an error.
 
     Args:
         project_name: Name for the new project (must be unique)
@@ -632,6 +634,30 @@ async def create_memory_project(
         )
         index_in_background = _routes_to_cloud(workspace_id)
         if existing_match:
+            requested_path = os.path.abspath(os.path.expanduser(project_path))
+            existing_path = os.path.abspath(os.path.expanduser(existing_match.path))
+            # Trigger: the name matches a project stored at a different directory.
+            # Why: a name-only success ignores the requested path and re-indexes
+            # the existing project (#1811). The API compares these normalized paths.
+            # Outcome: fail fast and name the stored path and the requested path,
+            # without indexing.
+            if requested_path != existing_path:
+                message = (
+                    f"Project '{existing_match.name}' already exists with different path. "
+                    f"Existing: {existing_match.path}, Requested: {project_path}"
+                )
+                if output_format == "json":
+                    return {
+                        "name": existing_match.name,
+                        "existing_path": existing_match.path,
+                        "requested_path": project_path,
+                        "created": False,
+                        "already_exists": False,
+                        "error": "PATH_MISMATCH",
+                        "message": message,
+                    }
+                return f"# Error\n\n{message}"
+
             is_default = bool(
                 existing_match.is_default or existing.default_project == existing_match.name
             )
