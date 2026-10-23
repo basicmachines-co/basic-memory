@@ -6,6 +6,9 @@ from typing import Any
 import pytest
 from fastmcp import Client
 
+# These tests delete projects through the MCP client, which needs the opt-in.
+pytestmark = pytest.mark.usefixtures("project_delete_enabled")
+
 
 def _json_content(tool_result) -> Any:
     assert len(tool_result.content) == 1

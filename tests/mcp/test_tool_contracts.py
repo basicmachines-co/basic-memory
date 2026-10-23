@@ -90,7 +90,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "project",
     ],
-    "bm_project_delete": ["name", "delete_notes", "workspace"],
+    "bm_project_delete": ["name", "delete_notes", "workspace", "output_format"],
     "bm_schema": [
         "command",
         "note_type",
@@ -331,7 +331,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     # if the target already exists.
     "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
     "delete_note": {"readOnlyHint": False, "destructiveHint": True},
-    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
@@ -359,6 +358,7 @@ OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "tail": {"readOnlyHint": True, "destructiveHint": False},
     # Listed only when enable_project_delete is on.
     "bm_project_delete": {"readOnlyHint": False, "destructiveHint": True},
+    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
 }
 
 EXPECTED_EDIT_NOTE_OPERATIONS = [

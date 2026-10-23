@@ -48,7 +48,8 @@ Workspace = Annotated[
     description=(
         "Basic Memory projects. `command`: list (projects, grouped by workspace); create "
         "(`name`, `path`, optional `set_default`, `workspace`); recent (what changed "
-        "lately: `since`, `items`, paging; omit `project` to see every project)."
+        "lately: `since`, `items`, paging; `project` picks the project, else the default "
+        "project, and with no default every project)."
     ),
     tags={"projects"},
     annotations={
@@ -153,12 +154,22 @@ async def bm_project_delete(
         bool, Field(description="Also delete the project's note files.")
     ] = False,
     workspace: Workspace = None,
+    output_format: OutputFormat = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict[str, Any]:
     """Delete one project."""
-    return await delete_project(
+    message = await delete_project(
         project_name=name, delete_notes=delete_notes, workspace=workspace, context=context
     )
+    # delete_project reports in prose; JSON callers get the same facts as fields.
+    if output_format == "json":
+        return {
+            "action": "deleted",
+            "name": name,
+            "delete_notes": delete_notes,
+            "message": message,
+        }
+    return message
 
 
 # Hidden until the composition root reads enable_project_delete at startup.

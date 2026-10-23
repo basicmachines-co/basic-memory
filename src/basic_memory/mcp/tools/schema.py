@@ -464,11 +464,22 @@ async def schema_infer(
             f"optional={len(result.suggested_optional)}"
         )
 
+        # --- No notes guard ---
+        # Trigger: no notes of this type exist, so nothing was analyzed
+        # Why: an empty report would read as a successful inference (C11)
+        # Outcome: a NOT_FOUND refusal with guidance on creating notes of this type
+        if result.notes_analyzed == 0:
+            raise _nothing_to_report(
+                output_format,
+                f"No notes found of type '{note_type}'",
+                _no_notes_guidance(note_type, "schema_infer"),
+            )
+
         # --- Empty schema guard ---
         # Trigger: notes were analyzed but no fields met the threshold
         # Why: returning hundreds of excluded fields overwhelms the LLM context
         # Outcome: a NOT_FOUND refusal with guidance instead of a massive empty result
-        if result.notes_analyzed > 0 and not result.suggested_schema:
+        if not result.suggested_schema:
             raise _nothing_to_report(
                 output_format,
                 f"No schema pattern found for '{note_type}' (threshold: {threshold:.0%})",

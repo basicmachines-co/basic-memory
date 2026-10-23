@@ -179,6 +179,7 @@ async def test_create_project_disabled_in_constrained_mode(mcp_server, app, test
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("project_delete_enabled")
 async def test_delete_project_disabled_in_constrained_mode(mcp_server, app, test_project):
     """Test that delete_project is disabled when server is constrained."""
 

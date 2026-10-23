@@ -29,7 +29,7 @@ from basic_memory.mcp.project_context import (
     resolve_workspace_parameter,
 )
 from basic_memory.mcp.refusals import refusal
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
@@ -767,7 +767,8 @@ def _format_note_file_delete_result(
 
 @mcp.tool(
     title="Delete Project",
-    tags={"projects"},
+    # Hidden unless enable_project_delete is on, like bm_project_delete (#1832).
+    tags={"projects", PROJECT_DELETE_TAG},
     annotations={
         "title": "Delete Project",
         "readOnlyHint": False,

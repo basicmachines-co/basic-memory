@@ -7,6 +7,9 @@ Tests the complete project management workflow: MCP client -> MCP server -> Fast
 import pytest
 from fastmcp import Client
 
+# These tests delete projects through the MCP client, which needs the opt-in.
+pytestmark = pytest.mark.usefixtures("project_delete_enabled")
+
 
 @pytest.mark.asyncio
 async def test_list_projects_basic_operation(mcp_server, app, test_project):
