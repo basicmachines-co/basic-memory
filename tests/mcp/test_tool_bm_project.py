@@ -120,6 +120,8 @@ async def test_constrained_server_refuses_project_changes(monkeypatch):
         await bm_project(command="create", name="x", path="/tmp/x")
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled"):
         await bm_project_delete(name="x")
+    with pytest.raises(ToolError, match='"error": "UNSUPPORTED"'):
+        await bm_project_delete(name="x", output_format="json")
 
 
 # --- bm_schema ---

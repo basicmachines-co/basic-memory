@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
-from basic_memory.mcp.refusals import refusal
+from basic_memory.mcp.refusals import Refusal, refusal
 from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp, set_project_delete_visibility
 from basic_memory.mcp.tool_params import (
     Items,
@@ -157,9 +157,13 @@ async def bm_project_delete(
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Delete one project."""
-    message = await delete_project(
-        project_name=name, delete_notes=delete_notes, workspace=workspace, context=context
-    )
+    try:
+        message = await delete_project(
+            project_name=name, delete_notes=delete_notes, workspace=workspace, context=context
+        )
+    except Refusal as refused:
+        # delete_project has no output_format; its refusals are re-rendered here.
+        raise refused.rendered_as(output_format) from refused
     # delete_project reports in prose; JSON callers get the same facts as fields.
     if output_format == "json":
         return {

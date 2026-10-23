@@ -55,6 +55,12 @@ class Refusal(ToolError):
         self.try_instead = try_instead
         super().__init__(_render(code, message, try_instead, output_format))
 
+    def rendered_as(self, output_format: OutputFormat) -> "Refusal":
+        """The same refusal in another output format, for a tool that wraps another."""
+        return Refusal(
+            self.code, self.message, try_instead=self.try_instead, output_format=output_format
+        )
+
 
 def _render(
     code: RefusalCode, message: str, try_instead: str | None, output_format: OutputFormat
