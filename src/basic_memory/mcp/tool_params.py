@@ -8,6 +8,7 @@ one parameter means one thing across the surface.
 """
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -149,6 +150,42 @@ PageSize = Annotated[
         description=f"Results per page (1-{MAX_PAGE_SIZE}).",
     ),
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class Pagination:
+    """One page of a result set, and the call that fetches the next one.
+
+    Every list-returning bm_* tool reports paging through this value, so bm_list,
+    bm_find and bm_search print the same continuation line.
+    """
+
+    page: int
+    page_size: int
+    has_more: bool
+
+    @classmethod
+    def of(cls, payload: Mapping[str, Any]) -> "Pagination":
+        """Read the paging fields of an API payload.
+
+        Directory listings call the page `page`; search responses call it
+        `current_page`. Both carry `page_size` and `has_more`.
+        """
+        page = payload["page"] if "page" in payload else payload["current_page"]
+        return cls(page=page, page_size=payload["page_size"], has_more=payload["has_more"])
+
+    def next_call(self, tool: str, arguments: Mapping[str, object]) -> str | None:
+        """The exact call for the next page, or None on the last page.
+
+        `arguments` are the call's other arguments, in the order to show them;
+        None values are left out, so callers pass every argument as given.
+        """
+        if not self.has_more:
+            return None
+        rendered = [f"{name}={value!r}" for name, value in arguments.items() if value is not None]
+        rendered += [f"page={self.page + 1}", f"page_size={self.page_size}"]
+        return f"{tool}({', '.join(rendered)})"
+
 
 # --- Output ---
 

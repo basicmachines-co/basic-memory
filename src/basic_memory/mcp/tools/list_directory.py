@@ -9,6 +9,7 @@ from pydantic import AliasChoices, Field
 from basic_memory.mcp.directory_listing import format_listing_text
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tool_params import Pagination
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
@@ -156,22 +157,16 @@ async def list_directory(
             if file_name_glob
             else f"Contents of '{dir_name}' (depth {depth}):"
         )
-        continuation_args = [
-            f"dir_name={dir_name!r}",
-            f"depth={depth}",
-            f"page={listing.page + 1}",
-            f"page_size={listing.page_size}",
-        ]
-        if file_name_glob:
-            continuation_args.append(f"file_name_glob={file_name_glob!r}")
-        if sort is not None:
-            continuation_args.append(f"sort={sort!r}")
-        if project_id:
-            continuation_args.append(f"project_id={project_id!r}")
-        elif project:
-            continuation_args.append(f"project={project!r}")
-        return format_listing_text(
-            listing,
-            heading=heading,
-            next_call=f"list_directory({', '.join(continuation_args)})",
+        next_call = Pagination.of(listing.model_dump()).next_call(
+            "list_directory",
+            {
+                "dir_name": dir_name,
+                "depth": depth,
+                "file_name_glob": file_name_glob,
+                "sort": sort,
+                # project_id routes exactly, so it wins when both were given.
+                "project_id": project_id,
+                "project": None if project_id else project,
+            },
         )
+        return format_listing_text(listing, heading=heading, next_call=next_call)

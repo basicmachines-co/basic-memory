@@ -24,6 +24,7 @@ from basic_memory.mcp.note_targets import open_project_target, qualify_listing_p
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
+    Pagination,
     DirectoryPath,
     Filters,
     OutputFormat,
@@ -135,7 +136,13 @@ async def bm_find(
                 page=page,
                 page_size=page_size,
             )
-            return hits if output_format == "json" else _format_hits(hits, path)
+            if output_format == "json":
+                return hits
+            next_call = Pagination.of(hits).next_call(
+                "bm_find",
+                {"path": path, "filters": filters, "fields": fields, "project": project},
+            )
+            return _format_hits(hits, path, next_call=next_call)
 
         # --- Listing arm ---
         list_path = f"/{target.route.path}" if target.route.stripped else path
@@ -154,22 +161,25 @@ async def bm_find(
         matching = f" matching '{name}'" if name else ""
         return f"No files under '{path}'{matching}."
 
-    next_arguments = [f"path={path!r}", f"page={page + 1}", f"page_size={page_size}"]
-    if name:
-        next_arguments.append(f"name={name!r}")
-    if depth != MAX_FIND_DEPTH:
-        next_arguments.append(f"depth={depth}")
-    if project is not None:
-        next_arguments.append(f"project={project!r}")
     matching = f" matching '{name}'" if name else ""
+    next_call = Pagination.of(qualified).next_call(
+        "bm_find",
+        {
+            "path": path,
+            "name": name,
+            # The default depth stays out of the call, as the caller left it out.
+            "depth": depth if depth != MAX_FIND_DEPTH else None,
+            "project": project,
+        },
+    )
     return format_listing_text(
         DirectoryListResponse.model_validate(qualified),
         heading=f"Files under '{path}'{matching}:",
-        next_call=f"bm_find({', '.join(next_arguments)})",
+        next_call=next_call,
     )
 
 
-def _format_hits(hits: dict[str, Any], path: str) -> str:
+def _format_hits(hits: dict[str, Any], path: str, *, next_call: str | None) -> str:
     """One line per matching note: its path and title, then any projected fields."""
     results = hits["results"]
     if not results:
@@ -181,6 +191,6 @@ def _format_hits(hits: dict[str, Any], path: str) -> str:
         if projected:
             line += " | " + ", ".join(f"{key}={value!r}" for key, value in projected.items())
         lines.append(line)
-    if hits.get("has_more"):
-        lines.extend(["", "More results: call again with page + 1."])
+    if next_call is not None:
+        lines.extend(["", f"More results available. Call {next_call} to continue."])
     return "\n".join(lines)

@@ -34,6 +34,7 @@ from basic_memory.mcp.project_context_identifiers import canonical_memory_path_f
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
+    Pagination,
     Filters,
     Items,
     OptionalSince,
@@ -177,6 +178,26 @@ async def bm_search(
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Search notes, observations and relations."""
+    # The caller's arguments as sent, for the next-page call: the body rewrites
+    # `query` for memory:// URLs and permalink patterns.
+    call_arguments: dict[str, object] = {
+        "query": query,
+        "mode": mode,
+        "filters": filters,
+        "note_types": note_types,
+        "items": items,
+        "categories": categories,
+        "since": since,
+        "lines": lines,
+        "max_matches": max_matches if lines is not None else None,
+        "path": path,
+        "compact": compact or None,
+        "valid_at": valid_at,
+        "valid_overlaps": valid_overlaps,
+        "time_kind": time_kind,
+        "min_similarity": min_similarity,
+        "project": project,
+    }
     # --- Argument combinations, before any I/O ---
     if identifier is not None and path is not None:
         raise refusal(
@@ -328,7 +349,8 @@ async def bm_search(
     payload = qualify_search_paths(payload, target.route)
     if output_format == "json":
         return payload
-    return _format_results(payload, query, target.project.name)
+    next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
+    return _format_results(payload, query, target.project.name, next_call=next_call)
 
 
 # --- Line matching ---
@@ -424,14 +446,20 @@ async def _search_one_note(
     )
     if output_format == "json":
         return payload["results"][0]
-    return _format_results(payload, query, target.project.name)
+    # One note is one result: there is no next page.
+    return _format_results(payload, query, target.project.name, next_call=None)
 
 
 # --- Text output ---
 
 
-def _format_results(payload: dict[str, Any], query: str | None, project_name: str) -> str:
-    """Render hits as a compact list: path, title, score, then excerpt or matching lines."""
+def _format_results(
+    payload: dict[str, Any], query: str | None, project_name: str, *, next_call: str | None
+) -> str:
+    """Render hits as a compact list: path, title, score, then excerpt or matching lines.
+
+    `next_call` is the exact call for the next page (Pagination.next_call), or None.
+    """
     results = payload["results"]
     heading = f"Results for '{query}'" if query else "Results"
     if not results:
@@ -455,6 +483,6 @@ def _format_results(payload: dict[str, Any], query: str | None, project_name: st
                 lines.append(f"    (more matches from line {row['next_match_line']})")
         elif row.get("matched_chunk"):
             lines.append(f"    {row['matched_chunk'][:200]}")
-    if payload.get("has_more"):
-        lines.extend(["", "More results: call again with page + 1."])
+    if next_call is not None:
+        lines.extend(["", f"More results available. Call {next_call} to continue."])
     return "\n".join(lines)

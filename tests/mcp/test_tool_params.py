@@ -14,6 +14,7 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import (
+    Pagination,
     DirectoryPath,
     Filters,
     Items,
@@ -251,3 +252,27 @@ def test_refusal_json_payload():
 def test_refusal_json_payload_without_an_alternative():
     error = refusal("AMBIGUOUS", "Two notes match.", output_format="json")
     assert json.loads(str(error)) == {"error": "AMBIGUOUS", "message": "Two notes match."}
+
+
+# --- Pagination ---
+
+
+def test_pagination_reads_listing_and_search_payloads():
+    assert Pagination.of({"page": 2, "page_size": 5, "has_more": True, "total": 30}) == (
+        Pagination(page=2, page_size=5, has_more=True)
+    )
+    assert Pagination.of({"current_page": 1, "page_size": 10, "has_more": False}) == (
+        Pagination(page=1, page_size=10, has_more=False)
+    )
+
+
+def test_next_call_repeats_the_arguments_and_advances_the_page():
+    pagination = Pagination(page=2, page_size=5, has_more=True)
+
+    assert pagination.next_call("bm_find", {"path": "specs", "name": None, "depth": 3}) == (
+        "bm_find(path='specs', depth=3, page=3, page_size=5)"
+    )
+
+
+def test_next_call_on_the_last_page_is_none():
+    assert Pagination(page=4, page_size=5, has_more=False).next_call("bm_list", {}) is None
