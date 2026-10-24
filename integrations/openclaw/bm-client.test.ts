@@ -494,6 +494,16 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
+  it("search ignores an empty tag shortcut", async () => {
+    const callTool = jest.fn().mockResolvedValue(mcpResult({ results: [] }))
+    setConnected(client, callTool)
+
+    await client.search("test", 10, undefined, { tags: [] })
+
+    expect(callTool.mock.calls[0][0].arguments.query).toBe("test")
+    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("filters")
+  })
+
   it("search omits metadata args when not provided", async () => {
     const callTool = jest.fn().mockResolvedValue(mcpResult({ results: [] }))
     setConnected(client, callTool)
