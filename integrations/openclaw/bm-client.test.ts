@@ -473,6 +473,27 @@ describe("BmClient MCP behavior", () => {
     expect(results[0].title).toBe("Auth Design")
   })
 
+  it("search preserves explicit filters over conflicting shortcuts", async () => {
+    const callTool = jest.fn().mockResolvedValue(mcpResult({ results: [] }))
+    setConnected(client, callTool)
+    const filters = {
+      status: { $in: ["draft", "review"] },
+      tags: { $contains: ["explicit"] },
+    }
+
+    await client.search(undefined, 10, undefined, {
+      filters,
+      tags: ["shortcut"],
+      status: "published",
+    })
+
+    expect(callTool.mock.calls[0][0].arguments.filters).toEqual(filters)
+    expect(filters).toEqual({
+      status: { $in: ["draft", "review"] },
+      tags: { $contains: ["explicit"] },
+    })
+  })
+
   it("search omits metadata args when not provided", async () => {
     const callTool = jest.fn().mockResolvedValue(mcpResult({ results: [] }))
     setConnected(client, callTool)
