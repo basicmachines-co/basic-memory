@@ -16,17 +16,14 @@ async def test_permalink_collision_across_projects(mcp_server, app, test_project
         # Create a second project
         project2_path = str(tmp_path.parent / (tmp_path.name + "-collision") / "second-project")
         create_result = await client.call_tool(
-            "create_memory_project",
-            {
-                "project_name": "second-project",
-                "project_path": project2_path,
-            },
+            "bm_project",
+            {"name": "second-project", "path": project2_path, "command": "create"},
         )
         assert "second-project" in create_result.content[0].text
 
         # Write a note with the same title in project 1
         write1 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Shared Title Note",
@@ -38,7 +35,7 @@ async def test_permalink_collision_across_projects(mcp_server, app, test_project
 
         # Write a note with the same title in project 2
         write2 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": "second-project",
                 "title": "Shared Title Note",
@@ -50,10 +47,11 @@ async def test_permalink_collision_across_projects(mcp_server, app, test_project
 
         # Read from project 1 by title — should get project 1's content
         read1 = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "Shared Title Note",
+                "include_frontmatter": True,
             },
         )
         read1_text = read1.content[0].text
@@ -61,10 +59,11 @@ async def test_permalink_collision_across_projects(mcp_server, app, test_project
 
         # Read from project 2 by title — should get project 2's content
         read2 = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": "second-project",
                 "identifier": "Shared Title Note",
+                "include_frontmatter": True,
             },
         )
         read2_text = read2.content[0].text
@@ -82,7 +81,7 @@ async def test_memory_url_routing_with_project_prefix(mcp_server, app, test_proj
     async with Client(mcp_server) as client:
         # Write a note in the default project
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "URL Routing Note",
@@ -93,9 +92,9 @@ async def test_memory_url_routing_with_project_prefix(mcp_server, app, test_proj
 
         # build_context with project-prefixed memory:// URL
         context_result = await client.call_tool(
-            "build_context",
+            "bm_context",
             {
-                "url": f"memory://{test_project.name}/docs/url-routing-note",
+                "identifier": f"memory://{test_project.name}/docs/url-routing-note",
                 "project": test_project.name,
             },
         )

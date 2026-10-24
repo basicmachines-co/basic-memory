@@ -11,8 +11,8 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.recent_activity import recent_activity
-from basic_memory.mcp.tools.search import search_notes
+from basic_memory.mcp.tools.projects import bm_project
+from basic_memory.mcp.tools.ranked_search import bm_search
 
 
 @mcp.prompt(
@@ -42,7 +42,7 @@ async def continue_conversation(
 
     if topic:
         # Use json format to get structured data for result counting and branching
-        result = await search_notes(query=topic, after_date=timeframe, output_format="json")
+        result = await bm_search(query=topic, since=timeframe, output_format="json")
 
         if isinstance(result, dict):
             results = result.get("results", [])
@@ -55,7 +55,7 @@ async def continue_conversation(
     else:
         # No topic — show recent activity
         effective_timeframe = timeframe or "7d"
-        activity_text = await recent_activity(timeframe=effective_timeframe)
+        activity_text = await bm_project(command="recent", since=effective_timeframe)
         context_text = str(activity_text)
         result_count = -1  # Signals we used recent_activity
 
@@ -66,8 +66,8 @@ async def continue_conversation(
 
         This is a memory retrieval session.
 
-        The notes below came from Basic Memory. Open a note with `read_note` or its linked notes
-        with `build_context` when a snippet is not enough to respond.
+        The notes below came from Basic Memory. Open a note with `bm_read` or its linked notes
+        with `bm_context` when a snippet is not enough to respond.
 
         {context_text}
 
@@ -80,25 +80,25 @@ async def continue_conversation(
         prompt += dedent(f"""
             Found {result_count} results related to '{topic}'.
 
-            1. **Read full content** - Use `read_note("permalink")` to dive into specific notes
-            2. **Build context** - Use `build_context("memory://path")` to see relationships
-            3. **Search deeper** - Use `search_notes("{topic}")` with different filters
+            1. **Read full content** - Use `bm_read("permalink")` to dive into specific notes
+            2. **Build context** - Use `bm_context("memory://path")` to see relationships
+            3. **Search deeper** - Use `bm_search("{topic}")` with different filters
 
             If this conversation produces a decision or insight worth keeping, offer to save it
-            with `write_note`.
+            with `bm_write`.
         """)
     elif topic:
         prompt += dedent(f"""
             No previous context found for '{topic}'.
 
-            Try `search_notes` with related terms or check `recent_activity`. If the user wants this
-            topic tracked, offer to start a note with `write_note`.
+            Try `bm_search` with related terms or check `bm_project(command="recent")`. If the user wants this
+            topic tracked, offer to start a note with `bm_write`.
         """)
     else:
         prompt += dedent("""
-            1. **Explore specific items** - Use `read_note("permalink")` to dive deeper
-            2. **Search for topics** - Use `search_notes("topic")` to find specific content
-            3. **Build context** - Use `build_context("memory://path")` to see relationships
+            1. **Explore specific items** - Use `bm_read("permalink")` to dive deeper
+            2. **Search for topics** - Use `bm_search("topic")` to find specific content
+            3. **Build context** - Use `bm_context("memory://path")` to see relationships
         """)
 
     return prompt
@@ -118,7 +118,7 @@ def _format_continuation_results(results: list[dict[str, Any]], topic: str) -> s
         lines.append(f"### {title}")
         if permalink:
             lines.append(f"permalink: {permalink}")
-            lines.append(f'Read with: `read_note("{permalink}")`')
+            lines.append(f'Read with: `bm_read("{permalink}")`')
         content = item.get("content")
         if content:
             content = content[:300] + "..." if len(content) > 300 else content

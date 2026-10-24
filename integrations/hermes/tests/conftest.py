@@ -150,13 +150,13 @@ def make_scripted_actor(
         actor._tools_cache = fake_tools or [
             {"name": n, "description": ""}
             for n in [
-                "search_notes",
-                "read_note",
-                "write_note",
-                "edit_note",
-                "build_context",
-                "delete_note",
-                "move_note",
+                "bm_search",
+                "bm_read",
+                "bm_write",
+                "bm_edit",
+                "bm_context",
+                "bm_delete",
+                "bm_move",
             ]
         ]
         actor._ready.set()

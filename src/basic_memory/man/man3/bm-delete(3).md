@@ -39,7 +39,7 @@ be undone.
 - **recursive** (boolean, optional, default: False) — Required true to delete a directory and everything under it.
 - **expected_checksum** (string | null, optional, default: None) — Delete the note only while it is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. Omit to use the default project.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

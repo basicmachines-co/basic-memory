@@ -129,7 +129,7 @@ def test_timed_out_mcp_call_is_cancelled_before_stop_returns(
             return None
 
         async def list_tools(self) -> SimpleNamespace:
-            return SimpleNamespace(tools=[SimpleNamespace(name="write_note")])
+            return SimpleNamespace(tools=[SimpleNamespace(name="bm_write")])
 
         async def call_tool(self, _name: str, _arguments: dict[str, Any]) -> Any:
             call_started.set()
@@ -141,18 +141,18 @@ def test_timed_out_mcp_call_is_cancelled_before_stop_returns(
     client = WarmMcpClient(
         request_timeout_seconds=0.01,
         startup_timeout_seconds=1.0,
-        required_tool="write_note",
+        required_tool="bm_write",
     )
     client.start()
     with pytest.raises(FutureTimeoutError):
-        client.call_tool("write_note", {})
+        client.call_tool("bm_write", {})
     assert call_started.wait(timeout=1.0)
 
     client.stop()
 
     assert transport_exited.wait(timeout=1.0)
     with pytest.raises(RuntimeError, match="not running"):
-        client.call_tool("write_note", {})
+        client.call_tool("bm_write", {})
 
 
 # --- Error classification and stats ---

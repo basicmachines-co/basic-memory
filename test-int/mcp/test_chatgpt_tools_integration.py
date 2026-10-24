@@ -40,41 +40,35 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
     async with openai_mcp_client(mcp_server) as client:
         # Create test notes for searching
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Machine Learning Fundamentals",
                 "directory": "ai",
-                "content": (
-                    "# Machine Learning Fundamentals\n\nIntroduction to ML concepts and algorithms."
-                ),
+                "content": "# Machine Learning Fundamentals\n\nIntroduction to ML concepts and algorithms.",
                 "tags": "ml,ai,fundamentals",
             },
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Deep Learning with PyTorch",
                 "directory": "ai",
-                "content": (
-                    "# Deep Learning with PyTorch\n\n"
-                    "Building neural networks using PyTorch framework."
-                ),
+                "content": "# Deep Learning with PyTorch\n\n"
+                "Building neural networks using PyTorch framework.",
                 "tags": "pytorch,deep-learning,ai",
             },
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Data Visualization Guide",
                 "directory": "data",
-                "content": (
-                    "# Data Visualization Guide\n\nCreating charts and graphs for data analysis."
-                ),
+                "content": "# Data Visualization Guide\n\nCreating charts and graphs for data analysis.",
                 "tags": "visualization,data,charts",
             },
         )
@@ -130,20 +124,18 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
     async with openai_mcp_client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Web Frameworks",
                 "directory": "dev",
-                "content": (
-                    "# Python Web Frameworks\n\nComparing Django and Flask for web development."
-                ),
+                "content": "# Python Web Frameworks\n\nComparing Django and Flask for web development.",
                 "tags": "python,web,frameworks",
             },
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JavaScript Frameworks",
@@ -195,7 +187,7 @@ def my_decorator(func):
 """
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Advanced Python Techniques",
@@ -235,7 +227,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
     async with openai_mcp_client(mcp_server) as client:
         # Create a note with known content
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Test Document",
@@ -295,7 +287,8 @@ async def test_chatgpt_fetch_nonexistent_document(mcp_server, app, test_project)
 
         # Check for error indication
         assert document_json["id"] == "NonExistentDocument12345"
-        assert "Not Found" in document_json["text"] or "not found" in document_json["text"]
+        assert document_json["metadata"]["error"] == "Document not found"
+        assert "NonExistentDocument12345" in document_json["text"]
 
 
 @pytest.mark.asyncio
@@ -305,7 +298,7 @@ async def test_chatgpt_fetch_with_empty_title(mcp_server, app, test_project):
     async with openai_mcp_client(mcp_server) as client:
         # Create a note without a title in the content
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "untitled-note",
@@ -341,7 +334,7 @@ async def test_chatgpt_search_pagination_default(mcp_server, app, test_project):
         # Create more than 10 notes to test pagination
         for i in range(15):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Test Note {i}",
@@ -407,7 +400,7 @@ async def test_chatgpt_tools_reject_default_client(mcp_server, app, test_project
         search_json = extract_mcp_json_content(search_result)
         assert search_json["results"] == []
         assert search_json["error"] == "Unsupported MCP client"
-        assert "search_notes" in search_json["error_message"]
+        assert "bm_search" in search_json["error_message"]
 
         fetch_result = await client.call_tool(
             "fetch",
@@ -419,7 +412,7 @@ async def test_chatgpt_tools_reject_default_client(mcp_server, app, test_project
         document_json = extract_mcp_json_content(fetch_result)
         assert document_json["id"] == "Machine Learning Fundamentals"
         assert document_json["metadata"]["error"] == "Unsupported MCP client"
-        assert "read_note" in document_json["text"]
+        assert "bm_read" in document_json["text"]
 
 
 @pytest.mark.asyncio
@@ -453,7 +446,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
 
         for doc in docs:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": doc["title"],

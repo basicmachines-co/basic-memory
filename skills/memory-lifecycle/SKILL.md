@@ -20,10 +20,10 @@ Deleting a note removes it from the knowledge graph — its observations and rel
 
 ```
 # Good — entity stays in the knowledge graph
-move_note → active/ to archive/
+bm_move → active/ to archive/
 
 # Bad — knowledge is lost
-delete_note
+bm_delete
 ```
 
 The only exception: notes created by mistake (typos, true duplicates) can be deleted.
@@ -77,8 +77,8 @@ When the user mentions completion or status change, extract the intent:
 Search Basic Memory with multiple variations to locate the entity:
 
 ```python
-search_notes(query="quarterly report")
-search_notes(query="Q1 report")
+bm_search(query="quarterly report")
+bm_search(query="Q1 report")
 ```
 
 If multiple matches come back, present options and ask which one.
@@ -87,12 +87,12 @@ If no match is found, ask for clarification — don't guess.
 
 ### 2. Move the File
 
-Use `move_note` to relocate the entity to the appropriate status folder:
+Use `bm_move` to relocate the entity to the appropriate status folder:
 
 ```python
-move_note(
+bm_move(
   identifier="tasks/active/quarterly-report",
-  destination_path="tasks/completed/quarterly-report.md"
+  destination="tasks/completed/quarterly-report.md"
 )
 ```
 
@@ -101,14 +101,13 @@ By default the permalink stays the same after a move, so links keep resolving. P
 ### 3. Update Frontmatter
 
 After moving, merge the new status (and completion date, if the type tracks one) into
-frontmatter with the `metadata` parameter. An `append` with empty `content` changes only
-the frontmatter:
+frontmatter with `command="set_metadata"` and the `metadata` parameter; this leaves
+the body unchanged:
 
 ```python
-edit_note(
-  identifier="quarterly-report",
-  operation="append",
-  content="",
+bm_edit(
+  identifier="tasks/completed/quarterly-report.md",
+  command="set_metadata",
   metadata={"status": "completed", "completed": "2026-02-22"}
 )
 ```
@@ -149,15 +148,14 @@ status is unchanged. Only the user can unlock it, by editing the file.
 If something was archived by mistake, move it back:
 
 ```python
-move_note(
+bm_move(
   identifier="tasks/completed/quarterly-report",
-  destination_path="tasks/active/quarterly-report.md"
+  destination="tasks/active/quarterly-report.md"
 )
 
-edit_note(
-  identifier="quarterly-report",
-  operation="append",
-  content="",
+bm_edit(
+  identifier="tasks/active/quarterly-report.md",
+  command="set_metadata",
   metadata={"status": "active"}
 )
 ```
@@ -176,7 +174,7 @@ Some status changes don't require a folder move — "paused" or "blocked" items 
 
 - **Archive, never delete.** The knowledge graph benefits from historical context.
 - **Move first, then update frontmatter.** This order ensures the file is in the right place even if the edit step fails.
-- **Permalinks survive moves by default.** Links to the entity keep working after a `move_note` unless the project enables `update_permalinks_on_move`.
+- **Permalinks survive moves by default.** Links to the entity keep working after a `bm_move` unless the project enables `update_permalinks_on_move`.
 - **Be concise in confirmations.** The user knows their system — just report what changed.
 - **Ask when ambiguous.** If multiple entities match or the target folder isn't clear, ask rather than guess.
 - **Batch operations are fine.** If the user says "archive all completed tasks", find them all, confirm the list, then move them in sequence.

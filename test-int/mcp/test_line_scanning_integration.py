@@ -16,7 +16,7 @@ async def test_grep_to_read_lines_over_mcp(mcp_server, app, test_project, config
     try:
         async with Client(mcp_server) as client:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Wire Scan",
                     "directory": "test",
@@ -25,11 +25,12 @@ async def test_grep_to_read_lines_over_mcp(mcp_server, app, test_project, config
                 },
             )
             found = await client.call_tool(
-                "grep",
+                "bm_search",
                 {
-                    "pattern": "retry",
-                    "context_lines": 1,
+                    "query": "retry",
+                    "lines": 1,
                     "project": test_project.name,
+                    "output_format": "json",
                 },
             )
             block = found.content[0]
@@ -44,13 +45,15 @@ async def test_grep_to_read_lines_over_mcp(mcp_server, app, test_project, config
                 "start_line": window["start_line"],
                 "end_line": window["end_line"],
             }
-            read = await client.call_tool("read_note", {**read_args, "output_format": "json"})
+            read = await client.call_tool(
+                "bm_read", {**read_args, "output_format": "json", "include_frontmatter": False}
+            )
             block = read.content[0]
             assert block.type == "text"
             selected = json.loads(block.text)
             assert selected["content"] == window["content"]
             assert selected["has_more"] is True
-            text_read = await client.call_tool("read_note", read_args)
+            text_read = await client.call_tool("bm_read", read_args)
             block = text_read.content[0]
             assert block.type == "text"
             assert f"{window['match_lines'][0]}: retry the task" in block.text

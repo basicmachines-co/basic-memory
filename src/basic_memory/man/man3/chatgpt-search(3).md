@@ -23,16 +23,16 @@ search(query)
 
 ## PARAMETERS
 
-- **query** (string, required) — Search query (full-text syntax supported by `search_notes`)
+- **query** (string, required) — Search query (full-text syntax supported by `bm_search`)
 
 ## DESCRIPTION
 
 **Availability:** `search` answers only OpenAI clients (ChatGPT connectors).
 Any other MCP client gets the error `Unsupported MCP client` without a
-search being run — use [[search-notes(3)]] and [[read-note(3)]] instead.
+search being run — use [[bm-search(3)]] and [[bm-read(3)]] instead.
 
 A minimal adapter for clients that expect the OpenAI actions search shape
-(ChatGPT connectors). Delegates to [[search-notes(3)]] with defaults
+(ChatGPT connectors). Delegates to [[bm-search(3)]] with defaults
 (page 1, size 10) and re-encodes the response as a single text content item
 whose body is a JSON string with `results` (id/title/url), `total_count`,
 and the echoed `query`.
@@ -52,9 +52,9 @@ search("overwrite conflict")
 ## GOTCHAS
 
 - [gotcha] No project parameter exists — the search always runs against the configured default project #routing
-- [gotcha] The payload is JSON-inside-text by design (OpenAI compatibility); normal MCP clients should prefer search_notes #encoding
+- [gotcha] The payload is JSON-inside-text by design (OpenAI compatibility); normal MCP clients should prefer bm_search #encoding
 
 ## SEE ALSO
 
-- see_also [[search-notes(3)]]
+- see_also [[bm-search(3)]]
 - see_also [[chatgpt-fetch(3)]]

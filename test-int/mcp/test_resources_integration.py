@@ -42,16 +42,14 @@ async def test_note_is_readable_at_its_memory_uri(mcp_server, app, test_project)
     """A note written through the tools reads back as raw markdown via its URI."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Search Design",
                 "directory": "specs",
-                "content": (
-                    "# Search Design\n\n"
-                    "- [decision] notes answer resources/read #mcp\n"
-                    "- relates_to [[Indexing]]\n"
-                ),
+                "content": "# Search Design\n\n"
+                "- [decision] notes answer resources/read #mcp\n"
+                "- relates_to [[Indexing]]\n",
             },
         )
 

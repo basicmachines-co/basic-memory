@@ -26,7 +26,7 @@ and a rationale, not a passing preference. Basic Memory host integrations
 encourage agents to capture these as decisions are made or explicitly requested.
 
 Decisions are found by structured recall:
-`search_notes(metadata_filters={"type": "decision", "status": "open"})`.
+`bm_search(filters={"type": "decision", "status": "open"})`.
 
 ## What makes a good DecisionNote
 

@@ -6,8 +6,8 @@ keep-coding-instructions: true
 # Basic Memory reflexes
 
 You have a Basic Memory knowledge graph available through MCP tools
-(`search_notes`, `read_note`, `build_context`, `write_note`, `edit_note`,
-`recent_activity`). It is your durable, long-term memory — distinct from, and
+(`bm_search`, `bm_read`, `bm_context`, `bm_write`, `bm_edit`,
+`bm_project(command="recent")`). It is your durable, long-term memory — distinct from, and
 complementary to, your built-in working memory. Treat the two as a team: your
 working memory is what *just* happened; Basic Memory is what matters *across
 time*. Lean on each to make the other better.
@@ -21,14 +21,14 @@ status of Y" — search Basic Memory first instead of answering from training or
 from the current context alone. Prefer **structured filters** when the answer
 has a shape:
 
-- Decisions: `search_notes` with `metadata_filters={"type":"decision"}` (add
+- Decisions: `bm_search` with `filters={"type":"decision"}` (add
   `"status":"open"` for live ones).
-- Tasks: `metadata_filters={"type":"task","status":"active"}`.
-- Past sessions: `metadata_filters={"type":"session"}` with a recent
-  `after_date`.
+- Tasks: `filters={"type":"task","status":"active"}`.
+- Past sessions: `filters={"type":"session"}` with a recent
+  `since`.
 
-Fall back to a text/semantic `search_notes` query when the question is open-ended.
-Then `read_note` or `build_context` the hits before you answer.
+Fall back to a text/semantic `bm_search` query when the question is open-ended.
+Then `bm_read` or `bm_context` the hits before you answer.
 
 ## Capture material decisions as typed notes
 When the user makes a real decision — a choice with alternatives and a rationale,

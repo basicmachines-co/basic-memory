@@ -48,12 +48,12 @@ async def test_sync_discovery_inside_running_loop_and_persistent_calls() -> None
     cfg = settings()
     tools = discover_sync(cfg)
     assert [t.name for t in tools] == [
-        "write_note",
-        "recent_activity",
+        "bm_write",
+        "bm_project",
         "extra_tool",
-        "read_note",
-        "search_notes",
-        "build_context",
+        "bm_read",
+        "bm_search",
+        "bm_context",
     ]
     connection = McpConnection(cfg)
     await connection.start()
@@ -67,6 +67,7 @@ async def test_sync_discovery_inside_running_loop_and_persistent_calls() -> None
         wrapped = make_tool(connection, tools[2])
         assert wrapped.parameters == tools[2].input_schema
         assert wrapped.name == "bm_extra_tool"
+        assert make_tool(connection, tools[0]).name == "bm_write"
         result = await wrapped.execute("id", {"project": "another/project"})
         assert "another/project" in result.text
         with pytest.raises(RuntimeError, match="tool failed"):
@@ -160,7 +161,7 @@ async def test_capture_controls_replay_and_failure() -> None:
             content=[],
             structured_content=(
                 {"results": []}
-                if name == "search_notes"
+                if name == "bm_search"
                 else {"result": {"file_path": "tau/message.md", "action": "created"}}
             ),
         )

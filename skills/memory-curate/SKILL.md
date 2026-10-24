@@ -26,12 +26,12 @@ Orphans have no relations to other notes — they're islands in the graph.
 
 ```python
 # List notes, then read each to inspect its Relations section
-search_notes(query="*", search_type="text", page_size=50)
-read_note(identifier="note-to-check")
+bm_search(query="*", mode="text", page_size=50)
+bm_read(identifier="note-to-check")
 # Orphans have an empty (or missing) Relations section
 ```
 
-`query="*"` lists everything only with `search_type="text"`. A note whose body
+`query="*"` lists everything only with `mode="text"`. A note whose body
 links to other notes, with wikilinks or ordinary Markdown links, is not an
 orphan even without a Relations section.
 
@@ -47,9 +47,9 @@ If the `bm` CLI is available, `bm orphans` lists notes with no relations in one 
 Analyze a note's content and propose meaningful connections.
 
 ```python
-read_note(identifier="note-to-analyze")
+bm_read(identifier="note-to-analyze")
 # Pull out key terms, then search for related notes
-search_notes(query="key terms from the note")
+bm_search(query="key terms from the note")
 ```
 
 Suggest relations based on shared topics, complementary content (problem/solution,
@@ -67,12 +67,12 @@ question/answer), sequence (part 1 → part 2), or hierarchy (parent concept →
 
 Custom relation types are fine — use whatever verb is descriptive.
 
-Add a confirmed relation with `edit_note`:
+Add a confirmed relation with `bm_edit`:
 
 ```python
-edit_note(
+bm_edit(
     identifier="API Design Decisions",
-    operation="insert_after_section",
+    command="insert_after_section",
     section="Relations",
     content="- depends_on [[Rate Limiter]]",
 )
@@ -82,9 +82,9 @@ edit_note(
 `## Relations`. Then append the section instead:
 
 ```python
-edit_note(
+bm_edit(
     identifier="API Design Decisions",
-    operation="append",
+    command="append",
     content="\n## Relations\n- depends_on [[Rate Limiter]]",
 )
 ```
@@ -94,7 +94,7 @@ edit_note(
 Find notes that may cover the same ground.
 
 ```python
-search_notes(query="topic keywords")
+bm_search(query="topic keywords")
 # Compare results for: similar titles, overlapping observations,
 # shared tags, close-together timestamps
 ```
@@ -107,9 +107,9 @@ search_notes(query="topic keywords")
 
 ```python
 # Point an older note at the one that replaces it
-edit_note(
+bm_edit(
     identifier="DB Schema v1",
-    operation="insert_after_section",
+    command="insert_after_section",
     section="Relations",
     content="- updates [[DB Schema v2]]",
 )
@@ -118,25 +118,25 @@ edit_note(
 ### 4. Folder Organization Review
 
 ```python
-list_directory(dir_name="/", depth=3)
+bm_find(path="/", depth=3, project="<project>")
 ```
 
 Look for overcrowded folders, single-note folders, inconsistent naming, and notes
 that belong elsewhere. Suggest grouping related notes into topic folders, adding
 subfolders for large categories, and a consistent naming convention. Move misplaced
-notes with `move_note`. By default the permalink stays the same after a move, so links keep resolving. Projects with `update_permalinks_on_move` enabled rewrite it from the new path.
+notes with `bm_move`. By default the permalink stays the same after a move, so links keep resolving. Projects with `update_permalinks_on_move` enabled rewrite it from the new path.
 
 ```python
-move_note(
+bm_move(
     identifier="API Design Decisions",
-    destination_path="architecture/api-design-decisions.md",
+    destination="architecture/api-design-decisions.md",
 )
 ```
 
 ### 5. Tag Consistency
 
 ```python
-search_notes(query="*", search_type="text", page_size=100)
+bm_search(query="*", mode="text", page_size=100)
 # Inspect tag patterns across results
 ```
 
@@ -151,7 +151,7 @@ Look for:
 After finding a cluster of related notes, build a navigation hub.
 
 ```python
-write_note(
+bm_write(
     title="Architecture Decisions Index",
     directory="indexes",
     tags=["architecture", "index"],
@@ -182,19 +182,19 @@ A hub linking architecture-related decisions and patterns.
 Find notes lacking structure and fill them in.
 
 ```python
-read_note(identifier="sparse-note")
+bm_read(identifier="sparse-note")
 ```
 
 If the note is missing an Observations section, suggest categories. If it has no
 Relations, suggest links. If it has no tags, suggest relevant ones. If it lacks
-context, suggest adding background. Apply with `edit_note`.
+context, suggest adding background. Apply with `bm_edit`.
 
 ## Curation Workflows
 
 Scale the pass to the request. A health check reports orphans, likely duplicates,
-recent activity (`recent_activity`), and folder distribution. A deep session works
+recent activity (`bm_project(command="recent")`), and folder distribution. A deep session works
 through the capabilities above in whatever order the findings suggest. A topic pass
-maps one subject with `search_notes` and `build_context`, fills the gaps it finds, and
+maps one subject with `bm_search` and `bm_context`, fills the gaps it finds, and
 ends with a hub note.
 
 ## Best Practices
@@ -204,7 +204,7 @@ ends with a hub note.
 3. **Preserve permalinks.** Changing a permalink breaks inbound `memory://` links. Moves keep the permalink by default (unless the project enables `update_permalinks_on_move`).
 4. **Explain suggestions.** Say *why* a relation or merge makes sense.
 5. **Respect the existing system.** Enhance the user's organization — don't impose a new taxonomy.
-6. **Show the graph.** Use `build_context` to help the user see how notes connect.
+6. **Show the graph.** Use `bm_context` to help the user see how notes connect.
 
 ## Example Conversations
 

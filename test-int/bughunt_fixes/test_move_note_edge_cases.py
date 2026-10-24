@@ -28,7 +28,7 @@ async def test_move_note_accepts_memory_url(mcp_server, app, test_project):
     """move_note should accept a memory:// URL identifier like read/edit/delete do."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Memory Url Move",
@@ -38,16 +38,16 @@ async def test_move_note_accepts_memory_url(mcp_server, app, test_project):
             },
         )
         move = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "memory://src/memory-url-move",
-                "destination_path": "dst/memory-url-move.md",
+                "destination": "dst/memory-url-move.md",
                 "output_format": "json",
             },
         )
         result = _result(move)
-        assert result["moved"] is True, (
+        assert result["action"] == "moved", (
             f"move_note should resolve memory:// URLs but failed: {result.get('error')}"
         )
         assert result["file_path"] == "dst/memory-url-move.md"
@@ -58,7 +58,7 @@ async def test_move_note_bare_permalink_works_control(mcp_server, app, test_proj
     """Control: bare permalink (no memory://) DOES work for move_note."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Bare Permalink Move",
@@ -68,16 +68,16 @@ async def test_move_note_bare_permalink_works_control(mcp_server, app, test_proj
             },
         )
         move = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "src/bare-permalink-move",
-                "destination_path": "dst/bare-permalink-move.md",
+                "destination": "dst/bare-permalink-move.md",
                 "output_format": "json",
             },
         )
         result = _result(move)
-        assert result["moved"] is True, result.get("error")
+        assert result["action"] == "moved", result.get("error")
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_delete_note_accepts_memory_url_control(mcp_server, app, test_proj
     """Control: delete_note DOES resolve memory:// URLs (proves the contract)."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Delete Memory Url",
@@ -95,14 +95,14 @@ async def test_delete_note_accepts_memory_url_control(mcp_server, app, test_proj
             },
         )
         d = await client.call_tool(
-            "delete_note",
+            "bm_delete",
             {
                 "project": test_project.name,
                 "identifier": "memory://src/delete-memory-url",
                 "output_format": "json",
             },
         )
-        assert _result(d)["deleted"] is True
+        assert _result(d)["action"] == "deleted"
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_edit_note_accepts_memory_url_control(mcp_server, app, test_projec
     """Control: edit_note DOES resolve memory:// URLs (proves the contract)."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Edit Memory Url",
@@ -120,18 +120,18 @@ async def test_edit_note_accepts_memory_url_control(mcp_server, app, test_projec
             },
         )
         e = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "memory://src/edit-memory-url",
-                "operation": "append",
+                "command": "append",
                 "content": "\nEDITED",
                 "output_format": "json",
             },
         )
         ec = _result(e)
         assert ec.get("error") is None
-        assert ec.get("fileCreated") is False
+        assert ec["action"] == "edited"
 
 
 # --- Bug #12: nested 'projects' folder false positive ---
@@ -143,7 +143,7 @@ async def test_move_into_nested_projects_folder_not_flagged(mcp_server, app, tes
     as a cross-project move (the structural 'projects'-segment heuristic was removed)."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Nested Projects Note",
@@ -153,11 +153,11 @@ async def test_move_into_nested_projects_folder_not_flagged(mcp_server, app, tes
             },
         )
         move = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "inbox/nested-projects-note",
-                "destination_path": "notes/projects/2025/nested-projects-note.md",
+                "destination": "notes/projects/2025/nested-projects-note.md",
                 "output_format": "json",
             },
         )
@@ -165,7 +165,7 @@ async def test_move_into_nested_projects_folder_not_flagged(mcp_server, app, tes
         assert result.get("error") != "CROSS_PROJECT_MOVE_NOT_SUPPORTED", (
             "Legit nested 'projects' folder wrongly flagged as cross-project move"
         )
-        assert result["moved"] is True, result.get("error")
+        assert result["action"] == "moved", result.get("error")
 
 
 @pytest.mark.asyncio
@@ -180,7 +180,7 @@ async def test_move_outcome_mismatch_guidance_uses_actual_landing_path(
     """
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Outcome Guidance Note",
@@ -195,25 +195,23 @@ async def test_move_outcome_mismatch_guidance_uses_actual_landing_path(
         real_move_entity = KnowledgeClient.move_entity
         actual_landing_path = "unexpected/outcome-guidance-note.md"
 
-        async def diverging_move_entity(self, entity_id, destination_path):
-            result = await real_move_entity(self, entity_id, destination_path)
+        async def diverging_move_entity(self, entity_id, destination_path, *, base_checksum=None):
+            result = await real_move_entity(
+                self, entity_id, destination_path, base_checksum=base_checksum
+            )
             return result.model_copy(update={"file_path": actual_landing_path})
 
         monkeypatch.setattr(KnowledgeClient, "move_entity", diverging_move_entity)
 
         move = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "source/outcome-guidance-note",
-                "destination_path": "target/outcome-guidance-note.md",
+                "destination": "target/outcome-guidance-note.md",
             },
         )
 
         guidance = move.content[0].text
-        stale_identifier = "source/outcome-guidance-note"
-        assert "Unexpected Result Location" in guidance
-        assert f'read_note("{actual_landing_path}")' in guidance
-        assert f'delete_note("{actual_landing_path}", project="{test_project.name}")' in guidance
-        assert f'read_note("{stale_identifier}")' not in guidance
-        assert f'delete_note("{stale_identifier}", project="{test_project.name}")' not in guidance
+        assert guidance.splitlines()[0].endswith(f" to {actual_landing_path}")
+        assert "target/outcome-guidance-note.md" in guidance

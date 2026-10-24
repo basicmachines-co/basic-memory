@@ -158,18 +158,18 @@ class TestAnswerGraders:
         assert evaluate_grader(MarkerAbsent(marker="BMEVAL-x-1"), ctx).passed is True
 
     def test_answer_matches_accepts_both_tool_spellings(self, tmp_path: Path) -> None:
-        # The man-chain regression: the man page is edit-note(3) but the MCP
-        # tool is edit_note — both spellings are substantively correct.
-        grader = AnswerMatches(pattern=r"edit[-_]note")
-        assert evaluate_grader(grader, _ctx(tmp_path, "the page is edit-note(3)")).passed is True
-        assert evaluate_grader(grader, _ctx(tmp_path, "use the edit_note tool")).passed is True
-        result = evaluate_grader(grader, _ctx(tmp_path, "use write_note instead"))
+        # The man-chain regression: the man page is bm-edit(3) but the MCP
+        # tool is bm_edit — both spellings are substantively correct.
+        grader = AnswerMatches(pattern=r"bm[-_]edit")
+        assert evaluate_grader(grader, _ctx(tmp_path, "the page is bm-edit(3)")).passed is True
+        assert evaluate_grader(grader, _ctx(tmp_path, "use the bm_edit tool")).passed is True
+        result = evaluate_grader(grader, _ctx(tmp_path, "use bm_write instead"))
         assert result.passed is False
         assert "missing" in result.detail
 
     def test_answer_matches_is_case_insensitive_like_contains(self, tmp_path: Path) -> None:
-        grader = AnswerMatches(pattern=r"edit[-_]note")
-        assert evaluate_grader(grader, _ctx(tmp_path, "call Edit_Note")).passed is True
+        grader = AnswerMatches(pattern=r"bm[-_]edit")
+        assert evaluate_grader(grader, _ctx(tmp_path, "call BM_Edit")).passed is True
         assert evaluate_grader(grader, _ctx(tmp_path, None)).passed is False
 
 
@@ -412,10 +412,10 @@ class TestToolCalledAndJudge:
     def test_tool_called_diagnostic(self, tmp_path: Path) -> None:
         records = (
             TurnRecord(turn_index=0, kind="model"),
-            TurnRecord(turn_index=1, kind="tool", tool_name="search_notes"),
+            TurnRecord(turn_index=1, kind="tool", tool_name="bm_search"),
         )
         ctx = _ctx(tmp_path, turn_records=records)
-        grader = ToolCalled(name_pattern=r"search_notes|grep")
+        grader = ToolCalled(name_pattern=r"bm_search")
         result = evaluate_grader(grader, ctx)
         assert result.passed is True
         assert result.required is False

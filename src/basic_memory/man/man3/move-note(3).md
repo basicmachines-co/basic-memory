@@ -11,6 +11,9 @@ verified: 0.21.6 mcp
 
 # move-note(3)
 
+> Compatibility API: new MCP workflows use [[bm-move(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **move-note** — move a note or directory, keeping the database consistent

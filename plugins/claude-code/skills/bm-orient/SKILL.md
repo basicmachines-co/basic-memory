@@ -21,16 +21,16 @@ of a session; this is the deliberate mid-session version with deeper reads.
    `secondaryProjects`, `recallTimeframe`, `sessionProfile`, `repository`, and
    `placementConventions`. If no config is present, continue against the default
    Basic Memory project and mention that setup has not been run. Scope queries to
-   `primaryProject` by passing it as `project`, or as `project_id` if it's an
+   `primaryProject` by passing it as `project`, including when it is an
    `external_id` UUID.
 
-2. Query the primary project with `search_notes`:
-   - active tasks: `metadata_filters={"type": "task", "status": "active"}`
-   - open decisions: `metadata_filters={"type": "decision", "status": "open"}`
-   - recent sessions: `metadata_filters={"type": "session"}`, after
-     `recallTimeframe`
-   - recent coding sessions: `metadata_filters={"type": "coding_session",
-     "repository": "<configured repository>"}`, after `recallTimeframe`, when
+2. Query the primary project with `bm_search`:
+   - active tasks: `filters={"type": "task", "status": "active"}`
+   - open decisions: `filters={"type": "decision", "status": "open"}`
+   - recent sessions: `filters={"type": "session"}`, with
+     `since=<recallTimeframe>`
+   - recent coding sessions: `filters={"type": "coding_session",
+     "repository": "<configured repository>"}`, with `since=<recallTimeframe>`, when
      `sessionProfile` is `coding`
 
    Always query `"type": "session"`; include `"type": "coding_session"` for a

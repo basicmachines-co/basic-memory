@@ -16,7 +16,7 @@ async def test_search_basic_text_search(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes for searching
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Programming Guide",
@@ -27,7 +27,7 @@ async def test_search_basic_text_search(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Flask Web Development",
@@ -38,7 +38,7 @@ async def test_search_basic_text_search(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JavaScript Basics",
@@ -50,11 +50,8 @@ async def test_search_basic_text_search(mcp_server, app, test_project):
 
         # Search for Python-related content
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Python",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Python"},
         )
 
         assert len(search_result.content) == 1
@@ -74,7 +71,7 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Flask Tutorial",
@@ -85,7 +82,7 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Django Guide",
@@ -96,7 +93,7 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "React JavaScript",
@@ -108,11 +105,8 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
 
         # Test AND operator
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Python AND Flask",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Python AND Flask"},
         )
 
         result_text = search_result.content[0].text
@@ -121,11 +115,8 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
 
         # Test OR operator
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Flask OR Django",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Flask OR Django"},
         )
 
         result_text = search_result.content[0].text
@@ -134,11 +125,8 @@ async def test_search_boolean_operators(mcp_server, app, test_project):
 
         # Test NOT operator
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Python NOT Django",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Python NOT Django"},
         )
 
         result_text = search_result.content[0].text
@@ -152,7 +140,7 @@ async def test_search_title_only(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Database Design",
@@ -163,7 +151,7 @@ async def test_search_title_only(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Web Development",
@@ -175,12 +163,8 @@ async def test_search_title_only(mcp_server, app, test_project):
 
         # Search for "database" in titles only
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Database",
-                "search_type": "title",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Database", "mode": "title"},
         )
 
         result_text = search_result.content[0].text
@@ -195,7 +179,7 @@ async def test_search_permalink_exact(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "API Documentation",
@@ -206,7 +190,7 @@ async def test_search_permalink_exact(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "API Testing",
@@ -218,11 +202,11 @@ async def test_search_permalink_exact(mcp_server, app, test_project):
 
         # Search for exact permalink
         search_result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": f"{test_project.name}/api/api-documentation",
-                "search_type": "permalink",
+                "mode": "permalink",
             },
         )
 
@@ -238,7 +222,7 @@ async def test_search_permalink_pattern(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes in different folders
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting Notes January",
@@ -249,7 +233,7 @@ async def test_search_permalink_pattern(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting Notes February",
@@ -260,7 +244,7 @@ async def test_search_permalink_pattern(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Notes",
@@ -272,11 +256,11 @@ async def test_search_permalink_pattern(mcp_server, app, test_project):
 
         # Search for all meeting notes using pattern
         search_result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": f"{test_project.name}/meetings/*",
-                "search_type": "permalink",
+                "mode": "permalink",
             },
         )
 
@@ -307,7 +291,7 @@ This describes our development workflow.
 Regular content about development practices."""
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Development Process",
@@ -319,12 +303,8 @@ Regular content about development practices."""
 
         # Search for "development" in entities only
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "development",
-                "entity_types": ["entity"],
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "development", "items": ["note"]},
         )
 
         result_text = search_result.content[0].text
@@ -340,7 +320,7 @@ async def test_search_pagination(mcp_server, app, test_project):
         # Create multiple notes to test pagination
         for i in range(15):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Test Note {i + 1:02d}",
@@ -352,33 +332,23 @@ async def test_search_pagination(mcp_server, app, test_project):
 
         # Search with pagination (page 1, page_size 5)
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "test",
-                "page": 1,
-                "page_size": 5,
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "test", "page": 1, "page_size": 5},
         )
 
         result_text = search_result.content[0].text
         # Text format includes pagination info in footer
-        assert "page 1" in result_text
-        assert "page_size 5" in result_text
+        assert "page=2" in result_text
+        assert "page_size=5" in result_text
 
         # Search page 2
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "test",
-                "page": 2,
-                "page_size": 5,
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "test", "page": 2, "page_size": 5},
         )
 
         result_text = search_result.content[0].text
-        assert "page 2" in result_text
+        assert "page=3" in result_text
 
 
 @pytest.mark.asyncio
@@ -388,7 +358,7 @@ async def test_search_no_results(mcp_server, app, test_project, indexed_project)
     async with Client(mcp_server) as client:
         # Create a test note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Sample Note",
@@ -400,16 +370,13 @@ async def test_search_no_results(mcp_server, app, test_project, indexed_project)
 
         # Search for something that doesn't exist — use a unique nonsense string
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "xyzzy99nonexistent",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "xyzzy99nonexistent"},
         )
 
-        # Default text format returns "No results found" when empty
+        # Default text format returns "No results for" when empty
         result_text = search_result.content[0].text
-        assert "No results found" in result_text
+        assert "No results for" in result_text
 
 
 @pytest.mark.asyncio
@@ -419,7 +386,7 @@ async def test_search_complex_boolean_query(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Web Development",
@@ -430,7 +397,7 @@ async def test_search_complex_boolean_query(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Python Data Science",
@@ -441,7 +408,7 @@ async def test_search_complex_boolean_query(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JavaScript Web Development",
@@ -453,11 +420,8 @@ async def test_search_complex_boolean_query(mcp_server, app, test_project):
 
         # Complex boolean query: (Python OR JavaScript) AND web
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "(Python OR JavaScript) AND web",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "(Python OR JavaScript) AND web"},
         )
 
         result_text = search_result.content[0].text
@@ -473,7 +437,7 @@ async def test_search_case_insensitive(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create test note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Machine Learning Guide",
@@ -488,11 +452,8 @@ async def test_search_case_insensitive(mcp_server, app, test_project):
 
         for search_term in search_cases:
             search_result = await client.call_tool(
-                "search_notes",
-                {
-                    "project": test_project.name,
-                    "query": search_term,
-                },
+                "bm_search",
+                {"project": test_project.name, "query": search_term},
             )
 
             result_text = search_result.content[0].text
@@ -511,7 +472,7 @@ async def test_tags_param_vs_tag_query_comma_consistency(mcp_server, app, test_p
     async with Client(mcp_server) as client:
         # Note tagged alpha + beta
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Tag Shorthand Note",
@@ -523,23 +484,19 @@ async def test_tags_param_vs_tag_query_comma_consistency(mcp_server, app, test_p
 
         # Path A: tag: query shorthand with comma list -> splits, matches
         via_query = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "tag:alpha,beta",
-                "search_type": "text",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "tag:alpha,beta", "mode": "text"},
         )
         query_hit = "Tag Shorthand Note" in via_query.content[0].text
 
         # Path B: tags= parameter with the SAME comma string
         via_param = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "TagShorthandToken",
-                "search_type": "text",
-                "tags": "alpha,beta",
+                "mode": "text",
+                "filters": {"tags": ["alpha", "beta"]},
             },
         )
         param_hit = "Tag Shorthand Note" in via_param.content[0].text

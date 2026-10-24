@@ -16,7 +16,7 @@ async def test_move_directory_basic(mcp_server, app, test_project):
         # Create multiple notes in a source directory
         for i in range(3):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Doc {i + 1}",
@@ -28,30 +28,26 @@ async def test_move_directory_basic(mcp_server, app, test_project):
 
         # Move the entire directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "source-dir",
-                "destination_path": "dest-dir",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "source-dir", "destination": "dest-dir"},
         )
 
         # Should return successful move message with summary
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "Directory Moved Successfully" in move_text
-        assert "Total files: 3" in move_text
+        assert "Moved directory" in move_text
+        assert "(3 files)" in move_text
         assert "source-dir" in move_text
         assert "dest-dir" in move_text
 
         # Verify all notes can be read from new locations
         for i in range(3):
             read_result = await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": f"dest-dir/doc-{i + 1}",
+                    "include_frontmatter": False,
                 },
             )
             content = read_result.content[0].text
@@ -60,13 +56,16 @@ async def test_move_directory_basic(mcp_server, app, test_project):
         # Verify original locations no longer exist
         for i in range(3):
             read_original = await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": f"source-dir/doc-{i + 1}",
+                    "include_frontmatter": False,
                 },
+                raise_on_error=False,
             )
-            assert "Note Not Found" in read_original.content[0].text
+            assert read_original.is_error
+            assert "NOT_FOUND" in read_original.content[0].text
 
 
 @pytest.mark.asyncio
@@ -83,7 +82,7 @@ async def test_move_directory_nested(mcp_server, app, test_project):
 
         for dir_path in directories:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Note in {dir_path.split('/')[-1]}",
@@ -95,36 +94,33 @@ async def test_move_directory_nested(mcp_server, app, test_project):
 
         # Move the parent directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "projects/2024",
-                "destination_path": "archive/2024",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "projects/2024", "destination": "archive/2024"},
         )
 
         # Should move all nested files
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "Directory Moved Successfully" in move_text
-        assert "Total files: 3" in move_text
+        assert "Moved directory" in move_text
+        assert "(3 files)" in move_text
 
         # Verify nested structure is preserved
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "archive/2024/q1/note-in-q1",
+                "include_frontmatter": False,
             },
         )
         assert "Content in projects/2024/q1" in read_result.content[0].text
 
         read_result2 = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "archive/2024/q2/note-in-q2",
+                "include_frontmatter": False,
             },
         )
         assert "Content in projects/2024/q2" in read_result2.content[0].text
@@ -137,13 +133,8 @@ async def test_move_directory_empty(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Try to move a non-existent/empty directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "nonexistent-dir",
-                "destination_path": "dest-dir",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "nonexistent-dir", "destination": "dest-dir"},
             raise_on_error=False,
         )
 
@@ -151,7 +142,7 @@ async def test_move_directory_empty(mcp_server, app, test_project):
         assert move_result.is_error is True
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "No files found" in move_text
+        assert "NOT_FOUND" in move_text
 
 
 @pytest.mark.asyncio
@@ -174,7 +165,7 @@ async def test_move_directory_preserves_content(mcp_server, app, test_project):
 Detailed content that must be preserved."""
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Complex Note",
@@ -186,23 +177,19 @@ Detailed content that must be preserved."""
 
         # Move the directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "source-complex",
-                "destination_path": "dest-complex",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "source-complex", "destination": "dest-complex"},
         )
 
-        assert "Directory Moved Successfully" in move_result.content[0].text
+        assert "Moved directory" in move_result.content[0].text
 
         # Verify content preservation
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "dest-complex/complex-note",
+                "include_frontmatter": False,
             },
         )
 
@@ -220,7 +207,7 @@ async def test_move_directory_search_still_works(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create searchable note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Searchable Doc",
@@ -232,32 +219,25 @@ async def test_move_directory_search_still_works(mcp_server, app, test_project):
 
         # Verify searchable before move
         search_before = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "quantum entanglement",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "quantum entanglement"},
         )
         assert "Searchable Doc" in search_before.content[0].text
 
         # Move directory
         await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
-                "identifier": "searchable-dir",
-                "destination_path": "moved-searchable",
-                "is_directory": True,
+                "path": "searchable-dir",
+                "destination": "moved-searchable",
             },
         )
 
         # Verify still searchable after move
         search_after = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "quantum entanglement",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "quantum entanglement"},
         )
         search_text = search_after.content[0].text
         assert "quantum entanglement" in search_text
@@ -271,7 +251,7 @@ async def test_move_directory_single_file(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create single note in directory
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Single Note",
@@ -283,26 +263,22 @@ async def test_move_directory_single_file(mcp_server, app, test_project):
 
         # Move directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "single-dir",
-                "destination_path": "moved-single",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "single-dir", "destination": "moved-single"},
         )
 
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "Directory Moved Successfully" in move_text
-        assert "Total files: 1" in move_text
+        assert "Moved directory" in move_text
+        assert "(1 files)" in move_text
 
         # Verify note at new location
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "moved-single/single-note",
+                "include_frontmatter": False,
             },
         )
         assert "Only note in this directory" in read_result.content[0].text
@@ -316,7 +292,7 @@ async def test_move_directory_many_files(mcp_server, app, test_project):
         # Create 12 notes in the directory
         for i in range(12):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"ManyDoc {i + 1}",
@@ -328,18 +304,13 @@ async def test_move_directory_many_files(mcp_server, app, test_project):
 
         # Move the directory
         move_result = await client.call_tool(
-            "move_note",
-            {
-                "project": test_project.name,
-                "identifier": "many-files-dir",
-                "destination_path": "moved-many",
-                "is_directory": True,
-            },
+            "bm_move",
+            {"project": test_project.name, "path": "many-files-dir", "destination": "moved-many"},
         )
 
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "Directory Moved Successfully" in move_text
-        assert "Total files: 12" in move_text
+        assert "Moved directory" in move_text
+        assert "(12 files)" in move_text
         # Should show truncation message for >10 files
-        assert "... and 2 more" in move_text
+        assert "(12 files)" in move_text

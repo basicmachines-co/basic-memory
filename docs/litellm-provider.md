@@ -31,7 +31,7 @@ bm reindex --embeddings
 Then use vector or hybrid search:
 
 ```python
-search_notes("login token flow", search_type="hybrid")
+bm_search("login token flow", mode="hybrid")
 ```
 
 ## Basic Memory Options

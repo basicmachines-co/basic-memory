@@ -42,7 +42,7 @@ async def test_write_note_content_type_is_persisted_and_searchable(mcp_server, a
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Session Log",
@@ -54,7 +54,7 @@ async def test_write_note_content_type_is_persisted_and_searchable(mcp_server, a
 
         # The persisted frontmatter should report the content-declared type.
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "logs/session-log",
@@ -67,11 +67,11 @@ async def test_write_note_content_type_is_persisted_and_searchable(mcp_server, a
 
         # And the note_types filter must return it (and only it for this token).
         search_result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "SessionTypeToken",
-                "search_type": "text",
+                "mode": "text",
                 "note_types": ["session"],
                 "output_format": "json",
             },
@@ -108,7 +108,7 @@ async def test_write_note_overwrite_flips_persisted_type(mcp_server, app, test_p
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Type Flip",
@@ -119,7 +119,7 @@ async def test_write_note_overwrite_flips_persisted_type(mcp_server, app, test_p
         )
 
         before = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "flip/type-flip",
@@ -131,7 +131,7 @@ async def test_write_note_overwrite_flips_persisted_type(mcp_server, app, test_p
 
         # Overwrite with a different content type.
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Type Flip",
@@ -143,7 +143,7 @@ async def test_write_note_overwrite_flips_persisted_type(mcp_server, app, test_p
         )
 
         after = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "flip/type-flip",

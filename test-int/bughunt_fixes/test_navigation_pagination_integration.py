@@ -32,7 +32,7 @@ def _parse(result):
 async def _seed_notes(client, project, n=15):
     for i in range(n):
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": project,
                 "title": f"Pg Note {i + 1:02d}",
@@ -56,19 +56,24 @@ async def test_search_notes_rejects_nonpositive_page_size(mcp_server, app, test_
         # Baseline: recent_activity correctly rejects page_size < 1.
         with pytest.raises(ToolError, match="page_size"):
             await client.call_tool(
-                "recent_activity",
-                {"project": test_project.name, "page_size": -3, "output_format": "json"},
+                "bm_project",
+                {
+                    "project": test_project.name,
+                    "page_size": -3,
+                    "output_format": "json",
+                    "command": "recent",
+                },
             )
 
         # search_notes must now reject page_size=0 with the same guard, rather than
         # returning an empty payload that misleadingly claims more results exist.
         with pytest.raises(ToolError, match="page_size"):
             await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": "pagination",
-                    "search_type": "text",
+                    "mode": "text",
                     "page": 1,
                     "page_size": 0,
                     "output_format": "json",
@@ -78,11 +83,11 @@ async def test_search_notes_rejects_nonpositive_page_size(mcp_server, app, test_
         # Negative page_size must not return an arbitrary uncapped slice — also rejected.
         with pytest.raises(ToolError, match="page_size"):
             await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": "pagination",
-                    "search_type": "text",
+                    "mode": "text",
                     "page": 1,
                     "page_size": -3,
                     "output_format": "json",
@@ -92,11 +97,11 @@ async def test_search_notes_rejects_nonpositive_page_size(mcp_server, app, test_
         # page < 1 is rejected too.
         with pytest.raises(ToolError, match="page"):
             await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": "pagination",
-                    "search_type": "text",
+                    "mode": "text",
                     "page": 0,
                     "page_size": 5,
                     "output_format": "json",
@@ -105,11 +110,11 @@ async def test_search_notes_rejects_nonpositive_page_size(mcp_server, app, test_
 
         # A valid page_size still works and reports honest pagination.
         ok = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "pagination",
-                "search_type": "text",
+                "mode": "text",
                 "page": 1,
                 "page_size": 5,
                 "output_format": "json",
@@ -165,7 +170,7 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
     a non-positive page_size must never silently drop it."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Primary Note",
@@ -175,7 +180,7 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
             },
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Other Note",
@@ -187,8 +192,12 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
 
         # Sanity: a normal page_size returns the primary note.
         r_ok = await client.call_tool(
-            "build_context",
-            {"project": test_project.name, "url": "ctx/primary-note", "output_format": "json"},
+            "bm_context",
+            {
+                "project": test_project.name,
+                "identifier": "ctx/primary-note",
+                "output_format": "json",
+            },
         )
         d_ok = _parse(r_ok)
         assert d_ok["metadata"]["primary_count"] == 1
@@ -197,20 +206,20 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
         # with a clear error rather than returning primary_count=0.
         with pytest.raises(ToolError, match="page_size"):
             await client.call_tool(
-                "build_context",
+                "bm_context",
                 {
                     "project": test_project.name,
-                    "url": "ctx/primary-note",
+                    "identifier": "ctx/primary-note",
                     "page_size": 0,
                     "output_format": "json",
                 },
             )
         with pytest.raises(ToolError, match="max_related"):
             await client.call_tool(
-                "build_context",
+                "bm_context",
                 {
                     "project": test_project.name,
-                    "url": "ctx/primary-note",
+                    "identifier": "ctx/primary-note",
                     "max_related": -1,
                     "output_format": "json",
                 },
@@ -221,12 +230,12 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
             ("page_size", MAX_CONTEXT_PAGE_SIZE + 1),
             ("max_related", MAX_CONTEXT_RELATED_RESULTS + 1),
         ):
-            with pytest.raises(ToolError, match="bounded traversal starting point"):
+            with pytest.raises(ToolError, match=parameter):
                 await client.call_tool(
-                    "build_context",
+                    "bm_context",
                     {
                         "project": test_project.name,
-                        "url": "ctx/primary-note",
+                        "identifier": "ctx/primary-note",
                         parameter: value,
                         "output_format": "json",
                     },
@@ -234,10 +243,10 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
 
         # Values at the ceiling remain valid and return the requested primary note.
         at_limits = await client.call_tool(
-            "build_context",
+            "bm_context",
             {
                 "project": test_project.name,
-                "url": "ctx/primary-note",
+                "identifier": "ctx/primary-note",
                 "page_size": MAX_CONTEXT_PAGE_SIZE,
                 "max_related": MAX_CONTEXT_RELATED_RESULTS,
                 "output_format": "json",
@@ -256,7 +265,7 @@ async def test_recent_activity_project_id_header_shows_name_not_uuid(
     """When routed via project_id, the text header must name the project, not the UUID."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "RA Header Note",
@@ -267,8 +276,8 @@ async def test_recent_activity_project_id_header_shows_name_not_uuid(
         )
 
         result = await client.call_tool(
-            "recent_activity",
-            {"project_id": test_project.external_id, "output_format": "text"},
+            "bm_project",
+            {"project": test_project.external_id, "output_format": "text", "command": "recent"},
         )
         text = result.content[0].text
 

@@ -42,10 +42,10 @@ settings:
 
 ## Creating a Task
 
-When work qualifies, create a task note. Use `write_note` with `note_type="Task"` and put queryable fields in `metadata`:
+When work qualifies, create a task note. Use `bm_write` with `note_type="Task"` and put queryable fields in `metadata`:
 
 ```python
-write_note(
+bm_write(
   title="Descriptive task name",
   directory="tasks",
   note_type="Task",
@@ -79,14 +79,14 @@ What future-you needs to pick up this work. Include:
 )
 ```
 
-**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `search_notes` with `metadata_filters`. Fields as observations (`- [status] active`) power `schema_validate`. Include queryable fields in both places for full coverage.
+**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema(command="validate")`. Include queryable fields in both places for full coverage.
 
 ### Key Principles
 
 - **Steps are concrete and checkable** — "Implement X in file Y", not "figure out stuff"
 - **Context is for post-amnesia resumption** — Write it as if explaining to a smart person who knows nothing about what you've been doing
 - **Relations link to other entities** — `parent_task [[Other Task]]`, `related_to [[Some Note]]`
-- **Note types are normalized to snake_case** — `write_note(note_type="Task")` stores `type: task`, and `note_types=["Task"]` or `note_types=["task"]` both match it.
+- **Note types are normalized to snake_case** — `bm_write(note_type="Task")` stores `type: task`, and `note_types=["Task"]` or `note_types=["task"]` both match it.
 
 ## Resuming After Compaction
 
@@ -94,7 +94,7 @@ On session start or after compaction:
 
 1. **Search for active tasks:**
    ```python
-   search_notes(note_types=["task"], status="active")
+   bm_search(note_types=["task"], filters={"status": "active"})
    ```
 
 2. **Read the task note** to get full context
@@ -122,13 +122,12 @@ edit. Two sessions often update the same task, for example in a pre-compaction
 flush; a revision conflict means the other one wrote first, so re-read before
 writing.
 
-Update frontmatter too, with the `metadata` parameter (empty `content` leaves the body alone):
+Update frontmatter too, with `command="set_metadata"` and the `metadata` parameter (the body stays unchanged):
 ```python
-task = read_note(identifier="tasks/descriptive-task-name", output_format="json")
-edit_note(
+task = bm_read(identifier="tasks/descriptive-task-name", output_format="json")
+bm_edit(
   identifier="tasks/descriptive-task-name",
-  operation="append",
-  content="",
+  command="set_metadata",
   metadata={"current_step": 3},
   expected_checksum=task["checksum"]
 )
@@ -148,7 +147,7 @@ Add a brief summary of what was accomplished and any follow-up needed.
 
 When a compaction event is imminent:
 
-1. Find all active tasks: `search_notes(note_types=["task"], status="active")`
+1. Find all active tasks: `bm_search(note_types=["task"], filters={"status": "active"})`
 2. For each, update:
    - `current_step` to reflect actual progress
    - `context` with everything needed to resume
@@ -161,14 +160,14 @@ With BM's schema system, tasks are fully queryable:
 
 | Query | What it finds |
 |-------|--------------|
-| `search_notes(note_types=["task"])` | All tasks |
-| `search_notes(note_types=["task"], status="active")` | Active tasks |
-| `search_notes(note_types=["task"], status="blocked")` | Blocked tasks |
-| `search_notes(note_types=["task"], metadata_filters={"assigned_to": "claude"})` | My tasks |
-| `search_notes("blockers", note_types=["task"])` | Tasks with blockers |
-| `search_notes(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")` | Tasks with a step due this week |
-| `schema_validate(note_type="Task")` | Validate all tasks against schema |
-| `schema_diff(note_type="Task")` | Detect drift between schema and actual task notes |
+| `bm_search(note_types=["task"])` | All tasks |
+| `bm_search(note_types=["task"], filters={"status": "active"})` | Active tasks |
+| `bm_search(note_types=["task"], filters={"status": "blocked"})` | Blocked tasks |
+| `bm_search(note_types=["task"], filters={"assigned_to": "claude"})` | My tasks |
+| `bm_search("blockers", note_types=["task"])` | Tasks with blockers |
+| `bm_search(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")` | Tasks with a step due this week |
+| `bm_schema(command="validate", note_type="Task")` | Validate all tasks against schema |
+| `bm_schema(command="diff", note_type="Task")` | Detect drift between schema and actual task notes |
 
 ### Due Dates
 
@@ -189,4 +188,4 @@ also returns overdue items.
 - **Context > steps** — Steps tell you what to do; context tells you why and how
 - **Close finished tasks** — Don't leave completed work as `active`
 - **Link related tasks** — Use `parent_task [[X]]` or relations to connect related work
-- **Schema validation is your friend** — Run `schema_validate(note_type="Task")` periodically to catch incomplete tasks
+- **Schema validation is your friend** — Run `bm_schema(command="validate", note_type="Task")` periodically to catch incomplete tasks

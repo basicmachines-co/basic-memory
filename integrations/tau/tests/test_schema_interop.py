@@ -51,7 +51,7 @@ async def test_shared_schema_and_cross_checkout_recall(
             )
             confirm_write(
                 await connection.call(
-                    "write_note",
+                    "bm_write",
                     {
                         "title": metadata["title"],
                         "note_type": "schema",
@@ -78,8 +78,9 @@ async def test_shared_schema_and_cross_checkout_recall(
             assert path is not None
             report = structured(
                 await connection.call(
-                    "schema_validate",
+                    "bm_schema",
                     {
+                        "command": "validate",
                         "identifier": path,
                         "project": "main",
                         "output_format": "json",
@@ -92,10 +93,10 @@ async def test_shared_schema_and_cross_checkout_recall(
             # This is the hook's repository query, not a Tau-specific receipt lookup.
             result = structured(
                 await connection.call(
-                    "search_notes",
+                    "bm_search",
                     {
                         "note_types": ["coding_session"],
-                        "metadata_filters": {"repository": "example/project"},
+                        "filters": {"repository": "example/project"},
                         "project": "main",
                         "output_format": "json",
                     },
@@ -110,7 +111,7 @@ async def test_shared_schema_and_cross_checkout_recall(
         note = Note.model_validate(
             structured(
                 await connection.call(
-                    "read_note", {"identifier": path, "project": "main", "output_format": "json"}
+                    "bm_read", {"identifier": path, "project": "main", "output_format": "json"}
                 )
             )
         )
@@ -127,7 +128,7 @@ async def test_shared_schema_and_cross_checkout_recall(
             foreign_metadata["agent"] = "codex"
         foreign = confirm_write(
             await connection.call(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Other agent engineering checkpoint",
                     "note_type": "coding_session",
@@ -142,8 +143,13 @@ async def test_shared_schema_and_cross_checkout_recall(
         )
         foreign_report = structured(
             await connection.call(
-                "schema_validate",
-                {"identifier": foreign.file_path, "project": "main", "output_format": "json"},
+                "bm_schema",
+                {
+                    "command": "validate",
+                    "identifier": foreign.file_path,
+                    "project": "main",
+                    "output_format": "json",
+                },
             )
         )
         assert isinstance(foreign_report, dict)

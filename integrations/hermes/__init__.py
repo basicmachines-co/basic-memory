@@ -67,16 +67,16 @@ PROVIDER_NAME = "basic-memory"
 
 # Hermes-side tool names → BM MCP tool names. Curated subset of BM's surface.
 _HERMES_TO_BM: dict[str, str] = {
-    "bm_search": "search_notes",
-    "bm_read": "read_note",
-    "bm_write": "write_note",
-    "bm_edit": "edit_note",
-    "bm_context": "build_context",
-    "bm_delete": "delete_note",
-    "bm_move": "move_note",
-    "bm_recent": "recent_activity",
-    "bm_projects": "list_memory_projects",
-    "bm_workspaces": "list_workspaces",
+    "bm_search": "bm_search",
+    "bm_read": "bm_read",
+    "bm_write": "bm_write",
+    "bm_edit": "bm_edit",
+    "bm_context": "bm_context",
+    "bm_delete": "bm_delete",
+    "bm_move": "bm_move",
+    "bm_recent": "bm_project",
+    "bm_projects": "bm_project",
+    "bm_workspaces": "bm_project",
 }
 
 # Discovery tools that operate across all projects/workspaces. They don't
@@ -317,9 +317,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "bm_workspaces",
         "description": (
-            "List Basic Memory Cloud workspaces the user belongs to. Workspaces "
-            "are a BM Cloud concept; local mode returns just the personal "
-            "workspace. Returns JSON with name, type, role, and default flag. "
+            "List projects with their Basic Memory Cloud workspace fields. "
+            "Workspaces without accessible projects are not included. "
             "Pair with bm_projects to disambiguate when the same project name "
             "exists in multiple workspaces."
         ),
@@ -904,7 +903,7 @@ def _translate_args(
         project_id_override = args.get("project_id")
         project_name_override = args.get("project")
         if project_id_override:
-            out["project_id"] = str(project_id_override)
+            out["project"] = str(project_id_override)
         elif project_name_override:
             out["project"] = str(project_name_override)
         elif not _should_omit_default_project(hermes_tool, args):
@@ -915,6 +914,7 @@ def _translate_args(
         if "limit" in args and args["limit"] is not None:
             out["page_size"] = int(args["limit"])
     elif hermes_tool == "bm_read":
+        out["include_frontmatter"] = False
         out["identifier"] = args["identifier"]
         for key in ("include_frontmatter", "output_format"):
             if args.get(key) is not None:
@@ -933,31 +933,33 @@ def _translate_args(
                 out[key] = args[key]
     elif hermes_tool == "bm_edit":
         out["identifier"] = args["identifier"]
-        out["operation"] = args["operation"]
+        out["command"] = args["operation"]
         out["content"] = args["content"]
         if args.get("find_text") is not None:
             out["find_text"] = args["find_text"]
         if args.get("section") is not None:
             out["section"] = args["section"]
     elif hermes_tool == "bm_context":
-        out["url"] = args["url"]
+        out["identifier"] = args["url"]
         if args.get("depth") is not None:
             out["depth"] = int(args["depth"])
     elif hermes_tool == "bm_delete":
         out["identifier"] = args["identifier"]
     elif hermes_tool == "bm_move":
         out["identifier"] = args["identifier"]
-        out["destination_folder"] = args["new_folder"]
+        out["destination"] = str(args["new_folder"]).rstrip("/") + "/"
     elif hermes_tool == "bm_recent":
+        out["command"] = "recent"
         if args.get("timeframe"):
-            out["timeframe"] = str(args["timeframe"])
+            out["since"] = str(args["timeframe"])
         if args.get("limit") is not None:
             out["page_size"] = int(args["limit"])
         if args.get("type"):
-            out["type"] = args["type"]
+            out["items"] = ["note" if args["type"] == "entity" else args["type"]]
     elif hermes_tool in _GLOBAL_TOOLS:
         # The agent needs to parse identifiers (UUIDs, workspace slugs) out
         # of the response, so request JSON regardless of BM's text default.
+        out["command"] = "list"
         out["output_format"] = "json"
     return bm_tool, out
 
@@ -1276,7 +1278,7 @@ class BasicMemoryProvider(MemoryProvider):
         if not self._initialized or self._actor is None or self._is_circuit_open():
             return ""
         try:
-            # search_type="text" — bypass BM's "hybrid" default which mixes FTS
+            # mode="text" — bypass BM's "hybrid" default which mixes FTS
             # with vector search. Vector indexing is scheduled asynchronously
             # in BM (see services/search_service.py:_schedule_vector_sync_if_enabled),
             # so hybrid search can miss notes that were just written, especially
@@ -1284,12 +1286,12 @@ class BasicMemoryProvider(MemoryProvider):
             # 3s budget and the queries are usually keyword-like — FTS-only is
             # both faster and more deterministic.
             raw = self._actor.call(
-                "search_notes",
+                "bm_search",
                 {
                     "project": self._project,
                     "query": query,
                     "page_size": 5,
-                    "search_type": "text",
+                    "mode": "text",
                     "output_format": "json",
                 },
                 timeout=3.0,
@@ -1307,16 +1309,16 @@ class BasicMemoryProvider(MemoryProvider):
 
         def _bg() -> None:
             try:
-                # search_type="text" mirrors prefetch() — see note there. The
+                # mode="text" mirrors prefetch() — see note there. The
                 # background path can afford a longer timeout but the
                 # async-vector-indexing race still applies.
                 raw = self._actor.call(  # type: ignore[union-attr]
-                    "search_notes",
+                    "bm_search",
                     {
                         "project": self._project,
                         "query": query,
                         "page_size": 5,
-                        "search_type": "text",
+                        "mode": "text",
                         "output_format": "json",
                     },
                     timeout=10.0,
@@ -1405,16 +1407,16 @@ class BasicMemoryProvider(MemoryProvider):
                 "tags": ["hermes-session", _hostname()],
                 "output_format": "json",
             }
-            raw = self._actor.call("write_note", args, timeout=15.0)  # type: ignore[union-attr]
+            raw = self._actor.call("bm_write", args, timeout=15.0)  # type: ignore[union-attr]
             self._session_note_id = _extract_permalink(raw, fallback=title)
         else:
             args = {
                 "project": self._project,
                 "identifier": self._session_note_id,
-                "operation": "append",
+                "command": "append",
                 "content": "\n" + block,
             }
-            self._actor.call("edit_note", args, timeout=15.0)  # type: ignore[union-attr]
+            self._actor.call("bm_edit", args, timeout=15.0)  # type: ignore[union-attr]
 
     def _session_note_title(self) -> str:
         ts = (self._session_started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H%M")
@@ -1491,7 +1493,7 @@ class BasicMemoryProvider(MemoryProvider):
             "output_format": "json",
         }
         try:
-            self._actor.call("write_note", args, timeout=15.0)  # type: ignore[union-attr]
+            self._actor.call("bm_write", args, timeout=15.0)  # type: ignore[union-attr]
         except Exception as e:
             logger.warning("basic-memory: summary write failed: %s", e)
 
@@ -1703,7 +1705,7 @@ def _build_slash_commands(
             return err
         try:
             raw = provider._actor.call(
-                "search_notes",
+                "bm_search",
                 {
                     "project": provider._project,
                     "query": args,
@@ -1730,8 +1732,13 @@ def _build_slash_commands(
             return err
         try:
             raw = provider._actor.call(
-                "read_note",
-                {"project": provider._project, "identifier": args},
+                "bm_read",
+                {
+                    "project": provider._project,
+                    "identifier": args,
+                    "include_frontmatter": False,
+                    "output_format": "text",
+                },
                 timeout=15.0,
             )
         except Exception as e:
@@ -1749,8 +1756,13 @@ def _build_slash_commands(
             return err
         try:
             raw = provider._actor.call(
-                "build_context",
-                {"project": provider._project, "url": args, "depth": 1},
+                "bm_context",
+                {
+                    "project": provider._project,
+                    "identifier": args,
+                    "depth": 1,
+                    "output_format": "text",
+                },
                 timeout=15.0,
             )
         except Exception as e:
@@ -1769,10 +1781,11 @@ def _build_slash_commands(
             return err
         try:
             raw = provider._actor.call(
-                "recent_activity",
+                "bm_project",
                 {
                     "project": provider._project,
-                    "timeframe": timeframe,
+                    "command": "recent",
+                    "since": timeframe,
                     "page_size": 10,
                     "output_format": "json",
                 },
@@ -1781,18 +1794,9 @@ def _build_slash_commands(
         except Exception as e:
             return f"bm-recent: {e}"
         data = _unwrap_json_or_text(raw)
-        results: list[Any] = []
-        if isinstance(data, list):
-            # BM's recent_activity returns `list[dict]` in JSON mode — that's
-            # the documented signature (`-> str | list[dict]`).
-            results = data
-        elif isinstance(data, dict):
-            # Older BM versions or wrapping layers may bury the rows under a key.
-            for key in ("results", "items", "activity", "primary_results"):
-                val = data.get(key)
-                if isinstance(val, list):
-                    results = val
-                    break
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            return "bm-recent: invalid activity response"
+        results = data["results"]
         return _format_result_rows(
             results,
             header=f"Basic Memory activity ({timeframe}):",
@@ -1835,7 +1839,7 @@ def _build_slash_commands(
         folder = provider._remember_folder or "bm-remember"
         try:
             raw = provider._actor.call(
-                "write_note",
+                "bm_write",
                 {
                     "project": provider._project,
                     "title": title,
@@ -1858,8 +1862,8 @@ def _build_slash_commands(
             return err
         try:
             raw = provider._actor.call(
-                "list_memory_projects",
-                {"output_format": "json"},
+                "bm_project",
+                {"command": "list", "output_format": "json"},
                 timeout=15.0,
             )
         except Exception as e:
@@ -1900,24 +1904,27 @@ def _build_slash_commands(
             )
         try:
             raw = provider._actor.call(
-                "list_workspaces",
-                {"output_format": "json"},
+                "bm_project",
+                {"command": "list", "output_format": "json"},
                 timeout=15.0,
             )
         except Exception as e:
             return f"bm-workspace: {e}"
         data = _unwrap_json_or_text(raw)
-        workspaces: list[Any] = []
+        workspaces: dict[str, dict[str, Any]] = {}
         if isinstance(data, dict):
-            for key in ("workspaces", "results", "items"):
-                val = data.get(key)
-                if isinstance(val, list):
-                    workspaces = val
-                    break
+            for project in data.get("projects", []):
+                tenant_id = project.get("workspace_tenant_id")
+                if tenant_id:
+                    workspaces[tenant_id] = {
+                        "name": project.get("workspace_name"),
+                        "workspace_type": project.get("workspace_type"),
+                        "is_default": project.get("workspace_is_default"),
+                    }
         if not workspaces:
             return "No Basic Memory Cloud workspaces found."
         lines = ["Basic Memory Cloud workspaces:"]
-        for w in workspaces:
+        for w in workspaces.values():
             if isinstance(w, dict):
                 name = str(w.get("name") or w.get("slug") or "(unnamed)")
                 wtype = w.get("workspace_type") or ""

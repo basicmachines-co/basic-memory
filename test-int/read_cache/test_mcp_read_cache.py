@@ -56,7 +56,7 @@ async def test_mcp_uses_configured_redis_for_requests_and_invalidation(
             assert resolve_container().read_cache is mcp_container.read_cache
 
             created = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Standalone Redis Cache",
@@ -68,11 +68,12 @@ async def test_mcp_uses_configured_redis_for_requests_and_invalidation(
 
             for _ in range(2):
                 result = await client.call_tool(
-                    "read_note",
+                    "bm_read",
                     {
                         "project": test_project.name,
                         "identifier": "cache/standalone-redis-cache",
                         "output_format": "json",
+                        "include_frontmatter": False,
                     },
                 )
                 assert result.is_error is False
@@ -107,7 +108,7 @@ async def test_mcp_restart_invalidates_persisted_project_entries(
 
         async with Client(mcp_server) as client:
             created = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Offline Restart",
@@ -117,11 +118,12 @@ async def test_mcp_restart_invalidates_persisted_project_entries(
             )
             assert created.is_error is False
             read = await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": "cache/offline-restart",
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
             assert read.is_error is False

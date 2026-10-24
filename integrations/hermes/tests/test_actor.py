@@ -29,7 +29,7 @@ def test_start_brings_actor_up(bm):
         assert actor._thread is not None and actor._thread.is_alive()
         # Tools cache populated
         names = {t["name"] for t in actor.list_tools()}
-        assert "search_notes" in names
+        assert "bm_search" in names
     finally:
         actor.shutdown(timeout=2.0)
 
@@ -121,7 +121,7 @@ def test_shutdown_is_idempotent(bm):
 def test_call_before_start_raises(bm):
     actor = bm._BmMcpActor(["fake-bm", "mcp"])
     with pytest.raises(RuntimeError):
-        actor.call("search_notes", {})
+        actor.call("bm_search", {})
 
 
 def test_call_after_shutdown_raises(bm):
@@ -129,7 +129,7 @@ def test_call_after_shutdown_raises(bm):
     actor.start(timeout=5.0)
     actor.shutdown(timeout=2.0)
     with pytest.raises(RuntimeError, match="not running"):
-        actor.call("search_notes", {})
+        actor.call("bm_search", {})
 
 
 def test_call_dispatches_through_actor_loop(bm):
@@ -137,11 +137,11 @@ def test_call_dispatches_through_actor_loop(bm):
     actor = make_scripted_actor(bm, session=session)
     actor.start(timeout=5.0)
     try:
-        out = actor.call("search_notes", {"query": "hi"}, timeout=5.0)
+        out = actor.call("bm_search", {"query": "hi"}, timeout=5.0)
         # Output is whatever _extract_mcp_text produces; we just verify it
         # contains the response payload we configured.
         assert "ok" in out
-        assert session.calls == [("search_notes", {"query": "hi"})]
+        assert session.calls == [("bm_search", {"query": "hi"})]
     finally:
         actor.shutdown(timeout=2.0)
 
@@ -151,7 +151,7 @@ def test_call_returns_mcp_extracted_text(bm):
     actor = make_scripted_actor(bm, session=session)
     actor.start(timeout=5.0)
     try:
-        out = actor.call("write_note", {"title": "T"}, timeout=5.0)
+        out = actor.call("bm_write", {"title": "T"}, timeout=5.0)
         parsed = json.loads(out)
         assert parsed["permalink"] == "p/q/r"
     finally:
@@ -165,7 +165,7 @@ def test_call_timeout_raises_and_cancels_coroutine(bm):
     try:
         t0 = time.monotonic()
         with pytest.raises(concurrent.futures.TimeoutError):
-            actor.call("search_notes", {}, timeout=0.3)
+            actor.call("bm_search", {}, timeout=0.3)
         elapsed = time.monotonic() - t0
         # Sanity: we didn't accidentally wait the full session-side sleep
         assert elapsed < 2.0

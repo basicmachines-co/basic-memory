@@ -48,7 +48,7 @@ def test_sync_turn_first_turn_calls_write_note(bm):
 
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
-    assert bm_tool == "write_note"
+    assert bm_tool == "bm_write"
     assert bm_args["project"] == "test-proj"
     assert bm_args["directory"] == "hermes-sessions"
     assert "Hermes Session" in bm_args["title"]
@@ -101,9 +101,9 @@ def test_sync_turn_subsequent_turn_calls_edit_note_append(bm):
 
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
-    assert bm_tool == "edit_note"
+    assert bm_tool == "bm_edit"
     assert bm_args["identifier"] == "test-proj/hermes-sessions/already-exists"
-    assert bm_args["operation"] == "append"
+    assert bm_args["command"] == "append"
     assert "turn 2 user" in bm_args["content"]
     assert "turn 2 assistant" in bm_args["content"]
 
@@ -126,7 +126,7 @@ def test_sync_turn_session_note_id_stable_across_turns(bm):
     assert p._session_note_id == first_id, "session_note_id mutated on second turn"
     # And the second call was edit_note, not write_note
     second_call_tool = actor.call.call_args_list[1][0][0]
-    assert second_call_tool == "edit_note"
+    assert second_call_tool == "bm_edit"
 
 
 # ---- sync_turn gating ----
@@ -188,7 +188,7 @@ def test_capture_turn_first_call_writes_note_with_session_metadata(bm):
     actor.call.return_value = json.dumps({"permalink": "p/folder/note"})
     p._capture_turn("u msg", "a msg")
     bm_tool, bm_args = actor.call.call_args[0][:2]
-    assert bm_tool == "write_note"
+    assert bm_tool == "bm_write"
     assert "20260510_123456_abcdef" in bm_args["content"]
     # Auto-captured banner present
     assert "Auto-captured" in bm_args["content"]
@@ -223,7 +223,7 @@ def test_on_session_end_writes_summary_note(bm):
 
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
-    assert bm_tool == "write_note"
+    assert bm_tool == "bm_write"
     assert "Hermes Session Summary" in bm_args["title"]
     assert bm_args["directory"] == "hermes-sessions"
     assert "first user message" in bm_args["content"]

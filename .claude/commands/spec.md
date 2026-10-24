@@ -1,5 +1,5 @@
 ---
-allowed-tools: mcp__basic-memory__write_note, mcp__basic-memory__read_note, mcp__basic-memory__search_notes, mcp__basic-memory__edit_note
+allowed-tools: mcp__basic-memory__bm_write, mcp__basic-memory__bm_read, mcp__basic-memory__bm_search, mcp__basic-memory__bm_edit
 argument-hint: [create|status|show|review] [spec-name]
 description: Manage specifications in our development process
 ---
@@ -23,16 +23,16 @@ Execute the spec command: `/spec $ARGUMENTS`
 ### If command is "create":
 1. Get next SPEC number by searching existing specs in "specs" project
 2. Create new spec using template from SPEC-2
-3. Use mcp__basic-memory__write_note with project="specs"
+3. Use mcp__basic-memory__bm_write with project="specs"
 4. Include standard sections: Why, What, How, How to Evaluate
 
 ### If command is "status":
-1. Use mcp__basic-memory__search_notes with project="specs"
+1. Use mcp__basic-memory__bm_search with project="specs"
 2. Display table with spec number, title, and progress
 3. Show completion status from checkboxes in content
 
 ### If command is "show":
-1. Use mcp__basic-memory__read_note with project="specs"
+1. Use mcp__basic-memory__bm_read with project="specs"
 2. Display the full spec content
 
 ### If command is "review":
@@ -40,5 +40,5 @@ Execute the spec command: `/spec $ARGUMENTS`
 2. Review the implementation against each success criterion: which specified behavior works,
    which tests cover it (`tests/`, `test-int/`), and whether `just check` and the relevant
    `just test-*` targets pass.
-3. Update the spec with the findings via mcp__basic-memory__edit_note, marking each criterion
+3. Update the spec with the findings via mcp__basic-memory__bm_edit, marking each criterion
    met or unmet with evidence; list unmet criteria as remaining work.

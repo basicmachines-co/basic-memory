@@ -37,7 +37,7 @@ thread cursor: what changed, what was verified, what decisions matter, and what
 the next Codex thread should do first.
 
 Codex sessions are found by structured recall:
-`search_notes(metadata_filters={"type": "codex_session"}, after_date="7d")`.
+`bm_search(filters={"type": "codex_session"}, since="7d")`.
 
 New checkpoints from one Codex chat share `agent: codex` and `session_id`.
 Legacy `codex_session_id` remains accepted for existing notes. Each new

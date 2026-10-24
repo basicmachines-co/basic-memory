@@ -1,6 +1,6 @@
 > Pi package reference only.
 > These canonical Basic Memory instructions may mention direct MCP tools such as
-> `read_note`, `write_note`, `search_notes`, or `build_context`.
+> `bm_read`, `bm_write`, `bm_search`, or `bm_context`.
 > In Pi CLI mode, use the active `basic-memory-pi` skill with `bm_recall` and
 > `bm_capture` instead. In Pi MCP mode, only use direct Basic Memory tool names
 > if the MCP adapter exposes them in the current runtime.
@@ -58,7 +58,7 @@ permalink: custom-path     # optional — auto-generated from title if omitted
 - Custom `type` values (Task, Meeting, Person, etc.) work with the schema system. See the **memory-schema** skill for defining schemas, validating notes against them, and detecting drift.
 - The `permalink` is auto-generated from the `title` and `directory`. For example, title "API Design Decisions" in directory "specs" produces permalink `specs/api-design-decisions` and memory URL `memory://specs/api-design-decisions`. If no directory is specified, the permalink is just the kebab-cased title. By default permalinks stay stable across file moves (unless the project enables `update_permalinks_on_move`). You rarely need to set one manually.
 
-> **Note:** When using `write_note`, you don't write frontmatter yourself. The `title`, `tags`, `note_type`, and `metadata` are separate parameters — Basic Memory generates the frontmatter automatically. Your `content` parameter is just the markdown body starting with `# Heading`.
+> **Note:** `bm_write` accepts an exact file path as `identifier`, or `title` + `directory`. `content` may include YAML frontmatter; alternatively, supply `title`, `tags`, `note_type`, and `metadata` separately and let Basic Memory generate it. For an overwrite, use the `file_path` returned by `bm_read` as `identifier` and pass its `checksum` as `expected_checksum`.
 
 ### Body / Context
 
@@ -106,7 +106,7 @@ A few examples to illustrate the range:
 - **One fact per observation.** Don't pack multiple ideas into one line.
 - **Be specific.** `[decision] Use JWT` is less useful than `[decision] Use JWT with 15-minute expiry for API auth`.
 - **Use tags for cross-cutting concerns.** `[risk] Rate limiting needed #api #security` makes this findable under both topics.
-- **Categories are queryable.** `search_notes(entity_types=["observation"], categories=["decision"])` returns every decision observation across your knowledge base.
+- **Categories are queryable.** `bm_search(items=["observation"], categories=["decision"])` returns every decision observation across your knowledge base.
 
 ### When a Claim Holds
 
@@ -135,8 +135,8 @@ An observation can say when it is true. Put a qualifier after the category:
 Search by what notes say was true, rather than by when they were edited:
 
 ```python
-search_notes(valid_at="2026-07-01")                              # true on that date
-search_notes(time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")  # due this week
+bm_search(valid_at="2026-07-01")                              # true on that date
+bm_search(time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")  # due this week
 ```
 
 A valid-time filter returns only dated observations; drop it to search
@@ -188,7 +188,7 @@ These create `references` relations automatically. Use the Relations section for
 
 - **Link liberally.** Relations are what turn isolated notes into a knowledge graph. When in doubt, add the link.
 - **Create target notes if they don't exist yet.** `[[Future Topic]]` is valid — BM will resolve it when that note is created.
-- **Use `build_context` to traverse.** `build_context(url="memory://note-title")` follows relations to gather connected knowledge.
+- **Use `bm_context` to traverse.** `bm_context(identifier="memory://note-title")` follows relations to gather connected knowledge.
 - **Custom relation types are fine.** `taught_by`, `blocks`, `tested_in` — use whatever is descriptive.
 
 ## Memory URLs
@@ -215,21 +215,21 @@ memory://main/specs/api-design         # "main" project, "specs/api-design" path
 memory://research/papers/crdt          # "research" project
 ```
 
-The first path segment is matched against known project names. If it matches, it's used as the project scope. Otherwise the URL resolves in the default project.
+The first path segment is matched against known project names. If it matches, it's used as the project scope. Otherwise pass `project` explicitly when several projects are addressable; unqualified calls are refused.
 
 ### Using Memory URLs
 
-Memory URLs work with `build_context` to assemble related knowledge by traversing relations:
+Memory URLs work with `bm_context` to assemble related knowledge by traversing relations:
 
 ```python
 # Get a note and its connected context
-build_context(url="memory://api-design-decisions")
+bm_context(identifier="memory://api-design-decisions")
 
 # Wildcard — gather all docs
-build_context(url="memory://docs/*")
+bm_context(identifier="memory://docs/*")
 
 # Direct read by permalink
-read_note(identifier="memory://api-design-decisions")
+bm_read(identifier="memory://api-design-decisions")
 ```
 
 ## Before Creating a Note
@@ -242,44 +242,44 @@ A single search often misses. Try the full name, abbreviations, acronyms, and ke
 
 ```python
 # Searching for an entity that might already exist
-search_notes(query="Kubernetes Migration")
-search_notes(query="k8s migration")
-search_notes(query="container migration")
+bm_search(query="Kubernetes Migration")
+bm_search(query="k8s migration")
+bm_search(query="container migration")
 ```
 
 For people, try full name and last name. For organizations, try the full name and common abbreviations.
 
 ### Decision Tree
 
-- **Entity exists** → Update it with `edit_note` (append observations, add relations, find-and-replace outdated info)
-- **Entity doesn't exist** → Create it with `write_note`
+- **Entity exists** → Update it with `bm_edit` (append observations, add relations, find-and-replace outdated info)
+- **Entity doesn't exist** → Create it with `bm_write`
 - **Unsure if it's the same entity** → Read the existing note first, then decide
 
-### Granular Updates with `edit_note`
+### Granular Updates with `bm_edit`
 
 When a note already exists, make targeted edits instead of rewriting the whole file:
 
 ```python
 # Add a new observation under the existing Observations heading
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="insert_after_section",
+  command="insert_after_section",
   section="Observations",
   content="- [decision] Switched to OpenAPI 3.1 for spec generation #api"
 )
 
 # Fix outdated information
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="find_replace",
+  command="find_replace",
   find_text="- [status] draft",
   content="- [status] approved"
 )
 
 # Add a new relation
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="insert_after_section",
+  command="insert_after_section",
   section="Relations",
   content="- depends_on [[Rate Limiter]]"
 )
@@ -292,7 +292,7 @@ This preserves existing content and keeps the edit history clean.
 ### Creating a Note
 
 ```python
-write_note(
+bm_write(
   title="API Design Decisions",
   directory="architecture",
   tags=["api", "architecture"],
@@ -318,38 +318,39 @@ Basic Memory auto-generates frontmatter (including the permalink and memory URL)
 
 ### Editing an Existing Note
 
-Use `edit_note` to update a note in place — six operations: `append`, `prepend`,
-`find_replace`, `replace_section`, `insert_before_section`, `insert_after_section`.
+Use `bm_edit` to update a note in place — seven commands: `append`, `prepend`,
+`find_replace`, `replace_section`, `insert_before_section`, `insert_after_section`,
+and `set_metadata` (merge frontmatter without changing the body).
 
 ```python
 # insert_after_section / insert_before_section — add lines at an existing heading
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="insert_after_section",
+  command="insert_after_section",
   section="Observations",
   content="- [decision] Use OpenAPI 3.1 for spec generation #api"
 )
 
 # append / prepend — add to the end of the note or the start of the body
 # (use for time-ordered logs; neither one targets a section)
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="prepend",
+  command="prepend",
   content="> Updated 2026-05-28: auth approach finalized.\n"
 )
 
 # replace_section — rewrite a named section (use for living content that stays current)
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="replace_section",
+  command="replace_section",
   section="Summary",
   content="Concise, current summary of the decision and its rationale."
 )
 
 # find_replace — swap specific text
-edit_note(
+bm_edit(
   identifier="API Design Decisions",
-  operation="find_replace",
+  command="find_replace",
   find_text="OpenAPI 3.0",
   content="OpenAPI 3.1"
 )
@@ -359,10 +360,10 @@ When an edit is destructive (`replace_section`, `find_replace`), read the note f
 and pass its checksum, so the edit applies only to the revision you read:
 
 ```python
-note = read_note(identifier="API Design Decisions", output_format="json")
-edit_note(
+note = bm_read(identifier="API Design Decisions", output_format="json")
+bm_edit(
   identifier="API Design Decisions",
-  operation="replace_section",
+  command="replace_section",
   section="Summary",
   content="Concise, current summary of the decision and its rationale.",
   expected_checksum=note["checksum"]
@@ -370,17 +371,17 @@ edit_note(
 ```
 
 A checksum conflict means someone changed the note after you read it. Read it
-again and redo the edit against the new text. `write_note(overwrite=True)` takes
+again and redo the edit against the new text. `bm_write(overwrite=True)` takes
 `expected_checksum` the same way.
 
 ### Moving a Note
 
-Use `move_note` to reorganize notes into different directories:
+Use `bm_move` to reorganize notes into different directories:
 
 ```python
-move_note(
+bm_move(
   identifier="API Design Decisions",
-  destination_path="archive/api-design-decisions.md"
+  destination="archive/api-design-decisions.md"
 )
 ```
 
@@ -392,7 +393,7 @@ By default the permalink stays the same after a move, so links keep resolving. P
 
 2. **Favor completeness.** Write rich, substantive notes. Basic Memory's search pulls relevant chunks from note bodies, so longer notes with more context are *more* discoverable, not less. Use prose in the body to tell the full story — the background, the reasoning, the nuance. Then distill key facts into `[category] content` observations for structured queries. Both matter: prose gives meaning, observations give precision.
 
-3. **Build incrementally.** Add to existing notes rather than creating duplicates. Use `edit_note` to append new observations or relations as you learn more.
+3. **Build incrementally.** Add to existing notes rather than creating duplicates. Use `bm_edit` to append new observations or relations as you learn more.
 
 4. **Use consistent titles.** Note titles are identifiers in the knowledge graph. `API Design Decisions` and `Api Design decisions` are different entities. Pick a convention and stick with it.
 

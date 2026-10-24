@@ -40,7 +40,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
 
     def _isolated_bm_env(self) -> dict[str, str]:
         # The benchmark must not depend on (or mutate) the operator's personal
-        # Basic Memory config — e.g. a cloud-mode setup would route search_notes
+        # Basic Memory config — e.g. a cloud-mode setup would route bm_search
         # through cloud.basicmemory.com. BASIC_MEMORY_CONFIG_DIR scopes config,
         # database, and project registry to a benchmark-owned directory.
         #
@@ -228,7 +228,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
 
     @classmethod
     def _row_to_hit(cls, row: dict[str, Any]) -> SearchHit:
-        """Normalize a search_notes result row into a SearchHit.
+        """Normalize a bm_search result row into a SearchHit.
 
         Carries the document title into hit metadata: BM's matched_chunk is a
         single bullet that strips document context, but the title holds it (for
@@ -262,13 +262,13 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
 
         project_name = self._project_name(run_config)
         tool_result = self._mcp.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "query": query,
                 "project": project_name,
                 "page": 1,
                 "page_size": limit,
-                "search_type": "hybrid",
+                "mode": "hybrid",
                 "output_format": "json",
             },
         )

@@ -67,6 +67,30 @@ async function waitForSearchResult(
   return false
 }
 
+async function waitForFile(path: string, exists: boolean): Promise<void> {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    let present = true
+    try {
+      await stat(path)
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) {
+        throw error
+      }
+      present = false
+    }
+    if (present === exists) return
+    await delay(100)
+  }
+  throw new Error(
+    `File materialization did not converge: ${path}, exists=${exists}`,
+  )
+}
+
 async function bootstrapProject(
   bmPath: string,
   projectName: string,
@@ -178,7 +202,7 @@ if (!RUN_INTEGRATION) {
       expect(created.file_path).toContain("integration/")
 
       const createdPath = resolve(projectPath, created.file_path)
-      await stat(createdPath)
+      await waitForFile(createdPath, true)
 
       const readBefore = await client.readNote(
         "integration/integration-lifecycle-note",
@@ -218,12 +242,12 @@ if (!RUN_INTEGRATION) {
       expect(moved.file_path.startsWith("archive/")).toBe(true)
 
       const movedPath = resolve(projectPath, moved.file_path)
-      await stat(movedPath)
+      await waitForFile(movedPath, true)
 
       const movedIdentifier = moved.file_path.replace(/\.md$/i, "")
       await client.deleteNote(movedIdentifier)
 
-      await expect(stat(movedPath)).rejects.toBeDefined()
+      await waitForFile(movedPath, false)
     })
 
     it("round-trips Memory Quest fields through the OpenClaw tools", async () => {
@@ -314,7 +338,7 @@ if (!RUN_INTEGRATION) {
         expected_checksum: "0".repeat(64),
       })
       expect(stale.details.error).toBe("note_revision_conflict")
-      expect(stale.details.current_checksum).toBe(checksum)
+      expect(stale.details.current_checksum).toBeNull()
       expect((await readBack()).content[0].text).toContain(
         "Memory Master body.",
       )

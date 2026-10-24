@@ -17,7 +17,7 @@ const SOURCE_SKILLS_DIR = resolve(PACKAGE_ROOT, "..", "..", "skills");
 const INCLUDED_SKILLS = ["memory-notes", "memory-capture", "memory-continue", "memory-tasks"];
 const REFERENCE_PREAMBLE = `> Pi package reference only.
 > These canonical Basic Memory instructions may mention direct MCP tools such as
-> \`read_note\`, \`write_note\`, \`search_notes\`, or \`build_context\`.
+> \`bm_read\`, \`bm_write\`, \`bm_search\`, or \`bm_context\`.
 > In Pi CLI mode, use the active \`basic-memory-pi\` skill with \`bm_recall\` and
 > \`bm_capture\` instead. In Pi MCP mode, only use direct Basic Memory tool names
 > if the MCP adapter exposes them in the current runtime.

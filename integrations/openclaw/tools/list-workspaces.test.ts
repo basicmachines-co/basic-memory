@@ -25,7 +25,7 @@ describe("workspace list tool", () => {
         name: "list_workspaces",
         label: "List Workspaces",
         description: expect.stringContaining(
-          "List all Basic Memory workspaces (personal and organization) accessible to this user",
+          "List workspaces represented by accessible Basic Memory projects",
         ),
         parameters: expect.objectContaining({
           type: "object",
@@ -55,17 +55,11 @@ describe("workspace list tool", () => {
           tenant_id: "t-1",
           name: "Personal",
           workspace_type: "personal",
-          role: "owner",
-          organization_id: null,
-          has_active_subscription: true,
         },
         {
           tenant_id: "t-2",
           name: "Acme Corp",
           workspace_type: "organization",
-          role: "member",
-          organization_id: "org-1",
-          has_active_subscription: false,
         },
       ])
 
@@ -75,9 +69,7 @@ describe("workspace list tool", () => {
       expect(result.content[0].text).toContain("Found 2 workspace(s):")
       expect(result.content[0].text).toContain("**Personal**")
       expect(result.content[0].text).toContain("Type: personal")
-      expect(result.content[0].text).toContain("Subscription: active")
       expect(result.content[0].text).toContain("**Acme Corp**")
-      expect(result.content[0].text).toContain("Subscription: none")
       expect(result.details).toEqual({
         count: 2,
         workspaces: [
@@ -85,17 +77,11 @@ describe("workspace list tool", () => {
             tenant_id: "t-1",
             name: "Personal",
             workspace_type: "personal",
-            role: "owner",
-            organization_id: null,
-            has_active_subscription: true,
           },
           {
             tenant_id: "t-2",
             name: "Acme Corp",
             workspace_type: "organization",
-            role: "member",
-            organization_id: "org-1",
-            has_active_subscription: false,
           },
         ],
       })

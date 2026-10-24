@@ -21,44 +21,14 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_read_note_accepts_pagination_params_and_aliases(mcp_server, app, test_project):
-    """Agents passing page/page_size (or their aliases) must not get a validation error."""
+async def test_read_rejects_removed_pagination(mcp_server, app, test_project):
+    """Exact reads use line bounds, not fuzzy-search pagination."""
     async with Client(mcp_server) as client:
-        await client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Paged Read Note",
-                "directory": "test",
-                "content": "# Paged Read Note\n\npaged read body",
-            },
-        )
-
         result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Paged Read Note",
-                "page": 1,
-                "page_size": 10,
-            },
+            "bm_read", {"identifier": "missing", "page": 1}, raise_on_error=False
         )
-        assert "paged read body" in result.content[0].text
-
-        # Aliases map silently: page_number -> page, limit -> page_size
-        result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Paged Read Note",
-                "page_number": 1,
-                "limit": 10,
-            },
-        )
-        assert "paged read body" in result.content[0].text
-
-
-# --- edit_note: find_text / content / section aliases ---
+        assert result.is_error
+        assert "unexpected_keyword_argument" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -66,7 +36,7 @@ async def test_edit_note_accepts_find_alias_for_find_text(mcp_server, app, test_
     """`find` should map to `find_text` — the highest-frequency miss in the issue."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Find Alias Note",
@@ -76,21 +46,25 @@ async def test_edit_note_accepts_find_alias_for_find_text(mcp_server, app, test_
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "Find Alias Note",
-                "operation": "find_replace",
+                "command": "find_replace",
                 "content": "v2.0.0",
-                "find": "v1.0.0",  # alias for find_text
+                "find": "v1.0.0",
             },
         )
 
-        assert "Edited note (find_replace)" in result.content[0].text
+        assert "(find_replace)" in result.content[0].text
 
         read_result = await client.call_tool(
-            "read_note",
-            {"project": test_project.name, "identifier": "Find Alias Note"},
+            "bm_read",
+            {
+                "project": test_project.name,
+                "identifier": "Find Alias Note",
+                "include_frontmatter": False,
+            },
         )
         assert "v2.0.0" in read_result.content[0].text
         assert "v1.0.0" not in read_result.content[0].text
@@ -101,7 +75,7 @@ async def test_edit_note_accepts_old_text_alias(mcp_server, app, test_project):
     """`old_text` (diff/patch convention) should map to `find_text`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Old Text Note",
@@ -111,17 +85,17 @@ async def test_edit_note_accepts_old_text_alias(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "Old Text Note",
-                "operation": "find_replace",
+                "command": "find_replace",
                 "content": "lazy",
                 "old_text": "quick",
             },
         )
 
-        assert "Edited note (find_replace)" in result.content[0].text
+        assert "(find_replace)" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -129,7 +103,7 @@ async def test_edit_note_accepts_new_content_alias_for_content(mcp_server, app, 
     """`new_content` should map to `content` — `content` is ambiguous as 'replacement text'."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "New Content Note",
@@ -139,21 +113,25 @@ async def test_edit_note_accepts_new_content_alias_for_content(mcp_server, app, 
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "New Content Note",
-                "operation": "find_replace",
-                "new_content": "actual value",  # alias for content
+                "command": "find_replace",
+                "new_content": "actual value",
                 "find_text": "placeholder",
             },
         )
 
-        assert "Edited note (find_replace)" in result.content[0].text
+        assert "(find_replace)" in result.content[0].text
 
         read_result = await client.call_tool(
-            "read_note",
-            {"project": test_project.name, "identifier": "New Content Note"},
+            "bm_read",
+            {
+                "project": test_project.name,
+                "identifier": "New Content Note",
+                "include_frontmatter": False,
+            },
         )
         assert "actual value" in read_result.content[0].text
 
@@ -163,7 +141,7 @@ async def test_edit_note_accepts_section_heading_alias(mcp_server, app, test_pro
     """`section_heading` and `heading` should map to `section`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Section Heading Note",
@@ -173,17 +151,17 @@ async def test_edit_note_accepts_section_heading_alias(mcp_server, app, test_pro
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "Section Heading Note",
-                "operation": "replace_section",
+                "command": "replace_section",
                 "content": "fresh notes\n",
-                "section_heading": "## Notes",  # alias for section
+                "section_heading": "## Notes",
             },
         )
 
-        assert "Edited note (replace_section)" in result.content[0].text
+        assert "(replace_section)" in result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -191,7 +169,7 @@ async def test_edit_note_canonical_names_still_work(mcp_server, app, test_projec
     """Canonical names must keep working alongside aliases."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Edit Canonical Note",
@@ -201,17 +179,17 @@ async def test_edit_note_canonical_names_still_work(mcp_server, app, test_projec
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "Edit Canonical Note",
-                "operation": "find_replace",
+                "command": "find_replace",
                 "content": "new-value",
                 "find_text": "old-value",
             },
         )
 
-        assert "Edited note (find_replace)" in result.content[0].text
+        assert "(find_replace)" in result.content[0].text
 
 
 # --- search_notes aliases ---
@@ -222,7 +200,7 @@ async def test_search_notes_accepts_query_aliases(mcp_server, app, test_project)
     """`q` (HTTP convention), `search`, and `text` should all map to `query`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Searchable Note",
@@ -232,14 +210,10 @@ async def test_search_notes_accepts_query_aliases(mcp_server, app, test_project)
         )
 
         # Try each alias
-        for alias_key in ("q", "search", "text"):
+        for alias_key in ("q", "pattern", "text"):
             result = await client.call_tool(
-                "search_notes",
-                {
-                    "project": test_project.name,
-                    alias_key: "Unique-keyword-XYZ",
-                    "limit": 5,  # also testing pagination alias
-                },
+                "bm_search",
+                {"project": test_project.name, alias_key: "Unique-keyword-XYZ", "limit": 5},
             )
             assert "Searchable Note" in result.content[0].text, f"alias {alias_key} failed"
 
@@ -249,7 +223,7 @@ async def test_search_notes_accepts_after_date_aliases(mcp_server, app, test_pro
     """`since`/`after`/`from_date` should map to `after_date`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Date Filter Note",
@@ -260,7 +234,7 @@ async def test_search_notes_accepts_after_date_aliases(mcp_server, app, test_pro
 
         # Just verify the alias is accepted at validation time (no error)
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {"project": test_project.name, "query": "Date Filter", "since": "1d"},
         )
         assert result.content  # didn't error
@@ -274,8 +248,8 @@ async def test_recent_activity_accepts_timeframe_aliases(mcp_server, app, test_p
     """`since`/`time_range`/`lookback` should map to `timeframe`."""
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "recent_activity",
-            {"project": test_project.name, "since": "7d", "limit": 5},
+            "bm_project",
+            {"project": test_project.name, "since": "7d", "limit": 5, "command": "recent"},
         )
         assert result.content  # accepted, no validation error
 
@@ -288,7 +262,7 @@ async def test_list_directory_accepts_directory_alias(mcp_server, app, test_proj
     """`directory`/`folder`/`path`/`dir` should all map to `dir_name`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Dir Test",
@@ -297,9 +271,9 @@ async def test_list_directory_accepts_directory_alias(mcp_server, app, test_proj
             },
         )
 
-        for alias_key in ("directory", "folder", "path", "dir"):
+        for alias_key in ("dir_name", "folder", "path"):
             result = await client.call_tool(
-                "list_directory",
+                "bm_find",
                 {"project": test_project.name, alias_key: "/list-dir-aliases"},
             )
             assert "Dir Test" in result.content[0].text, f"alias {alias_key} failed"
@@ -310,7 +284,7 @@ async def test_list_directory_accepts_glob_aliases(mcp_server, app, test_project
     """`glob`/`pattern`/`filter` should map to `file_name_glob`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Glob Target",
@@ -320,12 +294,8 @@ async def test_list_directory_accepts_glob_aliases(mcp_server, app, test_project
         )
 
         result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/glob-test",
-                "glob": "*.md",
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/glob-test", "name": "*.md"},
         )
         assert "Glob Target" in result.content[0].text
 
@@ -338,11 +308,11 @@ async def test_write_note_accepts_directory_aliases(mcp_server, app, test_projec
     """`folder`/`dir`/`path` should map to `directory`."""
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Folder Alias Note",
-                "folder": "folder-alias-test",  # alias
+                "folder": "folder-alias-test",
                 "content": "# Folder Alias Note\n\nbody",
             },
         )
@@ -354,7 +324,7 @@ async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_proj
     """Canonical overwrite=True must reach the handler (#818 regression)."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Overwrite Canonical Note",
@@ -363,7 +333,7 @@ async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_proj
             },
         )
         blocked = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Overwrite Canonical Note",
@@ -373,10 +343,10 @@ async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_proj
             raise_on_error=False,
         )
         assert blocked.is_error
-        assert "# Error: Note already exists" in blocked.content[0].text
+        assert "ALREADY_EXISTS" in blocked.content[0].text
 
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Overwrite Canonical Note",
@@ -385,7 +355,7 @@ async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_proj
                 "overwrite": True,
             },
         )
-        assert "# Updated note" in result.content[0].text
+        assert "Updated " in result.content[0].text
 
 
 # --- move_note aliases ---
@@ -396,7 +366,7 @@ async def test_move_note_accepts_destination_aliases(mcp_server, app, test_proje
     """`to`/`dest_path`/`new_path`/`destination` should map to `destination_path`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Move Target",
@@ -405,11 +375,11 @@ async def test_move_note_accepts_destination_aliases(mcp_server, app, test_proje
             },
         )
         result = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "Move Target",
-                "to": "move-dest/Move Target.md",  # alias for destination_path
+                "to": "move-dest/Move Target.md",
             },
         )
         assert "move-dest" in result.content[0].text
@@ -423,7 +393,7 @@ async def test_read_content_accepts_file_path_alias(mcp_server, app, test_projec
     """`file_path`/`filepath`/`file` should map to `path`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Read Content Target",
@@ -432,11 +402,8 @@ async def test_read_content_accepts_file_path_alias(mcp_server, app, test_projec
             },
         )
         result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "file_path": "read-content-test/Read Content Target.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "file_path": "read-content-test/Read Content Target.md"},
         )
         # read_content returns a dict; structured content should include the file
         text = result.content[0].text if result.content else ""
@@ -452,7 +419,7 @@ async def test_build_context_accepts_url_aliases(mcp_server, app, test_project):
     """`uri`/`memory_url` should map to `url`."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Context Target",
@@ -461,11 +428,8 @@ async def test_build_context_accepts_url_aliases(mcp_server, app, test_project):
             },
         )
         result = await client.call_tool(
-            "build_context",
-            {
-                "project": test_project.name,
-                "uri": "memory://build-ctx/context-target",  # alias for url
-            },
+            "bm_context",
+            {"project": test_project.name, "url": "memory://build-ctx/context-target"},
         )
         # Just verify validation accepted the alias
         assert result.content or result.structured_content
@@ -482,7 +446,7 @@ async def test_delete_note_accepts_is_dir_alias(mcp_server, app, test_project):
     """`is_dir` should map to `is_directory` and route to single-note deletion."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Delete Alias Note",
@@ -492,12 +456,8 @@ async def test_delete_note_accepts_is_dir_alias(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "delete_note",
-            {
-                "project": test_project.name,
-                "identifier": "delete-alias-test/Delete Alias Note",
-                "is_dir": False,  # alias for is_directory
-            },
+            "bm_delete",
+            {"project": test_project.name, "identifier": "delete-alias-test/Delete Alias Note"},
         )
 
         # delete_note returns a bool/dict on success; just assert no error
@@ -527,58 +487,27 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
 
         # tool_name -> (must_have_canonical, must_not_have_aliases)
         checks = {
-            # read_note pagination restored in #883 (paginates the search fallback).
-            # Accepted aliases (limit/page_number/per_page) plus the rejected
-            # `offset` must stay out of the advertised schema.
-            "read_note": (
-                ["page", "page_size"],
-                ["offset", "limit", "page_number", "per_page"],
+            "bm_read": (
+                ["identifier", "start_line", "end_line"],
+                ["file_path", "page", "page_size"],
             ),
-            "edit_note": (
-                ["find_text", "section", "content"],
-                ["find", "old_text", "old_content", "search", "new_content", "section_heading"],
+            "bm_write": (["identifier", "directory", "overwrite"], ["folder", "dir", "file_path"]),
+            "bm_edit": (
+                ["command", "find_text", "section", "content"],
+                ["operation", "find", "old_text", "new_content", "section_heading"],
             ),
-            "search_notes": (
-                ["query", "page", "page_size", "note_types", "after_date", "min_similarity"],
-                [
-                    "q",
-                    "search",
-                    "offset",
-                    "limit",
-                    "note_type",
-                    "types",
-                    "since",
-                    "after",
-                    "threshold",
-                ],
+            "bm_search": (
+                ["query", "mode", "filters", "items", "since", "page_size"],
+                ["q", "pattern", "search_type", "metadata_filters", "entity_types", "limit"],
             ),
-            "recent_activity": (
-                ["type", "timeframe", "page", "page_size"],
-                ["types", "kind", "since", "time_range", "lookback", "offset", "limit"],
+            "bm_project": (["command", "since", "items"], ["timeframe", "entity_types"]),
+            "bm_find": (["path", "name", "filters"], ["folder", "dir_name"]),
+            "bm_move": (
+                ["destination", "identifier", "path"],
+                ["to", "dest_path", "destination_path"],
             ),
-            "list_directory": (
-                ["dir_name", "file_name_glob"],
-                ["directory", "folder", "path", "dir", "glob", "pattern", "filter"],
-            ),
-            "write_note": (
-                ["directory", "overwrite"],
-                ["folder", "dir", "path", "force", "replace"],
-            ),
-            "move_note": (
-                ["destination_path", "destination_folder", "is_directory"],
-                ["dest_path", "new_path", "to", "destination", "is_dir"],
-            ),
-            "delete_note": (["is_directory"], ["is_dir"]),
-            "read_content": (["path"], ["file_path", "filepath", "file"]),
-            # view_note pagination params removed in #693 (delegates to read_note).
-            "view_note": (
-                [],
-                ["page", "page_size", "offset", "limit", "page_number", "per_page"],
-            ),
-            "build_context": (
-                ["url", "timeframe", "page", "page_size", "max_related"],
-                ["uri", "memory_url", "since", "offset", "limit", "max_results", "limit_related"],
-            ),
+            "bm_delete": (["identifier", "path", "recursive"], ["is_directory", "is_dir"]),
+            "bm_context": (["identifier", "since", "page_size"], ["url", "timeframe", "limit"]),
         }
 
         for tool_name, (must_have, must_not_have) in checks.items():
@@ -590,7 +519,7 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
                 assert alias not in props, f"{tool_name}: alias '{alias}' leaked into schema"
 
         # #818: AliasChoices on optional bool broke external-client JSON schema (null-only).
-        overwrite_schema = tools["write_note"].input_schema["properties"]["overwrite"]
+        overwrite_schema = tools["bm_write"].input_schema["properties"]["overwrite"]
         schema_types: set[str] = set()
         if "type" in overwrite_schema:
             raw = overwrite_schema["type"]

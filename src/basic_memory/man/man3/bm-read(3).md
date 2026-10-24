@@ -53,7 +53,7 @@ The shell counterpart is cat(1).
 - **include_frontmatter** (boolean, optional, default: True) — Include the YAML frontmatter in a whole-note read.
 - **include_content** (boolean, optional, default: True) — False returns only title, paths, checksum and updated_at.
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. Omit to use the default project.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

@@ -397,11 +397,12 @@ Try a prompt:
 - **Optional search reranking.** Rescore the strongest vector and hybrid
   candidates with a local FastEmbed cross-encoder or a LiteLLM-backed provider.
 - **Schema system.** Infer, validate, and diff the structure of your
-  knowledge base with `schema_infer`, `schema_validate`, `schema_diff`.
+  knowledge base with `bm_schema(command="infer")`, `bm_schema(command="validate")`, and
+  `bm_schema(command="diff")`.
 - **Per-project cloud routing.** Route individual projects through the cloud
   while others stay local, via API key (`bm project set-cloud`).
-- **Smarter editing.** `edit_note` append/prepend auto-creates notes when
-  missing; `write_note` guards against accidental overwrites.
+- **Explicit note changes.** `bm_edit` updates existing notes; `bm_write`
+  creates notes and guards against accidental overwrites.
 - **Richer search results.** Matched chunk text is included so the LLM gets
   context, not just hits.
 - **FastMCP 3.0 + tool annotations.** Every tool ships with MCP behavior
@@ -554,19 +555,20 @@ Basic Memory exposes these tools to any MCP client. Every tool is annotated
 with MCP behavior hints (read-only, destructive, idempotent, open-world) so
 agents can pick the right one without trial-and-error:
 
-- **Content:** `write_note`, `read_note`, `edit_note`, `move_note`,
-  `delete_note`, `read_content`, `view_note`
-- **Search & discovery:** `search_notes`, `recent_activity`, `list_directory`
-- **Knowledge graph:** `build_context` (navigates `memory://` URLs)
-- **Projects:** `list_memory_projects`, `list_workspaces`,
-  `create_memory_project`, `delete_project`
-- **Schema:** `schema_infer`, `schema_validate`, `schema_diff`
-- **Compatibility & diagnostics:** `search`, `fetch`,
-  `basic_memory_diagnostics`
+- **Content:** `bm_write`, `bm_read`, `bm_edit`, `bm_move`, `bm_delete`
+- **Search & discovery:** `bm_search`, `bm_list`, `bm_find`
+- **Knowledge graph:** `bm_context`
+- **Projects:** `bm_project(command="list" | "create" | "recent")`;
+  `bm_project_delete` is separate and requires server opt-in.
+- **Schema:** `bm_schema(command="validate" | "infer" | "diff")`
+- **Manual:** `bm_man`
+- **Compatibility & diagnostics:** `search`, `fetch`, `basic_memory_diagnostics`
 
-All MCP tools default to text output; pass `output_format="json"` for
-structured responses. Full tool reference in the
-[docs](https://docs.basicmemory.com/?utm_source=github&utm_medium=referral&utm_campaign=readme).
+Most tools default to text; `bm_context` defaults to JSON. Pass
+`output_format="json"` for structured responses. Project-scoped tools accept a
+name, `workspace/project`, or external UUID through `project`.
+Use `bm_man(page="bm-search(3)")` for the installed contract, or see the
+[tool guide](docs/ai-assistant-guide-extended.md). CLI commands retain their shell names.
 
 ## CLI essentials
 

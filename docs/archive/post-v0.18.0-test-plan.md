@@ -1,5 +1,9 @@
 # Post-v0.18.0 Test Plan and Acceptance Criteria
 
+> Historical record. Preserved for context; commands, tool contracts, and results below
+> describe the original work, not the current release. For current verification, see
+> [AGENTS.md](../../AGENTS.md) and the [manual guide](../manual-pages.md).
+
 ## Goal
 
 Define a complete validation plan for all major features merged after `v0.18.0`, combining:

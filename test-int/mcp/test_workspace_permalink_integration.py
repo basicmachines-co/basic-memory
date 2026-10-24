@@ -177,7 +177,7 @@ async def _write_json(
 ) -> dict[str, Any]:
     return await _call_json(
         mcp_server,
-        "write_note",
+        "bm_write",
         {
             "project": project,
             "title": title,
@@ -200,7 +200,7 @@ async def _read_json(
     }
     if project is not None:
         arguments["project"] = project
-    return await _call_json(mcp_server, "read_note", arguments)
+    return await _call_json(mcp_server, "bm_read", arguments)
 
 
 async def _search_single_permalink(
@@ -211,13 +211,13 @@ async def _search_single_permalink(
 ) -> str:
     arguments = {
         "query": title,
-        "search_type": "text",
+        "mode": "text",
         "output_format": "json",
     }
     if project is not None:
         arguments["project"] = project
 
-    payload = await _call_json(mcp_server, "search_notes", arguments)
+    payload = await _call_json(mcp_server, "bm_search", arguments)
     matching_results = [
         item for item in payload["results"] if isinstance(item, dict) and item.get("title") == title
     ]
@@ -235,14 +235,14 @@ async def _search_permalink_exact(
     project: str | None = None,
 ) -> str:
     arguments = {
-        "query": permalink,
-        "search_type": "permalink",
+        "query": permalink if project is not None else f"memory://{permalink}",
+        "mode": "permalink",
         "output_format": "json",
     }
     if project is not None:
         arguments["project"] = project
 
-    payload = await _call_json(mcp_server, "search_notes", arguments)
+    payload = await _call_json(mcp_server, "bm_search", arguments)
     matching_results = [
         item for item in payload["results"] if isinstance(item, dict) and item.get("title") == title
     ]
@@ -281,17 +281,20 @@ async def test_local_short_permalink_round_trips_when_project_is_supplied(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("include_project", [True, False])
 async def test_local_project_permalink_routes_without_project_argument(
     mcp_server,
     alternate_project,
     app_config,
+    include_project,
 ):
     """Local project-qualified IDs carry enough route context for search/read."""
-    _save_permalink_config(app_config, include_project=True, default_project=None)
+    _save_permalink_config(app_config, include_project=include_project, default_project=None)
 
     title = "Local Project Permalink"
     short_permalink = "permalink-suite/local-project-permalink"
-    expected_permalink = f"{alternate_project.name}/{short_permalink}"
+    qualified_permalink = f"{alternate_project.name}/{short_permalink}"
+    expected_permalink = qualified_permalink if include_project else short_permalink
 
     write_payload = await _write_json(mcp_server, project=alternate_project.name, title=title)
     assert write_payload["permalink"] == expected_permalink
@@ -299,13 +302,13 @@ async def test_local_project_permalink_routes_without_project_argument(
     assert (
         await _search_permalink_exact(
             mcp_server,
-            permalink=expected_permalink,
+            permalink=qualified_permalink,
             title=title,
         )
         == expected_permalink
     )
 
-    project_read = await _read_json(mcp_server, identifier=expected_permalink)
+    project_read = await _read_json(mcp_server, identifier=qualified_permalink)
     assert project_read["permalink"] == expected_permalink
 
 
@@ -494,9 +497,9 @@ async def test_write_note_by_project_id_qualifies_permalink_when_headers_not_for
     with route_workspaces(team_workspace, forward_permalink_headers=False):
         write_payload = await _call_json(
             mcp_server,
-            "write_note",
+            "bm_write",
             {
-                "project_id": test_project.external_id,
+                "project": test_project.external_id,
                 "title": title,
                 "directory": "permalink-suite",
                 "content": f"# {title}\n\nProject ID workspace body.",

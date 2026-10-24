@@ -33,7 +33,7 @@ async def test_search_notes_pages_are_disjoint(mcp_server, app, test_project):
         # Create 6 notes so page_size=3 gives us at least 2 full pages
         for i in range(6):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Pagination Note {i:02d}",
@@ -44,7 +44,7 @@ async def test_search_notes_pages_are_disjoint(mcp_server, app, test_project):
 
         # Fetch page 1
         page1_result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "Pagination Note",
@@ -61,7 +61,7 @@ async def test_search_notes_pages_are_disjoint(mcp_server, app, test_project):
 
         # Fetch page 2
         page2_result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "Pagination Note",
@@ -92,7 +92,7 @@ async def test_search_notes_has_more_becomes_false(mcp_server, app, test_project
         # Create 4 notes, page_size=3 → page 1 has_more=True, page 2 has_more=False
         for i in range(4):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"LastPage Note {i:02d}",
@@ -103,7 +103,7 @@ async def test_search_notes_has_more_becomes_false(mcp_server, app, test_project
 
         page1 = _json_content(
             await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": "LastPage Note",
@@ -118,7 +118,7 @@ async def test_search_notes_has_more_becomes_false(mcp_server, app, test_project
 
         page2 = _json_content(
             await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": "LastPage Note",
@@ -145,7 +145,7 @@ async def test_recent_activity_pages_are_disjoint(mcp_server, app, test_project)
         # Create 6 notes so page_size=3 gives us 2 full pages of entities
         for i in range(6):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Recent Page Note {i:02d}",
@@ -156,32 +156,34 @@ async def test_recent_activity_pages_are_disjoint(mcp_server, app, test_project)
 
         # Fetch page 1 (entity-only default)
         page1_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
                 "page": 1,
                 "page_size": 3,
-                "timeframe": "7d",
+                "since": "7d",
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        page1 = _json_content(page1_result)
+        page1 = _json_content(page1_result)["results"]
         page1_titles = {item["title"] for item in page1}
 
         assert len(page1) == 3
 
         # Fetch page 2
         page2_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
                 "page": 2,
                 "page_size": 3,
-                "timeframe": "7d",
+                "since": "7d",
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        page2 = _json_content(page2_result)
+        page2 = _json_content(page2_result)["results"]
         page2_titles = {item["title"] for item in page2}
 
         assert len(page2) == 3
@@ -203,7 +205,7 @@ async def test_recent_activity_has_more_becomes_false(mcp_server, app, test_proj
         # Create 4 notes, page_size=3 → page 1 has more, page 2 does not
         for i in range(4):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": f"Recent Last Note {i:02d}",
@@ -214,12 +216,13 @@ async def test_recent_activity_has_more_becomes_false(mcp_server, app, test_proj
 
         # Page 1: text output should mention "page=2 to see more"
         page1_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
                 "page": 1,
                 "page_size": 3,
-                "timeframe": "7d",
+                "since": "7d",
+                "command": "recent",
             },
         )
         page1_text = page1_result.content[0].text
@@ -227,12 +230,13 @@ async def test_recent_activity_has_more_becomes_false(mcp_server, app, test_proj
 
         # Page 2: should NOT mention further pagination
         page2_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
                 "page": 2,
                 "page_size": 3,
-                "timeframe": "7d",
+                "since": "7d",
+                "command": "recent",
             },
         )
         page2_text = page2_result.content[0].text
@@ -248,23 +252,21 @@ async def test_recent_activity_entity_only_default_with_relations(mcp_server, ap
     async with Client(mcp_server) as client:
         # Create a note with observations and relations
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Entity With Relations",
                 "directory": "dedup",
-                "content": (
-                    "# Entity With Relations\n\n"
-                    "## Observations\n"
-                    "- [status] This entity has observations\n"
-                    "- [note] Another observation here\n\n"
-                    "## Relations\n"
-                    "- links_to [[Target Note]]\n"
-                ),
+                "content": "# Entity With Relations\n\n"
+                "## Observations\n"
+                "- [status] This entity has observations\n"
+                "- [note] Another observation here\n\n"
+                "## Relations\n"
+                "- links_to [[Target Note]]\n",
             },
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Target Note",
@@ -275,29 +277,31 @@ async def test_recent_activity_entity_only_default_with_relations(mcp_server, ap
 
         # Default call (no type specified) should return only entities
         result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
-                "timeframe": "7d",
+                "since": "7d",
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        payload = _json_content(result)
+        payload = _json_content(result)["results"]
         assert isinstance(payload, list)
         assert len(payload) >= 2
         assert all(item["type"] == "entity" for item in payload)
 
         # Explicit type=["entity", "observation", "relation"] returns mixed types
         all_types_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
-                "timeframe": "7d",
-                "type": ["entity", "observation", "relation"],
+                "since": "7d",
+                "items": ["note", "observation", "relation"],
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        all_payload = _json_content(all_types_result)
+        all_payload = _json_content(all_types_result)["results"]
         types_returned = {item["type"] for item in all_payload}
         # Observations and relations should now appear alongside entities
         assert "entity" in types_returned

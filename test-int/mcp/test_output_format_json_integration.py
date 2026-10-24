@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
 
@@ -23,7 +24,7 @@ def _json_content(tool_result) -> Any:
 async def test_write_note_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Write",
@@ -45,7 +46,7 @@ async def test_write_note_json_output(mcp_server, app, test_project):
 async def test_read_note_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Read",
@@ -55,11 +56,12 @@ async def test_read_note_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "json-int/json-integration-read",
                 "output_format": "json",
+                "include_frontmatter": False,
             },
         )
 
@@ -75,7 +77,7 @@ async def test_read_note_json_output(mcp_server, app, test_project):
 async def test_edit_note_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Edit",
@@ -85,11 +87,11 @@ async def test_edit_note_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "json-int/json-integration-edit",
-                "operation": "append",
+                "command": "append",
                 "content": "\n\nAppended",
                 "output_format": "json",
             },
@@ -97,7 +99,7 @@ async def test_edit_note_json_output(mcp_server, app, test_project):
 
         payload = _json_content(result)
         assert payload["title"] == "JSON Integration Edit"
-        assert payload["operation"] == "append"
+        assert payload["command"] == "append"
         assert payload["permalink"]
         assert payload["file_path"]
         assert "checksum" in payload
@@ -107,7 +109,7 @@ async def test_edit_note_json_output(mcp_server, app, test_project):
 async def test_recent_activity_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Recent",
@@ -117,15 +119,16 @@ async def test_recent_activity_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
-                "timeframe": "7d",
+                "since": "7d",
                 "output_format": "json",
+                "command": "recent",
             },
         )
 
-        payload = _json_content(result)
+        payload = _json_content(result)["results"]
         assert isinstance(payload, list)
         assert any(item.get("title") == "JSON Integration Recent" for item in payload)
         for item in payload:
@@ -140,20 +143,18 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
 ):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Type Source",
                 "directory": "json-int",
-                "content": (
-                    "# JSON Integration Type Source\n\n"
-                    "- [note] observation from source\n"
-                    "- links_to [[JSON Integration Type Target]]"
-                ),
+                "content": "# JSON Integration Type Source\n\n"
+                "- [note] observation from source\n"
+                "- links_to [[JSON Integration Type Target]]",
             },
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Type Target",
@@ -163,15 +164,16 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
         )
 
         relation_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
-                "timeframe": "7d",
-                "type": "relation",
+                "since": "7d",
+                "items": ["relation"],
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        relation_payload = _json_content(relation_result)
+        relation_payload = _json_content(relation_result)["results"]
         assert isinstance(relation_payload, list)
         assert relation_payload
         assert all(item.get("type") == "relation" for item in relation_payload)
@@ -181,15 +183,16 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
             )
 
         observation_result = await client.call_tool(
-            "recent_activity",
+            "bm_project",
             {
                 "project": test_project.name,
-                "timeframe": "7d",
-                "type": "observation",
+                "since": "7d",
+                "items": ["observation"],
                 "output_format": "json",
+                "command": "recent",
             },
         )
-        observation_payload = _json_content(observation_result)
+        observation_payload = _json_content(observation_result)["results"]
         assert isinstance(observation_payload, list)
         assert observation_payload
         assert all(item.get("type") == "observation" for item in observation_payload)
@@ -203,8 +206,8 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
 async def test_list_memory_projects_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "list_memory_projects",
-            {"output_format": "json"},
+            "bm_project",
+            {"output_format": "json", "command": "list"},
         )
 
         payload = _json_content(result)
@@ -224,11 +227,12 @@ async def test_create_memory_project_json_output_is_idempotent(
         project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "json-int-created")
 
         first = await client.call_tool(
-            "create_memory_project",
+            "bm_project",
             {
-                "project_name": project_name,
-                "project_path": project_path,
+                "name": project_name,
+                "path": project_path,
                 "output_format": "json",
+                "command": "create",
             },
         )
         first_payload = _json_content(first)
@@ -239,11 +243,12 @@ async def test_create_memory_project_json_output_is_idempotent(
         assert first_payload["already_exists"] is False
 
         second = await client.call_tool(
-            "create_memory_project",
+            "bm_project",
             {
-                "project_name": project_name,
-                "project_path": project_path,
+                "name": project_name,
+                "path": project_path,
                 "output_format": "json",
+                "command": "create",
             },
         )
         second_payload = _json_content(second)
@@ -256,7 +261,7 @@ async def test_create_memory_project_json_output_is_idempotent(
 async def test_delete_note_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Delete",
@@ -266,7 +271,7 @@ async def test_delete_note_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "delete_note",
+            "bm_delete",
             {
                 "project": test_project.name,
                 "identifier": "json-int/json-integration-delete",
@@ -275,9 +280,8 @@ async def test_delete_note_json_output(mcp_server, app, test_project):
         )
 
         payload = _json_content(result)
-        assert payload["deleted"] is True
+        assert payload["action"] == "deleted"
         assert payload["title"] == "JSON Integration Delete"
-        assert payload["permalink"]
         assert payload["file_path"]
 
 
@@ -286,18 +290,18 @@ async def test_delete_note_directory_json_output_failure_is_structured(
     mcp_server, app, test_project, monkeypatch
 ):
     async def mock_delete_directory(self, directory: str):
-        raise RuntimeError("simulated directory delete failure")
+        raise ToolError("simulated directory delete failure")
 
     monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "delete_note",
+            "bm_delete",
             {
                 "project": test_project.name,
-                "identifier": "json-int",
-                "is_directory": True,
+                "path": "json-int",
                 "output_format": "json",
+                "recursive": True,
             },
             raise_on_error=False,
         )
@@ -305,17 +309,15 @@ async def test_delete_note_directory_json_output_failure_is_structured(
         # A failed delete is an MCP error result whose text is the structured payload.
         assert result.is_error is True
         payload = _json_content(result)
-        assert payload["deleted"] is False
-        assert payload["is_directory"] is True
-        assert payload["identifier"] == "json-int"
-        assert "simulated directory delete failure" in payload["error"]
+        assert payload["error"] == "OUTCOME_UNKNOWN"
+        assert "simulated directory delete failure" in payload["message"]
 
 
 @pytest.mark.asyncio
 async def test_move_note_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Move",
@@ -325,21 +327,20 @@ async def test_move_note_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "json-int/json-integration-move",
-                "destination_path": "json-int/moved/json-integration-move.md",
+                "destination": "json-int/moved/json-integration-move.md",
                 "output_format": "json",
             },
         )
 
         payload = _json_content(result)
-        assert payload["moved"] is True
+        assert payload["action"] == "moved"
         assert payload["title"] == "JSON Integration Move"
-        assert payload["source"] == "json-int/json-integration-move"
-        assert payload["destination"] == "json-int/moved/json-integration-move.md"
-        assert payload["permalink"]
+        assert payload["previous_file_path"] == "json-int/JSON Integration Move.md"
+        assert payload["file_path"] == "json-int/moved/json-integration-move.md"
         assert payload["file_path"]
 
 
@@ -347,7 +348,7 @@ async def test_move_note_json_output(mcp_server, app, test_project):
 async def test_build_context_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Context",
@@ -357,10 +358,10 @@ async def test_build_context_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "build_context",
+            "bm_context",
             {
                 "project": test_project.name,
-                "url": "memory://json-int/json-integration-context",
+                "identifier": "memory://json-int/json-integration-context",
                 "output_format": "json",
             },
         )
@@ -375,7 +376,7 @@ async def test_build_context_json_output(mcp_server, app, test_project):
 async def test_search_notes_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "JSON Integration Search",
@@ -385,7 +386,7 @@ async def test_search_notes_json_output(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "JSON Integration Search",

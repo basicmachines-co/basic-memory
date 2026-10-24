@@ -42,7 +42,7 @@ async def test_continue_conversation_creates_structured_suggestions(client, test
     result = await continue_conversation(topic="Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     assert "when a snippet is not enough to respond" in result  # pyright: ignore [reportOperatorIssue]
-    assert "read_note" in result  # pyright: ignore [reportOperatorIssue]
+    assert "bm_read" in result  # pyright: ignore [reportOperatorIssue]
     assert "search" in result  # pyright: ignore [reportOperatorIssue]
 
 
@@ -56,7 +56,7 @@ async def test_search_prompt_with_results(client, test_graph):
 
     assert 'Search Results: "Root"' in result  # pyright: ignore [reportOperatorIssue]
     assert "Found" in result  # pyright: ignore [reportOperatorIssue]
-    assert "read_note" in result  # pyright: ignore [reportOperatorIssue]
+    assert "bm_read" in result  # pyright: ignore [reportOperatorIssue]
 
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_recent_activity_prompt_discovery_mode(client, test_project, test_
     assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
     assert "showing recent activity." in result  # pyright: ignore [reportOperatorIssue]
     assert "Next Steps" in result  # pyright: ignore [reportOperatorIssue]
-    assert "write_note" in result  # pyright: ignore [reportOperatorIssue]
+    assert "bm_write" in result  # pyright: ignore [reportOperatorIssue]
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_recent_activity_prompt_project_specific(client, test_project, tes
     assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
     assert test_project.name in result  # pyright: ignore [reportOperatorIssue]
     assert "Next Steps" in result  # pyright: ignore [reportOperatorIssue]
-    assert "write_note" in result  # pyright: ignore [reportOperatorIssue]
+    assert "bm_write" in result  # pyright: ignore [reportOperatorIssue]
 
 
 @pytest.mark.asyncio

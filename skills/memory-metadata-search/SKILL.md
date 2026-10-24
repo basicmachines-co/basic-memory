@@ -18,7 +18,7 @@ Find notes by their structured frontmatter fields instead of (or in addition to)
 
 ## The Tool
 
-All metadata searching uses `search_notes`. Pass filters via `metadata_filters`, or use the `tags` and `status` convenience shortcuts. Omit `query` (or pass `None`) for filter-only searches.
+Use `bm_search` for ranked results or `bm_find` for file discovery with selected fields. Pass frontmatter conditions via `filters`, including tags and status. Omit `query` (or pass `None`) for filter-only searches.
 
 ## Filter Syntax
 
@@ -104,43 +104,42 @@ against the value and a comparison with null is never true.
 
 Frontmatter fields say when a note was filed or reviewed. To ask what a note
 *claims was true* on a date, use observation qualifiers (see **memory-notes**)
-and `search_notes(valid_at="2026-07-01")` or
-`search_notes(valid_overlaps="[2026-07-01,2026-08-01)")`.
+and `bm_search(valid_at="2026-07-01")` or
+`bm_search(valid_overlaps="[2026-07-01,2026-08-01)")`.
 
-## Using `search_notes` with Metadata
+## Using `bm_search` with Metadata
 
-Pass `metadata_filters`, `tags`, or `status` to `search_notes`. Omit `query` for filter-only searches, or combine text and filters together.
+Pass `filters` to `bm_search`. Omit `query` for filter-only searches, or combine text and filters together.
 
 ```python
 # Filter-only — find all notes with a given status
-search_notes(metadata_filters={"status": "in-progress"})
+bm_search(filters={"status": "in-progress"})
 
 # Filter-only — high-priority specs in a specific project
-search_notes(
-    metadata_filters={"type": "spec", "priority": {"$in": ["high", "critical"]}},
+bm_search(
+    filters={"type": "spec", "priority": {"$in": ["high", "critical"]}},
     project="research",
     page_size=10,
 )
 
 # Filter-only — notes with confidence above a threshold
-search_notes(metadata_filters={"confidence": {"$gt": 0.7}})
+bm_search(filters={"confidence": {"$gt": 0.7}})
 
-# Convenience shortcuts for tags and status
-search_notes(status="active")
-search_notes(tags=["security", "oauth"])
+# Tags and status use the same filter syntax
+bm_search(filters={"status": "active"})
+bm_search(filters={"tags": ["security", "oauth"]})
 
 # Text search narrowed by metadata
-search_notes("authentication", metadata_filters={"status": "draft"})
+bm_search("authentication", filters={"status": "draft"})
 
-# Mix text, tag shortcut, and advanced filter
-search_notes(
+# Mix text, tags, and an advanced filter
+bm_search(
     "oauth flow",
-    tags=["security"],
-    metadata_filters={"confidence": {"$gt": 0.7}},
+    filters={"tags": ["security"], "confidence": {"$gt": 0.7}},
 )
 ```
 
-**Merging rules:** `tags` and `status` are convenience shortcuts merged into `metadata_filters` via `setdefault`. If the same key exists in `metadata_filters`, the explicit filter wins.
+Use one `filters` object for all frontmatter conditions; its keys combine with AND.
 
 ## Tag Search Shorthand
 
@@ -148,11 +147,11 @@ The `tag:` prefix in a query converts to a tag filter automatically:
 
 ```python
 # These are equivalent:
-search_notes("tag:tier1")
-search_notes("", tags=["tier1"])
+bm_search("tag:tier1")
+bm_search(filters={"tags": ["tier1"]})
 
 # Multiple tags (comma or space separated) — all must match:
-search_notes("tag:tier1,alpha")
+bm_search("tag:tier1,alpha")
 ```
 
 ## Example: Custom Frontmatter in Practice
@@ -183,19 +182,19 @@ Queries that find it:
 
 ```python
 # By status and type
-search_notes(metadata_filters={"status": "in-progress", "type": "spec"})
+bm_search(filters={"status": "in-progress", "type": "spec"})
 
 # By numeric threshold
-search_notes(metadata_filters={"confidence": {"$gt": 0.7}})
+bm_search(filters={"confidence": {"$gt": 0.7}})
 
 # By priority set
-search_notes(metadata_filters={"priority": {"$in": ["high", "critical"]}})
+bm_search(filters={"priority": {"$in": ["high", "critical"]}})
 
 # By tag shorthand
-search_notes("tag:security")
+bm_search("tag:security")
 
 # Combined text + metadata
-search_notes("OAuth", metadata_filters={"status": "in-progress"})
+bm_search("OAuth", filters={"status": "in-progress"})
 ```
 
 ## Guidelines
@@ -204,6 +203,6 @@ search_notes("OAuth", metadata_filters={"status": "in-progress"})
 - **Use text search for content queries.** If you're looking for notes *about* something, text search is better. Combine both when you need precision.
 - **Custom fields are free.** Any YAML key you put in frontmatter becomes queryable — no schema or configuration required.
 - **Multiple filters are AND.** `{"status": "active", "priority": "high"}` requires both conditions.
-- **Omit `query` for filter-only searches.** `search_notes(metadata_filters={"status": "active"})` works without a text query.
+- **Omit `query` for filter-only searches.** `bm_search(filters={"status": "active"})` works without a text query.
 - **Dot notation for nesting.** Access nested YAML structures with dots: `{"schema.version": "2"}` queries the `version` key inside a `schema` object.
-- **Tags shortcut is convenient but limited.** `tags` and `status` are sugar for common fields. For anything else, use `metadata_filters` directly.
+- **Use the same filters for file discovery.** `bm_find(filters={"status": "active"}, fields=["title", "priority"])` returns selected frontmatter values without reading each note.

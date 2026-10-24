@@ -17,7 +17,7 @@ async def test_read_note_after_write(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # First write a note
         write_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Test Note",
@@ -33,11 +33,8 @@ async def test_read_note_after_write(mcp_server, app, test_project):
 
         # Then read it back
         read_result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": "Test Note",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "Test Note", "include_frontmatter": True},
         )
 
         assert len(read_result.content) == 1
@@ -62,7 +59,7 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
     async with Client(mcp_server) as client:
         # Create a note in an underscored folder
         write_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Example Note",
@@ -86,10 +83,11 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
         # This is the exact scenario from the bug report - using the permalink
         # that was generated in the YAML frontmatter
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
-                "identifier": "archive/articles/example-note",  # permalink without underscores
+                "identifier": "archive/articles/example-note",
+                "include_frontmatter": True,
             },
         )
 
@@ -115,7 +113,7 @@ async def test_read_note_by_project_id(mcp_server, app, test_project):
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "By ID Note",
@@ -126,10 +124,11 @@ async def test_read_note_by_project_id(mcp_server, app, test_project):
 
         # Read by external_id (UUID) instead of project name
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
-                "project_id": test_project.external_id,
+                "project": test_project.external_id,
                 "identifier": "By ID Note",
+                "include_frontmatter": False,
             },
         )
 
@@ -141,12 +140,12 @@ async def test_read_note_by_project_id(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_note_project_id_takes_precedence_over_name(mcp_server, app, test_project):
-    """When project_id is passed alongside a wrong project name, project_id wins."""
+async def test_read_note_uuid_routes_exact_project(mcp_server, app, test_project):
+    """The project parameter accepts a UUID as well as a name."""
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Precedence Note",
@@ -158,11 +157,11 @@ async def test_read_note_project_id_takes_precedence_over_name(mcp_server, app, 
         # Pass an obviously-wrong project name alongside the correct project_id.
         # If project_id takes precedence (as documented), the read still succeeds.
         read_result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
-                "project": "this-project-does-not-exist",
-                "project_id": test_project.external_id,
+                "project": test_project.external_id,
                 "identifier": "Precedence Note",
+                "include_frontmatter": False,
             },
         )
 
@@ -179,7 +178,7 @@ async def test_read_note_include_content_false_returns_metadata_and_checksum(
     """A metadata-only read returns the full checksum edit_note accepts, without the body."""
     async with Client(mcp_server) as client:
         created = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Head Read",
@@ -191,12 +190,13 @@ async def test_read_note_include_content_false_returns_metadata_and_checksum(
         checksum = json.loads(created.content[0].text)["checksum"]
 
         head_json = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "Head Read",
                 "include_content": False,
                 "output_format": "json",
+                "include_frontmatter": False,
             },
         )
         metadata = json.loads(head_json.content[0].text)
@@ -207,11 +207,12 @@ async def test_read_note_include_content_false_returns_metadata_and_checksum(
         assert "content" not in metadata
 
         head_text = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "test/head-read",
                 "include_content": False,
+                "include_frontmatter": False,
             },
         )
         text = head_text.content[0].text
@@ -221,28 +222,29 @@ async def test_read_note_include_content_false_returns_metadata_and_checksum(
 
         # The checksum from the metadata read is accepted as edit_note's precondition.
         edited = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "test/head-read",
-                "operation": "append",
+                "command": "append",
                 "content": "\nMore.",
                 "expected_checksum": metadata["checksum"],
             },
         )
-        assert "# Edited note (append)" in edited.content[0].text
+        assert "(append)" in edited.content[0].text
 
 
 @pytest.mark.asyncio
 async def test_read_note_include_content_false_rejects_line_ranges(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
-        with pytest.raises(Exception, match="include_content=False cannot be combined"):
+        with pytest.raises(Exception, match="include_content=false cannot be combined"):
             await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": "anything",
                     "include_content": False,
                     "start_line": 1,
+                    "include_frontmatter": False,
                 },
             )

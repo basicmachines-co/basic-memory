@@ -26,7 +26,7 @@ from basic_memory_benchmarks.agent_tasks.loop import ToolOutcome
 from basic_memory_benchmarks.agent_tasks.models import AgentTaskResult, AgentTasksConfig
 from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, JudgeRubric
 from basic_memory_benchmarks.agent_tasks.surfaces import (
-    RICH_SURFACE,
+    BM_SURFACE,
     SurfaceUnavailableError,
     read_only_view,
 )
@@ -128,7 +128,7 @@ def _stub_bm(monkeypatch: pytest.MonkeyPatch) -> None:
 def _config(tmp_path: Path, **overrides: Any) -> AgentTasksConfig:
     defaults: dict[str, Any] = {
         "run_id": "test-run",
-        "surfaces": ["rich"],
+        "surfaces": ["bm"],
         "task_ids": ["curate-orphans"],
         "model_spec": "scripted:inline",
         "corpus_dir": str(CORPUS_DIR),
@@ -148,7 +148,7 @@ def _orphan_agent(final_text: str = ORPHAN_ANSWER) -> ScriptedToolAgent:
                     {
                         "tool_calls": [
                             {
-                                "name": "search_notes",
+                                "name": "bm_search",
                                 "arguments": {"query": "x", "project": "{project}"},
                             }
                         ]
@@ -205,7 +205,7 @@ def test_default_factory_receives_the_recorded_temperature(
     _stub_bm(monkeypatch)
     monkeypatch.chdir(tmp_path)
 
-    config = _config(tmp_path, surfaces=["rich"], task_ids=["curate-orphans"])
+    config = _config(tmp_path, surfaces=["bm"], task_ids=["curate-orphans"])
     config = config.model_copy(update={"model_temperature": None})
 
     with pytest.raises(RuntimeError, match="stop after model construction"):
@@ -216,13 +216,13 @@ def test_default_factory_receives_the_recorded_temperature(
 
 
 def test_happy_path_writes_all_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    session = FakeSession(RICH_SURFACE.tool_allowlist)
+    session = FakeSession(BM_SURFACE.tool_allowlist)
     run_dir = _run(
         tmp_path,
         monkeypatch,
         config=_config(tmp_path),
         agent=_orphan_agent(),
-        sessions={"rich": session},
+        sessions={"bm": session},
     )
 
     for artifact in (
@@ -239,9 +239,9 @@ def test_happy_path_writes_all_artifacts(tmp_path: Path, monkeypatch: pytest.Mon
     assert manifest["bm_resolved_sha"] == "deadbeef"
     assert manifest["corpus_file_count"] > 20
     assert manifest["task_manifest_sha256"] is None  # shipped-task run
-    assert manifest["surfaces"][0]["name"] == "rich"
-    assert manifest["surfaces"][0]["tool_allowlist"] == list(RICH_SURFACE.tool_allowlist)
-    assert manifest["surfaces"][0]["observed_tools"] == sorted(RICH_SURFACE.tool_allowlist)
+    assert manifest["surfaces"][0]["name"] == "bm"
+    assert manifest["surfaces"][0]["tool_allowlist"] == list(BM_SURFACE.tool_allowlist)
+    assert manifest["surfaces"][0]["observed_tools"] == sorted(BM_SURFACE.tool_allowlist)
     assert manifest["budget"]["max_turns"] == 20
 
     summary = json.loads((run_dir / "agent-tasks-summary.json").read_text())
@@ -284,7 +284,7 @@ def test_state_graded_task_reindexes_before_grading(
                     {
                         "tool_calls": [
                             {
-                                "name": "edit_note",
+                                "name": "bm_edit",
                                 "arguments": {"identifier": "x", "project": "{project}"},
                             }
                         ]
@@ -297,7 +297,7 @@ def test_state_graded_task_reindexes_before_grading(
     run_agent_tasks(
         _config(tmp_path, task_ids=["tasks-complete"]),
         model_factory=lambda spec: agent,
-        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        session_factory=lambda runtime: FakeSession(BM_SURFACE.tool_allowlist),
     )
 
     project = "test-run-tasks-complete"
@@ -340,7 +340,7 @@ def test_headline_is_none_not_zero_when_nothing_completes(
         monkeypatch,
         config=_config(tmp_path),
         agent=_orphan_agent(final_text=wrong),
-        sessions={"rich": FakeSession(RICH_SURFACE.tool_allowlist)},
+        sessions={"bm": FakeSession(BM_SURFACE.tool_allowlist)},
     )
     summary = json.loads((run_dir / "agent-tasks-summary.json").read_text())
     surface_summary = summary["surfaces"][0]
@@ -349,44 +349,26 @@ def test_headline_is_none_not_zero_when_nothing_completes(
     assert "n/a — 0 tasks completed" in (run_dir / "summary.md").read_text()
 
 
-def test_posix_without_tools_is_skipped_with_reason(
+def test_missing_bm_tools_is_skipped_with_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A rich-only BM: the posix session starts (shared write verbs exist) but
-    # exposes no cat/grep/... — recorded as an explicit skip, never dropped.
-    config = _config(tmp_path, surfaces=["rich", "posix"])
-    sessions = {
-        "rich": FakeSession(RICH_SURFACE.tool_allowlist),
-        "posix": FakeSession(("write_note", "edit_note", "move_note", "delete_note")),
-    }
+    config = _config(tmp_path, surfaces=["bm"])
+    sessions = {"bm": FakeSession(("bm_write", "bm_edit"))}
     run_dir = _run(tmp_path, monkeypatch, config=config, agent=_orphan_agent(), sessions=sessions)
-
-    statuses = {
-        row["provider"]: row for row in json.loads((run_dir / "surface-status.json").read_text())
-    }
-    assert statuses["rich"]["state"] == "ok"
-    assert statuses["posix"]["state"] == "skipped"
-    assert "cat" in statuses["posix"]["reason"]
-    assert "enable_posix_tools" in statuses["posix"]["reason"]
-    assert sessions["posix"].stopped is True
-
-    summary = json.loads((run_dir / "agent-tasks-summary.json").read_text())
-    assert [row["surface"] for row in summary["surfaces"]] == ["rich"]
-
-    # The human-facing report must say the A/B is incomplete, not just the
-    # status artifact and console output.
+    statuses = json.loads((run_dir / "surface-status.json").read_text())
+    assert statuses[0]["state"] == "skipped"
+    assert "bm_read" in statuses[0]["reason"]
+    assert sessions["bm"].stopped is True
     report = (run_dir / "summary.md").read_text()
-    assert "Surfaces not run" in report
-    assert "posix (skipped)" in report
-    assert "enable_posix_tools" in report
+    assert "bm (skipped)" in report
 
 
 def test_strict_surfaces_raises_instead_of_skipping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = _config(tmp_path, surfaces=["posix"], allow_surface_skip=False)
-    sessions = {"posix": FakeSession(("write_note", "edit_note"))}
-    with pytest.raises(SurfaceUnavailableError, match="posix"):
+    config = _config(tmp_path, surfaces=["bm"], allow_surface_skip=False)
+    sessions = {"bm": FakeSession(("bm_write", "bm_edit"))}
+    with pytest.raises(SurfaceUnavailableError, match="bm"):
         _run(tmp_path, monkeypatch, config=config, agent=_orphan_agent(), sessions=sessions)
 
 
@@ -394,9 +376,9 @@ def test_dead_session_marks_remaining_tasks_errored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = _config(tmp_path, task_ids=["curate-orphans", "man-chain"])
-    session = FakeSession(RICH_SURFACE.tool_allowlist, die_on_call=True)
+    session = FakeSession(BM_SURFACE.tool_allowlist, die_on_call=True)
     run_dir = _run(
-        tmp_path, monkeypatch, config=config, agent=_orphan_agent(), sessions={"rich": session}
+        tmp_path, monkeypatch, config=config, agent=_orphan_agent(), sessions={"bm": session}
     )
 
     task_rows = [
@@ -438,7 +420,7 @@ def test_mid_run_model_error_keeps_partial_accounting(
         script={
             "tasks": {
                 "orphan notes": [
-                    {"tool_calls": [{"name": "search_notes", "arguments": {"query": "x"}}]}
+                    {"tool_calls": [{"name": "bm_search", "arguments": {"query": "x"}}]}
                 ]
             }
         }
@@ -448,7 +430,7 @@ def test_mid_run_model_error_keeps_partial_accounting(
         monkeypatch,
         config=_config(tmp_path),
         agent=one_turn_agent,
-        sessions={"rich": FakeSession(RICH_SURFACE.tool_allowlist)},
+        sessions={"bm": FakeSession(BM_SURFACE.tool_allowlist)},
     )
 
     (row,) = [
@@ -474,7 +456,7 @@ def test_unknown_dispatch_bug_aborts_the_run(
             monkeypatch,
             config=_config(tmp_path),
             agent=_orphan_agent(),
-            sessions={"rich": BuggySession(RICH_SURFACE.tool_allowlist)},
+            sessions={"bm": BuggySession(BM_SURFACE.tool_allowlist)},
         )
 
 
@@ -490,7 +472,7 @@ def test_judge_failure_keeps_loop_accounting(
         monkeypatch,
         config=_config(tmp_path),
         agent=_orphan_agent(),
-        sessions={"rich": FakeSession(RICH_SURFACE.tool_allowlist)},
+        sessions={"bm": FakeSession(BM_SURFACE.tool_allowlist)},
     )
 
     (row,) = [
@@ -511,7 +493,7 @@ def test_reused_run_id_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         monkeypatch,
         config=config,
         agent=_orphan_agent(),
-        sessions={"rich": FakeSession(RICH_SURFACE.tool_allowlist)},
+        sessions={"bm": FakeSession(BM_SURFACE.tool_allowlist)},
     )
     with pytest.raises(RuntimeError, match="Home already exists"):
         _run(
@@ -519,7 +501,7 @@ def test_reused_run_id_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             monkeypatch,
             config=config,
             agent=_orphan_agent(),
-            sessions={"rich": FakeSession(RICH_SURFACE.tool_allowlist)},
+            sessions={"bm": FakeSession(BM_SURFACE.tool_allowlist)},
         )
 
 
@@ -529,7 +511,7 @@ def _task_row(surface: str, task_id: str) -> AgentTaskResult:
 
 def test_validate_surface_fairness_flags_task_set_mismatch() -> None:
     results = {
-        "rich": [_task_row("rich", "a"), _task_row("rich", "b")],
+        "bm": [_task_row("bm", "a"), _task_row("bm", "b")],
         "posix": [_task_row("posix", "a")],
     }
     warnings = validate_surface_fairness(results)
@@ -539,16 +521,16 @@ def test_validate_surface_fairness_flags_task_set_mismatch() -> None:
     assert "'b'" in warnings[0]
 
     aligned = {
-        "rich": [_task_row("rich", "a")],
+        "bm": [_task_row("bm", "a")],
         "posix": [_task_row("posix", "a")],
     }
     assert validate_surface_fairness(aligned) == []
-    assert validate_surface_fairness({"rich": [_task_row("rich", "a")]}) == []
+    assert validate_surface_fairness({"bm": [_task_row("bm", "a")]}) == []
 
 
 def test_build_surface_summary_excludes_errored_from_means() -> None:
     ok = AgentTaskResult(
-        surface="rich",
+        surface="bm",
         task_id="a",
         skill="memory-continue",
         passed=True,
@@ -560,7 +542,7 @@ def test_build_surface_summary_excludes_errored_from_means() -> None:
         wall_seconds=1.0,
     )
     errored = AgentTaskResult(
-        surface="rich",
+        surface="bm",
         task_id="b",
         skill="memory-curate",
         passed=False,
@@ -568,7 +550,7 @@ def test_build_surface_summary_excludes_errored_from_means() -> None:
         total_output_tokens=10,
         error="mcp session terminated",
     )
-    summary = build_surface_summary("rich", "scripted:x", [ok, errored])
+    summary = build_surface_summary("bm", "scripted:x", [ok, errored])
 
     assert summary.tasks_total == 2
     assert summary.tasks_errored == 1
@@ -657,23 +639,23 @@ def _xafs_agent() -> ScriptedToolAgent:
         script={
             "tasks": {
                 "amount of the Acme onboarding invoice": turns(
-                    "search_notes", {"query": "invoice"}, f"The invoice was {DP1_INVOICE_AMOUNT}."
+                    "bm_search", {"query": "invoice"}, f"The invoice was {DP1_INVOICE_AMOUNT}."
                 ),
                 "referred the client": turns(
-                    "search_notes", {"query": "referral"}, f"{DP1_REFERRER} referred Acme."
+                    "bm_search", {"query": "referral"}, f"{DP1_REFERRER} referred Acme."
                 ),
                 "when is payment due": turns(
-                    "read_content",
+                    "bm_read",
                     {"path": "data/mail/2026-04-01_invoice.eml"},
                     f"Payment is due {DP1_DUE_DATE}.",
                 ),
                 "revenue first exceed": turns(
-                    "read_content",
+                    "bm_read",
                     {"path": "data/notes/metrics.csv.md"},
                     f"In {DP1_CROSS_FORMAT_ANSWER}.",
                 ),
-                "goal pace": turns("search_notes", {"query": "pace"}, "WRONG: 9:30 per mile."),
-                "longest run": turns("search_notes", {"query": "race"}, f"{DP2_TRAINING_SUMMARY}."),
+                "goal pace": turns("bm_search", {"query": "pace"}, "WRONG: 9:30 per mile."),
+                "longest run": turns("bm_search", {"query": "race"}, f"{DP2_TRAINING_SUMMARY}."),
             }
         }
     )
@@ -701,7 +683,7 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     commands, settles = _stub_bm_recording(monkeypatch)
     monkeypatch.setattr(driver, "snapshot_baseline", _forbid_baseline)
     monkeypatch.chdir(tmp_path)
-    session = FakeSession(RICH_SURFACE.tool_allowlist)
+    session = FakeSession(BM_SURFACE.tool_allowlist)
     judge = _StubJudgeRunner()
 
     run_dir = run_agent_tasks(
@@ -736,8 +718,8 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     # The read-only surface view is what actually ran, echoed for the
     # fairness audit trail: no write verbs on a shared warm project.
     echo = manifest["surfaces"][0]
-    assert echo["tool_allowlist"] == list(read_only_view(RICH_SURFACE).tool_allowlist)
-    assert "write_note" not in echo["tool_allowlist"]
+    assert echo["tool_allowlist"] == list(read_only_view(BM_SURFACE).tool_allowlist)
+    assert "bm_write" not in echo["tool_allowlist"]
 
     rows = [
         json.loads(line) for line in (run_dir / "per-task-agent.jsonl").read_text().splitlines()
@@ -786,10 +768,10 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
 
     report = (run_dir / "summary.md").read_text()
     assert "## Per group (persona)" in report
-    assert "| rich | xafs-dp001 | 4/4 | 30.0 |" in report
-    assert "| rich | xafs-dp002 | 1/2 | 60.0 |" in report
+    assert "| bm | xafs-dp001 | 4/4 | 30.0 |" in report
+    assert "| bm | xafs-dp002 | 1/2 | 60.0 |" in report
     assert "## Judge usage (never part of the headline)" in report
-    assert "- rich: 60 tokens over 6 calls" in report
+    assert "- bm: 60 tokens over 6 calls" in report
 
     # The scripted {project} placeholder resolved to the shared group project.
     assert session.calls[0][1]["project"] == "xafs-run-xafs-dp001"
@@ -823,7 +805,7 @@ def test_mixed_grouped_and_ungrouped_task_set_fails(
         run_agent_tasks(
             config,
             model_factory=lambda spec: _orphan_agent(),
-            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+            session_factory=lambda runtime: FakeSession(BM_SURFACE.tool_allowlist),
         )
 
 
@@ -844,7 +826,7 @@ def test_grouped_run_requires_the_converter_groups_layout(
         run_agent_tasks(
             config,
             model_factory=lambda spec: _xafs_agent(),
-            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+            session_factory=lambda runtime: FakeSession(BM_SURFACE.tool_allowlist),
         )
 
 
@@ -1049,7 +1031,7 @@ def test_seeding_records_a_project_that_lost_its_aged_mtimes(
     run_dir = run_agent_tasks(
         _config(tmp_path),
         model_factory=lambda spec: _orphan_agent(),
-        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        session_factory=lambda runtime: FakeSession(BM_SURFACE.tool_allowlist),
     )
 
     rows = [
@@ -1074,7 +1056,7 @@ def _run_with_bm_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout_
     return run_agent_tasks(
         _config(tmp_path),
         model_factory=lambda spec: _orphan_agent(),
-        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        session_factory=lambda runtime: FakeSession(BM_SURFACE.tool_allowlist),
     )
 
 
@@ -1132,7 +1114,7 @@ def test_a_grouped_seeding_failure_errors_the_whole_group_and_seeds_it_once(
 
     monkeypatch.setattr(driver, "run_command", failing_dp001_status)
     monkeypatch.chdir(tmp_path)
-    session = FakeSession(RICH_SURFACE.tool_allowlist)
+    session = FakeSession(BM_SURFACE.tool_allowlist)
 
     run_dir = run_agent_tasks(
         config,

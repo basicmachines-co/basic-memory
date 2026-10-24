@@ -415,25 +415,33 @@ async def bm_search(
     # Trigger: the query is a memory:// URL (no other scope, as checked above).
     # Why: the URL may name its project ('memory://research/foo'), which must route
     #      the search the way it routes a read, not fall to the active project.
-    # Outcome: the URL is the routed target; its project-relative path is the query.
+    # Outcome: the URL selects the route while retaining its permalink spelling.
     routed = query if memory_query and query is not None else path or ""
     kind = "identifier" if memory_query else "path"
     async with open_project_target(
         routed, project, context, kind=kind, output_format=output_format
     ) as target:
         search_mode: str = mode or _search_type_for(None, query, [target.project.name])
-        if memory_query:
-            query, search_mode = memory_url_path(target.route.path), "permalink"
+        include_project = ConfigManager().config.permalinks_include_project
+        if memory_query and query is not None:
+            # A routed URL can name a legacy project-qualified stored permalink.
+            # Preserve that identity rather than adding the current workspace prefix.
+            query = memory_url_path(query if include_project else target.route.path)
+            search_mode = "permalink"
         # Trigger: a permalink search ('core/*' or an exact permalink).
         # Why: permalinks are stored in index form, with the project prefix when
         #      permalinks_include_project is on (and the workspace form in Cloud), and
         #      a project-relative pattern matches none of them.
         # Outcome: the permalink is put into index form before it is matched.
-        if search_mode == "permalink" and query is not None:
+        if (
+            search_mode == "permalink"
+            and query is not None
+            and not (memory_query and target.route.stripped)
+        ):
             query = canonical_memory_path_for_active_route(
                 target.project,
                 query,
-                include_project=ConfigManager().config.permalinks_include_project,
+                include_project=include_project,
                 cached_workspace=await get_cached_active_workspace(context),
             )
 

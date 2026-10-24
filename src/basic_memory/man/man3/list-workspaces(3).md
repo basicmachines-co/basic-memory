@@ -11,6 +11,9 @@ verified: 0.21.6 mcp+cli
 
 # list-workspaces(3)
 
+> Compatibility API: new MCP workflows use [[bm-project(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **list-workspaces** — list cloud workspaces available to the authenticated user

@@ -27,6 +27,12 @@ The CLI is fine when you genuinely need a feature these wrappers don't expose (r
 | List available projects | `bm_projects` |
 | List cloud workspaces | `bm_workspaces` |
 
+These are Hermes-native wrappers, with their own argument schemas. For example,
+`bm_recent`, `bm_projects`, `bm_workspaces`, `limit`, `folder`, and `operation`
+below belong to Hermes. Direct Basic Memory 1.0 MCP tools use `bm_project`,
+`page_size`, `directory`/`identifier`, and `command` instead. Follow the active
+Hermes tool schema when adapting examples from the shared memory skills.
+
 ## Tool reference
 
 ### `bm_search` — search the graph

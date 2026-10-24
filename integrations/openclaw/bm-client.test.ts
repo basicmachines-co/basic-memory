@@ -41,7 +41,7 @@ describe("BmClient MCP behavior", () => {
     client = new BmClient("/usr/local/bin/bm", DEFAULT_PROJECT)
   })
 
-  it("readNote calls read_note with JSON output and no frontmatter by default", async () => {
+  it("readNote calls bm_read with JSON output and no frontmatter by default", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         title: "t",
@@ -56,7 +56,7 @@ describe("BmClient MCP behavior", () => {
     const note = await client.readNote("t")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "read_note",
+      name: "bm_read",
       arguments: {
         identifier: "t",
         include_frontmatter: false,
@@ -83,7 +83,7 @@ describe("BmClient MCP behavior", () => {
     const note = await client.readNote("t", { includeFrontmatter: true })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "read_note",
+      name: "bm_read",
       arguments: {
         identifier: "t",
         include_frontmatter: true,
@@ -95,7 +95,7 @@ describe("BmClient MCP behavior", () => {
     expect(note.frontmatter).toEqual({ title: "t" })
   })
 
-  it("writeNote calls write_note with JSON output", async () => {
+  it("writeNote calls bm_write with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         title: "Note",
@@ -110,7 +110,7 @@ describe("BmClient MCP behavior", () => {
     const result = await client.writeNote("Note", "hello", "notes")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "write_note",
+      name: "bm_write",
       arguments: {
         title: "Note",
         content: "hello",
@@ -137,7 +137,7 @@ describe("BmClient MCP behavior", () => {
     await client.writeNote("Note", "hello", "notes", undefined, true)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "write_note",
+      name: "bm_write",
       arguments: {
         title: "Note",
         content: "hello",
@@ -177,7 +177,7 @@ describe("BmClient MCP behavior", () => {
     )
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "write_note",
+      name: "bm_write",
       arguments: {
         title: "Task Note",
         content: "hello",
@@ -192,24 +192,6 @@ describe("BmClient MCP behavior", () => {
         note_type: "Task",
       },
     })
-  })
-
-  it("writeNote throws NoteAlreadyExistsError on conflict response", async () => {
-    const callTool = jest.fn().mockResolvedValue(
-      mcpResult({
-        title: "Existing",
-        permalink: "notes/existing",
-        file_path: null,
-        checksum: null,
-        action: "conflict",
-        error: "NOTE_ALREADY_EXISTS",
-      }),
-    )
-    setConnected(client, callTool)
-
-    await expect(
-      client.writeNote("Existing", "content", "notes"),
-    ).rejects.toThrow("Note already exists")
   })
 
   it("readNote routes by project_id alone and returns the checksum", async () => {
@@ -231,15 +213,15 @@ describe("BmClient MCP behavior", () => {
     })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "read_note",
+      name: "bm_read",
       arguments: {
         identifier: "t",
         include_frontmatter: true,
         output_format: "json",
-        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        project: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
       },
     })
-    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project")
+    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project_id")
     expect(note.checksum).toBe("abc123")
   })
 
@@ -273,13 +255,13 @@ describe("BmClient MCP behavior", () => {
     )
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "write_note",
+      name: "bm_write",
       arguments: {
         title: "Memory Master",
         content: "body",
         directory: "memory-quest",
         output_format: "json",
-        project_id: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
+        project: "6b1c3f0e-0f5e-4d6b-9a39-2a4f8c1d7e55",
         overwrite: true,
         note_type: "memory_master",
         metadata: {
@@ -289,19 +271,16 @@ describe("BmClient MCP behavior", () => {
         expected_checksum: "old",
       },
     })
-    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project")
+    expect(callTool.mock.calls[0][0].arguments).not.toHaveProperty("project_id")
   })
 
-  it("writeNote maps a JSON NOTE_ALREADY_EXISTS tool error to NoteAlreadyExistsError", async () => {
+  it("writeNote maps a JSON ALREADY_EXISTS tool error to NoteAlreadyExistsError", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpToolError(
         JSON.stringify({
-          title: "Memory Master",
-          permalink: "probe/memory-quest/memory-master",
-          file_path: "memory-quest/Memory Master.md",
-          checksum: null,
-          action: "conflict",
-          error: "NOTE_ALREADY_EXISTS",
+          error: "ALREADY_EXISTS",
+          message:
+            "A note exists at memory-quest/Memory Master.md. Nothing was written.",
         }),
       ),
     )
@@ -312,22 +291,18 @@ describe("BmClient MCP behavior", () => {
       .catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(NoteAlreadyExistsError)
-    expect((err as NoteAlreadyExistsError).permalink).toBe(
-      "probe/memory-quest/memory-master",
+    expect((err as NoteAlreadyExistsError).message).toContain(
+      "memory-quest/Memory Master.md",
     )
+    expect((err as NoteAlreadyExistsError).permalink).toBe("")
   })
 
-  it("writeNote maps NOTE_REVISION_CONFLICT to NoteRevisionConflictError", async () => {
+  it("writeNote maps REVISION_CONFLICT to NoteRevisionConflictError", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpToolError(
         JSON.stringify({
-          title: "Memory Master",
-          permalink: "probe/memory-quest/memory-master",
-          file_path: "memory-quest/Memory Master.md",
-          checksum: null,
-          action: "conflict",
-          error: "NOTE_REVISION_CONFLICT",
-          currentChecksum: "current",
+          error: "REVISION_CONFLICT",
+          message: "Changed since read; read again before retrying",
         }),
       ),
     )
@@ -340,7 +315,7 @@ describe("BmClient MCP behavior", () => {
       .catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(NoteRevisionConflictError)
-    expect((err as NoteRevisionConflictError).currentChecksum).toBe("current")
+    expect((err as NoteRevisionConflictError).currentChecksum).toBeNull()
   })
 
   it("writeNote rethrows tool errors that are not refusal payloads", async () => {
@@ -359,17 +334,17 @@ describe("BmClient MCP behavior", () => {
 
     expect(err).toBeInstanceOf(BmToolError)
     expect((err as Error).message).toBe(
-      "BM MCP tool write_note failed: expected_checksum requires overwrite=True",
+      "BM MCP tool bm_write failed: expected_checksum requires overwrite=True",
     )
   })
 
-  it("editNote calls edit_note with MCP argument names", async () => {
+  it("editNote calls bm_edit with MCP argument names", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         title: "t",
         permalink: "p",
         file_path: "notes/t.md",
-        operation: "find_replace",
+        command: "find_replace",
         checksum: "abc",
       }),
     )
@@ -381,10 +356,10 @@ describe("BmClient MCP behavior", () => {
     })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "edit_note",
+      name: "bm_edit",
       arguments: {
         identifier: "t",
-        operation: "find_replace",
+        command: "find_replace",
         content: "new",
         find_text: "old",
         section: undefined,
@@ -396,13 +371,13 @@ describe("BmClient MCP behavior", () => {
     expect(result.checksum).toBe("abc")
   })
 
-  it("editNote passes metadata to edit_note", async () => {
+  it("editNote passes metadata to bm_edit", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         title: "t",
         permalink: "p",
         file_path: "notes/t.md",
-        operation: "append",
+        command: "append",
       }),
     )
     setConnected(client, callTool)
@@ -412,10 +387,10 @@ describe("BmClient MCP behavior", () => {
     })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "edit_note",
+      name: "bm_edit",
       arguments: {
         identifier: "t",
-        operation: "append",
+        command: "append",
         content: "new",
         metadata: { status: "complete", review: { approved: true } },
         output_format: "json",
@@ -424,7 +399,7 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
-  it("search calls search_notes with paging params", async () => {
+  it("search calls bm_search with paging params", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         results: [
@@ -443,7 +418,7 @@ describe("BmClient MCP behavior", () => {
     const results = await client.search("marketing strategy", 3)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "search_notes",
+      name: "bm_search",
       arguments: {
         query: "marketing strategy",
         page: 1,
@@ -456,7 +431,7 @@ describe("BmClient MCP behavior", () => {
     expect(results[0].title).toBe("x")
   })
 
-  it("search passes metadata_filters, tags, and status to search_notes", async () => {
+  it("search passes metadata_filters, tags, and status to bm_search", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         results: [
@@ -479,16 +454,19 @@ describe("BmClient MCP behavior", () => {
     })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "search_notes",
+      name: "bm_search",
       arguments: {
         query: "oauth",
         page: 1,
         page_size: 5,
         output_format: "json",
         project: "research",
-        metadata_filters: { type: "spec", confidence: { $gt: 0.7 } },
-        tags: ["security"],
-        status: "in-progress",
+        filters: {
+          type: "spec",
+          confidence: { $gt: 0.7 },
+          tags: { $contains: ["security"] },
+          status: "in-progress",
+        },
       },
     })
     expect(results).toHaveLength(1)
@@ -502,7 +480,7 @@ describe("BmClient MCP behavior", () => {
     await client.search("test", 10)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "search_notes",
+      name: "bm_search",
       arguments: {
         query: "test",
         page: 1,
@@ -513,7 +491,7 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
-  it("buildContext calls build_context using output_format=json", async () => {
+  it("buildContext calls bm_context using output_format=json", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         results: [
@@ -535,9 +513,9 @@ describe("BmClient MCP behavior", () => {
     const ctx = await client.buildContext("memory://notes/x", 2)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "build_context",
+      name: "bm_context",
       arguments: {
-        url: "memory://notes/x",
+        identifier: "memory://notes/x",
         depth: 2,
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -546,25 +524,28 @@ describe("BmClient MCP behavior", () => {
     expect(ctx.results).toHaveLength(1)
   })
 
-  it("recentActivity calls recent_activity with JSON output", async () => {
+  it("recentActivity calls bm_project with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
-      mcpResult([
-        {
-          title: "x",
-          permalink: "x",
-          file_path: "notes/x.md",
-          created_at: "2026-01-01T00:00:00Z",
-        },
-      ]),
+      mcpResult({
+        results: [
+          {
+            title: "x",
+            permalink: "x",
+            file_path: "notes/x.md",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      }),
     )
     setConnected(client, callTool)
 
     const recent = await client.recentActivity("7d")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "recent_activity",
+      name: "bm_project",
       arguments: {
-        timeframe: "7d",
+        command: "recent",
+        since: "7d",
         output_format: "json",
         project: DEFAULT_PROJECT,
       },
@@ -572,7 +553,7 @@ describe("BmClient MCP behavior", () => {
     expect(recent).toHaveLength(1)
   })
 
-  it("listProjects calls list_memory_projects with JSON output", async () => {
+  it("listProjects calls bm_project with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         projects: [
@@ -589,8 +570,9 @@ describe("BmClient MCP behavior", () => {
     const projects = await client.listProjects()
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "list_memory_projects",
+      name: "bm_project",
       arguments: {
+        command: "list",
         output_format: "json",
       },
     })
@@ -623,15 +605,46 @@ describe("BmClient MCP behavior", () => {
     const projects = await client.listProjects("team-alpha")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "list_memory_projects",
+      name: "bm_project",
       arguments: {
+        command: "list",
         output_format: "json",
       },
     })
     expect(projects.map((project) => project.name)).toEqual(["alpha"])
   })
 
-  it("ensureProject calls create_memory_project in idempotent JSON mode", async () => {
+  it("listWorkspaces deduplicates project workspaces and excludes local projects", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpResult({
+        projects: [
+          {
+            name: "one",
+            workspace_tenant_id: "team-id",
+            workspace_name: "Team",
+            workspace_type: "team",
+          },
+          {
+            name: "two",
+            workspace_tenant_id: "team-id",
+            workspace_name: "Team",
+            workspace_type: "team",
+          },
+          { name: "local", path: "/tmp/local" },
+        ],
+      }),
+    )
+    setConnected(client, callTool)
+    expect(await client.listWorkspaces()).toEqual([
+      { tenant_id: "team-id", name: "Team", workspace_type: "team" },
+    ])
+    expect(callTool).toHaveBeenCalledWith({
+      name: "bm_project",
+      arguments: { command: "list", output_format: "json" },
+    })
+  })
+
+  it("ensureProject calls bm_project in idempotent JSON mode", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         name: "test-project",
@@ -645,20 +658,21 @@ describe("BmClient MCP behavior", () => {
     await client.ensureProject("/tmp/memory")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "create_memory_project",
+      name: "bm_project",
       arguments: {
-        project_name: "test-project",
-        project_path: "/tmp/memory",
+        command: "create",
+        name: "test-project",
+        path: "/tmp/memory",
         set_default: true,
         output_format: "json",
       },
     })
   })
 
-  it("deleteNote calls delete_note with JSON output", async () => {
+  it("deleteNote calls bm_delete with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
-        deleted: true,
+        action: "deleted",
         title: "old-note",
         permalink: "notes/old-note",
         file_path: "notes/old-note.md",
@@ -669,7 +683,7 @@ describe("BmClient MCP behavior", () => {
     const result = await client.deleteNote("notes/old-note")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "delete_note",
+      name: "bm_delete",
       arguments: {
         identifier: "notes/old-note",
         output_format: "json",
@@ -679,7 +693,7 @@ describe("BmClient MCP behavior", () => {
     expect(result.file_path).toBe("notes/old-note.md")
   })
 
-  it("schemaValidate calls schema_validate with JSON output", async () => {
+  it("schemaValidate calls bm_schema with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "person",
@@ -696,8 +710,9 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaValidate("person")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "schema_validate",
+      name: "bm_schema",
       arguments: {
+        command: "validate",
         note_type: "person",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -724,8 +739,9 @@ describe("BmClient MCP behavior", () => {
     await client.schemaValidate(undefined, "notes/my-note")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "schema_validate",
+      name: "bm_schema",
       arguments: {
+        command: "validate",
         identifier: "notes/my-note",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -733,7 +749,7 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
-  it("schemaInfer calls schema_infer with threshold", async () => {
+  it("schemaInfer calls bm_schema with threshold", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "task",
@@ -750,8 +766,9 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaInfer("task", 0.5)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "schema_infer",
+      name: "bm_schema",
       arguments: {
+        command: "infer",
         note_type: "task",
         threshold: 0.5,
         output_format: "json",
@@ -761,7 +778,7 @@ describe("BmClient MCP behavior", () => {
     expect(result.notes_analyzed).toBe(10)
   })
 
-  it("schemaDiff calls schema_diff with JSON output", async () => {
+  it("schemaDiff calls bm_schema with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "person",
@@ -776,8 +793,9 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaDiff("person")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "schema_diff",
+      name: "bm_schema",
       arguments: {
+        command: "diff",
         note_type: "person",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -808,12 +826,12 @@ describe("BmClient MCP behavior", () => {
     })
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "search_notes",
+      name: "bm_search",
       arguments: {
         page: 1,
         page_size: 10,
         note_types: ["task"],
-        status: "active",
+        filters: { status: "active" },
         output_format: "json",
         project: DEFAULT_PROJECT,
       },
@@ -822,10 +840,10 @@ describe("BmClient MCP behavior", () => {
     expect(result[0].title).toBe("Task 1")
   })
 
-  it("moveNote calls move_note with destination_folder in a single MCP call", async () => {
+  it("moveNote calls bm_move with destination_folder in a single MCP call", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
-        moved: true,
+        action: "moved",
         title: "My Note",
         permalink: "archive/my-note",
         file_path: "archive/my-note.md",
@@ -839,10 +857,10 @@ describe("BmClient MCP behavior", () => {
 
     expect(callTool).toHaveBeenCalledTimes(1)
     expect(callTool).toHaveBeenCalledWith({
-      name: "move_note",
+      name: "bm_move",
       arguments: {
         identifier: "notes/my-note",
-        destination_folder: "archive",
+        destination: "archive/",
         output_format: "json",
         project: DEFAULT_PROJECT,
       },
@@ -870,7 +888,12 @@ describe("BmClient MCP behavior", () => {
   it("indexConversation creates fallback note only on note-not-found errors", async () => {
     ;(client as any).editNote = jest
       .fn()
-      .mockRejectedValue(new Error("Entity not found"))
+      .mockRejectedValue(
+        new BmToolError(
+          "bm_edit",
+          JSON.stringify({ error: "NOT_FOUND", message: "Missing note" }),
+        ),
+      )
     ;(client as any).writeNote = jest.fn().mockResolvedValue({
       title: "conversations",
       permalink: "conversations",
@@ -904,7 +927,7 @@ describe("BmClient MCP behavior", () => {
     }
 
     await expect(
-      (client as any).callToolRaw("search_notes", { query: "x" }),
+      (client as any).callToolRaw("bm_search", { query: "x" }),
     ).rejects.toThrow("BM MCP unavailable")
 
     expect((client as any).ensureConnected).toHaveBeenCalledTimes(4)
@@ -920,7 +943,7 @@ describe("BmClient MCP behavior", () => {
     ;(client as any).disconnectCurrent = jest.fn().mockResolvedValue(undefined)
 
     await expect(
-      (client as any).callToolRaw("search_notes", { query: "x" }),
+      (client as any).callToolRaw("bm_search", { query: "x" }),
     ).rejects.toThrow("invalid params")
 
     expect((client as any).ensureConnected).toHaveBeenCalledTimes(1)

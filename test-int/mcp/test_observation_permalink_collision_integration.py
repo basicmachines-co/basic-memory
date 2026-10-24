@@ -39,7 +39,7 @@ async def test_duplicate_category_content_observations_both_searchable(
             f"- [note] {prefix} BETA_UNIQUE_MARKER\n"
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Dup Obs Note",
@@ -51,12 +51,12 @@ async def test_duplicate_category_content_observations_both_searchable(
         # Both observations should be independently findable by their unique suffix
         for marker in ("ALPHA_UNIQUE_MARKER", "BETA_UNIQUE_MARKER"):
             result = await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": marker,
-                    "search_type": "text",
-                    "entity_types": ["observation"],
+                    "mode": "text",
+                    "items": ["observation"],
                     "output_format": "json",
                 },
             )
@@ -95,7 +95,7 @@ async def test_delete_note_with_colliding_observations_leaves_no_ghost_rows(
             f"- [note] {prefix} GHOST_BETA_MARKER\n"
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Ghost Obs Note",
@@ -107,12 +107,12 @@ async def test_delete_note_with_colliding_observations_leaves_no_ghost_rows(
         # Both observations are searchable before deletion
         for marker in ("GHOST_ALPHA_MARKER", "GHOST_BETA_MARKER"):
             result = await client.call_tool(
-                "search_notes",
+                "bm_search",
                 {
                     "project": test_project.name,
                     "query": marker,
-                    "search_type": "text",
-                    "entity_types": ["observation"],
+                    "mode": "text",
+                    "items": ["observation"],
                     "output_format": "json",
                 },
             )
@@ -124,13 +124,10 @@ async def test_delete_note_with_colliding_observations_leaves_no_ghost_rows(
         assert any(r.type == "observation" for r in index_rows)
 
         delete_result = await client.call_tool(
-            "delete_note",
-            {
-                "project": test_project.name,
-                "identifier": "Ghost Obs Note",
-            },
+            "bm_delete",
+            {"project": test_project.name, "identifier": "Ghost Obs Note"},
         )
-        assert "true" in delete_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
+        assert delete_result.content[0].text.startswith("Deleted ")  # pyright: ignore [reportAttributeAccessIssue]
 
         # No ghost rows remain in the index - including any disambiguated row
         for marker in ("GHOST_ALPHA_MARKER", "GHOST_BETA_MARKER"):

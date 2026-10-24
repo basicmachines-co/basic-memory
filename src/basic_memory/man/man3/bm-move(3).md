@@ -44,7 +44,7 @@ bm_write it there, then bm_delete the original.
 - **path** (string | null, optional, default: None) — The directory to move, with everything in it, e.g. 'drafts/2025'.
 - **expected_checksum** (string | null, optional, default: None) — Move the note only while it is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. Omit to use the default project.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

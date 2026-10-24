@@ -109,7 +109,7 @@ def test_handle_tool_call_dispatches(bm):
     p.handle_tool_call("bm_search", {"query": "hi", "limit": 3})
     actor.call.assert_called_once()
     bm_tool, bm_args = actor.call.call_args[0][:2]
-    assert bm_tool == "search_notes"
+    assert bm_tool == "bm_search"
     assert bm_args == {"project": "proj", "query": "hi", "page_size": 3}
 
 
@@ -137,7 +137,10 @@ def test_bm_projects_returns_routing_fields_verbatim(bm, fake_result):
 
     out = json.loads(p.handle_tool_call("bm_projects", {}))
 
-    assert actor.call.call_args[0][:2] == ("list_memory_projects", {"output_format": "json"})
+    assert actor.call.call_args[0][:2] == (
+        "bm_project",
+        {"command": "list", "output_format": "json"},
+    )
     assert out == payload
 
 

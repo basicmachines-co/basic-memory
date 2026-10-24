@@ -126,7 +126,7 @@ Health/
 
 - **Log schema:** `entry_type(enum): [workout, symptom, appointment, measurement]` · `date`
 - **Index:** optional — a current-goals note works better than a full log index.
-- **Key conventions:** log entries are quick and low-friction (two observations and a sentence beats an unfilled template); ongoing threads link their log entries so `build_context` on "left knee" pulls the full history.
+- **Key conventions:** log entries are quick and low-friction (two observations and a sentence beats an unfilled template); ongoing threads link their log entries so `bm_context` on "left knee" pulls the full history.
 - **Sensitivity note for the instruction file:** health data in plaintext markdown — the user should decide consciously what level of detail they're comfortable storing, and where the project syncs to.
 - **Expansions:** habit streaks; pre-appointment summaries generated from the log.
 

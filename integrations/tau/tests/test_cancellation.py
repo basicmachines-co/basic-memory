@@ -23,7 +23,7 @@ async def test_cancellation_token_stops_inflight_request() -> None:
     connection.call = AsyncMock(side_effect=slow_call)
     signal = MagicMock()
     signal.is_cancelled.return_value = False
-    pending = asyncio.create_task(execute_tool(connection, "write_note", "id", {}, signal=signal))
+    pending = asyncio.create_task(execute_tool(connection, "bm_write", "id", {}, signal=signal))
     await started.wait()
     signal.is_cancelled.return_value = True
     with pytest.raises(asyncio.CancelledError):
@@ -37,5 +37,5 @@ async def test_uncancelled_token_returns_result() -> None:
     connection.call = AsyncMock(return_value=CallToolResult(content=[]))
     signal = MagicMock()
     signal.is_cancelled.return_value = False
-    result = await execute_tool(connection, "read_note", "id", {}, signal=signal)
+    result = await execute_tool(connection, "bm_read", "id", {}, signal=signal)
     assert result.content == []

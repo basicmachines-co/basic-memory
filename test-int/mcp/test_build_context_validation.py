@@ -11,7 +11,7 @@ async def test_build_context_valid_urls(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create a test note to ensure we have something to find
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "URL Validation Test",
@@ -30,7 +30,7 @@ async def test_build_context_valid_urls(mcp_server, app, test_project):
 
         for url in valid_urls:
             result = await client.call_tool(
-                "build_context", {"project": test_project.name, "url": url}
+                "bm_context", {"project": test_project.name, "identifier": url}
             )
 
             # Should return a valid GraphContext response
@@ -56,7 +56,7 @@ async def test_build_context_invalid_urls_fail_validation(mcp_server, app, test_
         for invalid_url, expected_error in invalid_test_cases:
             with pytest.raises(Exception) as exc_info:
                 await client.call_tool(
-                    "build_context", {"project": test_project.name, "url": invalid_url}
+                    "bm_context", {"project": test_project.name, "identifier": invalid_url}
                 )
 
             error_message = str(exc_info.value).lower()
@@ -79,13 +79,14 @@ async def test_build_context_empty_urls_fail_validation(mcp_server, app, test_pr
         for empty_url in empty_urls:
             with pytest.raises(Exception) as exc_info:
                 await client.call_tool(
-                    "build_context", {"project": test_project.name, "url": empty_url}
+                    "bm_context", {"project": test_project.name, "identifier": empty_url}
                 )
 
             error_message = str(exc_info.value)
             # Should fail with validation error
             assert (
-                "cannot be empty" in error_message
+                "string_too_short" in error_message
+                or "cannot be empty" in error_message
                 or "empty or whitespace" in error_message
                 or "value_error" in error_message
                 or "should be non-empty" in error_message
@@ -106,7 +107,7 @@ async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, a
 
         for url in nonexistent_valid_urls:
             result = await client.call_tool(
-                "build_context", {"project": test_project.name, "url": url}
+                "bm_context", {"project": test_project.name, "identifier": url}
             )
 
             # Should return valid response with empty results
@@ -125,7 +126,7 @@ async def test_build_context_error_messages_are_helpful(mcp_server, app, test_pr
         # Test double slash error message
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(
-                "build_context", {"project": test_project.name, "url": "memory//bad"}
+                "bm_context", {"project": test_project.name, "identifier": "memory//bad"}
             )
 
         error_msg = str(exc_info.value).lower()
@@ -139,7 +140,7 @@ async def test_build_context_error_messages_are_helpful(mcp_server, app, test_pr
         # Test protocol scheme error message
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(
-                "build_context", {"project": test_project.name, "url": "http://example.com"}
+                "bm_context", {"project": test_project.name, "identifier": "http://example.com"}
             )
 
         error_msg = str(exc_info.value).lower()
@@ -165,7 +166,7 @@ async def test_build_context_pattern_matching_works(mcp_server, app, test_projec
 
         for title, folder, content in test_notes:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": title,
@@ -176,7 +177,7 @@ async def test_build_context_pattern_matching_works(mcp_server, app, test_projec
 
         # Test pattern matching
         result = await client.call_tool(
-            "build_context", {"project": test_project.name, "url": "patterns/*"}
+            "bm_context", {"project": test_project.name, "identifier": "patterns/*"}
         )
 
         assert len(result.content) == 1

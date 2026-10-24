@@ -22,9 +22,9 @@ async def test_project_constraint_override_content_tools(mcp_server, app, test_p
         async with Client(mcp_server) as client:
             # Try to write to a different project - should be overridden
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
-                    "project": "some-other-project",  # Should be ignored
+                    "project": "some-other-project",
                     "title": "Constraint Test Note",
                     "directory": "test",
                     "content": "# Constraint Test\n\nThis should go to the constrained project.",
@@ -36,10 +36,9 @@ async def test_project_constraint_override_content_tools(mcp_server, app, test_p
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
             # Should use the constrained project, not the requested one
-            assert f"project: {test_project.name}" in response_text
-            assert "# Created note" in response_text
-            assert "file_path: test/Constraint Test Note.md" in response_text
-            assert f"[Project: '{test_project.name}']" in response_text
+            assert f"permalink: {test_project.name}/" in response_text
+            assert "Created " in response_text
+            assert "Created test/Constraint Test Note.md" in response_text
 
     finally:
         # Clean up environment variable
@@ -58,7 +57,7 @@ async def test_project_constraint_read_note_override(mcp_server, app, test_proje
         async with Client(mcp_server) as client:
             # First create a note
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Read Test Note",
@@ -69,10 +68,11 @@ async def test_project_constraint_read_note_override(mcp_server, app, test_proje
 
             # Try to read from different project - should be overridden
             result = await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
-                    "project": "wrong-project",  # Should be ignored
+                    "project": "wrong-project",
                     "identifier": "Read Test Note",
+                    "include_frontmatter": False,
                 },
             )
 
@@ -99,7 +99,7 @@ async def test_project_constraint_search_notes_override(mcp_server, app, test_pr
         async with Client(mcp_server) as client:
             # First create a searchable note
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Searchable Note",
@@ -110,11 +110,8 @@ async def test_project_constraint_search_notes_override(mcp_server, app, test_pr
 
             # Try to search in different project - should be overridden
             result = await client.call_tool(
-                "search_notes",
-                {
-                    "project": "different-project",  # Should be ignored
-                    "query": "searchable terms",
-                },
+                "bm_search",
+                {"project": "different-project", "query": "searchable terms"},
             )
 
             assert len(result.content) == 1
@@ -138,7 +135,7 @@ async def test_list_projects_constrained_mode(mcp_server, app, test_project):
 
     try:
         async with Client(mcp_server) as client:
-            result = await client.call_tool("list_memory_projects", {})
+            result = await client.call_tool("bm_project", {"command": "list"})
 
             assert len(result.content) == 1
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -161,8 +158,8 @@ async def test_create_project_disabled_in_constrained_mode(mcp_server, app, test
     try:
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "create_memory_project",
-                {"project_name": "new-project", "project_path": "/tmp/new-project"},
+                "bm_project",
+                {"name": "new-project", "path": "/tmp/new-project", "command": "create"},
                 raise_on_error=False,
             )
 
@@ -189,7 +186,7 @@ async def test_delete_project_disabled_in_constrained_mode(mcp_server, app, test
     try:
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "delete_project", {"project_name": "some-project"}, raise_on_error=False
+                "bm_project_delete", {"name": "some-project"}, raise_on_error=False
             )
 
             # A refusal is a tool error (#1813), and it still names the way forward.
@@ -215,7 +212,7 @@ async def test_normal_mode_without_constraint(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Test write_note works with explicit project
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Normal Mode Note",
@@ -226,11 +223,11 @@ async def test_normal_mode_without_constraint(mcp_server, app, test_project):
 
         assert len(result.content) == 1
         response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert f"project: {test_project.name}" in response_text
-        assert "# Created note" in response_text
+        assert f"permalink: {test_project.name}/" in response_text
+        assert "Created " in response_text
 
         # Test list_memory_projects works normally
-        list_result = await client.call_tool("list_memory_projects", {})
+        list_result = await client.call_tool("bm_project", {"command": "list"})
         list_text = list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Should not show constraint message
@@ -248,7 +245,7 @@ async def test_constraint_with_multiple_content_tools(mcp_server, app, test_proj
         async with Client(mcp_server) as client:
             # Test write_note
             write_result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": "wrong-project",
                     "title": "Multi Tool Test",
@@ -256,18 +253,23 @@ async def test_constraint_with_multiple_content_tools(mcp_server, app, test_proj
                     "content": "# Multi Tool Test\n\n- [note] Testing multiple tools",
                 },
             )
-            assert f"project: {test_project.name}" in write_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+            assert f"permalink: {test_project.name}/" in write_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
             # Test read_note
             read_result = await client.call_tool(
-                "read_note", {"project": "another-wrong-project", "identifier": "Multi Tool Test"}
+                "bm_read",
+                {
+                    "project": "another-wrong-project",
+                    "identifier": "Multi Tool Test",
+                    "include_frontmatter": False,
+                },
             )
             # Should successfully find the note (proving constraint worked)
             assert "# Multi Tool Test" in read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
             # Test search_notes
             search_result = await client.call_tool(
-                "search_notes", {"project": "yet-another-wrong-project", "query": "multiple tools"}
+                "bm_search", {"project": "yet-another-wrong-project", "query": "multiple tools"}
             )
             # Should find results (proving constraint worked)
             assert "Multi Tool Test" in search_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -286,14 +288,14 @@ async def test_constraint_environment_cleanup(mcp_server, app, test_project):
 
     async with Client(mcp_server) as client:
         # Verify constraint is active
-        constrained_result = await client.call_tool("list_memory_projects", {})
+        constrained_result = await client.call_tool("bm_project", {"command": "list"})
         assert "MCP server is constrained to a single project" in constrained_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Remove constraint
         del os.environ["BASIC_MEMORY_MCP_PROJECT"]
 
         # Verify normal behavior is restored
-        normal_result = await client.call_tool("list_memory_projects", {})
+        normal_result = await client.call_tool("bm_project", {"command": "list"})
         normal_text = normal_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         assert "constrained to a single project" not in normal_text
@@ -318,7 +320,7 @@ async def test_constraint_with_invalid_project_override(mcp_server, app, test_pr
 
             for i, invalid_project in enumerate(invalid_projects):
                 result = await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": invalid_project,
                         "title": f"Test Invalid {i} {invalid_project[:5]}",
@@ -329,9 +331,9 @@ async def test_constraint_with_invalid_project_override(mcp_server, app, test_pr
 
                 # Should still use the constrained project
                 response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-                assert f"project: {test_project.name}" in response_text
+                assert f"permalink: {test_project.name}/" in response_text
                 # Should create or update successfully
-                assert "# Created note" in response_text or "# Updated note" in response_text
+                assert "Created " in response_text or "Updated " in response_text
 
     finally:
         if "BASIC_MEMORY_MCP_PROJECT" in os.environ:

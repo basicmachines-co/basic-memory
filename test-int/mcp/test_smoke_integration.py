@@ -14,7 +14,7 @@ async def test_mcp_smoke_flow(mcp_server, app, test_project):
         content = "# Smoke Test Note\n\n- [note] MCP smoke flow"
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": title,
@@ -25,31 +25,22 @@ async def test_mcp_smoke_flow(mcp_server, app, test_project):
         )
 
         read_result = await client.call_tool(
-            "read_note",
-            {
-                "project": test_project.name,
-                "identifier": title,
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": title, "include_frontmatter": False},
         )
         assert len(read_result.content) == 1
         assert title in read_result.content[0].text
 
         search_result = await client.call_tool(
-            "search_notes",
-            {
-                "project": test_project.name,
-                "query": "Smoke Test Note",
-            },
+            "bm_search",
+            {"project": test_project.name, "query": "Smoke Test Note"},
         )
         assert len(search_result.content) == 1
         assert title in search_result.content[0].text
 
         context_result = await client.call_tool(
-            "build_context",
-            {
-                "project": test_project.name,
-                "url": "smoke/*",
-            },
+            "bm_context",
+            {"project": test_project.name, "identifier": "smoke/*"},
         )
         assert len(context_result.content) == 1
         assert title in context_result.content[0].text

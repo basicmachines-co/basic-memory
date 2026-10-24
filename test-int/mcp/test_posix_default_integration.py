@@ -25,24 +25,24 @@ async def test_posix_registration_over_mcp(mcp_server, config_manager, setting, 
     try:
         async with Client(mcp_server, mode=mode) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
-            assert {"read_note", "search_notes", "write_note", "build_context"} <= tools.keys()
+            assert {
+                "bm_read",
+                "bm_search",
+                "bm_write",
+                "bm_context",
+                "bm_list",
+                "bm_find",
+                "bm_man",
+                "bm_project",
+            } <= tools.keys()
             instructions = client.instructions
             assert instructions is not None
-            assert "When available in your tool list" in instructions
-            assert "If they are absent, use the note tools" in instructions
-            if setting is False:
-                assert POSIX_TOOLS.isdisjoint(tools)
-                hidden = await client.call_tool("man", {}, raise_on_error=False)
-                assert hidden.is_error
-            else:
-                assert POSIX_TOOLS <= tools.keys()
-                for name in POSIX_TOOLS:
-                    annotations = tools[name].annotations
-                    assert annotations is not None
-                    assert annotations.read_only_hint is True
-                    assert annotations.destructive_hint is False
-                assert "Projects are mount points" in instructions
-                assert 'cat(identifier="research/notes/topic.md")' in instructions
+            assert "bm_read" in instructions
+            assert "bm_search" in instructions
+            for name in ("bm_read", "bm_search", "bm_list", "bm_find", "bm_man"):
+                assert tools[name].annotations.read_only_hint is True
+            manual = await client.call_tool("bm_man", {})
+            assert not manual.is_error
     finally:
         set_posix_tools_visibility(mcp_server, False)
 
@@ -53,7 +53,7 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
     try:
         async with Client(mcp_server) as client:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "POSIX Runbook",
                     "directory": "notes",
@@ -62,19 +62,28 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
                     "project": test_project.name,
                 },
             )
-            mounts = await client.call_tool("ls", {"path": "/"})
+            mounts = await client.call_tool("bm_list", {"path": "/", "output_format": "json"})
             mount = next(row for row in mounts.data["nodes"] if row["name"] == test_project.name)
             note_dir = f"{mount['directory_path']}/notes"
-            listing = await client.call_tool("ls", {"path": note_dir})
+            listing = await client.call_tool("bm_list", {"path": note_dir, "output_format": "json"})
             note_path = listing.data["nodes"][0]["file_path"]
-            full = await client.call_tool("cat", {"identifier": note_path})
+            full = await client.call_tool(
+                "bm_read", {"identifier": note_path, "output_format": "json"}
+            )
             assert "retry the task" in full.data["content"]
 
-            found = await client.call_tool("find", {"path": note_dir, "name": "*.md"})
+            found = await client.call_tool(
+                "bm_find", {"path": note_dir, "name": "*.md", "output_format": "json"}
+            )
             assert found.data["nodes"][0]["file_path"] == note_path
             projected = await client.call_tool(
-                "find",
-                {"path": note_dir, "meta": ["status=active"], "fields": ["priority"]},
+                "bm_find",
+                {
+                    "path": note_dir,
+                    "filters": {"status": "active"},
+                    "fields": ["priority"],
+                    "output_format": "json",
+                },
             )
             row = projected.data["results"][0]
             assert row["file_path"] == note_path
@@ -82,28 +91,38 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
             assert "content" not in row
 
             matches = await client.call_tool(
-                "grep",
+                "bm_search",
                 {
-                    "pattern": "retry",
-                    "context_lines": 1,
+                    "query": "retry",
+                    "lines": 1,
                     "project": test_project.name,
+                    "output_format": "json",
                 },
             )
             window = matches.data["results"][0]["windows"][0]
             sliced = await client.call_tool(
-                "cat",
+                "bm_read",
                 {
                     "identifier": note_path,
                     "start_line": window["start_line"],
                     "end_line": window["end_line"],
+                    "output_format": "json",
                 },
             )
             assert sliced.data["content"] == window["content"] == "before\nretry the task\nafter"
             assert len(sliced.data["content"]) < len(full.data["content"])
 
-            recent = await client.call_tool("tail", {"project": test_project.name, "lines": 1})
-            assert recent.data[0]["title"] == "POSIX Runbook"
-            manual = await client.call_tool("man", {"page": "cat(1)"})
-            assert "--lines" in manual.data
+            recent = await client.call_tool(
+                "bm_project",
+                {
+                    "project": test_project.name,
+                    "page_size": 1,
+                    "command": "recent",
+                    "output_format": "json",
+                },
+            )
+            assert recent.data["results"][0]["title"] == "POSIX Runbook"
+            manual = await client.call_tool("bm_man", {"page": "bm-read"})
+            assert "start_line" in manual.data
     finally:
         set_posix_tools_visibility(mcp_server, False)

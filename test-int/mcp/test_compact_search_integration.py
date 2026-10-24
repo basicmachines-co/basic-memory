@@ -17,7 +17,7 @@ async def test_compact_search_can_discover_then_read_notes(
         body = "- [fact] " + body
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "title": "CompactNeedle",
                 "content": body,
@@ -27,16 +27,16 @@ async def test_compact_search_can_discover_then_read_notes(
         )
         arguments: dict[str, object] = {
             "query": "CompactNeedle",
-            "search_type": "text",
+            "mode": "text",
             "output_format": "json",
-            "entity_types": ["observation"] if observations else ["entity"],
+            "items": ["observation"] if observations else ["note"],
         }
         if all_projects:
-            arguments["search_all_projects"] = True
+            arguments["all_projects"] = True
         else:
             arguments["project"] = test_project.name
-        full_result = await client.call_tool("search_notes", arguments)
-        compact_result = await client.call_tool("search_notes", {**arguments, "compact": True})
+        full_result = await client.call_tool("bm_search", arguments)
+        compact_result = await client.call_tool("bm_search", {**arguments, "compact": True})
         full = json.loads(full_result.content[0].text)
         compact = json.loads(compact_result.content[0].text)
         assert full["results"]
@@ -52,15 +52,13 @@ async def test_compact_search_can_discover_then_read_notes(
         if observations:
             for row in expected["results"]:
                 row["title"] = row["category"]
-                row["permalink"] = (
-                    f"{test_project.name}/{row['file_path']}" if all_projects else row["file_path"]
-                )
+                row["permalink"] = row["file_path"]
         assert compact == expected
         assert len(json.dumps(compact)) < len(json.dumps(full)) / 3
 
         selected = compact["results"][0]
         read = await client.call_tool(
-            "read_note",
+            "bm_read",
             {"identifier": selected["permalink"]}
             if all_projects and observations
             else {"identifier": selected["external_id"], "project": test_project.name},
@@ -68,7 +66,7 @@ async def test_compact_search_can_discover_then_read_notes(
         assert body in read.content[0].text
 
         text_result = await client.call_tool(
-            "search_notes", {**arguments, "compact": True, "output_format": "text"}
+            "bm_search", {**arguments, "compact": True, "output_format": "text"}
         )
         assert ("fact" if observations else "CompactNeedle") in text_result.content[0].text
         assert "This is source prose" not in text_result.content[0].text

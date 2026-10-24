@@ -19,8 +19,8 @@ def test_ai_assistant_guide_exists():
     guide = ai_assistant_guide()
 
     assert "# AI Assistant Guide" in guide
-    assert "recent_activity" in guide
-    assert "project_id" in guide
+    assert 'bm_project(command="recent")' in guide
+    assert "`external_id` UUID as `project`" in guide
     assert "directory" in guide
     assert "https://docs.basicmemory.com/llms.txt" in guide
     assert "https://docs.basicmemory.com/raw/...md" in guide

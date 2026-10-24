@@ -26,23 +26,23 @@ not during them.
 ```python
 # The last reflection is the checkpoint. Titles carry date and time, so the
 # newest sorts first.
-list_directory(dir_name="reflections", sort="title_desc", page_size=1)
+bm_list(path="reflections", sort="title_desc", page_size=1)
 
 # Everything changed since that date (json gives one row per note). With no
-# reflection yet, use timeframe="7d".
-recent_activity(timeframe="2026-10-13", output_format="json", page_size=50)
-# Ask for page=2, 3, ... until a page returns fewer than page_size rows.
+# reflection yet, use since="7d".
+bm_project(command="recent", since="2026-10-13", items=["note"], output_format="json", page_size=50)
+# Ask for page=2, 3, ... until has_more is false.
 
 # Read each changed note in full before judging it
-read_note(identifier="meetings/2026-10-14-launch-sync")
+bm_read(identifier="meetings/2026-10-14-launch-sync")
 ```
 
 Timeframes count whole days, so the window can overlap the last reflection.
 Skip notes it lists as `reviewed`, and notes you wrote in an earlier
 reflection, unless someone edited them since.
 
-`recent_activity` looks back at most a year. If the last reflection is older
-than that, use `timeframe="365d"` and record in this reflection that changes
+`bm_project(command="recent")` looks back at most a year. If the last reflection is older
+than that, use `since="365d"` and record in this reflection that changes
 before that window were not reviewed.
 
 ### 2. Decide what lasts
@@ -65,8 +65,8 @@ For each item, ask:
 Find the durable note for each item before writing anything:
 
 ```python
-search_notes(query="launch checklist owner")
-build_context(url="memory://projects/launch")
+bm_search(query="launch checklist owner")
+bm_context(identifier="memory://projects/launch")
 ```
 
 - **Say when it holds.** A fact with a date gets a qualifier (see
@@ -91,10 +91,10 @@ build_context(url="memory://projects/launch")
   checksum to the edit, so the edit applies only to the revision you read.
 
   ```python
-  note = read_note(identifier="Launch Plan", output_format="json")
-  edit_note(
+  note = bm_read(identifier="Launch Plan", output_format="json")
+  bm_edit(
       identifier="Launch Plan",
-      operation="replace_section",
+      command="replace_section",
       section="## Owners",
       content="- [owner] Maya owns the launch checklist",
       expected_checksum=note["checksum"],
@@ -103,7 +103,7 @@ build_context(url="memory://projects/launch")
 
   If the edit reports a checksum conflict, someone changed the note after you
   read it: read it again and decide again from the new text.
-- **The topic has no note**: create one with `write_note`, following
+- **The topic has no note**: create one with `bm_write`, following
   **memory-notes**: a clear title, observations with categories, and relations.
 - **Link back**: every consolidated fact names its source, e.g.
   `- derived_from [[2026-10-14 Launch Sync]]`, so a reader can check it.

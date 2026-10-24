@@ -497,7 +497,7 @@ def test_bm_status_renders_provider_state(bm, monkeypatch):
 def test_bm_search_happy_path(bm):
     session = FakeSession()
     session.stub(
-        "search_notes",
+        "bm_search",
         lambda args: {
             "results": [
                 {"title": "Decisions", "permalink": "decisions/foo", "content": "we chose X"},
@@ -513,7 +513,7 @@ def test_bm_search_happy_path(bm):
         assert "we chose X" in out
         # Args sent to BM
         call = session.calls[-1]
-        assert call[0] == "search_notes"
+        assert call[0] == "bm_search"
         assert call[1]["query"] == "widgets"
         assert call[1]["project"] == "test-proj"
         assert call[1]["output_format"] == "json"
@@ -538,7 +538,7 @@ def test_bm_search_actor_exception_returns_plain_string(bm):
     def _boom(_args):
         raise RuntimeError("MCP transport closed")
 
-    session.stub("search_notes", _boom)
+    session.stub("bm_search", _boom)
     provider, actor = _ready_provider(bm, session)
     try:
         out = _handlers_by_name(bm, provider)["bm-search"]("anything")
@@ -558,7 +558,7 @@ def test_bm_read_returns_text_body(bm):
     return the bare markdown."""
     session = FakeSession()
     session.stub(
-        "read_note",
+        "bm_read",
         # FakeSession serializes whatever the handler returns; emit the JSON
         # the wrapper would produce for a markdown response.
         lambda args: {"text": "# Foo\n\nbody text"},
@@ -581,7 +581,7 @@ def test_bm_recent_default_timeframe(bm):
     try:
         out = _handlers_by_name(bm, provider)["bm-recent"]("")
         assert "7d" in out
-        assert session.calls[-1][1]["timeframe"] == "7d"
+        assert session.calls[-1][1]["since"] == "7d"
     finally:
         actor.shutdown()
 
@@ -589,7 +589,7 @@ def test_bm_recent_default_timeframe(bm):
 def test_bm_recent_custom_timeframe(bm):
     session = FakeSession()
     session.stub(
-        "recent_activity",
+        "bm_project",
         lambda args: {"results": [{"title": "Recent thing", "permalink": "x/y"}]},
     )
     provider, actor = _ready_provider(bm, session)
@@ -597,29 +597,18 @@ def test_bm_recent_custom_timeframe(bm):
         out = _handlers_by_name(bm, provider)["bm-recent"]("2 weeks")
         assert "2 weeks" in out
         assert "Recent thing" in out
-        assert session.calls[-1][1]["timeframe"] == "2 weeks"
+        assert session.calls[-1][1]["since"] == "2 weeks"
     finally:
         actor.shutdown()
 
 
-def test_bm_recent_bare_list_shape(bm):
-    """Regression: BM's `recent_activity(output_format="json")` returns a bare
-    `list[dict]` (signature: `-> str | list[dict]`), not a dict-with-results.
-    The handler must surface those rows, not report "no activity"."""
-    session = FakeSession()
-    session.stub(
-        "recent_activity",
-        lambda args: [
-            {"title": "Edited yesterday", "permalink": "notes/a", "content": "blob"},
-            {"title": "Edited 3d ago", "permalink": "notes/b"},
-        ],
-    )
+def test_bm_recent_rejects_legacy_bare_list_shape(bm):
+    """An unexpected response must not be reported as no activity."""
+    session = FakeSession(default_response=[])
     provider, actor = _ready_provider(bm, session)
     try:
         out = _handlers_by_name(bm, provider)["bm-recent"]("")
-        assert "Edited yesterday" in out
-        assert "Edited 3d ago" in out
-        assert "No activity" not in out
+        assert "invalid activity response" in out
     finally:
         actor.shutdown()
 
@@ -635,7 +624,7 @@ def test_bm_remember_derives_title_from_first_line(bm):
         return {"permalink": "bm-remember/note-perm"}
 
     session = FakeSession()
-    session.stub("write_note", _write)
+    session.stub("bm_write", _write)
     provider, actor = _ready_provider(bm, session)
     provider._remember_folder = "bm-remember"
     try:
@@ -680,7 +669,7 @@ def test_bm_remember_uses_configured_folder(bm):
 def test_bm_project_lists_and_marks_active(bm):
     session = FakeSession()
     session.stub(
-        "list_memory_projects",
+        "bm_project",
         lambda args: {
             "projects": [
                 {"name": "other-proj"},
@@ -717,16 +706,22 @@ def test_bm_workspace_local_mode_message(bm):
 def test_bm_workspace_cloud_mode_lists(bm):
     session = FakeSession()
     session.stub(
-        "list_workspaces",
+        "bm_project",
         lambda args: {
-            "workspaces": [
+            "projects": [
                 {
-                    "name": "Personal",
+                    "workspace_name": "Personal",
+                    "workspace_tenant_id": "personal-id",
                     "workspace_type": "personal",
                     "role": "owner",
-                    "is_default": True,
+                    "workspace_is_default": True,
                 },
-                {"name": "Acme", "workspace_type": "team", "role": "member"},
+                {
+                    "workspace_name": "Acme",
+                    "workspace_tenant_id": "team-id",
+                    "workspace_type": "team",
+                    "role": "member",
+                },
             ]
         },
     )
@@ -744,8 +739,16 @@ def test_bm_workspace_cloud_mode_lists(bm):
 def test_bm_workspace_lazily_initializes_before_mode_check(bm, monkeypatch):
     session = FakeSession()
     session.stub(
-        "list_workspaces",
-        lambda args: {"workspaces": [{"name": "Personal", "workspace_type": "personal"}]},
+        "bm_project",
+        lambda args: {
+            "projects": [
+                {
+                    "workspace_name": "Personal",
+                    "workspace_tenant_id": "personal-id",
+                    "workspace_type": "personal",
+                }
+            ]
+        },
     )
     provider = bm.BasicMemoryProvider()
     calls = []
@@ -764,7 +767,7 @@ def test_bm_workspace_lazily_initializes_before_mode_check(bm, monkeypatch):
         assert "Personal" in out
         assert "no workspaces to list" not in out
         assert calls
-        assert session.calls[-1][0] == "list_workspaces"
+        assert session.calls[-1][0] == "bm_project"
     finally:
         if provider._actor is not None:
             provider._actor.shutdown()

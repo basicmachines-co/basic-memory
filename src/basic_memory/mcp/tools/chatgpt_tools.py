@@ -13,8 +13,10 @@ from loguru import logger
 
 from basic_memory.mcp.client_info import is_openai_mcp_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools.search import _SERVICE_UNAVAILABLE_HEADING, search_notes
+from basic_memory.mcp.project_context import resolve_project_parameter
+from basic_memory.mcp.tools.read import bm_read
+from basic_memory.mcp.refusals import Refusal
+from basic_memory.mcp.tools.ranked_search import bm_search
 from basic_memory.schemas.search import SearchResponse, SearchResult
 
 
@@ -32,7 +34,7 @@ def _unsupported_search_client_response() -> List[Dict[str, Any]]:
             "error": _UNSUPPORTED_CLIENT_ERROR,
             "error_message": (
                 "The search compatibility tool is only available to OpenAI MCP clients. "
-                "Use search_notes instead."
+                "Use bm_search instead."
             ),
         }
     )
@@ -45,7 +47,7 @@ def _unsupported_fetch_client_response(identifier: str) -> List[Dict[str, Any]]:
             "title": "Unsupported MCP Client",
             "text": (
                 "The fetch compatibility tool is only available to OpenAI MCP clients. "
-                "Use read_note instead."
+                "Use bm_read instead."
             ),
             "url": identifier,
             "metadata": {"error": _UNSUPPORTED_CLIENT_ERROR},
@@ -53,7 +55,7 @@ def _unsupported_fetch_client_response(identifier: str) -> List[Dict[str, Any]]:
     )
 
 
-def _identifier_for_read_note(identifier: str) -> str:
+def _identifier_for_bm_read(identifier: str) -> str:
     """Convert ChatGPT result ids into routable Basic Memory identifiers."""
     stripped = identifier.strip()
     if stripped.startswith("memory://") or "/" not in stripped:
@@ -121,16 +123,6 @@ def _format_document_for_chatgpt(
     if not title:
         title = "Untitled Document"
 
-    # Handle error cases
-    if isinstance(content, str) and content.lstrip().startswith("# Note Not Found"):
-        return {
-            "id": identifier,
-            "title": title or "Document Not Found",
-            "text": content,
-            "url": identifier,
-            "metadata": {"error": "Document not found"},
-        }
-
     return {
         "id": identifier,
         "title": title or "Untitled Document",
@@ -144,8 +136,8 @@ def _format_document_for_chatgpt(
     title="Search Knowledge Base",
     description=(
         "OpenAI/ChatGPT connector search adapter. Returns one text item holding JSON "
-        "{results, total_count, query} for the top 10 search_notes matches. Other MCP "
-        "clients receive an unsupported-client error; use search_notes instead."
+        "{results, total_count, query} for the top 10 bm_search matches. Other MCP "
+        "clients receive an unsupported-client error; use bm_search instead."
     ),
     tags={"search"},
     annotations={
@@ -162,7 +154,7 @@ async def search(
     """ChatGPT/OpenAI MCP search adapter returning a single text content item.
 
     Args:
-        query: Search query (full-text syntax supported by `search_notes`)
+        query: Search query (full-text syntax supported by `bm_search`)
         context: Optional FastMCP context passed through for auth/session data
 
     Returns:
@@ -176,35 +168,17 @@ async def search(
     logger.debug(f"ChatGPT search request: query='{query}'")
 
     try:
-        # Keep this adapter tiny: the real search behavior lives in search_notes.
-        results = await search_notes(
+        # Keep this adapter tiny: the real search behavior lives in bm_search.
+        # The connector has no project parameter; preserve its default-project scope.
+        project = await resolve_project_parameter(context=context)
+        results = await bm_search(
+            project=project,
             query=query,
             page=1,
             page_size=10,
             output_format="json",
             context=context,
         )
-
-        if isinstance(results, str):
-            # Trigger: search_notes translated an API 503 into its retryable outage response.
-            # Why: OpenAI clients need to distinguish a temporary provider failure from an
-            # internal adapter error before deciding whether to retry.
-            # Outcome: preserve the retry signal in the Actions-compatible error payload.
-            if results.startswith(_SERVICE_UNAVAILABLE_HEADING):
-                return _text_content(
-                    {
-                        "results": [],
-                        "error": "Search temporarily unavailable",
-                        "error_message": "Search temporarily unavailable, retry shortly",
-                    }
-                )
-            logger.warning(f"Search failed with error: {results[:100]}...")
-            search_results = {
-                "results": [],
-                "error": "Search failed",
-                "error_details": results[:500],  # Truncate long error messages
-            }
-            return _text_content(search_results)
 
         raw_results = results.get("results", []) if isinstance(results, dict) else []
 
@@ -218,6 +192,19 @@ async def search(
 
         # Return in MCP content array format as required by OpenAI
         return _text_content(search_results)
+
+    except Refusal as error:
+        return _text_content(
+            {
+                "results": [],
+                "error": "Search temporarily unavailable"
+                if error.code == "UNAVAILABLE"
+                else "Search failed",
+                "error_message": "Search temporarily unavailable, retry shortly"
+                if error.code == "UNAVAILABLE"
+                else error.message,
+            }
+        )
 
     except Exception as e:
         logger.error(f"ChatGPT search failed for query '{query}': {e}")
@@ -235,7 +222,7 @@ async def search(
         "OpenAI/ChatGPT connector fetch adapter. Takes an id from search results "
         "(permalink, title, or memory:// URL) and returns one text item holding JSON "
         "{id, title, text, url, metadata}. Other MCP clients receive an "
-        "unsupported-client error; use read_note instead."
+        "unsupported-client error; use bm_read instead."
     ),
     tags={"search", "notes"},
     annotations={
@@ -266,11 +253,13 @@ async def fetch(
     logger.debug(f"ChatGPT fetch request: id='{id}'")
 
     try:
-        # Let read_note resolve the default project via get_project_client(),
+        # Let bm_read resolve the default project via get_project_client(),
         # which works in both local mode (ConfigManager) and cloud mode (database).
         content = str(
-            await read_note(
-                identifier=_identifier_for_read_note(id),
+            await bm_read(
+                identifier=_identifier_for_bm_read(id),
+                include_frontmatter=False,
+                project=await resolve_project_parameter(context=context) if "/" not in id else None,
                 context=context,
             )
         )
@@ -282,6 +271,19 @@ async def fetch(
 
         # Return in MCP content array format as required by OpenAI
         return _text_content(document)
+
+    except Refusal as error:
+        return _text_content(
+            {
+                "id": id,
+                "title": "Document Not Found" if error.code == "NOT_FOUND" else "Fetch Error",
+                "text": error.message,
+                "url": id,
+                "metadata": {
+                    "error": "Document not found" if error.code == "NOT_FOUND" else error.code
+                },
+            }
+        )
 
     except Exception as e:
         logger.error(f"ChatGPT fetch failed for id '{id}': {e}")

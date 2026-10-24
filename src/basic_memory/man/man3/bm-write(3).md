@@ -52,7 +52,7 @@ later.
 - **overwrite** (boolean | null, optional, default: None) — Replace a note that already exists. Default: the write_note_overwrite_default setting (false unless changed).
 - **expected_checksum** (string | null, optional, default: None) — Replace the note only while it is still this revision (the checksum from bm_read). Implies overwrite=true.
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. Omit to use the default project.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

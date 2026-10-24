@@ -9,14 +9,19 @@ Use this before substantial work in a repo, before resuming an old thread, or wh
 the user asks where things stand. Accept an optional Basic Memory identifier,
 permalink, or topic after `$bm-orient`.
 
+When no project is pinned, discover projects with `bm_project(command="list")`
+and pass the selected project's external ID as `project` on note/search calls.
+With several addressable projects, these calls require an explicit scope even
+when a default is configured.
+
 ## Resolve Configuration
 
 Read `~/.codex/basic-memory.json`, then the nearest project
 `.codex/basic-memory.json`; project keys override user keys. Use
 `primaryProject`, `secondaryProjects`, `recallTimeframe`, `sessionProfile`,
 `repository`, and `placementConventions`. If the file is missing, continue
-against the default Basic Memory project and mention that setup has not been
-run.
+by discovering projects and explicitly selecting the listed default or sole
+project. Mention that setup has not been run.
 
 ## Choose One Recall Route
 
@@ -25,11 +30,12 @@ Choose exactly one route from the invocation.
 ### Exact checkpoint
 
 When the user supplies an exact Basic Memory identifier or permalink, read that note directly.
-When `primaryProject` is configured, call `read_note` with both the exact
+When `primaryProject` is configured, call `bm_read` with both the exact
 identifier and `project=<configured primaryProject>`. The explicit project is
 required even when the identifier is a permalink, file path, or title. If setup
-is missing, use the default project and say that the project scope could not be
-verified. Do not retry the identifier against secondary or other projects, search
+is missing, use a project-qualified pointer as its own route; otherwise discover
+and explicitly select the listed default or sole project, and say that the
+configured project scope could not be verified. Do not retry the identifier against secondary or other projects, search
 for alternatives, or silently substitute a newer checkpoint. The exact pointer
 and project are the user's chosen cursor.
 
@@ -40,7 +46,7 @@ primary project for matching `task`, `decision`, and `codex_session` notes.
 
 Run the `coding_session` topic search separately and include it only when
 `sessionProfile=coding` and the configured `repository` is present. Apply
-`metadata_filters={"repository": "<configured repository>"}` using the exact
+`filters={"repository": "<configured repository>"}` using the exact
 configured value. Never let topic text similarity compensate for a missing or
 mismatched repository. If the coding profile has no configured repository,
 omit `coding_session` results and report that setup is incomplete.

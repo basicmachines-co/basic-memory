@@ -19,8 +19,8 @@ it works whether or not that style is enabled.
    it, expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json`
    only when the variable is absent. Then the project's `.claude/settings.json`
    and `.claude/settings.local.json` override it per key:
-   - write to `primaryProject` when set (pass it as `project`, or as
-     `project_id` if it's an `external_id` UUID)
+   - write to `primaryProject` when set (pass it as `project`, including
+     when it is an `external_id` UUID)
    - follow `placementConventions` for the directory when they are specific
    - otherwise use `decisions`
 
@@ -29,7 +29,7 @@ it works whether or not that style is enabled.
 2. Clarify only if the choice itself is ambiguous. Do not ask for every field if
    the conversation already contains the rationale.
 
-3. Write a `type: decision` note (`note_type: decision`):
+3. Write with `bm_write`: a `type: decision` note (`note_type: decision`):
    - `status: open` unless the user says it is accepted, superseded, or rejected
    - `decided: <ISO timestamp when known>`
    - `project: <primaryProject if known>`

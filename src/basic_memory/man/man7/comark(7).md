@@ -28,7 +28,7 @@ on its own line. Attribute values are double-quoted and cannot contain `"`.
 
 Comark components are block directives inside an ordinary Markdown note. Basic
 Memory Cloud draws them in Notes, the Wiki, and shared pages. Everywhere else (a
-local editor, GitHub, a raw `read_note`) the same Markdown reads as the list,
+local editor, GitHub, a raw `bm_read`) the same Markdown reads as the list,
 table, or paragraph it is, so a component never hides content.
 
 Data goes in the body as Markdown, not in an attribute. A component with a
@@ -133,10 +133,10 @@ are never authored.
 
 In Basic Memory Cloud:
 
-- `write_note` and `edit_note` list the components that will render as errors,
+- `bm_write` and `bm_edit` list the components that will render as errors,
   under **Component problems** (a `component_problems` field in JSON output).
   The problems never block the write; fix them in the note's Markdown.
-- `read_note(view="text")` returns the note as a reader sees it: each component
+- `bm_read(view="text")` returns the note as a reader sees it: each component
   as plain Markdown, with live queries run now. Use it to confirm a live view
   has rows before you quote its numbers. Edit from the default view, which is
   the stored source.
@@ -164,6 +164,6 @@ The queue rewrite more than doubled steady-state throughput.
 
 ## SEE ALSO
 
-- see_also [[write-note(3)]]
-- see_also [[edit-note(3)]]
-- see_also [[read-note(3)]]
+- see_also [[bm-write(3)]]
+- see_also [[bm-edit(3)]]
+- see_also [[bm-read(3)]]

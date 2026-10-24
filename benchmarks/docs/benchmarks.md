@@ -186,7 +186,7 @@ just bench-run-long-strict
    - if supported, poll `status --json --project <name> --local`
 5. Start a warm MCP stdio session:
    - one long-lived `basic-memory mcp` process per provider run
-6. Execute `search_notes` calls over MCP for each query.
+6. Execute `bm_search` calls over MCP for each query.
 7. Cleanup MCP session.
 
 ### `mem0-local` provider flow
@@ -334,14 +334,17 @@ Adapted from `mohammadtavakoli78/BEAM` (MIT code / CC BY-SA 4.0 data):
   paper's tables); the HF materialization script and `chat.pickle` (the
   repo's JSON layout is read directly); the 10M tier.
 
-## 6c) Agent-task eval (rich vs POSIX tool surfaces, issue #1401)
+## 6c) Agent-task eval (1.0 bm tools)
 
-An AGENT-IN-THE-LOOP run kind: the same model, budget, task set, and seeded
-corpus, with the TOOL SURFACE as the provider axis — `rich` (today's MCP
-tools) vs `posix` (the `cat`/`grep`/`ls`/`find`/`tail`/`man` read surface from
-#1399/#1406). The model proposes tool calls; the harness dispatches them
-against an ephemeral per-surface `bm mcp` stdio instance, feeds results back,
-and grades the final answer plus the resulting project state.
+The agent loop uses the `bm` surface declared in `agent_tasks/surfaces.py`:
+`bm_search`, `bm_read`, `bm_list`, `bm_find`, `bm_context`, `bm_man`,
+`bm_write`, `bm_edit`, `bm_move`, and `bm_delete`. The model proposes calls;
+the harness dispatches them to an isolated MCP server and grades the final
+answer and resulting project state.
+
+The old `rich` and `posix` presets are retired. Historical artifacts retain
+those labels and their original tool schemas; rerun with `bm` to establish a
+1.0 baseline. Do not relabel old results as new-tool measurements.
 
 ### Headline: tokens per completed task (xAFS framing)
 
@@ -381,29 +384,16 @@ one many-call assistant turn cannot overrun it), same corpus snapshot
 (checksummed into the manifest), one
 fixed prompt preamble, a fixed tool-result truncation cap
 (`TOOL_RESULT_MAX_CHARS`), and deterministic tool-schema ordering (the
-surface allowlist order). Only the surface definition varies, and both
-definitions — config overrides, allowlist, and the tool list actually
-observed from the server — are echoed into `manifest.json` as the audit
-trail. `validate_surface_fairness` warns when surfaces attempted different
-task sets. Note one structural asymmetry, by design: posix v1 (#1399) is
-read-side only, so both surfaces share the rich write verbs (`write_note`,
-`edit_note`, `move_note`, `delete_note`) and the A/B isolates the read-side
-surface.
+surface allowlist order). The configured allowlist and the tool schemas actually
+advertised by the server are recorded in `manifest.json`.
 
-### POSIX surface gating (important)
+### Tool availability and provenance
 
-This branch does NOT contain the posix tools — they live on the 1399/1403
-stack. The surface is data (`agent_tasks/surfaces.py`): selecting it applies
-`BASIC_MEMORY_ENABLE_POSIX_TOOLS=true` to the ephemeral BM env and requires
-the six read tools in the server's advertised tool list. Because an older
-BM silently ignores the unknown env var, the tool list is the authoritative
-check: a missing tool raises `SurfaceUnavailableError` naming the missing
-tools, the flag, and the branch requirement. Under the default
-`--allow-surface-skip` the surface is recorded as `skipped` in
-`surface-status.json` and the run continues; `--strict-surfaces` aborts.
-Point `--bm-local-path` at a checkout with the flag for live posix runs; the
-six tool names in `surfaces.py` are the single place to reconcile if names
-drift on that branch.
+A missing required `bm_*` tool raises `SurfaceUnavailableError`.
+`--allow-surface-skip` records the reason in `surface-status.json`;
+`--strict-surfaces` aborts. The checkout under test must be clean so its SHA
+identifies the tested source. Commit the migration before running the smoke
+benchmark; do not bypass the provenance check.
 
 ### Model transports
 
@@ -422,9 +412,9 @@ future work (Claude Agent SDK or an MCP-proxy recorder). The optional
 ### Workflow
 
 ```bash
-BM_LOCAL_PATH=.. just bench-agent-smoke     # LLM-free: scripted model, rich surface, strict
-BM_LOCAL_PATH=.. just bench-agent-tasks     # rich,posix A/B with a local openai-compat model
-uv run bm-bench run agent-tasks --surfaces rich,posix \
+BM_LOCAL_PATH=.. just bench-agent-smoke     # LLM-free: scripted model, bm surface, strict
+BM_LOCAL_PATH=.. just bench-agent-tasks     # bm tools with a local openai-compat model
+uv run bm-bench run agent-tasks --surfaces bm \
   --model openai-compat:qwen3@http://localhost:11434/v1 \
   --bm-local-path <bm-checkout>
 ```
@@ -492,8 +482,7 @@ just bench-xafs-audit-sample                # seeded human-review sample
 Conversion copies each persona's `data/` tree byte-for-byte (relpaths
 preserved, no frontmatter render — questions cite exact file content) into
 `groups/xafs-dpNNN/docs/`. BM's sync ingests `.md` files as notes and
-non-markdown files as file resources reachable via `read_content` (rich) or
-`cat`/`grep` (posix) — nothing is skipped, and `conversion.json` records
+non-markdown files as file resources reachable via `bm_read` — nothing is skipped, and `conversion.json` records
 per-extension counts plus a `skipped` list that must stay empty (a file the
 copy policy cannot place aborts the conversion). Gold answers and prompts
 exist only in `tasks.json`; an answer-key/scenario filename appearing inside
@@ -503,7 +492,7 @@ exist only in `tasks.json`; an answer-key/scenario filename appearing inside
 
 | Family | Path | Rationale |
 | --- | --- | --- |
-| format_spanning (26) | Agent harness only | Verbatim file reading (`read_content` / `cat`+`grep`) is the point; the retrieval path only searches notes |
+| format_spanning (26) | Agent harness only | Verbatim file reading (`bm_read`) is the point; the retrieval path only searches notes |
 | single_hop (33), multi_hop (51) | Agent harness (headline) | Tokens-per-correct-answer is literally the harness headline; a retrieval+QA diagnostic is deferred (below) |
 
 The retrieval diagnostic for single/multi-hop is deliberately NOT emitted in
@@ -519,13 +508,11 @@ LoCoMo `official_headline` container despite the name collision.
 Manifest runs are grouped and read-only: each persona is ingested ONCE per
 (surface, group) as project `at-<run-id>-xafs-dpNNN` and every question in
 the group reuses that warm project (copying 837MB per question is untenable).
-To keep reuse safe AND fair, the shared write verbs (`write_note`,
-`edit_note`, `move_note`, `delete_note`) are dropped from BOTH surfaces
-symmetrically — rich becomes `search_notes, read_note, read_content,
-list_directory, recent_activity, build_context`; posix becomes `cat, grep,
-ls, find, tail, man` — matching upstream's read-only reference agent
-(grep/find/cat). The reduced allowlists are echoed into `manifest.json` via
-`SurfaceEcho`. State-free tasks (all xAFS tasks: judge-graded answers) skip
+To keep reused corpora unchanged, `bm_write`, `bm_edit`, `bm_move`, and
+`bm_delete` are removed. The resulting read-only surface is `bm_search`,
+`bm_read`, `bm_list`, `bm_find`, `bm_context`, and `bm_man`.
+The reduced allowlist is recorded in `manifest.json` via `SurfaceEcho`.
+State-free tasks (all xAFS tasks: judge-graded answers) skip
 the per-task baseline snapshot and post-loop settle. The per-group table in
 `summary.md` (tokens/correct per persona) is the corpus-scaling curve —
 xAFS's central claim — read alongside per-family (skill) accuracy.
@@ -595,7 +582,9 @@ them; exclusions are dropped from `tasks.json` and counted in
 
 ## 7) Commit-to-Commit Comparison (Current Manual Method)
 
-Use this workflow today to compare BM revisions while keeping benchmark tooling fixed.
+Use this workflow to compare revisions that expose the same tool contract.
+For pre-1.0 revisions without `bm_*`, use the benchmark runner from that era;
+the current runner intentionally does not emulate retired tool surfaces.
 
 ### Step 1: Create BM worktrees for target refs
 

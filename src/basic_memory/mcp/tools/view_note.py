@@ -7,16 +7,15 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.mcp.tools.read import bm_read
 
 
 @mcp.tool(
     title="View Note",
     description=(
-        "Read a note (same resolution as read_note) and return it wrapped in an instruction "
+        "Read a note (same resolution as bm_read) and return it wrapped in an instruction "
         "to display it to the user as a markdown artifact. Use when the user wants to see the "
-        "note rendered; use read_note when you need the content yourself. Not-found results "
-        "are returned unwrapped."
+        "note rendered; use bm_read when you need the content yourself. Missing notes raise tool errors."
     ),
     tags={"notes"},
     annotations={
@@ -34,17 +33,17 @@ async def view_note(
 ) -> str:
     """View a markdown note as a formatted artifact.
 
-    This tool reads a note using the same logic as read_note but instructs Claude
+    This tool reads a note using the same logic as bm_read but instructs Claude
     to display the content as a markdown artifact in the Claude Desktop app.
     Project parameter optional with server resolution.
 
     Args:
         identifier: The title or permalink of the note to view
         project: Project name to read from. Optional - server will resolve using hierarchy.
-                If unknown, use list_memory_projects() to discover available projects.
+                If unknown, use bm_project(command="list") to discover available projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
-                workspaces. Takes precedence over `project`. Get from list_memory_projects().
+                workspaces. Takes precedence over `project`. Get from bm_project(command="list").
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -66,19 +65,14 @@ async def view_note(
     """
     logger.debug(f"Viewing note: {identifier} in project: {project}")
 
-    # Call the existing read_note logic (default output_format="text" returns str)
+    # Call the existing bm_read logic (default output_format="text" returns str)
     content = str(
-        await read_note(
+        await bm_read(
             identifier=identifier,
-            project=project,
-            project_id=project_id,
+            project=project_id or project,
             context=context,
         )
     )
-
-    # Check if this is an error message (note not found)
-    if "# Note Not Found" in content:
-        return content  # Return error message directly
 
     # The note opens with its own `---` frontmatter fence, so the content is set off by
     # named markers that cannot collide with it. The header is joined, not dedented:

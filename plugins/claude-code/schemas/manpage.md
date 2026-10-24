@@ -29,7 +29,7 @@ Memory notes (issue #952): commands in section 1, MCP tools in section 3,
 file formats in section 5, concepts in section 7, admin in section 8. The
 manual becomes a knowledge graph — `SEE ALSO` entries are typed relations,
 and pages are found by structured recall:
-`search_notes(metadata_filters={"type": "manpage", "section": 3})`.
+`bm_search(filters={"type": "manpage", "section": 3})`.
 
 This schema is an opt-in seed for documentation projects; the canonical
 manual lives in the Basic Memory team workspace `manual` project.

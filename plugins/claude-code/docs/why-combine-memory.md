@@ -48,7 +48,7 @@ a body of work that compounds over months, and don't touch git.
 
 > *"What did we conclude about the pricing model?"* — Claude searches the graph and
 > answers with the actual note, not a guess. A month of conversations stays one
-> `search_notes` away.
+> `bm_search` away.
 
 **Wins:** picking up where you left off; never losing the texture of a long session;
 recalling what you actually decided.

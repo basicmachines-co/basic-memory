@@ -138,13 +138,13 @@ Semantics to state honestly in the surrounding prose:
 
 ### Check the rendered result before you quote it
 
-In Basic Memory Cloud, `read_note(view="text")` returns the note as a reader
+In Basic Memory Cloud, `bm_read(view="text")` returns the note as a reader
 sees it: every component as plain Markdown, with live queries run now. Read it
 back after writing a live view and confirm the view has rows before you state a
 number in prose. A query over a field no note has renders an empty view.
 
 Elsewhere, only the browser runs the query, so run the equivalent read yourself
-(for example `search_notes` with metadata filters; see the
+(for example `bm_search` with metadata filters; see the
 memory-metadata-search skill).
 
 A live chart's body is its **snapshot**: the rows readers see when live data
@@ -154,7 +154,7 @@ as a snapshot in prose and keep them in the chart's row grammar.
 
 ## Edit a note that already has components
 
-- Change one component with `edit_note` (`find_replace` on its directive line or
+- Change one component with `bm_edit` (`find_replace` on its directive line or
   rows). Do not rewrite the whole note to change one value.
 - The rich editor normalizes formatting when a person edits the note: attribute
   order changes and YAML blocks come back as JSON. Values survive; do not fight
@@ -168,9 +168,9 @@ as a snapshot in prose and keep them in the chart's row grammar.
 ## When a component shows an error
 
 A broken component renders a coded problem and a fix inside its own frame; the
-rest of the note still renders. In Basic Memory Cloud, `write_note` and
-`edit_note` list these problems under **Component problems** in their result
-(they never block the write), so fix them right away with `edit_note`. `comark(7)` in the manual
+rest of the note still renders. In Basic Memory Cloud, `bm_write` and
+`bm_edit` list these problems under **Component problems** in their result
+(they never block the write), so fix them right away with `bm_edit`. `comark(7)` in the manual
 (`memory://man/comark(7)`) is a quick reference to the syntax and codes. The
 codes you will meet most:
 

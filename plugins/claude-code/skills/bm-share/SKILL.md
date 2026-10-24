@@ -28,7 +28,7 @@ project — session checkpoints and `/basic-memory:bm-remember` always stay pers
    target.
 
 2. **Find the source note.** From `$ARGUMENTS` (a title, permalink, or `memory://`
-   URL), `read_note` it from `primaryProject`. If `$ARGUMENTS` is empty (you were
+   URL), `bm_read` it from `primaryProject`. If `$ARGUMENTS` is empty (you were
    invoked from "share this"), use the note most clearly referenced in the
    conversation — confirm which one if there's any ambiguity. Capture its title,
    full content (including frontmatter), and source permalink.
@@ -41,10 +41,9 @@ project — session checkpoints and `/basic-memory:bm-remember` always stay pers
    what you're about to do — *"Share '<title>' to <target>/<promoteFolder>?"* — and
    wait for a yes. Never share silently.
 
-5. **Write the shared copy** with `write_note`:
-   - Route to the target: if the team ref is an `external_id` UUID, pass it as
-     `project_id`; otherwise pass the workspace-qualified name as `project`. (A bare
-     UUID in `project` won't route — Basic Memory takes UUIDs only via `project_id`.)
+5. **Write the shared copy** with `bm_write`:
+   - Route to the target with `project`: either the team's workspace-qualified
+     name or its `external_id` UUID.
    - `directory` = the `promoteFolder`
    - `title` = the source title
    - `content` = the source's content, with attribution added: keep its frontmatter
@@ -63,4 +62,4 @@ project — session checkpoints and `/basic-memory:bm-remember` always stay pers
 - Don't share notes containing secrets, credentials, or anything the user wouldn't
   want teammates to see — if in doubt, ask.
 - Use whichever Basic Memory MCP server is connected; route to the team project by
-  the `project` (qualified name) or `project_id` (UUID) argument.
+  the `project` argument (qualified name or UUID).

@@ -28,12 +28,12 @@ shape. For the full task workflow (creating, updating, completing), use that
 skill.
 
 Tasks are found by the SessionStart hook via structured recall:
-`search_notes(metadata_filters={"type": "task", "status": "active"})`.
+`bm_search(filters={"type": "task", "status": "active"})`.
 
 ## Frontmatter vs observations
 
 Put queryable fields (`status`, `priority`, `current_step`) in frontmatter so
-`metadata_filters` can find them, and mirror them as `- [status] active`
-observations so `schema_validate` sees them. `note_type="Task"` is stored as
+`filters` can find them, and mirror them as `- [status] active`
+observations so `bm_schema(command="validate")` sees them. `note_type="Task"` is stored as
 lowercase `task` in frontmatter, so search with `note_types=["task"]`.
 Validation is `warn` — advisory, never blocking.

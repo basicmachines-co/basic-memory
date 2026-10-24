@@ -13,7 +13,7 @@ async def test_search_notes_entity_types_as_string(mcp_server, app, test_project
     """search_notes should accept entity_types as a JSON string via MCP protocol."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Entity Type Coerce Test",
@@ -24,12 +24,12 @@ async def test_search_notes_entity_types_as_string(mcp_server, app, test_project
 
         # MCP client sends entity_types as a string
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "coercion",
-                "search_type": "text",
-                "entity_types": '["entity"]',
+                "mode": "text",
+                "items": '["note"]',
             },
         )
         text = result.content[0].text
@@ -41,7 +41,7 @@ async def test_search_notes_note_types_as_string(mcp_server, app, test_project):
     """search_notes should accept note_types as a JSON string via MCP protocol."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Note Type Coerce Test",
@@ -51,11 +51,11 @@ async def test_search_notes_note_types_as_string(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "coercion",
-                "search_type": "text",
+                "mode": "text",
                 "note_types": '["note"]',
             },
         )
@@ -68,7 +68,7 @@ async def test_search_notes_tags_as_string(mcp_server, app, test_project):
     """search_notes should accept tags as a JSON string via MCP protocol."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Tags Coerce Test",
@@ -79,12 +79,12 @@ async def test_search_notes_tags_as_string(mcp_server, app, test_project):
         )
 
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "tagged",
-                "search_type": "text",
-                "tags": '["alpha"]',
+                "mode": "text",
+                "filters": {"tags": ["alpha"]},
             },
         )
         text = result.content[0].text
@@ -96,7 +96,7 @@ async def test_search_notes_metadata_filters_as_string(mcp_server, app, test_pro
     """search_notes should accept metadata_filters as a JSON string via MCP protocol."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Metadata Coerce Test",
@@ -106,12 +106,12 @@ async def test_search_notes_metadata_filters_as_string(mcp_server, app, test_pro
         )
 
         result = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "metadata",
-                "search_type": "text",
-                "metadata_filters": '{"type": "note"}',
+                "mode": "text",
+                "filters": '{"type": "note"}',
             },
         )
         text = result.content[0].text
@@ -123,7 +123,7 @@ async def test_write_note_metadata_as_string(mcp_server, app, test_project):
     """write_note should accept metadata as a JSON string via MCP protocol."""
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "String Metadata Note",
@@ -133,4 +133,4 @@ async def test_write_note_metadata_as_string(mcp_server, app, test_project):
             },
         )
         text = result.content[0].text
-        assert "Created note" in text or "Updated note" in text
+        assert "Created " in text or "Updated " in text

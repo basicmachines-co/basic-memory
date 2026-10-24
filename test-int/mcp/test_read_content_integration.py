@@ -5,7 +5,6 @@ Comprehensive tests covering text files, binary files, images, error cases,
 and memory:// URL handling via the complete MCP client-server flow.
 """
 
-import json
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
@@ -15,7 +14,7 @@ def parse_read_content_response(mcp_result):
     """Helper function to parse read_content MCP response."""
     assert len(mcp_result.content) == 1
     assert mcp_result.content[0].type == "text"
-    return json.loads(mcp_result.content[0].text)
+    return mcp_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -25,7 +24,7 @@ async def test_read_content_markdown_file(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # First create a note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Content Test",
@@ -37,21 +36,14 @@ async def test_read_content_markdown_file(mcp_server, app, test_project):
 
         # Then read the raw file content
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "test/Content Test.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "test/Content Test.md"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
 
-        assert response_data["type"] == "text"
-        assert response_data["content_type"] == "text/markdown; charset=utf-8"
-        assert response_data["encoding"] == "utf-8"
-
-        content = response_data["text"]
+        content = response_data
 
         # Should contain the raw markdown with frontmatter
         assert "# Content Test" in content
@@ -68,7 +60,7 @@ async def test_read_content_by_permalink(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create a note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Permalink Test",
@@ -79,16 +71,13 @@ async def test_read_content_by_permalink(mcp_server, app, test_project):
 
         # Read by permalink (without .md extension)
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "docs/permalink-test",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "docs/permalink-test"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         assert "# Permalink Test" in content
         assert "Testing permalink-based content reading." in content
@@ -101,7 +90,7 @@ async def test_read_content_memory_url(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create a note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Memory URL Test",
@@ -113,16 +102,13 @@ async def test_read_content_memory_url(mcp_server, app, test_project):
 
         # Read using memory:// URL
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "memory://test/memory-url-test",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "memory://test/memory-url-test"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         assert "# Memory URL Test" in content
         assert "Testing memory:// URL handling." in content
@@ -139,7 +125,7 @@ async def test_read_content_unicode_file(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Unicode Content Test",
@@ -151,16 +137,13 @@ async def test_read_content_unicode_file(mcp_server, app, test_project):
 
         # Read the content back
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "test/Unicode Content Test.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "test/Unicode Content Test.md"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         # All unicode content should be preserved
         assert "🚀" in content
@@ -200,7 +183,7 @@ This note has complex frontmatter and various markdown elements.
 Regular markdown content continues here."""
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Complex Note",
@@ -212,16 +195,13 @@ Regular markdown content continues here."""
 
         # Read the content back
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "docs/Complex Note.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "docs/Complex Note.md"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         # Should preserve all frontmatter and content structure
         assert "version: 1.0" in content
@@ -238,18 +218,15 @@ async def test_read_content_missing_file(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         try:
             await client.call_tool(
-                "read_content",
-                {
-                    "project": test_project.name,
-                    "path": "nonexistent/file.md",
-                },
+                "bm_read",
+                {"project": test_project.name, "identifier": "nonexistent/file.md"},
             )
             # Should not reach here - expecting an error
             assert False, "Expected error for missing file"
         except ToolError as e:
             # Should get an appropriate error message
             error_msg = str(e).lower()
-            assert "not found" in error_msg or "does not exist" in error_msg
+            assert "not_found" in error_msg or "does not exist" in error_msg
 
 
 @pytest.mark.asyncio
@@ -259,27 +236,24 @@ async def test_read_content_empty_file(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create a note with minimal content
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Empty Test",
                 "directory": "test",
-                "content": "",  # Empty content
+                "content": "",
             },
         )
 
         # Read the content back
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "test/Empty Test.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "test/Empty Test.md"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         # Should still have frontmatter even with empty content
         assert "title: Empty Test" in content
@@ -312,7 +286,7 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
 """
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Large Content Note",
@@ -324,16 +298,13 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
 
         # Read the content back
         read_result = await client.call_tool(
-            "read_content",
-            {
-                "project": test_project.name,
-                "path": "test/Large Content Note.md",
-            },
+            "bm_read",
+            {"project": test_project.name, "identifier": "test/Large Content Note.md"},
         )
 
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        content = response_data["text"]
+        content = response_data
 
         # Should contain all sections
         assert "Section 1" in content
@@ -358,7 +329,7 @@ async def test_read_content_special_characters_in_filename(mcp_server, app, test
 
         for title, folder in test_cases:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": title,
@@ -369,11 +340,8 @@ async def test_read_content_special_characters_in_filename(mcp_server, app, test
 
             # Read the content back using the exact filename
             read_result = await client.call_tool(
-                "read_content",
-                {
-                    "project": test_project.name,
-                    "path": f"{folder}/{title}.md",
-                },
+                "bm_read",
+                {"project": test_project.name, "identifier": f"{folder}/{title}.md"},
             )
 
             assert len(read_result.content) == 1

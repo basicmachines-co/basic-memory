@@ -84,7 +84,7 @@ An index is a note containing a table of contents for one domain — one row per
 
 Rules:
 - **Update the index as part of any change to its members** — a stale index is worse than none, because it gets trusted.
-- **Full overwrite, not section edits.** When updating an index with `write_note`, always rewrite the whole note (read → modify → overwrite). Piecemeal section edits on tables are easy to get wrong — duplicated or mis-scoped sections — while a full overwrite is deterministic.
+- **Full overwrite, not section edits.** When updating an index with `bm_write`, always rewrite the whole note (read → modify → overwrite). Piecemeal section edits on tables are easy to get wrong — duplicated or mis-scoped sections — while a full overwrite is deterministic.
 - Not every domain needs one. Indexes earn their keep where the user will ask "show me all X with status Y" or wants a glanceable board. Journals and reference notes usually don't need one — search covers them.
 
 ## Linking discipline
@@ -98,12 +98,12 @@ Rules:
 
 The habits that prevent 90% of knowledge-base corruption:
 
-1. **Search before create.** Always search (try 2–3 query variations: full name, abbreviation, keywords) before writing a new note. Duplicates fragment the graph. If the entity exists, `edit_note` it instead. For people and other proper nouns, use **title search** — semantic search is unreliable for names.
+1. **Search before create.** Always search (try 2–3 query variations: full name, abbreviation, keywords) before writing a new note. Duplicates fragment the graph. If the entity exists, `bm_edit` it instead. For people and other proper nouns, use **title search** — semantic search is unreliable for names.
 2. **Exact casing, exact paths.** `Tasks/` and `tasks/` are different directories. Take folder paths from the instruction note, character for character. If a write would create a new top-level folder you didn't plan, that's a casing error — stop and fix.
 3. **Explicit project on every call.** In multi-project setups, pass the project explicitly on every read, search, and write. Writes to the wrong project are invisible until much later.
 4. **Read before overwrite.** Full-note overwrites must start from the current content — never reconstruct a note from memory of what it contained. Read as JSON and pass its `checksum` as `expected_checksum`; a revision conflict means someone else edited the note, so re-read before writing.
-5. **Watch write results.** If a write returns a permalink ending in `-1` or `-2`, you just created a duplicate: delete it and re-write the original with overwrite semantics. Writing to an existing note without `overwrite=True` is refused with `NOTE_ALREADY_EXISTS`, not duplicated. If the result lists similar existing notes, check them before keeping the new one.
-6. **Prefer targeted edits.** `edit_note` (append an observation, find-and-replace a status) over full overwrites wherever possible — smaller blast radius.
+5. **Watch write results.** If a write returns a permalink ending in `-1` or `-2`, you just created a duplicate: delete it and re-write the original with overwrite semantics. Writing to an existing note without `overwrite=True` is refused with `ALREADY_EXISTS`, not duplicated. If the result lists similar existing notes, check them before keeping the new one.
+6. **Prefer targeted edits.** `bm_edit` (append an observation, find-and-replace a status) over full overwrites wherever possible — smaller blast radius.
 
 ## Known failure modes
 

@@ -10,7 +10,7 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.recent_activity import recent_activity
+from basic_memory.mcp.tools.projects import bm_project
 
 
 @mcp.prompt(
@@ -52,7 +52,7 @@ async def recent_activity_prompt(
     logger.info(f"Getting recent activity, timeframe: {timeframe}, project: {project}")
 
     # Call the tool function - it returns a well-formatted string
-    activity_summary = await recent_activity(project=project, timeframe=timeframe)
+    activity_summary = await bm_project(command="recent", project=project, since=timeframe)
 
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly
@@ -75,14 +75,14 @@ async def recent_activity_prompt(
 
         Based on this activity, you can:
 
-        1. **Explore specific items** - Use `read_note("permalink")` to dive deeper into any item
-        2. **Search for related content** - Use `search_notes("topic")` to find connected knowledge
-        3. **Build context** - Use `build_context("memory://path")` to see relationships
+        1. **Explore specific items** - Use `bm_read("permalink")` to dive deeper into any item
+        2. **Search for related content** - Use `bm_search("topic")` to find connected knowledge
+        3. **Build context** - Use `bm_context("memory://path")` to see relationships
 
         ## Capture Opportunity
 
         If this activity shows a pattern or development worth tracking, offer to record it
-        with `write_note` (for example in an `insights` directory).
+        with `bm_write` (for example in an `insights` directory).
     """)
 
     return prompt_guidance

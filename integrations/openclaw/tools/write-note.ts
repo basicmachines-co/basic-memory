@@ -73,7 +73,7 @@ export function registerWriteTool(
         expected_checksum: Type.Optional(
           Type.String({
             description:
-              "Requires overwrite=true. The checksum of the note as you read it; " +
+              "Implies overwrite=true. The checksum of the note as you read it; " +
               "the note is replaced only while it is still that revision.",
           }),
         ),
@@ -141,13 +141,10 @@ export function registerWriteTool(
         } catch (err) {
           if (err instanceof NoteAlreadyExistsError) {
             const hint = [
-              `Note already exists: "${params.title}" (${err.permalink})`,
+              err.message,
               "",
-              "To update this note, use one of:",
-              `  - edit_note("${err.permalink}", operation="append", content="...")`,
-              `  - edit_note("${err.permalink}", operation="replace_section", section="...", content="...")`,
-              `  - write_note("${params.title}", ..., overwrite=true) to fully replace`,
-              `  - read_note("${err.permalink}", include_frontmatter=true) to inspect it first; pass its checksum as expected_checksum with overwrite=true to replace only that revision`,
+              "Use search_notes to locate the note, then read_note to inspect its current content and checksum.",
+              "Use edit_note for incremental changes, or write_note with overwrite=true and expected_checksum to replace the revision you read.",
             ].join("\n")
 
             return {
@@ -163,9 +160,9 @@ export function registerWriteTool(
           if (err instanceof NoteRevisionConflictError) {
             const current = err.currentChecksum
               ? `Its current checksum is ${err.currentChecksum}.`
-              : "No note exists at that path any more."
+              : "Read the note to obtain its current checksum."
             const text = [
-              `Note revision conflict: "${params.title}" changed since it was read, so nothing was replaced. ${current}`,
+              `Note revision conflict: ${err.message} ${current}`,
               "",
               "Read the note again, confirm it should still be replaced, then retry with the new checksum as expected_checksum.",
             ].join("\n")

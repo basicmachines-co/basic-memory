@@ -32,7 +32,7 @@ class AgentBudget(BaseModel):
 
 class AgentTasksConfig(BaseModel):
     run_id: str
-    surfaces: list[str] = Field(default_factory=lambda: ["rich"])
+    surfaces: list[str] = Field(default_factory=lambda: ["bm"])
     task_ids: list[str] = Field(default_factory=list)  # empty = all shipped tasks
     # Converted-dataset tasks.json (e.g. convert xafs); None runs the shipped
     # task set. Manifest runs are grouped and read-only (see driver).

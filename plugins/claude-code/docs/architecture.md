@@ -104,7 +104,7 @@ sequenceDiagram
         H-->>CC: exit (never write un-opted-in)
     else configured
         H->>H: extract opening request + recent thread
-        H->>BM: write_note type=session status=open<br/>→ primaryProject/sessions/
+        H->>BM: CLI checkpoint write type=session status=open<br/>→ primaryProject/sessions/
         BM-->>H: ok
     end
     Note over CC: compaction proceeds;<br/>checkpoint surfaces in the next<br/>SessionStart brief

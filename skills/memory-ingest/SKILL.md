@@ -70,16 +70,16 @@ For each extracted entity, search Basic Memory with multiple query variations:
 
 ```python
 # Person — try full name, last name
-search_notes(query="Sarah Chen")
-search_notes(query="Chen")
+bm_search(query="Sarah Chen")
+bm_search(query="Chen")
 
 # Organization — try full name, abbreviation, acronym
-search_notes(query="National Renewable Energy Laboratory")
-search_notes(query="NREL")
+bm_search(query="National Renewable Energy Laboratory")
+bm_search(query="NREL")
 
 # Topic — try the full term and keywords
-search_notes(query="edge computing")
-search_notes(query="edge inference")
+bm_search(query="edge computing")
+bm_search(query="edge inference")
 ```
 
 Classify each entity as:
@@ -124,7 +124,7 @@ Create the primary note for the ingested content. This is the "record of what ha
 ### Meeting / Conversation Note
 
 ```python
-write_note(
+bm_write(
   title="NovaTech Meeting - Jordan Rivera - Feb 22, 2026",
   directory="meetings/2026",
   note_type="meeting",
@@ -157,7 +157,7 @@ Brief one-sentence summary of what this meeting was about.
 ### Document / Article Note
 
 ```python
-write_note(
+bm_write(
   title="Edge Computing Architecture Whitepaper",
   directory="references",
   note_type="reference",
@@ -204,13 +204,13 @@ Invent categories as needed — these are suggestions, not a fixed list.
 
 For each entity the user approved, create a structured note. Match the entity type to an appropriate template.
 
-If `write_note` reports similar existing notes, treat that as a match Step 3 missed: merge into
+If `bm_write` reports similar existing notes, treat that as a match Step 3 missed: merge into
 the existing note and delete the new one, or link the two.
 
 ### Person
 
 ```python
-write_note(
+bm_write(
   title="Jordan Rivera",
   directory="people",
   note_type="person",
@@ -239,7 +239,7 @@ VP of Engineering at NovaTech. Met during integration partnership discussion.
 ### Organization
 
 ```python
-write_note(
+bm_write(
   title="NovaTech",
   directory="organizations",
   note_type="organization",
@@ -269,7 +269,7 @@ SaaS platform company. Series B stage.
 ### Concept / Topic
 
 ```python
-write_note(
+bm_write(
   title="Federated Learning",
   directory="concepts",
   note_type="concept",

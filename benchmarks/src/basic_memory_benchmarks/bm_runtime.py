@@ -52,7 +52,7 @@ class WarmMcpClient:
         env: dict[str, str] | None = None,
         startup_timeout_seconds: float = 30.0,
         request_timeout_seconds: float = 60.0,
-        required_tool: str = "search_notes",
+        required_tool: str = "bm_search",
     ) -> None:
         self._command = command
         self._args = args or ["mcp"]

@@ -52,7 +52,7 @@ missing note is an error; create notes with bm_write.
 - **metadata** (object | null, optional, default: None) — Frontmatter fields to set; other fields are kept.
 - **expected_checksum** (string | null, optional, default: None) — Edit only while the note is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. Omit to use the default project.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

@@ -1,11 +1,7 @@
-"""Tool surfaces as data: rich (today's MCP tools) vs posix (#1399/#1406).
+"""The 1.0 tool surface, pinned in each run manifest.
 
-This branch does NOT contain the posix tools — they live on the 1399/1403
-stack — so the surface is pure data: config overrides applied to the ephemeral
-BM instance's environment plus a tool allowlist. Selecting the posix surface
-against a BM build that lacks the flag fails fast (or is recorded as an
-explicit skip) via ``verify_surface_tools``; the six posix tool names below
-are the single place to reconcile against that branch if names drift.
+Historical rich/POSIX artifacts retain their original names and allowlists.
+New runs use bm; legacy presets are retired rather than silently relabeled.
 """
 
 from __future__ import annotations
@@ -30,49 +26,27 @@ class ToolSurface:
     requires: str
 
 
-RICH_SURFACE = ToolSurface(
-    name="rich",
+BM_SURFACE = ToolSurface(
+    name="bm",
     config_overrides={},
     tool_allowlist=(
-        "search_notes",
-        "read_note",
-        "read_content",
-        "list_directory",
-        "recent_activity",
-        "build_context",
-        "write_note",
-        "edit_note",
-        "move_note",
-        "delete_note",
+        "bm_search",
+        "bm_read",
+        "bm_list",
+        "bm_find",
+        "bm_context",
+        "bm_man",
+        "bm_write",
+        "bm_edit",
+        "bm_move",
+        "bm_delete",
     ),
-    requires="any current basic-memory build",
+    requires="a basic-memory checkout with the 1.0 bm_* tools",
 )
 
-# Read verbs swapped per #1399; write verbs shared — posix v1 is read-side
-# only ("later issue if the read-side A/B justifies it"), so the A/B isolates
-# the read-side surface while every task stays runnable on both surfaces.
-POSIX_SURFACE = ToolSurface(
-    name="posix",
-    config_overrides={"enable_posix_tools": "true"},
-    tool_allowlist=(
-        "cat",
-        "grep",
-        "ls",
-        "find",
-        "tail",
-        "man",
-        "write_note",
-        "edit_note",
-        "move_note",
-        "delete_note",
-    ),
-    requires="a basic-memory checkout with the enable_posix_tools flag (#1399/#1406 stack)",
-)
+SURFACES: dict[str, ToolSurface] = {"bm": BM_SURFACE}
 
-SURFACES: dict[str, ToolSurface] = {"rich": RICH_SURFACE, "posix": POSIX_SURFACE}
-
-# The write verbs both surfaces share (posix v1 is read-side only, see above).
-SHARED_WRITE_TOOLS = ("write_note", "edit_note", "move_note", "delete_note")
+SHARED_WRITE_TOOLS = ("bm_write", "bm_edit", "bm_move", "bm_delete")
 
 
 def read_only_view(surface: ToolSurface) -> ToolSurface:
@@ -80,8 +54,8 @@ def read_only_view(surface: ToolSurface) -> ToolSurface:
 
     Dataset-manifest runs reuse one warm project per (surface, group); a write
     from an earlier question would pollute later questions' haystack. Dropping
-    the same four verbs from BOTH surfaces preserves the fairness contract and
-    matches xAFS's read-only reference agent (grep/find/cat).
+    the same four verbs from each surface preserves the fairness contract and
+    matches xAFS's read-only reference agent.
     """
     return ToolSurface(
         name=surface.name,

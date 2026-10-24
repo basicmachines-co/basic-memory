@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write-path load benchmark for Basic Memory.
 
-Drives `write_note` over a warm `bm mcp` stdio session at increasing
+Drives `bm_write` over a warm `bm mcp` stdio session at increasing
 concurrency and measures caller-perceived accept latency, throughput, error
 rate, and how long the background follow-up work takes to make the writes
 visible (materialized on disk, then FTS-searchable).
@@ -169,7 +169,7 @@ async def write_burst(
     count: int,
     concurrency: int,
 ) -> tuple[list[float], int]:
-    """Fire `count` write_note calls with at most `concurrency` in flight."""
+    """Fire `count` bm_write calls with at most `concurrency` in flight."""
     sem = asyncio.Semaphore(concurrency)
     latencies: list[float] = []
     errors = 0
@@ -181,7 +181,7 @@ async def write_burst(
             start = time.perf_counter()
             try:
                 result = await session.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": project,
                         "title": note["title"],
@@ -217,11 +217,11 @@ async def poll_until(predicate, *, timeout_s: float, interval_s: float = 0.1) ->
 
 async def searchable_count(session: ClientSession, project: str, level: int) -> int:
     result = await session.call_tool(
-        "search_notes",
+        "bm_search",
         {
             "project": project,
             "query": f"burst {level}",
-            "search_type": "text",
+            "mode": "text",
             "page": 1,
             "page_size": 1,
             "output_format": "json",

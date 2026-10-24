@@ -27,7 +27,7 @@ async def test_markdown_paths_are_indexed_and_resolved_exactly(
             ("Source", "notes", body),
         ]:
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": title,
                     "directory": directory,
@@ -75,7 +75,7 @@ async def test_markdown_self_link_is_resolved_when_written(
 ):
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "title": "Self",
                 "directory": "notes",
@@ -104,7 +104,7 @@ async def test_markdown_links_past_the_project_root_are_not_relations(
     """Links that climb out of the project are dropped on write and on move (#1634)."""
     async with Client(mcp_server) as client:
         written = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "title": "Climber",
                 "directory": "links/sub",
@@ -122,10 +122,10 @@ async def test_markdown_links_past_the_project_root_are_not_relations(
 
         # From the project root, ../../Inside.md climbs out too, so the move drops it.
         moved = await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "identifier": "links/sub/Climber.md",
-                "destination_path": "Climber.md",
+                "destination": "Climber.md",
                 "project": test_project.name,
             },
         )

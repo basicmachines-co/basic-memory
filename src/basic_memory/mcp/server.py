@@ -243,35 +243,27 @@ async def lifespan(app: FastMCP):
 BASIC_MEMORY_INSTRUCTIONS = (
     "Basic Memory is the user's personal knowledge base: Markdown notes that persist "
     "across conversations and that both the user and their AI assistants can read and write.\n\n"
-    "When a request may draw on the user's notes, check them (`recent_activity` is a good "
-    "first look) before answering from memory. If the knowledge base is empty, briefly explain "
-    "that Basic "
-    "Memory gives them persistent notes shared between the user and their AI, and offer to save "
-    "something useful from this conversation as their first note with `write_note` — then wait "
-    "for them to agree before writing anything. Do not create notes unprompted.\n\n"
-    "When available in your tool list, use the read-only POSIX tools `ls`, `find`, "
-    "`grep`, `cat`, `tail`, and `man` for compact navigation. If they are absent, use "
-    "the note tools (`read_note`, `search_notes`, `list_directory`) instead. Projects are "
-    "mount points: "
-    '`ls(path="/")` without a project constraint lists '
-    'addressable projects; `ls(path="research/notes")` and '
-    '`cat(identifier="research/notes/topic.md")` route into the research project. '
-    "Use returned project-qualified paths for follow-up reads. With multiple projects, "
-    "qualify paths or pass `project` (also required for `grep` and `tail`, and for `find` "
-    "without a project-qualified path); an explicit "
-    "project must agree with any path prefix. `cat` supports bounded line, section, and "
-    "token-budget reads; `find` can return selected metadata fields. "
-    "Set `enable_posix_tools=false` to hide the POSIX tools.\n\n"
-    "For a fuller guide, read the `memory://ai_assistant_guide` resource. The manual has a "
-    "page for nearly every tool, with verified examples and gotchas: `memory://man` lists "
-    "them, and `memory://man/<tool>(3)` (for example `memory://man/search-notes(3)`) is one "
-    "page — read a tool's page when its description leaves a question open or a call fails. "
-    "Any note is readable the same "
-    "way: its memory://<project>/<path> URL is a resource returning the raw markdown. If "
-    "you have a web or fetch tool "
-    "and need current "
-    "documentation, fetch `https://docs.basicmemory.com/llms.txt` first, then fetch only the "
-    "relevant linked `/raw/...md` page."
+    "When a request may draw on the user's notes, use bm_search or "
+    'bm_project(command="recent") before answering from memory. No recent activity does not '
+    "prove a project is empty. If the knowledge base is empty, explain the shared-memory loop "
+    "and offer a useful first note with bm_write; wait for agreement before writing. Do not write unprompted.\n\n"
+    "Use bm_list for one folder, bm_find for recursive names or frontmatter inventories, "
+    "bm_search for ranked retrieval or matching lines, and bm_read for note and file content. "
+    "bm_read supports bounded lines, sections, and token budgets. Follow relations with "
+    "bm_context. Read before editing with bm_edit; use the returned checksum to guard changes. "
+    "bm_write creates notes and explicitly overwrites them; bm_edit never creates missing notes. "
+    "Use returned paths for subsequent reads and writes.\n\n"
+    'bm_project(command="list") discovers projects, grouped by workspace. Pass a project name, '
+    "workspace/project, or external UUID through project. With multiple projects, qualify "
+    "paths or pass project; an explicit project must agree with a path prefix. "
+    'bm_list(path="/") without a project constraint lists project mount points. '
+    "Calls do not remember a previous project selection.\n\n"
+    "The installed tool schemas are authoritative. Most tools default to text; bm_context "
+    'defaults to JSON. Use output_format="json" when consuming structured fields. Failures '
+    "are tool errors, not empty successful results. Follow pagination and continuation fields. "
+    'Call bm_man(page="bm-search(3)") for details, or read memory://man for the manual index. '
+    "Read memory://ai_assistant_guide for a fuller guide. With a web or fetch tool, fetch "
+    "https://docs.basicmemory.com/llms.txt first, then only the relevant linked /raw/...md page."
 )
 
 mcp = FastMCP(

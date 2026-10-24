@@ -26,7 +26,7 @@ async def test_note_types_filter_is_case_insensitive(mcp_server, app, test_proje
             "# Capitalized Type Note\n\nuniqtoken99 body text\n"
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Capitalized Type Note",
@@ -35,22 +35,22 @@ async def test_note_types_filter_is_case_insensitive(mcp_server, app, test_proje
             },
         )
         plain = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "uniqtoken99",
-                "search_type": "text",
+                "mode": "text",
                 "output_format": "json",
             },
         )
         plain_data = _json(plain)
         assert plain_data["results"], "note not indexed at all"
         res = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "uniqtoken99",
-                "search_type": "text",
+                "mode": "text",
                 "note_types": ["Chapter"],
                 "output_format": "json",
             },
@@ -75,7 +75,7 @@ async def test_note_types_lowercase_control(mcp_server, app, test_project):
             "# Lowercase Type Note\n\nuniqtoken88 body text\n"
         )
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Lowercase Type Note",
@@ -84,11 +84,11 @@ async def test_note_types_lowercase_control(mcp_server, app, test_project):
             },
         )
         res = await client.call_tool(
-            "search_notes",
+            "bm_search",
             {
                 "project": test_project.name,
                 "query": "uniqtoken88",
-                "search_type": "text",
+                "mode": "text",
                 "note_types": ["Chapter"],
                 "output_format": "json",
             },

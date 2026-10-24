@@ -9,6 +9,11 @@ disable-model-invocation: true
 Report the plugin's current state for this project, then present a concise summary.
 This is a quick diagnostic — gather the facts and lay them out; don't over-investigate.
 
+When no project is pinned, discover projects with `bm_project(command="list")`
+and pass the selected project's external ID as `project` on note/search calls.
+With several addressable projects, these calls require an explicit scope even
+when a default is configured.
+
 ## Gather
 
 1. **CLI reachable?** Run `basic-memory --version`, then `bm --version`, then
@@ -24,7 +29,7 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    `.claude/settings.local.json` override per key. Report the result, noting when
    a value comes from the user-level block versus the project:
    - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
-     default project is used), `secondaryProjects` (team/shared read sources),
+     listed default or sole project is selected explicitly), `secondaryProjects` (team/shared read sources),
      `teamProjects` (share targets for `/basic-memory:bm-share`), `captureFolder`
      (default `sessions`), `rememberFolder` (default `bm-remember`),
      `preCompactCapture` mode (default `extractive`), `sessionProfile` (default
@@ -44,18 +49,18 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    manually merged config, show the mismatch. If no launcher resolves, mark these
    fields unavailable and continue.
 
-4. **Recent checkpoints.** `search_notes` with
-   `metadata_filters={"type": "session"}`, `page_size` 5, scoped to `primaryProject`
+4. **Recent checkpoints.** `bm_search` with
+   `filters={"type": "session"}`, `page_size` 5, scoped to `primaryProject`
    if one is set. When `sessionProfile` is `coding`, also query
-   `metadata_filters={"type": "coding_session", "repository": "<configured repository>"}`,
+   `filters={"type": "coding_session", "repository": "<configured repository>"}`,
    then merge, deduplicate, sort newest first, and keep the newest five. List them
    by title + permalink.
 
-5. **Active tasks.** `search_notes` with
-   `metadata_filters={"type": "task", "status": "active"}` — report just the count.
+5. **Active tasks.** `bm_search` with
+   `filters={"type": "task", "status": "active"}` — report just the count.
 
-When scoping these queries to `primaryProject`, pass it as `project`, or as
-`project_id` if it's an `external_id` UUID (a bare UUID in `project` won't route).
+When scoping these queries to `primaryProject`, pass it as `project`, including
+when it is an `external_id` UUID.
 
 ## Present
 
@@ -66,7 +71,7 @@ you couldn't determine, rather than failing the whole report):
 ## Basic Memory status
 
 - CLI:               basic-memory <version>
-- Project:           <primaryProject, or "default project (not pinned)">
+- Project:           <primaryProject, or "discovered project (not pinned)">
 - Reads from (team): <secondaryProjects joined, or "none">
 - Share targets:     <teamProjects keys joined, or "none">
 - Capture folder:    <captureFolder>
