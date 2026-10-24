@@ -11,7 +11,8 @@ short-lived agent in Cloud that reads the target, works through the Basic Memory
 tools, and changes notes as its instructions say.
 
 Agents run in Basic Memory Cloud only, on plans that include them. A local
-Basic Memory has no agent tools.
+Basic Memory has no agent tools. Confirm the connected server exposes `bm_agent`
+before starting this workflow.
 
 ## When to Use
 
@@ -24,12 +25,13 @@ Basic Memory has no agent tools.
 
 | Tool | Does |
 |---|---|
-| `list_agents` | The project's agents and how their recent runs went |
-| `run_agent` | Starts an agent on a note; returns the run id |
-| `get_agent_run` | One run: status, notes changed, and the agent's last reply |
-| `list_agent_runs` | Recent runs, newest first, optionally for one agent |
+| `bm_agent(command="list")` | The project's agents and how their recent runs went |
+| `bm_agent(command="run")` | Starts an agent on a note; returns the run id |
+| `bm_agent(command="get")` | One run: status, notes changed, and the agent's last reply |
+| `bm_agent(command="runs")` | Recent runs, newest first, optionally for one agent |
+| `bm_agent(command="mark")` | Mark a run `kept` or `dismissed` with `run_id` and `decision` |
 
-Create and edit agents with `write_note` and `edit_note`. There is no separate
+Create and edit agents with `bm_write` and `bm_edit`. There is no separate
 agent tool for that.
 
 ## Write an Agent
@@ -112,10 +114,10 @@ Point the user to these before writing an agent from scratch.
 ## Run an Agent
 
 ```python
-list_agents(project="work")
-run_agent(agent="Curator", note="projects/Launch", project="work")
+bm_agent(command="list", project="work")
+bm_agent(command="run", agent="Curator", identifier="projects/Launch", project="work")
 # -> run id. Runs usually take one to a few minutes.
-get_agent_run(run_id="<run id>", project="work")
+bm_agent(command="get", run_id="<run id>", project="work")
 ```
 
 An agent changes the user's notes. Ask before running one, unless the user has
@@ -128,7 +130,7 @@ on the version the person ended with. Notes written by agents, imports, or
 
 ## Check a Run
 
-`get_agent_run` shows the status, the notes the run created, edited, moved, or
+`bm_agent(command="get")` shows the status, the notes the run created, edited, moved, or
 deleted, and the agent's last reply. Every reply is also kept in a run log note, `agents/runs/<agent> run <id>`. Read it for the whole
 conversation; do not edit it.
 

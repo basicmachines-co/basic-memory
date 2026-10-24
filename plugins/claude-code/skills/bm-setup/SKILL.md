@@ -8,7 +8,7 @@ argument-hint: (no arguments — runs an interactive interview)
 
 Run a short, adaptive interview (~2-3 minutes) and then write the configuration.
 Be conversational and **skip questions whose answer is already obvious** from
-context (e.g. if `list_memory_projects` shows a single local project and no cloud
+context (e.g. if `bm_project(command="list")` shows a single local project and no cloud
 workspaces, don't ask about cloud/teams — just confirm). Suggest a sensible default
 for every question so the user can accept with one word. Don't do any writes until
 the interview is done and you've confirmed the plan.
@@ -16,18 +16,18 @@ the interview is done and you've confirmed the plan.
 ## Prerequisite check
 
 First confirm the **Basic Memory MCP server is connected** — call
-`list_memory_projects`. If that tool isn't available or errors, Basic Memory isn't
+`bm_project(command="list")`. If that tool isn't available or errors, Basic Memory isn't
 wired into Claude Code yet. **Stop and walk the user through it first** (everything
 below depends on it):
 
 1. Install it: `uv tool install basic-memory --prerelease=allow` (or
-   `pip install basic-memory`), version `>= 0.19.0`. Keep `--prerelease=allow`
+   `pip install basic-memory`), a version exposing the 1.0 `bm_*` tools. Keep `--prerelease=allow`
    with uv: published releases pin a FastMCP pre-release, and without the flag uv
    silently installs an older Basic Memory release.
 2. Connect it: `claude mcp add basic-memory -- uvx --prerelease=allow basic-memory mcp`,
    then restart the session so the MCP server loads.
 
-Re-check `list_memory_projects` before continuing — don't start the interview until
+Re-check `bm_project(command="list")` before continuing — don't start the interview until
 it succeeds.
 
 ## Interview
@@ -53,14 +53,14 @@ Ask only what you can't infer. Cover:
 
 2. **Project mapping.** "Do you already have a Basic Memory project for this, or
    should I create one?"
-   - Existing → show `list_memory_projects()` and let them pick. That name becomes
+   - Existing → show `bm_project(command="list")` and let them pick. That name becomes
      `primaryProject`.
    - New → propose a name (default: this repo's directory name) and create it with
-     `create_memory_project`.
+     `bm_project(command="create", name="<name>", path="<path>")`.
      - *Local project* (default): path defaults to `~/basic-memory/<name>/`; any
        connected Basic Memory server can create it.
      - *Cloud project* (the user wants capture in a cloud workspace): pass the
-       `workspace` selector (a slug from `list_workspaces`) and a cloud-style path
+       `workspace` selector (a slug from `bm_project(command="list")`) and a cloud-style path
        like `/<name>`, and create it with a **cloud-connected** MCP server. A purely
        local server (`uvx --prerelease=allow basic-memory mcp`) treats the path as a local directory and
        fails to create it (e.g. read-only `/`). When both a local and a cloud server
@@ -69,9 +69,9 @@ Ask only what you can't infer. Cover:
        (collision-proof across workspaces).
 
 3. **Cloud / teams** (skip if there are no extra workspaces). Run
-   `list_workspaces`. If the user belongs to more than one workspace, they likely
+   `bm_project(command="list")`. If the user belongs to more than one workspace, they likely
    have a **team** workspace alongside their personal/default one. Use
-   `list_memory_projects` to see the projects in each (note: project names collide
+   `bm_project(command="list")` to see the projects in each (note: project names collide
    across workspaces, so always use the **workspace-qualified name**, e.g.
    `my-team-2/notes`, or the `external_id` UUID — never a bare name).
    - **Read from the team** (recommended): ask which team projects to pull into the
@@ -92,9 +92,9 @@ Ask only what you can't infer. Cover:
 4. **Placement — learn or suggest** (depends on the project's state). The goal is a
    short `placementConventions` string (3-6 lines) telling you where new notes go.
    How you get it depends on whether the project already has notes:
-   - **Existing project with notes** → *learn*. Inspect it: `list_directory` for the
-     folder layout, sample a few notes per folder (and, where a folder holds
-     recurring typed notes, you may run `schema_infer` to see their shape).
+   - **Existing project with notes** → *learn*. Inspect it: `bm_list(path="/", project="<primaryProject>")` for the
+     top-level folder layout (`bm_find` for recursive discovery), sample a few notes per folder (and, where a folder holds
+     recurring typed notes, you may run `bm_schema(command="infer")` to see their shape).
      Summarize the *real* conventions — folder-by-topic layout, naming style, the
      observation categories they favor. Infer from their actual notes; don't impose.
    - **New or empty project** → *suggest* (there's nothing to learn yet). Propose a
@@ -148,11 +148,11 @@ so there is no projected session or tool-ledger schema to seed.
 
 For each one:
 - Check whether the chosen project already has a schema for that type
-  (`search_notes` with `metadata_filters={"type": "schema"}`, or try
-  `read_note("schemas/<name>")`). **If it exists, skip it** — never overwrite a
+  (`bm_search` with `filters={"type": "schema"}`, or try
+  `bm_read("schemas/<name>")`). **If it exists, skip it** — never overwrite a
   schema the user may have customized.
-- Otherwise write it with `write_note`, routed to `primaryProject` (pass it as
-  `project`, or as `project_id` if it's an `external_id` UUID):
+- Otherwise write it with `bm_write`, routed to `primaryProject` (pass it as
+  `project`, which accepts a name, workspace-qualified name, or `external_id` UUID):
   - `directory="schemas"`, `note_type="schema"`, `title` = the schema's title
     (Session / Decision / Task).
   - `content` = the markdown **body only** — everything *after* the `---`
@@ -164,7 +164,7 @@ For each one:
     write path that nested YAML is silently coerced to the string `'[object Object]'`
     (basic-memory-cloud#1000), corrupting `schema`/`settings`. The `metadata` param
     round-trips correctly on both local and cloud. After seeding, verify one note
-    with `read_note(..., output_format="json", include_frontmatter=true)` —
+    with `bm_read(..., output_format="json", include_frontmatter=true)` —
     `schema`/`settings` must come back as nested objects, not strings.
 - **Coding setup:** the selected `coding-session.md` schema's Git identity fields
   (`repository`, `repo_root`, `cwd`, `branch`, `git_sha`) are required by design.

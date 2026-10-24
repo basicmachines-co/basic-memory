@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 from unittest.mock import patch
 
 from basic_memory import db
@@ -30,7 +31,7 @@ async def test_default_project_write_note(mcp_server, app, test_project):
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Default Mode Test",
                     "directory": "test",
@@ -42,13 +43,9 @@ async def test_default_project_write_note(mcp_server, app, test_project):
             assert len(result.content) == 1
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            assert f"project: {test_project.name}" in response_text
-            assert "# Created note" in response_text
-            assert "file_path: test/Default Mode Test.md" in response_text
-            assert (
-                f"[Project: '{test_project.name}' (no project was given, so this used the "
-                "default project"
-            ) in response_text
+            assert f"permalink: {test_project.name}/" in response_text
+            assert "Created " in response_text
+            assert "Created test/Default Mode Test.md" in response_text
 
 
 @pytest.mark.asyncio
@@ -80,21 +77,20 @@ async def test_explicit_project_overrides_default(
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Override Test",
                     "directory": "test",
                     "content": "# Override Test\n\nThis should go to the explicitly specified project.",
-                    "project": other_project.name,  # Explicit override
+                    "project": other_project.name,
                 },
             )
 
             assert len(result.content) == 1
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            assert f"project: {other_project.name}" in response_text
-            assert "# Created note" in response_text
-            assert f"[Project: '{other_project.name}']" in response_text
+            assert f"permalink: {other_project.name}/" in response_text
+            assert "Created " in response_text
 
 
 @pytest.mark.asyncio
@@ -111,7 +107,7 @@ async def test_no_config_default_falls_back_to_db(mcp_server, app, test_project)
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "DB Fallback Test",
                     "directory": "test",
@@ -122,8 +118,8 @@ async def test_no_config_default_falls_back_to_db(mcp_server, app, test_project)
             assert len(result.content) == 1
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            assert f"project: {test_project.name}" in response_text
-            assert "# Created note" in response_text
+            assert f"permalink: {test_project.name}/" in response_text
+            assert "Created " in response_text
 
 
 @pytest.mark.asyncio
@@ -158,7 +154,7 @@ async def test_cli_constraint_overrides_default_project(
         with patch.object(ConfigManager, "config", mock_config):
             async with Client(mcp_server) as client:
                 result = await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "title": "CLI Constraint Test",
                         "directory": "test",
@@ -169,9 +165,8 @@ async def test_cli_constraint_overrides_default_project(
                 assert len(result.content) == 1
                 response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-                assert f"project: {other_project.name}" in response_text
-                assert "# Created note" in response_text
-                assert f"[Project: '{other_project.name}']" in response_text
+                assert f"permalink: {other_project.name}/" in response_text
+                assert "Created " in response_text
 
     finally:
         if "BASIC_MEMORY_MCP_PROJECT" in os.environ:
@@ -190,7 +185,7 @@ async def test_default_project_read_note(mcp_server, app, test_project):
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Read Test Note",
                     "directory": "test",
@@ -199,10 +194,8 @@ async def test_default_project_read_note(mcp_server, app, test_project):
             )
 
             result = await client.call_tool(
-                "read_note",
-                {
-                    "identifier": "Read Test Note",
-                },
+                "bm_read",
+                {"identifier": "Read Test Note", "include_frontmatter": False},
             )
 
             assert len(result.content) == 1
@@ -224,7 +217,7 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Edit Test Note",
                     "directory": "test",
@@ -233,10 +226,10 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
             )
 
             result = await client.call_tool(
-                "edit_note",
+                "bm_edit",
                 {
                     "identifier": "Edit Test Note",
-                    "operation": "append",
+                    "command": "append",
                     "content": "\n\n## Added Content\n\nThis was added via edit_note.",
                 },
             )
@@ -244,8 +237,8 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
             assert len(result.content) == 1
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            assert "# Edited note" in response_text
-            assert "operation: Added" in response_text
+            assert "Edited " in response_text
+            assert "(append)" in response_text
 
 
 @pytest.mark.asyncio
@@ -297,16 +290,16 @@ async def test_project_resolution_hierarchy(
         with patch.object(ConfigManager, "config", mock_config):
             async with Client(mcp_server) as client:
                 result = await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "title": "CLI Priority Test",
                         "directory": "test",
                         "content": "# CLI Priority Test",
-                        "project": explicit_project.name,  # Should be ignored
+                        "project": explicit_project.name,
                     },
                 )
                 response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-                assert f"project: {cli_project.name}" in response_text
+                assert f"permalink: {cli_project.name}/" in response_text
 
     finally:
         del os.environ["BASIC_MEMORY_MCP_PROJECT"]
@@ -315,7 +308,7 @@ async def test_project_resolution_hierarchy(
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": "Explicit Priority Test",
                     "directory": "test",
@@ -324,19 +317,27 @@ async def test_project_resolution_hierarchy(
                 },
             )
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-            assert f"project: {explicit_project.name}" in response_text
+            assert f"permalink: {explicit_project.name}/" in response_text
 
-    # Test 3: Default project (lowest priority)
+    # Multiple addressable projects require an explicit scope even with a default.
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
+            with pytest.raises(ToolError, match="no project specified"):
+                await client.call_tool(
+                    "bm_write",
+                    {
+                        "title": "Default Priority Test",
+                        "directory": "test",
+                        "content": "# Default Priority Test",
+                    },
+                )
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
+                    "project": default_project.name,
                     "title": "Default Priority Test",
                     "directory": "test",
                     "content": "# Default Priority Test",
-                    # No project specified
                 },
             )
-            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-            assert f"project: {default_project.name}" in response_text
+            assert f"permalink: {default_project.name}/" in result.content[0].text

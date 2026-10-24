@@ -25,10 +25,10 @@ Work through these in order. Stop at the first step that fails, explain what's m
 
 ### 1. Confirm a cloud connection
 
-Call `list_workspaces`.
+Call `bm_project(command="list", output_format="json")` and inspect the projects grouped by workspace.
 
 - If it fails, Basic Memory isn't connected to this assistant. Tell the user to connect it and run Memory Quest again.
-- If the only workspace has `tenant_id` `personal`, this assistant is connected to a local-only Basic Memory. Memory Quest lives in Basic Memory Cloud: tell the user to connect their cloud account (`bm cloud login` for the CLI, or the Basic Memory connector in a chat app) and try again.
+- If no project has `source: cloud` or `source: local+cloud`, this assistant has not demonstrated a cloud connection. Memory Quest lives in Basic Memory Cloud: tell the user to connect their cloud account (`bm cloud login` for the CLI, or the Basic Memory connector in a chat app) and try again.
 - Otherwise the connection works. You may show the user one line about what you can see, such as the workspace names. That is a courtesy, not evidence.
 
 ### 2. Confirm the guidance is active
@@ -54,23 +54,23 @@ If they decline, stop. Say that the mission stays incomplete and they can run Me
 
 ### 5. Save the Memory Master note
 
-First choose a project that exists only in Basic Memory Cloud. Call `list_memory_projects` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
+First choose a project that exists only in Basic Memory Cloud. Call `bm_project(command="list")` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
 
 Don't use a project listed as `local` or `local+cloud`. When this machine has a local project with the same name as a cloud one, which is common because every local install creates `main`, a local Basic Memory server writes the note to the local copy however you address it, by name, workspace-qualified name, or ID. The write reports success, but the cloud never sees it, so the mission stays incomplete. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud (or connect their cloud account), then run Memory Quest again.
 
-With approval, call `write_note` once:
+With approval, call `bm_write` once:
 
 - `title`: `Memory Master`
 - `directory`: `memory-quest`
 - `note_type`: `memory_master`
-- `project_id`: the chosen project's `external_id`
+- `project`: the chosen project's `external_id`
 - `metadata`: `{"memory_quest_code": "<the code exactly as the user gave it>", "memory_quest_guidance": "active"}`
 - `content`: the template below, unchanged except where it says to fill in
-- `overwrite`: `false`. Always pass it: when it's omitted, `write_note` follows the user's `write_note_overwrite_default` setting and could silently replace an existing note.
+- `overwrite`: `false`. Always pass it: when it's omitted, `bm_write` follows the user's `write_note_overwrite_default` setting and could silently replace an existing note.
 
 Pass the code and guidance in `metadata`, never inside `content`. They must arrive as frontmatter fields for the cloud to recognize the write.
 
-If `write_note` reports that the note already exists, read it with `read_note`, passing the same `project_id`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `write_note` again with the same arguments, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
+If `bm_write` reports that the note already exists, read it with `bm_read`, using the exact path from the refusal and the same `project`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `bm_write` again using the read result's `file_path` as `identifier` instead of `title` + `directory`, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
 
 ### 6. Tell the user what happens next
 

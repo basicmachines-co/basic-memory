@@ -209,20 +209,20 @@ def test_extract_permalink_strips_trailing_punct(bm):
 
 def test_translate_search(bm):
     tool, args = bm._translate_args("bm_search", {"query": "hi", "limit": 7}, "proj")
-    assert tool == "search_notes"
+    assert tool == "bm_search"
     assert args == {"project": "proj", "query": "hi", "page_size": 7}
 
 
 def test_translate_search_no_limit(bm):
     tool, args = bm._translate_args("bm_search", {"query": "hi"}, "proj")
-    assert tool == "search_notes"
+    assert tool == "bm_search"
     assert args == {"project": "proj", "query": "hi"}
 
 
 def test_translate_read(bm):
     tool, args = bm._translate_args("bm_read", {"identifier": "x/y"}, "proj")
-    assert tool == "read_note"
-    assert args == {"project": "proj", "identifier": "x/y"}
+    assert tool == "bm_read"
+    assert args == {"include_frontmatter": False, "project": "proj", "identifier": "x/y"}
 
 
 def test_translate_read_workspace_qualified_identifier_self_routes(bm):
@@ -231,8 +231,8 @@ def test_translate_read_workspace_qualified_identifier_self_routes(bm):
         {"identifier": "personal/main/scratch/note"},
         "hermes-memory",
     )
-    assert tool == "read_note"
-    assert args == {"identifier": "personal/main/scratch/note"}
+    assert tool == "bm_read"
+    assert args == {"include_frontmatter": False, "identifier": "personal/main/scratch/note"}
 
 
 def test_translate_read_org_workspace_qualified_identifier_self_routes(bm):
@@ -241,8 +241,11 @@ def test_translate_read_org_workspace_qualified_identifier_self_routes(bm):
         {"identifier": "basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note"},
         "hermes-memory",
     )
-    assert tool == "read_note"
-    assert args == {"identifier": "basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note"}
+    assert tool == "bm_read"
+    assert args == {
+        "include_frontmatter": False,
+        "identifier": "basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
+    }
 
 
 def test_translate_write(bm):
@@ -251,7 +254,7 @@ def test_translate_write(bm):
         {"title": "T", "content": "C", "folder": "F", "tags": ["a", "b"]},
         "proj",
     )
-    assert tool == "write_note"
+    assert tool == "bm_write"
     assert args == {
         "project": "proj",
         "title": "T",
@@ -267,7 +270,7 @@ def test_translate_write_no_tags(bm):
         {"title": "T", "content": "C", "folder": "F"},
         "proj",
     )
-    assert tool == "write_note"
+    assert tool == "bm_write"
     assert "tags" not in args
     assert args["directory"] == "F"
 
@@ -292,9 +295,9 @@ def test_translate_write_forwards_note_fields_and_project_id(bm):
         },
         "proj",
     )
-    assert tool == "write_note"
+    assert tool == "bm_write"
     assert args == {
-        "project_id": _CLOUD_PROJECT_ID,
+        "project": _CLOUD_PROJECT_ID,
         "title": "Memory Master",
         "content": "body",
         "directory": "memory-quest",
@@ -327,9 +330,9 @@ def test_translate_read_forwards_frontmatter_and_output_format(bm):
         },
         "proj",
     )
-    assert tool == "read_note"
+    assert tool == "bm_read"
     assert args == {
-        "project_id": _CLOUD_PROJECT_ID,
+        "project": _CLOUD_PROJECT_ID,
         "identifier": "memory-quest/memory-master",
         "include_frontmatter": True,
         "output_format": "json",
@@ -351,11 +354,11 @@ def test_translate_edit_minimal(bm):
         {"identifier": "x", "operation": "append", "content": "more"},
         "proj",
     )
-    assert tool == "edit_note"
+    assert tool == "bm_edit"
     assert args == {
         "project": "proj",
         "identifier": "x",
-        "operation": "append",
+        "command": "append",
         "content": "more",
     }
 
@@ -390,8 +393,8 @@ def test_translate_edit_replace_section(bm):
 
 def test_translate_context(bm):
     tool, args = bm._translate_args("bm_context", {"url": "memory://x", "depth": 2}, "proj")
-    assert tool == "build_context"
-    assert args == {"project": "proj", "url": "memory://x", "depth": 2}
+    assert tool == "bm_context"
+    assert args == {"project": "proj", "identifier": "memory://x", "depth": 2}
 
 
 def test_translate_context_workspace_qualified_url_self_routes(bm):
@@ -400,8 +403,8 @@ def test_translate_context_workspace_qualified_url_self_routes(bm):
         {"url": "memory://personal/main/scratch/note", "depth": 1},
         "hermes-memory",
     )
-    assert tool == "build_context"
-    assert args == {"url": "memory://personal/main/scratch/note", "depth": 1}
+    assert tool == "bm_context"
+    assert args == {"identifier": "memory://personal/main/scratch/note", "depth": 1}
 
 
 def test_translate_context_org_workspace_qualified_url_self_routes(bm):
@@ -413,16 +416,16 @@ def test_translate_context_org_workspace_qualified_url_self_routes(bm):
         },
         "hermes-memory",
     )
-    assert tool == "build_context"
+    assert tool == "bm_context"
     assert args == {
-        "url": "memory://basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
+        "identifier": "memory://basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
         "depth": 1,
     }
 
 
 def test_translate_delete(bm):
     tool, args = bm._translate_args("bm_delete", {"identifier": "x"}, "proj")
-    assert tool == "delete_note"
+    assert tool == "bm_delete"
     assert args == {"project": "proj", "identifier": "x"}
 
 
@@ -430,18 +433,18 @@ def test_translate_move(bm):
     tool, args = bm._translate_args(
         "bm_move", {"identifier": "x", "new_folder": "archive/2026"}, "proj"
     )
-    assert tool == "move_note"
+    assert tool == "bm_move"
     assert args == {
         "project": "proj",
         "identifier": "x",
-        "destination_folder": "archive/2026",
+        "destination": "archive/2026/",
     }
 
 
 def test_translate_recent_defaults(bm):
     tool, args = bm._translate_args("bm_recent", {}, "proj")
-    assert tool == "recent_activity"
-    assert args == {"project": "proj"}
+    assert tool == "bm_project"
+    assert args == {"project": "proj", "command": "recent"}
 
 
 def test_translate_recent_full(bm):
@@ -450,12 +453,13 @@ def test_translate_recent_full(bm):
         {"timeframe": "2 weeks", "limit": 25, "type": "entity"},
         "proj",
     )
-    assert tool == "recent_activity"
+    assert tool == "bm_project"
     assert args == {
         "project": "proj",
-        "timeframe": "2 weeks",
+        "command": "recent",
+        "since": "2 weeks",
         "page_size": 25,
-        "type": "entity",
+        "items": ["note"],
     }
 
 
@@ -483,8 +487,8 @@ def test_translate_uses_project_id_override(bm):
     precedence surprises)."""
     uuid = "bf2a4c1e-d77f-4b7a-9c3e-5d8a1f0e2b6d"
     _, args = bm._translate_args("bm_search", {"query": "hi", "project_id": uuid}, "default-proj")
-    assert args["project_id"] == uuid
-    assert "project" not in args
+    assert args["project"] == uuid
+    assert "project_id" not in args
 
 
 def test_translate_project_id_wins_when_both_supplied(bm):
@@ -496,15 +500,15 @@ def test_translate_project_id_wins_when_both_supplied(bm):
         {"query": "hi", "project": "main", "project_id": uuid},
         "default-proj",
     )
-    assert args["project_id"] == uuid
-    assert "project" not in args
+    assert args["project"] == uuid
+    assert "project_id" not in args
 
 
 def test_translate_routing_coerces_to_string(bm):
     """Defensive: if a model passes a non-string identifier (e.g. an int),
     coerce rather than crash. BM accepts strings."""
     _, args = bm._translate_args("bm_search", {"query": "hi", "project_id": 12345}, "default-proj")
-    assert args["project_id"] == "12345"
+    assert args["project"] == "12345"
 
 
 @pytest.mark.parametrize(
@@ -529,8 +533,8 @@ def test_translate_routing_works_for_every_tool(bm, tool, base_args):
 
     args_with_id = dict(base_args, project_id="e1d3a5b8-0492-4c1f-8e7d-2a4b6c8d0e2f")
     _, out = bm._translate_args(tool, args_with_id, "default-proj")
-    assert out["project_id"] == "e1d3a5b8-0492-4c1f-8e7d-2a4b6c8d0e2f"
-    assert "project" not in out
+    assert out["project"] == "e1d3a5b8-0492-4c1f-8e7d-2a4b6c8d0e2f"
+    assert "project_id" not in out
 
     _, out = bm._translate_args(tool, base_args, "default-proj")
     assert out["project"] == "default-proj"
@@ -545,18 +549,18 @@ def test_translate_bm_projects_no_routing(bm):
     (would make BM scope the listing) and MUST request JSON so the agent
     can parse identifiers out of the response."""
     tool, out = bm._translate_args("bm_projects", {}, "default-proj")
-    assert tool == "list_memory_projects"
-    assert "project" not in out
+    assert tool == "bm_project"
     assert "project_id" not in out
-    assert out == {"output_format": "json"}
+    assert "project_id" not in out
+    assert out == {"command": "list", "output_format": "json"}
 
 
 def test_translate_bm_workspaces_no_routing(bm):
     tool, out = bm._translate_args("bm_workspaces", {}, "default-proj")
-    assert tool == "list_workspaces"
-    assert "project" not in out
+    assert tool == "bm_project"
     assert "project_id" not in out
-    assert out == {"output_format": "json"}
+    assert "project_id" not in out
+    assert out == {"command": "list", "output_format": "json"}
 
 
 def test_translate_global_tools_ignore_project_kwargs(bm):
@@ -568,7 +572,7 @@ def test_translate_global_tools_ignore_project_kwargs(bm):
         {"project": "main", "project_id": "e1d3a5b8-0492-4c1f-8e7d-2a4b6c8d0e2f"},
         "default-proj",
     )
-    assert "project" not in out
+    assert "project_id" not in out
     assert "project_id" not in out
 
 

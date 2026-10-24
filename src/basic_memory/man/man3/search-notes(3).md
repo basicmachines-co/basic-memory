@@ -11,6 +11,9 @@ verified: 0.21.6 mcp+cli
 
 # search-notes(3)
 
+> Compatibility API: new MCP workflows use [[bm-search(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **search-notes** — search the knowledge base by text, similarity, or metadata

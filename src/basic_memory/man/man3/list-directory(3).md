@@ -11,6 +11,9 @@ verified: 0.21.6 mcp
 
 # list-directory(3)
 
+> Compatibility API: new MCP workflows use [[bm-list(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **list-directory** — browse project folders with depth and glob filtering

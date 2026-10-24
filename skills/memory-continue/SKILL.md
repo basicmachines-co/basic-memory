@@ -21,31 +21,31 @@ Resume previous work by reconstructing context from the Basic Memory knowledge g
 
 If it's unclear, ask:
 - What topic or project should you resume?
-- What timeframe matters?
+- What since matters?
 - Any specific aspect to focus on?
 
 ### 2. Gather Context with MCP Tools
 
-**Known topic — use `build_context`.** Navigate the graph from a starting point, following relations outward:
+**Known topic — use `bm_context`.** Navigate the graph from a starting point, following relations outward:
 
 ```python
-build_context(
-    url="memory://topic-or-note-name",
+bm_context(
+    identifier="memory://topic-or-note-name",
     depth=2,           # how many relation hops to follow
-    timeframe="7d",    # bias toward recent changes
+    since="7d",        # only include changes in this window
 )
 ```
 
-**No clear starting point — use `recent_activity`.** See what's changed and let it surface the thread:
+**No clear starting point — use `bm_project(command="recent")`.** See what's changed and let it surface the thread:
 
 ```python
-recent_activity(timeframe="3d", depth=1)
+bm_project(command="recent", since="3d")
 ```
 
-**Looking for something specific — use `search_notes`.** Find candidate notes by keyword:
+**Looking for something specific — use `bm_search`.** Find candidate notes by keyword:
 
 ```python
-search_notes(query="async client refactor", page_size=10)
+bm_search(query="async client refactor", page_size=10)
 ```
 
 ### 3. Read the Key Notes
@@ -53,17 +53,17 @@ search_notes(query="async client refactor", page_size=10)
 Once you've identified the relevant notes, read them in full:
 
 ```python
-read_note(identifier="note-title-or-permalink")
+bm_read(identifier="note-title-or-permalink")
 ```
 
 For long notes, pick before you pay for bodies. `compact=True` drops bodies from
-search results (and observations from `build_context`), and a line range or a
+search results (and observations from `bm_context`), and a line range or a
 section reads only the part you need:
 
 ```python
-search_notes(query="async client refactor", compact=True)
-read_note(identifier="note-title-or-permalink", start_line=120, end_line=180)
-cat(identifier="note-title-or-permalink", section="Status")
+bm_search(query="async client refactor", compact=True)
+bm_read(identifier="note-title-or-permalink", start_line=120, end_line=180)
+bm_read(identifier="note-title-or-permalink", section="Status")
 ```
 
 ### 4. Present Context to the User
@@ -76,7 +76,7 @@ Summarize what you found, incrementally:
 
 ## Memory URL Reference
 
-`build_context` and `read_note` both accept `memory://` URLs, which address notes by permalink and support wildcards for gathering groups of notes.
+`bm_context` and `bm_read` both accept `memory://` URLs. `bm_read` resolves one exact note; use `bm_context` for wildcard patterns that gather groups of notes.
 
 ```
 memory://note-title            # a single note by permalink
@@ -89,7 +89,7 @@ Use a specific note URL to anchor on one starting point; use a wildcard to pull 
 
 ## Timeframe Reference
 
-`build_context` and `recent_activity` accept natural-language timeframes:
+`bm_context` and `bm_project(command="recent")` accept natural-language timeframes:
 
 | Timeframe | Meaning |
 |-----------|---------|
@@ -106,10 +106,10 @@ Use a specific note URL to anchor on one starting point; use a wildcard to pull 
 
 ```python
 # 1. Read the spec / project note
-read_note(identifier="SPEC-24: Postgres Database Migration")
+bm_read(identifier="SPEC-24: Postgres Database Migration")
 
 # 2. Pull in related context and recent changes via the graph
-build_context(url="memory://SPEC-24*", timeframe="7d")
+bm_context(identifier="memory://SPEC-24*", since="7d")
 ```
 
 Then summarize: the goals, what's completed, what's pending, and any blockers or open decisions.
@@ -118,10 +118,10 @@ Then summarize: the goals, what's completed, what's pending, and any blockers or
 
 ```python
 # 1. Check recent activity
-recent_activity(timeframe="3d")
+bm_project(command="recent", since="3d")
 
 # 2. Read notes from the recent sessions it surfaces
-read_note(identifier="relevant-note")
+bm_read(identifier="relevant-note")
 ```
 
 Then list the modified notes with brief descriptions and ask which thread to dive into.
@@ -130,10 +130,10 @@ Then list the modified notes with brief descriptions and ask which thread to div
 
 ```python
 # 1. Find the topic
-search_notes(query="topic keywords")
+bm_search(query="topic keywords")
 
 # 2. Build context from the best match, following its relations
-build_context(url="memory://found-note-permalink", depth=2)
+bm_context(identifier="memory://found-note-permalink", depth=2)
 ```
 
 Then present the full picture — the note plus its connected context.
@@ -143,16 +143,16 @@ Then present the full picture — the note plus its connected context.
 Project names are user-specific. To discover what's available before scoping a search or `memory://` URL:
 
 ```python
-list_memory_projects()
+bm_project(command="list")
 ```
 
 In multi-project setups, prefix a `memory://` URL with the project name (e.g. `memory://research/papers/crdt`) to scope it.
 
 ## Guidelines
 
-1. **Start broad, then narrow.** Get an overview with `recent_activity` or a wildcard `build_context`, then drill into specific notes.
+1. **Start broad, then narrow.** Get an overview with `bm_project(command="recent")` or a wildcard `bm_context`, then drill into specific notes.
 2. **Present incrementally.** Share what you find as you go rather than holding everything until the end.
-3. **Follow relations.** The graph's connections are the point — `build_context` with `depth` surfaces context you wouldn't find by reading one note.
-4. **Check multiple projects.** Specs may live separately from implementation notes; discover projects with `list_memory_projects`.
+3. **Follow relations.** The graph's connections are the point — `bm_context` with `depth` surfaces context you wouldn't find by reading one note.
+4. **Check multiple projects.** Specs may live separately from implementation notes; discover projects with `bm_project(command="list")`.
 5. **Confirm understanding.** Verify the reconstructed context is what the user actually needs before acting on it.
 6. **Capture new progress.** As the resumed work advances, write it back to the graph (see the **memory-notes** skill) so the next session can continue too.

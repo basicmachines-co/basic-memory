@@ -8,7 +8,31 @@ This is the canonical source for Basic Memory `SKILL.md` files. The former `basi
 
 Skills are markdown instruction files (`SKILL.md`) that AI agents load for domain-specific guidance. Each skill contains structured knowledge about *when* and *how* to use specific tools, with examples and best practices.
 
-Basic Memory provides the MCP server — tools like `write_note`, `search_notes`, and `build_context` for managing a local-first knowledge graph. These skills teach agents how to use those tools well: when to create tasks vs. notes, how to structure observations for searchability, when to run schema validation, and more.
+Basic Memory provides the MCP server — tools like `bm_write`, `bm_search`, and `bm_context` for managing a local-first knowledge graph. These skills teach agents how to use those tools well: when to create tasks vs. notes, how to structure observations for searchability, when to run schema validation, and more.
+
+## Tool contract
+
+These skills target the Basic Memory 1.0 MCP surface. Use `bm_man(page="bm_search")`
+(or the relevant tool name) to check the installed server's parameters.
+
+- `bm_read` reads one exact note or file, with optional section or line bounds.
+- `bm_write` creates or replaces a note; use its exact `identifier` path when replacing it.
+- `bm_edit` uses `command`, including `set_metadata` for frontmatter-only updates.
+- `bm_move` takes `destination`; `bm_delete` removes a note or directory.
+- `bm_list` lists one folder level. At `/` without `project`, it lists projects.
+  `bm_find` recurses and supports `filters` plus `fields` for metadata discovery.
+- `bm_search` takes `mode`, `filters`, `items`, and `since`; `lines` requests matching lines.
+- `bm_context` takes `identifier`, graph `depth`, and `since`.
+- `bm_project(command="list"|"create"|"recent")` handles project discovery and activity.
+- `bm_schema(command="validate"|"infer"|"diff")` handles schemas.
+- Cloud adds `bm_agent` and Cloud-only read options. Check that the connected server
+  exposes them before using those workflows.
+
+`project` accepts a name, `workspace/project`, or external ID. Pass it explicitly
+when working across projects. Page list/find/search results until `has_more` is
+false (maximum `page_size=100`); context pages currently cap at 50. For revision-guarded
+changes, read as JSON and pass `checksum` as `expected_checksum`.
+The CLI examples retain their `bm cat`, `bm find`, and other CLI command shapes.
 
 ## Skills
 
@@ -28,7 +52,7 @@ Basic Memory provides the MCP server — tools like `write_note`, `search_notes`
 | **memory-ingest** | Process unstructured external input into structured entities. Parses meeting transcripts, conversation logs, and pasted documents. | When pasting a transcript, conversation log, or external document that should become structured knowledge. |
 | **memory-research** | Web research synthesized into Basic Memory entities. Researches a subject, checks for existing knowledge, presents findings, and creates entity notes. | When asked to research a company, person, technology, or topic. |
 | **memory-literary-analysis** | Analyze a complete literary work into a structured knowledge graph — characters, themes, chapters, locations, symbols, and literary devices. | Full-text literary analysis, book club companions, teaching resources, or research projects. |
-| **memory-continue** | Resume prior work by rebuilding context from the knowledge graph — `build_context` via `memory://` URLs, recent activity, and search, then read the key notes. | Starting a session, or when the user says "continue with...", "back to...", or "where were we?" |
+| **memory-continue** | Resume prior work by rebuilding context from the knowledge graph — `bm_context` via `memory://` URLs, recent activity, and search, then read the key notes. | Starting a session, or when the user says "continue with...", "back to...", or "where were we?" |
 | **memory-onboarding** | Guided onboarding for people new to Basic Memory — interview, blueprint, approval gate, then build a full system: schemas, templates, instruction notes, a startup router, indexes, and real seed notes, plus assistant setup so the rules load every session. | When a user is new to Basic Memory, doesn't know what to use it for, wants structure in an empty or messy project, or wants their assistant to follow consistent rules across sessions. |
 | **memory-quest** | Finish Memory Quest's last mission in Basic Memory Cloud: confirm the assistant reaches the cloud account and starts work from Basic Memory, then — with approval — save a Memory Master note carrying the code from app.basicmemory.com/memory-quest. | When the user runs `/memory-quest` or asks to verify their assistant for Memory Quest. |
 | **memory-agents** | Create, run, and check Basic Memory Cloud agents: notes with `type: agent` whose text is the instructions, started by hand on a note or by a watched folder. | When asked to automate recurring work on notes, run an agent, or find out how a run went or why it did not run. |

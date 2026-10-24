@@ -33,7 +33,7 @@ async def test_write_note_basic_creation(mcp_server, app, test_project):
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Simple Note",
@@ -47,13 +47,16 @@ async def test_write_note_basic_creation(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: basic/Simple Note.md" in response_text
+        assert "Created " in response_text
+
+        assert "basic/Simple Note.md" in response_text
         assert f"permalink: {test_project.name}/basic/simple-note" in response_text
-        assert "## Tags" in response_text
-        assert "- simple, test" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
+        assert "checksum:" in response_text
+        read = await client.call_tool(
+            "bm_read",
+            {"identifier": "Simple Note", "project": test_project.name, "output_format": "json"},
+        )
+        assert _json_content(read)["frontmatter"]["tags"] == ["simple", "test"]
 
 
 @pytest.mark.asyncio
@@ -62,7 +65,7 @@ async def test_write_note_no_tags(mcp_server, app, test_project):
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "No Tags Note",
@@ -75,8 +78,8 @@ async def test_write_note_no_tags(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert "file_path: test/No Tags Note.md" in response_text
+        assert "Created " in response_text
+        assert "test/No Tags Note.md" in response_text
         assert f"permalink: {test_project.name}/test/no-tags-note" in response_text
         # Should not have tags section when no tags provided
 
@@ -88,7 +91,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create initial note
         result1 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Update Test",
@@ -98,11 +101,11 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
             },
         )
 
-        assert "# Created note" in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "Created " in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Update the same note (explicit overwrite)
         result2 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Update Test",
@@ -117,12 +120,15 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
         assert result2.content[0].type == "text"
         response_text = result2.content[0].text
 
-        assert "# Updated note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: test/Update Test.md" in response_text
+        assert "Updated " in response_text
+
+        assert "test/Update Test.md" in response_text
         assert f"permalink: {test_project.name}/test/update-test" in response_text
-        assert "- updated, modified" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
+        read = await client.call_tool(
+            "bm_read",
+            {"identifier": "Update Test", "project": test_project.name, "output_format": "json"},
+        )
+        assert _json_content(read)["frontmatter"]["tags"] == ["updated", "modified"]
 
 
 @pytest.mark.asyncio
@@ -132,7 +138,7 @@ async def test_write_note_overwrite_preserves_path_when_permalink_changes(
     """A custom permalink replacement still updates the exact requested file."""
     async with Client(mcp_server) as client:
         created = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Overwrite Permalink Change",
@@ -157,7 +163,7 @@ async def test_write_note_overwrite_preserves_path_when_permalink_changes(
         """).strip()
 
         updated = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Overwrite Permalink Change",
@@ -173,11 +179,12 @@ async def test_write_note_overwrite_preserves_path_when_permalink_changes(
         assert updated_payload["file_path"] == "overwrite-conflicts/Overwrite Permalink Change.md"
 
         read_updated = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "project": test_project.name,
                 "identifier": "overwrite-conflicts/custom-overwrite-permalink",
                 "output_format": "json",
+                "include_frontmatter": False,
             },
         )
         read_payload = _json_content(read_updated)
@@ -193,7 +200,7 @@ async def test_write_note_tag_array(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # This reproduces the exact bug from Issue #38
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Array Tags Test",
@@ -207,13 +214,25 @@ async def test_write_note_tag_array(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: test/Array Tags Test.md" in response_text
+        assert "Created " in response_text
+
+        assert "test/Array Tags Test.md" in response_text
         assert f"permalink: {test_project.name}/test/array-tags-test" in response_text
-        assert "## Tags" in response_text
-        assert "python" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
+        assert "checksum:" in response_text
+        read = await client.call_tool(
+            "bm_read",
+            {
+                "identifier": "Array Tags Test",
+                "project": test_project.name,
+                "output_format": "json",
+            },
+        )
+        assert _json_content(read)["frontmatter"]["tags"] == [
+            "python",
+            "testing",
+            "integration",
+            "mcp",
+        ]
 
 
 @pytest.mark.asyncio
@@ -234,7 +253,7 @@ async def test_write_note_custom_permalink(mcp_server, app, test_project):
         """).strip()
 
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Custom Permalink Note",
@@ -247,11 +266,10 @@ async def test_write_note_custom_permalink(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: notes/Custom Permalink Note.md" in response_text
+        assert "Created " in response_text
+
+        assert "notes/Custom Permalink Note.md" in response_text
         assert "permalink: custom/my-special-permalink" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -262,7 +280,7 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
         unicode_content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦\n\n- [note] Testing unicode handling 测试"
 
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Unicode Test 🌟",
@@ -276,13 +294,12 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: test/Unicode Test 🌟.md" in response_text
+        assert "Created " in response_text
+
+        assert "test/Unicode Test 🌟.md" in response_text
         # Permalink should be sanitized
         assert f"permalink: {test_project.name}/test/unicode-test" in response_text
-        assert "## Tags" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
+        assert "checksum:" in response_text
 
 
 @pytest.mark.asyncio
@@ -313,7 +330,7 @@ async def test_write_note_complex_content_with_observations_relations(
         """).strip()
 
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Complex Knowledge Note",
@@ -327,23 +344,27 @@ async def test_write_note_complex_content_with_observations_relations(
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: knowledge/Complex Knowledge Note.md" in response_text
+        assert "Created " in response_text
+
+        assert "knowledge/Complex Knowledge Note.md" in response_text
         assert f"permalink: {test_project.name}/knowledge/complex-knowledge-note" in response_text
 
         # Should show observation and relation counts
-        assert "## Observations" in response_text
-        assert "tech: 1" in response_text
-        assert "design: 1" in response_text
-        assert "note: 1" in response_text
+        assert "observations: 3" in response_text
 
-        assert "## Relations" in response_text
+        assert "relations: 3" in response_text
         # Should show outgoing relations
 
-        assert "## Tags" in response_text
-        assert "complex, knowledge, relations" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
+        assert "checksum:" in response_text
+        read = await client.call_tool(
+            "bm_read",
+            {
+                "identifier": "Complex Knowledge Note",
+                "project": test_project.name,
+                "output_format": "json",
+            },
+        )
+        assert _json_content(read)["frontmatter"]["tags"] == ["complex", "knowledge", "relations"]
 
 
 @pytest.mark.asyncio
@@ -366,7 +387,7 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
         """).strip()
 
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Frontmatter Note",
@@ -380,11 +401,10 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
         assert result.content[0].type == "text"
         response_text = result.content[0].text
 
-        assert "# Created note" in response_text
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: test/Frontmatter Note.md" in response_text
+        assert "Created " in response_text
+
+        assert "test/Frontmatter Note.md" in response_text
         assert f"permalink: {test_project.name}/test/frontmatter-note" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -396,7 +416,7 @@ async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, a
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "My Note: With/Invalid|Chars?",
@@ -410,12 +430,11 @@ async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, a
         response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # File path and permalink should be kebab-case and sanitized
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
+
+        assert "my-folder/my-note-with-invalid-chars.md" in response_text
         assert (
             f"permalink: {test_project.name}/my-folder/my-note-with-invalid-chars" in response_text
         )
-        assert f"[Project: '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -427,7 +446,7 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": 'Crazy<>:"|?*Note/Name',
@@ -440,10 +459,8 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
         assert len(result.content) == 1
         response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        assert f"project: {test_project.name}" in response_text
-        assert "file_path: my-folder/crazy-note-name.md" in response_text
+        assert "my-folder/crazy-note-name.md" in response_text
         assert f"permalink: {test_project.name}/my-folder/crazy-note-name" in response_text
-        assert f"[Project: '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -460,7 +477,7 @@ async def test_write_note_rejects_equivalent_legacy_markdown_filename(
 
     async with Client(mcp_server) as client:
         created = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Site Roadmap",
@@ -468,14 +485,14 @@ async def test_write_note_rejects_equivalent_legacy_markdown_filename(
                 "content": "# Site Roadmap\n\nLegacy body.",
             },
         )
-        assert "# Created note" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "file_path: filename-conflicts/site-roadmap.md" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "Created " in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "filename-conflicts/site-roadmap.md" in created.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         app_config.kebab_filenames = False
         ConfigManager().save_config(app_config)
 
         rejected = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Site Roadmap",
@@ -486,8 +503,8 @@ async def test_write_note_rejects_equivalent_legacy_markdown_filename(
         )
         assert rejected.is_error
         rejected_text = rejected.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "# Error: Note already exists" in rejected_text
-        assert "edit_note" in rejected_text
+        assert "ALREADY_EXISTS" in rejected_text
+        assert "bm_edit" in rejected_text
 
     note_paths = sorted(
         path.relative_to(test_project.path).as_posix()
@@ -525,8 +542,20 @@ async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, 
 
     async with Client(mcp_server) as client:
         for folder, title, expected_path, expected_permalink in test_cases:
+            if "//" in folder:
+                with pytest.raises(ToolError, match="INVALID_ARGUMENTS"):
+                    await client.call_tool(
+                        "bm_write",
+                        {
+                            "project": test_project.name,
+                            "title": title,
+                            "directory": folder,
+                            "content": "Do not normalize invalid folders silently.",
+                        },
+                    )
+                continue
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": title,
@@ -540,10 +569,8 @@ async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, 
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
             print(response_text)
 
-            assert f"project: {test_project.name}" in response_text
-            assert f"file_path: {expected_path}" in response_text
+            assert f"{expected_path}" in response_text
             assert f"permalink: {test_project.name}/{expected_permalink}" in response_text
-            assert f"[Project: '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -584,7 +611,7 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
     # Also test that write_note works with regular project
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Validation Test",
@@ -597,7 +624,7 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
         response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Should successfully create without path validation errors
-        assert "# Created note" in response_text
+        assert "Created " in response_text
         assert "not allowed" not in response_text
 
 
@@ -608,7 +635,7 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
     async with Client(mcp_server) as client:
         # Create initial note
         result1 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "MCP Guard Test",
@@ -616,11 +643,11 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
                 "content": "# MCP Guard Test\n\nOriginal content via MCP.",
             },
         )
-        assert "# Created note" in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "Created " in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Second write without overwrite should be blocked
         result2 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "MCP Guard Test",
@@ -631,12 +658,12 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
         )
         assert result2.is_error
         response_text = result2.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "# Error: Note already exists" in response_text
-        assert "edit_note" in response_text
+        assert "ALREADY_EXISTS" in response_text
+        assert "bm_edit" in response_text
 
         # Overwrite with explicit flag should succeed
         result3 = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "MCP Guard Test",
@@ -646,7 +673,7 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
             },
         )
         response_text3 = result3.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "# Updated note" in response_text3
+        assert "Updated " in response_text3
 
 
 @pytest.mark.asyncio
@@ -659,13 +686,13 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
     async with Client(mcp_server) as client:
         created = _json_content(
             await client.call_tool(
-                "write_note", {**note, "content": "Revision A.", "output_format": "json"}
+                "bm_write", {**note, "content": "Revision A.", "output_format": "json"}
             )
         )
         revision_a = created["checksum"]
         updated = _json_content(
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     **note,
                     "content": "Revision B.",
@@ -680,7 +707,7 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
         assert revision_b != revision_a
 
         stale_json_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 **note,
                 "content": "Stale replacement.",
@@ -692,18 +719,12 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
         )
         assert stale_json_result.is_error
         stale_json = _json_content(stale_json_result)
-        assert stale_json["action"] == "conflict"
-        assert stale_json["error"] == "NOTE_REVISION_CONFLICT"
-        # Same shape as edit_note's conflict (#1719): nothing written, the current
-        # revision under currentChecksum, and the note at the path named.
-        assert stale_json["checksum"] is None
-        assert stale_json["currentChecksum"] == revision_b
-        assert stale_json["title"] == updated["title"]
-        assert stale_json["permalink"] == updated["permalink"]
-        assert stale_json["file_path"] == updated["file_path"]
+        assert stale_json["error"] == "REVISION_CONFLICT"
+        assert updated["file_path"] in stale_json["message"]
+        assert "bm_read" in stale_json["try_instead"]
 
         stale_text = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 **note,
                 "content": "Stale replacement.",
@@ -714,11 +735,16 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
         )
         assert stale_text.is_error
         text = stale_text.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "# Error: Note revision conflict" in text
-        assert f'expected_checksum="{revision_b}"' in text
+        assert "REVISION_CONFLICT" in text
+        assert "bm_read" in text
 
         read = await client.call_tool(
-            "read_note", {"project": test_project.name, "identifier": "test/Conditional"}
+            "bm_read",
+            {
+                "project": test_project.name,
+                "identifier": "test/Conditional",
+                "include_frontmatter": False,
+            },
         )
         content = read.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "Revision B." in content
@@ -728,14 +754,15 @@ async def test_write_note_expected_checksum_replaces_only_the_revision_read(
 @pytest.mark.asyncio
 async def test_write_note_expected_checksum_requires_overwrite(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
-        with pytest.raises(ToolError, match="expected_checksum requires overwrite=True"):
+        with pytest.raises(ToolError, match="needs overwrite=true"):
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Create Only",
                     "directory": "test",
                     "content": "Body.",
                     "expected_checksum": "a" * 64,
+                    "overwrite": False,
                 },
             )

@@ -11,6 +11,11 @@ to checkpoint, wrap up, hand off, remember the state of the work, or before a
 long context transition. This is the deliberate, high-signal counterpart to the
 automatic PreCompact checkpoint.
 
+When no project is pinned, discover projects with `bm_project(command="list")`
+and pass the selected project's external ID as `project` on note/search calls.
+With several addressable projects, these calls require an explicit scope even
+when a default is configured.
+
 ## Gather
 
 Resolve config: read the `basicMemory` block with the same precedence the hooks
@@ -20,7 +25,7 @@ expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json` only
 when the variable is absent. Then the project's `.claude/settings.json` and
 `.claude/settings.local.json` override it per key:
 
-- `primaryProject`, default omitted (Basic Memory's default project)
+- `primaryProject`, optional; discover and explicitly select the listed default or sole project when absent
 - `captureFolder`, default `sessions`
 - `placementConventions`, optional
 - `sessionProfile`, default `general`
@@ -56,8 +61,8 @@ Do not claim a test passed unless you ran it or the user supplied the result.
 A checkpoint is a durable handoff, not a status dump or commit-by-commit
 changelog. Tell the story for a human or agent returning later.
 
-Write the note with `write_note`, routed to `primaryProject` (pass it as
-`project`, or as `project_id` if it's an `external_id` UUID). For the `general`
+Write the note with `bm_write`, routed to `primaryProject` (pass it as
+`project`, which accepts a name, workspace-qualified name, or `external_id` UUID). For the `general`
 profile:
 
 - `title`: `Claude checkpoint - <short topic>`

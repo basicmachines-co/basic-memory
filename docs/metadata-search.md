@@ -2,9 +2,10 @@
 
 Basic Memory automatically indexes custom frontmatter fields so you can query them with structured filters. Any YAML key in a note's frontmatter beyond the standard set (`title`, `type`, `tags`, `permalink`, `schema`) is stored as `entity_metadata` and becomes searchable.
 
-## Querying with `search_notes`
+## Querying with `bm_search`
 
-`search_notes` is the single search tool for all queries — text, metadata filters, or both. The `query` parameter is optional, so you can use metadata filters alone without passing an empty string.
+`bm_search` ranks text and semantic queries, optionally narrowed by metadata. Use
+`bm_find` for folder-scoped frontmatter inventories and selected fields. The `query` parameter is optional, so you can use metadata filters alone without passing an empty string.
 
 ## Filter Syntax
 
@@ -99,61 +100,71 @@ This queries the `version` key inside a `schema` object in frontmatter.
 
 **Key rules:**
 - Filter keys must match `[A-Za-z0-9_-]+` (dots separate nesting levels).
-- Each operator dict must contain exactly one operator.
+- Several operators on one field combine with AND logic.
 - `$in` and array-contains require non-empty lists.
 - `$between` requires exactly two values `[min, max]`.
 - `null` is an is-null match and only valid as a plain equality value.
 - Comparison and `$between` bounds must be finite numbers. A magnitude no float can hold — a 400-digit integer, which JSON keeps as an ordinary `int` — is refused as a filter error rather than compared against an infinite bound.
 
-## MCP Tool — `search_notes`
+## MCP Tool — `bm_search`
 
-`search_notes` is the single search tool for text queries, metadata filters, or both. The `query` parameter is optional.
+`bm_search` is the single search tool for text queries, metadata filters, or both. The `query` parameter is optional.
 
 **Relevant parameters:**
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `query` | string (optional) | Text search query. Omit for filter-only searches. |
-| `metadata_filters` | dict | Structured filter dict (see syntax above) |
-| `tags` | list[str] | Convenience shorthand — merged into `metadata_filters["tags"]` |
-| `status` | string | Convenience shorthand — merged into `metadata_filters["status"]` |
+| `filters` | dict | Structured filter dict (see syntax above) |
+| `project` | string | Project name, workspace-qualified name, or external UUID |
 
-**Merging rules:** `tags` and `status` are convenience shortcuts. They are merged into `metadata_filters` using `setdefault` — if the same key already exists in `metadata_filters`, the explicit filter wins.
+Put `tags` and `status` inside `filters`; they are not separate MCP parameters.
 
 **Examples:**
 
 ```python
 # Text search filtered by metadata
-await search_notes("authentication", metadata_filters={"status": "draft"})
+await bm_search("authentication", filters={"status": "draft"})
 
 # Filter-only search (no query needed)
-await search_notes(metadata_filters={"type": "spec"})
+await bm_search(filters={"type": "spec"})
 
-# Combine text, tags shortcut, and metadata
-await search_notes(
+# Combine text, tags, and metadata
+await bm_search(
     "oauth flow",
-    tags=["security"],
-    metadata_filters={"confidence": {"$gt": 0.7}},
+    filters={"tags": ["security"], "confidence": {"$gt": 0.7}},
 )
 
-# Convenience shortcuts
-await search_notes("planning", status="active")
-await search_notes(tags=["tier1", "alpha"])
+# Metadata filters
+await bm_search("planning", filters={"status": "active"})
+await bm_search(filters={"tags": ["tier1", "alpha"]})
 ```
 
 ## Tag Search Shortcuts
 
-The `tag:` prefix in a search query is a shorthand for tag-based metadata filtering. When `search_notes` receives a query starting with `tag:`, it converts the query into a `tags` filter and clears the text query.
+The `tag:` prefix in a search query is a shorthand for tag-based metadata filtering. When `bm_search` receives a query starting with `tag:`, it converts the query into a `tags` filter and clears the text query.
 
 ```python
 # These are equivalent:
-await search_notes("tag:tier1")
-await search_notes("", tags=["tier1"])
+await bm_search("tag:tier1")
+await bm_search(filters={"tags": ["tier1"]})
 
 # Multiple tags (comma or space separated) — all must be present:
-await search_notes("tag:tier1,alpha")
-await search_notes("tag:tier1 alpha")
+await bm_search("tag:tier1,alpha")
+await bm_search("tag:tier1 alpha")
 ```
+
+For a scoped inventory with selected metadata fields:
+
+```python
+await bm_find(path="specs", filters={"status": "draft"},
+              fields=["title", "priority"], project="main")
+```
+
+`bm_find` cannot combine `filters` with `name` or a non-default `depth`.
+Both tools paginate; follow `has_more` and use at most 100 results per page.
+Examples without `project` use the configured default; pass an explicit route
+when working across projects.
 
 ## CLI Access
 
@@ -248,27 +259,27 @@ confidence: 0.6
 
 ```python
 # Find all in-progress specs
-await search_notes(metadata_filters={"status": "in-progress", "type": "spec"})
+await bm_search(filters={"status": "in-progress", "type": "spec"})
 # → Auth Design
 
 # Find high-confidence specs
-await search_notes(metadata_filters={"confidence": {"$gt": 0.7}})
+await bm_search(filters={"confidence": {"$gt": 0.7}})
 # → Auth Design (confidence: 0.85)
 
 # Find specs with priority high or medium
-await search_notes(metadata_filters={"priority": {"$in": ["high", "medium"]}})
+await bm_search(filters={"priority": {"$in": ["high", "medium"]}})
 # → Auth Design, Search Redesign
 
 # Find specs in a confidence range
-await search_notes(metadata_filters={"confidence": {"$between": [0.5, 0.9]}})
+await bm_search(filters={"confidence": {"$between": [0.5, 0.9]}})
 # → Auth Design (0.85), Search Redesign (0.6)
 
 # Find notes tagged with security
-await search_notes("tag:security")
+await bm_search("tag:security")
 # → Auth Design
 
 # Combined: text search + metadata filter
-await search_notes("OAuth", metadata_filters={"status": "in-progress"})
+await bm_search("OAuth", filters={"status": "in-progress"})
 # → Auth Design
 ```
 

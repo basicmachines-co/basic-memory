@@ -46,7 +46,7 @@ the session back to it before the context window compacts.
   capture reflexes.
 - **Seed schemas.** Picoschema definitions for `session`, `decision`, and `task`
   notes, plus `coding_session` for coding setups, so the stuff the plugin writes
-  is structured and findable by `search_notes` metadata filters — recall is
+  is structured and findable by `bm_search` metadata filters — recall is
   precise, not fuzzy.
 
 The full design and rationale live in [DESIGN.md](./DESIGN.md).
@@ -74,7 +74,7 @@ Plugin skills are namespaced under the plugin name:
   - Linux/macOS: `curl -LsSf https://astral.sh/uv/install.sh | sh`
   - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 - [Basic Memory](https://github.com/basicmachines-co/basic-memory) connected as an
-  MCP server. The hooks resolve their own `basic-memory` through uv, so no
+  MCP server exposing the 1.0 `bm_*` tools used by these skills. The hooks resolve their own `basic-memory` through uv, so no
   PATH install is required for them.
 - Claude Code.
 
@@ -216,7 +216,7 @@ ever auto-writing to the shared graph.**
 
 Because project names repeat across workspaces, team refs must be **workspace-qualified**
 (`my-team/notes`) or `external_id` UUIDs — `/basic-memory:bm-setup` fills these in for you
-from `list_workspaces`.
+from `bm_project(command="list")`.
 
 ## Documentation
 

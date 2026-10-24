@@ -8,6 +8,11 @@ argument-hint: <text to remember>
 
 Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words.
 
+When no project is pinned, discover projects with `bm_project(command="list")`
+and pass the selected project's external ID as `project` on note/search calls.
+With several addressable projects, these calls require an explicit scope even
+when a default is configured.
+
 ## Steps
 
 1. **Resolve config.** Read the `basicMemory` block with the same precedence the
@@ -18,8 +23,8 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
    and `.claude/settings.local.json` override it per key. A user-level block alone
    is enough; a project can still pin its own values:
    - `rememberFolder` — folder for quick captures (default: `bm-remember`)
-   - `primaryProject` — project to write to (default: omit the `project` argument so
-     Basic Memory uses its default project)
+   - `primaryProject` — project to write to (when absent, discover projects and explicitly
+     select the listed default or sole project)
 
    Both are optional. Use the defaults if the block or a key is missing. Don't fail
    if there's no settings file.
@@ -34,13 +39,13 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
      that…"), capture the specific thing they asked you to remember from the
      conversation. If it's genuinely unclear what to save, ask one short question.
 
-3. **Write it** with `write_note`:
+3. **Write it** with `bm_write`:
    - `title` = the derived title
    - `directory` = the resolved `rememberFolder`
    - `content` = the text
    - `tags` = `["manual-capture"]`
-   - Route to `primaryProject` if set: pass it as `project`, or as `project_id` if
-     it's an `external_id` UUID (a bare UUID in `project` won't route). Omit both if
+   - Route to `primaryProject` if set: pass it as `project`, including when
+     it is an `external_id` UUID. Omit `project` if
      `primaryProject` isn't set.
    Don't overwrite an existing note unless the user explicitly asks.
 
@@ -54,5 +59,5 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
 - For a decision with rationale and alternatives, use the `bm-decide` skill
   instead (the basic-memory output style also captures these inline). Wrapping up
   a work session is `bm-checkpoint`'s job, not this skill's.
-- Use whichever Basic Memory MCP server is connected — don't assume a specific tool
-  name prefix.
+- Use whichever Basic Memory MCP server is connected — don't assume a specific host-added
+  server prefix; use the advertised `bm_write` tool.

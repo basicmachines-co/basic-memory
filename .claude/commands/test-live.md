@@ -1,6 +1,6 @@
 # /project:test-live - Live Basic Memory Testing Suite
 
-Execute comprehensive real-world testing of Basic Memory using the installed version. 
+Execute comprehensive real-world testing of Basic Memory using the installed version.
 All test results are recorded as notes in a dedicated test project.
 
 ## Usage
@@ -11,77 +11,60 @@ All test results are recorded as notes in a dedicated test project.
 **Parameters:**
 - `phase` (optional): Specific test phase to run (`recent`, `core`, `features`, `edge`, `workflows`, `stress`, or `all`)
 - `recent` - Focus on recent changes and new features (recommended for regular testing)
-- `core` - Essential tools only (Tier 1: write_note, read_note, search_notes, edit_note, list_memory_projects, recent_activity)
+- `core` - Essential tools only (Tier 1: bm_write, bm_read, bm_search, bm_edit, bm_project(command="list"), bm_project(command="recent"))
 - `features` - Core + important workflows (Tier 1 + Tier 2)
 - `all` - Comprehensive testing of all tools and scenarios
 
 ## Implementation
 
-You are an expert QA engineer conducting live testing of Basic Memory. 
+You are an expert QA engineer conducting live testing of Basic Memory.
 When the user runs `/project:test-live`, execute comprehensive test plan:
 
 ## Tool Testing Priority
 
 ### **Tier 1: Critical Core (Always Test)**
-1. **write_note** - Foundation of all knowledge creation
-2. **read_note** - Primary knowledge retrieval mechanism
-3. **search_notes** - Essential for finding information
-4. **edit_note** - Core content modification capability
-5. **list_memory_projects** - Project discovery and session guidance
-6. **recent_activity** - Project discovery mode and activity analysis
+1. **bm_write** - Foundation of all knowledge creation
+2. **bm_read** - Primary knowledge retrieval mechanism
+3. **bm_search** - Essential for finding information
+4. **bm_edit** - Core content modification capability
+5. **bm_project(command="list")** - Project discovery and session guidance
+6. **bm_project(command="recent")** - Project discovery mode and activity analysis
 
 ### **Tier 2: Important Workflows (Usually Test)**
-7. **build_context** - Conversation continuity via memory:// URLs
-8. **create_memory_project** - Essential for project setup
-9. **move_note** - Knowledge organization
-10. **delete_project** - Project lifecycle management
+7. **bm_context** - Conversation continuity via memory:// URLs
+8. **bm_project(command="create")** - Essential for project setup
+9. **bm_move** - Knowledge organization
+10. **bm_project_delete** - Project lifecycle management
 
 ### **Tier 3: Enhanced Functionality (Sometimes Test)**
-11. **view_note** - Claude Desktop artifact display
-12. **read_content** - Raw content access
-13. **delete_note** - Content removal
-14. **list_directory** - File system exploration
-15. **edit_note** (advanced modes) - Complex find/replace operations
-16. **POSIX & schema** - `ls`, `find`, `grep`, `cat`, `tail`, `man`, `list_workspaces`, `schema_validate`/`schema_infer`/`schema_diff`
+11. **bm_read** — bounded section/line/token reads and non-Markdown files
+12. **bm_delete** — content removal
+13. **bm_list / bm_find** — one-level listing, recursive names, frontmatter inventories
+14. **bm_edit** — advanced section commands and metadata updates
+15. **bm_schema** — `command="validate"`, `"infer"`, and `"diff"`
+16. **bm_man** — manual index, page lookup, and text search
 
 ### **Tier 4: Specialized (Rarely Test)**
-17. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
+17. **MCP prompts and resources** — assistant guide, conversation continuity, manual pages
 
-## Stateless Architecture Testing
+## Project Routing Tests
 
-### **Project Discovery Workflow**
-Test project selection:
-
-1. **Initial Discovery**
-   - Call `list_memory_projects()` without knowing which project to use
-   - Verify the footer explains routing: pass a project name (or `[external_id]` as `project_id`); calls without one use the session's active project, then the configured default
-   - Confirm no scripted "ask the user" lines and no CLI-specific references
-
-2. **Activity-Based Discovery**
-   - Call `recent_activity()` without project parameter (discovery mode)
-   - Verify the summary names the most active project: `Suggested project: '<name>' (most active with N items)`
-   - With no activity anywhere, verify it reports "No recent activity found in any project." and adds no scripted question
-
-3. **Session Tracking Validation**
-   - Verify tool responses include `[Session: Using project 'name']`
-
-4. **Single Project Constraint Mode**
-   - Test MCP server with `--project` parameter
-   - Verify all operations constrained to specified project
-   - Test project override behavior in constrained mode
-
-### **Explicit Project Parameters**
-All tools must require explicit project parameters:
-
-1. **Parameter Validation**
-   - Test all Tier 1 tools require `project` parameter
-   - Verify clear error messages for missing project
-   - Test invalid project name handling
-
-2. **No Session State Dependencies**
-   - Confirm no tool relies on "current project" concept
-   - Test rapid project switching within conversation
-   - Verify each call is truly independent
+1. Call `bm_project(command="list")`; inspect project names, external IDs, and
+   workspace grouping. Reuse a returned UUID through `project`.
+2. Call `bm_project(command="recent", project=<test-project>, since="7d")`.
+   Check paging and indexing guidance. Without `project`, it uses the default
+   project; with no default, it aggregates projects. Empty activity is not proof
+   of an empty knowledge base.
+3. Test explicit names, workspace-qualified names, UUIDs, and project-qualified
+   paths. A path prefix and explicit project must agree. Verify ambiguous and
+   conflicting routes fail clearly.
+4. Test a server constrained with `--project`. Verify operations cannot bypass
+   that constraint.
+5. Switch between two disposable projects with the same note title. Confirm reads
+   and writes stay in the requested project and do not depend on an earlier call.
+6. Test omission according to each tool's schema, including default-project use
+   and ambiguous unqualified note refusals. Do not expect every tool to require
+   `project` or to emit a session-tracking footer.
 
 ### Pre-Test Setup
 
@@ -98,7 +81,7 @@ All tools must require explicit project parameters:
 
 3. **Test Project Creation**
 
-Run the bash `date` command to get the current date/time. 
+Run the bash `date` command to get the current date/time.
 
    ```
    Create project: "basic-memory-testing-[timestamp]"
@@ -139,110 +122,111 @@ Based on recent commit analysis, create targeted test scenarios:
    - Test under various load conditions
    - Document performance observations
 
-**Example Recent Changes (Update based on actual git log):**
-- Watch Service Restart (#156): Test project creation → file modification → automatic restart
-- Cross-Project Moves (#161): Test move_note with cross-project detection
-- Docker Environment Support (#174): Test BASIC_MEMORY_HOME behavior
-- MCP Server Logging (#164): Verify log level configurations
+Use the actual recent commits to choose regression cases; do not reuse a fixed
+list of old issue numbers as the current release scope.
 
 ### Phase 1: Core Functionality Validation (Tier 1 Tools)
 
 Test essential MCP tools that form the foundation of Basic Memory:
 
-**1. write_note Tests (Critical):**
+**1. bm_write Tests (Critical):**
 - ✅ Basic note creation with frontmatter
 - ✅ Special characters and Unicode in titles
 - ✅ Various content types (lists, headings, code blocks)
 - ✅ Empty notes and minimal content edge cases
 - ⚠️ Error handling for invalid parameters
 
-**2. read_note Tests (Critical):**
+**2. bm_read Tests (Critical):**
 - ✅ Read by title, permalink, memory:// URLs
 - ✅ Non-existent notes (error handling)
 - ✅ Notes with complex markdown formatting
 - ⚠️ Performance with large notes (>10MB)
 
-**3. search_notes Tests (Critical):**
+**3. bm_search Tests (Critical):**
 - ✅ Simple text queries across content
-- ✅ Tag-based searches with multiple tags
+- ✅ Tag filters via `filters={"tags": [...]}` and `tag:` query shorthand
 - ✅ Boolean operators (AND, OR, NOT)
 - ✅ Empty/no results scenarios
 - ⚠️ Performance with 100+ notes
 
-**4. edit_note Tests (Critical):**
+**4. bm_edit Tests (Critical):**
 - ✅ Append operations preserving frontmatter
 - ✅ Prepend operations
 - ✅ Find/replace with validation
 - ✅ Section replacement under headers
-- ⚠️ Error scenarios (invalid operations)
+- ✅ `command="set_metadata"` preserves other frontmatter fields
+- ✅ Missing-note edits fail instead of creating notes
+- ✅ Stale `expected_checksum` refuses changes
+- ⚠️ Error scenarios (invalid commands)
 
-**5. list_memory_projects Tests (Critical):**
-- ✅ Display all projects with clear session guidance
-- ✅ Project discovery workflow prompts
-- ✅ Removal of CLI-specific references
-- ✅ Empty project list handling
-- ✅ Single project constraint mode display
+**5. bm_project(command="list") Tests (Critical):**
+- Project identities and workspace grouping
+- Empty project list and constrained server behavior
+- UUIDs reusable through `project`
 
-**6. recent_activity Tests (Critical - Discovery Mode):**
-- ✅ Discovery mode without project parameter
-- ✅ Intelligent project suggestions based on activity
-- ✅ Guidance prompts for project selection
-- ✅ Session tracking reminders in responses
-- ⚠️ Performance with multiple projects
+**6. bm_project(command="recent") Tests (Critical):**
+- Explicit project, default project, and no-default aggregation
+- `since`, `items`, and pagination
+- Empty activity and never-indexed guidance
 
 ### Phase 2: Important Workflows (Tier 2 Tools)
 
-**7. build_context Tests (Important):**
+**7. bm_context Tests (Important):**
 - ✅ Different depth levels (1, 2, 3+)
-- ✅ Various timeframes for context
+- ✅ `since` windows (default `7d`), depth 1–5, and context page size at most 50
 - ✅ memory:// URL navigation
 - ⚠️ Performance with complex relation graphs
 
-**8. create_memory_project Tests (Important):**
+**8. bm_project(command="create") Tests (Important):**
 - ✅ Create projects dynamically
 - ✅ Set default during creation
 - ✅ Path validation and creation
 - ⚠️ Invalid paths and names
 - ✅ Integration with existing projects
 
-**9. move_note Tests (Important):**
+**9. bm_move Tests (Important):**
 - ✅ Move within same project
-- ✅ Cross-project moves with detection (#161)
+- ✅ Refuse cross-project moves; preserve source and destination
 - ✅ Automatic folder creation
 - ✅ Database consistency validation
 - ⚠️ Special characters in paths
 
 ### Phase 3: Enhanced Functionality (Tier 3 Tools)
 
-**10. view_note Tests (Enhanced):**
-- ✅ Claude Desktop artifact display
+**10. bm_read (Markdown display) Tests (Enhanced):**
+- ✅ Markdown returned for host display; no artifact-opening guarantee
 - ✅ Title extraction from frontmatter
 - ✅ Unicode and emoji content rendering
 - ⚠️ Error handling for non-existent notes
 
-**11. read_content Tests (Enhanced):**
+**11. bm_read (file content) Tests (Enhanced):**
 - ✅ Raw file content access
 - ✅ Binary file handling
 - ✅ Image file reading
 - ⚠️ Large file performance
 
-**12. delete_note Tests (Enhanced):**
+**12. bm_delete Tests (Enhanced):**
 - ✅ Single note deletion
 - ✅ Database consistency after deletion
 - ⚠️ Non-existent note handling
 - ✅ Confirmation of successful deletion
 
-**13. list_directory Tests (Enhanced):**
+**13. bm_list / bm_find Tests (Enhanced):**
 - ✅ Directory content listing
-- ✅ Depth control and filtering
+- ✅ `bm_list` lists one level; `bm_find` controls recursive depth
 - ✅ File name globbing
 - ⚠️ Empty directory handling
 
-**14. delete_project Tests (Enhanced):**
+**14. bm_project_delete Tests (Enhanced):**
 - ✅ Project removal from config
 - ✅ Database cleanup
 - ⚠️ Default project protection
 - ⚠️ Non-existent project handling
+
+**Schema and manual discovery:**
+- Validate one fixture by identifier and a note type with `bm_schema(command="validate")`.
+- Infer and diff a fixture type using the corresponding `command` values.
+- Read `bm_man(page="bm-edit(3)")`; confirm documented signatures match the server.
 
 ### Phase 4: Edge Case Exploration
 
@@ -272,7 +256,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 
 **Meeting Notes Pipeline:**
 1. Create meeting notes with action items
-2. Extract action items using edit_note
+2. Extract action items using bm_edit
 3. Build relations to project documents
 4. Update progress incrementally
 5. Search and track completion
@@ -378,22 +362,22 @@ permalink: test-session-[phase]-[timestamp]
 ## Test Results
 
 ### ✅ Successful Operations
-- [timestamp] ✅ write_note: Created note with emoji title 📝 #tier1 #functionality
-- [timestamp] ✅ search_notes: Boolean query returned 23 results in 0.4s #tier1 #performance  
-- [timestamp] ✅ edit_note: Append operation preserved frontmatter #tier1 #reliability
+- [timestamp] ✅ bm_write: Created note with emoji title 📝 #tier1 #functionality
+- [timestamp] ✅ bm_search: Boolean query returned 23 results in 0.4s #tier1 #performance
+- [timestamp] ✅ bm_edit: Append operation preserved frontmatter #tier1 #reliability
 
 ### ⚠️ Issues Discovered
-- [timestamp] ⚠️ move_note: Slow with deep folder paths (2.1s) #tier2 #performance
-- [timestamp] 🚨 search_notes: Unicode query returned unexpected results #tier1 #bug #critical
-- [timestamp] ⚠️ build_context: Context lost for memory:// URLs #tier2 #issue
+- [timestamp] ⚠️ bm_move: Slow with deep folder paths (2.1s) #tier2 #performance
+- [timestamp] 🚨 bm_search: Unicode query returned unexpected results #tier1 #bug #critical
+- [timestamp] ⚠️ bm_context: Context lost for memory:// URLs #tier2 #issue
 
 ### 🚀 Enhancements Identified
-- edit_note could benefit from preview mode #ux-improvement
-- search_notes needs fuzzy matching for typos #feature-idea
-- move_note could auto-suggest folder creation #usability
+- bm_edit could benefit from preview mode #ux-improvement
+- bm_search needs fuzzy matching for typos #feature-idea
+- bm_move could auto-suggest folder creation #usability
 
 ### 📊 Performance Metrics
-- Average write_note time: 0.3s
+- Average bm_write time: 0.3s
 - Search with 100+ notes: 0.6s
 - Project parameter overhead: <0.1s
 - Memory usage: [observed levels]
@@ -455,36 +439,36 @@ For each error discovered:
    title: Bug Report - [Short Description]
    tags: [bug, testing, [installed-version], [severity]]
    ---
-   
+
    # Bug Report: [Description]
-   
+
    ## Reproduction Steps
    1. [Exact steps to reproduce]
    2. [Include all parameters used]
    3. [Note any special conditions]
-   
+
    ## Expected Behavior
    [What should have happened]
-   
-   ## Actual Behavior  
+
+   ## Actual Behavior
    [What actually happened]
-   
+
    ## Error Messages
    ```
    [Exact error text]
    ```
-   
+
    ## Environment
    - Version: [version]
    - Project: [name]
    - Timestamp: [when]
-   
+
    ## Severity
    - [ ] Critical (blocks major functionality)
    - [ ] High (impacts user experience)
    - [ ] Medium (workaround available)
    - [ ] Low (minor inconvenience)
-   
+
    ## Relations
    - discovered_during [[Test Session [Phase]]]
    - affects [[Feature Name]]
@@ -532,13 +516,13 @@ For each error discovered:
 ## Testing Success Criteria
 
 ### Core Testing (Tier 1) - Must Pass
-- All 6 critical tools function correctly
+- All critical core cases function correctly
 - No critical bugs in essential workflows
 - Acceptable performance for basic operations
 - Error handling works as expected
 
 ### Feature Testing (Tier 1+2) - Should Pass
-- All 10 core + important tools function
+- All core and important workflow cases function
 - Workflow scenarios complete successfully
 - Performance meets baseline expectations
 - Integration points work correctly
@@ -598,7 +582,7 @@ For each error discovered:
    - Add performance benchmarks and targets
 
 ## Context
-- Uses real installed basic-memory version 
+- Uses real installed basic-memory version
 - Tests complete MCP→API→DB→File stack
 - Creates living documentation in Basic Memory itself
 - Follows integration over isolation philosophy

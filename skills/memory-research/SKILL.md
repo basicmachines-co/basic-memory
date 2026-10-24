@@ -36,8 +36,8 @@ Search for current information across multiple sources. Aim for 3-5 searches to 
 Before proposing a new entity, search Basic Memory:
 
 ```python
-search_notes(query="Acme Corp")
-search_notes(query="acme")
+bm_search(query="Acme Corp")
+bm_search(query="acme")
 ```
 
 Try name variations — full name, abbreviation, acronym, domain name.
@@ -45,7 +45,7 @@ Try name variations — full name, abbreviation, acronym, domain name.
 If the entity already exists:
 - Report what you found in Basic Memory alongside your web research
 - Offer to update the existing note with new information
-- Use `edit_note` to append new observations or update outdated ones
+- Use `bm_edit` to append new observations or update outdated ones
 
 If the entity doesn't exist, proceed to evaluation.
 
@@ -109,7 +109,7 @@ After approval, create a structured note. Adapt the template to the entity type:
 #### Organization
 
 ```python
-write_note(
+bm_write(
   title="Acme Corp",
   directory="organizations",
   note_type="organization",
@@ -142,7 +142,7 @@ write_note(
 #### Person
 
 ```python
-write_note(
+bm_write(
   title="Jane Smith",
   directory="people",
   note_type="person",
@@ -170,7 +170,7 @@ write_note(
 #### Technology
 
 ```python
-write_note(
+bm_write(
   title="Technology Name",
   directory="concepts",
   note_type="concept",
@@ -198,7 +198,7 @@ write_note(
 
 Adapt these templates freely. The key elements are: note_type/tags parameters, an overview, structured details, observations with categories, and relations.
 
-If `write_note` reports similar existing notes, check whether one of them is this
+If `bm_write` reports similar existing notes, check whether one of them is this
 entity before keeping the new note; merge or link instead of duplicating.
 
 ### Step 6: Store Source Context
@@ -207,9 +207,9 @@ If the user provided context with their request, capture it in the entity:
 
 ```python
 # User said: "Acme Corp — saw their demo at the conference last week"
-edit_note(
+bm_edit(
   identifier="Acme Corp",
-  operation="insert_after_section",
+  command="insert_after_section",
   section="Observations",
   content="- [context] Saw their demo at conference, week of 2026-02-17"
 )

@@ -13,7 +13,7 @@ will be written.
 
 Confirm Basic Memory is reachable before changing files:
 
-1. Prefer MCP: call `list_memory_projects`.
+1. Prefer MCP: call `bm_project(command="list")`.
 2. If MCP tools are not available, run `basic-memory --version` or `bm --version`.
 3. If neither works, stop and tell the user to install Basic Memory and connect the
    MCP server. The plugin bundles an `.mcp.json` that starts
@@ -76,7 +76,7 @@ use. Prefer qualified project names or project ids for cloud projects. Never pic
 between cloud and local variants without confirmation.
 
 For a new or empty project, suggest a light convention instead of creating empty
-folders. For an existing project, inspect `list_directory` and a few notes before
+folders. For an existing project, inspect `bm_list(path="/", project="<primaryProject>")` and a few notes before
 summarizing the real convention.
 
 ## Apply
@@ -189,7 +189,7 @@ These schemas cover notes Codex writes directly. Lifecycle envelopes are not
 notes: `bm hook flush` archives that operational trace locally, so there is no
 projected session or tool-ledger schema to seed.
 
-Use `write_note` with `directory="schemas"`, `note_type="schema"`, schema
+Use `bm_write` with `directory="schemas"`, `note_type="schema"`, schema
 frontmatter as metadata, and the markdown body as content. Do not paste the YAML
 frontmatter into content.
 

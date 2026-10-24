@@ -36,7 +36,7 @@ the search response with pagination.
 With `-C N`, return compact literal match windows instead. The full-text index
 selects a page of candidate notes, then their current content is checked for
 case-insensitive literal substrings. Matching line numbers include frontmatter
-and can be passed directly to `read_note(start_line=..., end_line=...)` or
+and can be passed directly to `bm_read(start_line=..., end_line=...)` or
 `bm cat ... --lines N-M`. Overlapping context windows merge to avoid repeated text.
 The full body and search excerpt are omitted in this mode, including JSON output.
 

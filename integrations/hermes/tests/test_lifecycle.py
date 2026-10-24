@@ -37,7 +37,7 @@ class TrackingActor:
         return self.alive
 
     def list_tools(self):
-        return [{"name": n, "description": ""} for n in ("search_notes", "read_note")]
+        return [{"name": n, "description": ""} for n in ("bm_search", "bm_read")]
 
     def shutdown(self, timeout: float = 5.0) -> None:
         self.shutdown_calls.append(timeout)

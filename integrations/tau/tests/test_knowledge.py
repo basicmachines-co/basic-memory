@@ -198,7 +198,7 @@ async def test_recall_repository_identity_and_shared_sources(tmp_path: Path) -> 
     assert "From private" in inserted and "From team/shared" in inserted
     assert "Read-only sources" in inserted
     assert not any(
-        call.args[0] == "recent_activity" for call in lifecycle.connection.call.call_args_list
+        call.args[0] == "bm_project" for call in lifecycle.connection.call.call_args_list
     )
     assert lifecycle.connection.call.call_args.args[1]["note_types"] == ["task", "decision"]
     api.append_entry.assert_not_called()
@@ -246,7 +246,7 @@ async def test_checkpoint_write_contract_and_destination(
         reason="test",
     )
     call = lifecycle.connection.call.call_args
-    assert call.args[0] == "write_note"
+    assert call.args[0] == "bm_write"
     args = call.args[1]
     assert args["project"] == "private"
     assert args["directory"] == ("tau/repo" if coding else "tau/checkpoints")

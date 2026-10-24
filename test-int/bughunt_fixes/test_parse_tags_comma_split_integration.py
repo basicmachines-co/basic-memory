@@ -61,7 +61,7 @@ async def test_mcp_write_note_comma_tags_split_baseline(mcp_server, app, test_pr
     """Baseline: MCP write_note DOES split comma strings (the behavior CLI should match)."""
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "MCP Comma Split",
@@ -71,8 +71,12 @@ async def test_mcp_write_note_comma_tags_split_baseline(mcp_server, app, test_pr
             },
         )
         read = await client.call_tool(
-            "read_note",
-            {"project": test_project.name, "identifier": "MCP Comma Split"},
+            "bm_read",
+            {
+                "project": test_project.name,
+                "identifier": "MCP Comma Split",
+                "include_frontmatter": True,
+            },
         )
         text = read.content[0].text
         text_lines = text.splitlines()

@@ -17,18 +17,18 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create some test files and directories first
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Root Note",
-                "directory": "",  # Root folder
+                "directory": "",
                 "content": "# Root Note\n\nThis is in the root directory.",
                 "tags": "test,root",
             },
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Planning",
@@ -39,7 +39,7 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting Notes",
@@ -51,12 +51,8 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
 
         # List root directory
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/", "depth": 1},
         )
 
         # Should return formatted directory listing
@@ -64,7 +60,7 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
         list_text = list_result.content[0].text
 
         # Should show the structure
-        assert "Contents of '/' (depth 1):" in list_text
+        assert "Files under '/':" in list_text
         assert "📁 meetings" in list_text
         assert "📁 projects" in list_text
         assert "📄 Root Note.md" in list_text
@@ -80,7 +76,7 @@ async def test_list_directory_pagination_text_and_json(mcp_server, app, test_pro
     async with Client(mcp_server) as client:
         for title in ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": title,
@@ -90,13 +86,8 @@ async def test_list_directory_pagination_text_and_json(mcp_server, app, test_pro
             )
 
         text_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/paged",
-                "page": 1,
-                "page_size": 2,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/paged", "page": 1, "page_size": 2},
         )
         text_result_value = text_result.content[0].text
         assert "Page 1 (page size 2, 5 total items)" in text_result_value
@@ -106,10 +97,10 @@ async def test_list_directory_pagination_text_and_json(mcp_server, app, test_pro
         assert "page=2" in text_result_value
 
         json_result = await client.call_tool(
-            "list_directory",
+            "bm_find",
             {
                 "project": test_project.name,
-                "dir_name": "/paged",
+                "path": "/paged",
                 "page": 2,
                 "page_size": 2,
                 "output_format": "json",
@@ -130,7 +121,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create nested structure
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Task List",
@@ -141,7 +132,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Alpha",
@@ -152,7 +143,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Daily Standup",
@@ -164,19 +155,15 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
 
         # List specific folder
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/work",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/work", "depth": 1},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should show work folder contents
-        assert "Contents of '/work' (depth 1):" in list_text
+        assert "Files under '/work':" in list_text
         assert "📁 meetings" in list_text
         assert "📁 projects" in list_text
         assert "📄 Task List.md" in list_text
@@ -190,7 +177,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create deep nested structure
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Deep Note",
@@ -201,7 +188,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "ML Overview",
@@ -212,7 +199,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Research Index",
@@ -224,19 +211,15 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
 
         # List with depth=3 to see nested structure
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/research",
-                "depth": 3,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/research", "depth": 3},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should show nested structure within depth=3
-        assert "Contents of '/research' (depth 3):" in list_text
+        assert "Files under '/research':" in list_text
         assert "📁 ml" in list_text
         assert "📄 Research Index.md" in list_text
         assert "📄 ML Overview.md" in list_text
@@ -250,7 +233,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create files with different patterns
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting 2025-01-15",
@@ -261,7 +244,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting 2025-01-22",
@@ -272,7 +255,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Status",
@@ -284,20 +267,15 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
 
         # List with glob pattern for meeting files
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/meetings",
-                "depth": 1,
-                "file_name_glob": "Meeting*",
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/meetings", "depth": 1, "name": "Meeting*"},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should show only matching files
-        assert "Files in '/meetings' matching 'Meeting*' (depth 1):" in list_text
+        assert "Files under '/meetings' matching 'Meeting*':" in list_text
         assert "📄 Meeting 2025-01-15.md" in list_text
         assert "📄 Meeting 2025-01-22.md" in list_text
         assert "Project Status" not in list_text  # Should be filtered out
@@ -310,19 +288,15 @@ async def test_list_directory_empty_directory(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # List non-existent/empty directory
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/empty",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/empty", "depth": 1},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should indicate no files found
-        assert "No files found in directory '/empty'" in list_text
+        assert "No files under '/empty'" in list_text
 
 
 @pytest.mark.asyncio
@@ -332,7 +306,7 @@ async def test_list_directory_glob_no_matches(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create some files
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Document One",
@@ -344,20 +318,15 @@ async def test_list_directory_glob_no_matches(mcp_server, app, test_project):
 
         # List with glob pattern that won't match
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/docs",
-                "depth": 1,
-                "file_name_glob": "*.py",  # No Python files
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/docs", "depth": 1, "name": "*.py"},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should indicate no matches for the pattern
-        assert "No files found in directory '/docs' matching '*.py'" in list_text
+        assert "No files under '/docs' matching '*.py'" in list_text
 
 
 @pytest.mark.asyncio
@@ -367,7 +336,7 @@ async def test_list_directory_various_file_types(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create files with different characteristics
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Simple Note",
@@ -378,7 +347,7 @@ async def test_list_directory_various_file_types(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Complex Document with Long Title",
@@ -390,12 +359,8 @@ async def test_list_directory_various_file_types(mcp_server, app, test_project):
 
         # List the mixed directory
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/mixed",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/mixed", "depth": 1},
         )
 
         assert len(list_result.content) == 1
@@ -416,7 +381,7 @@ async def test_list_directory_default_parameters(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create some content
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Default Test",
@@ -428,7 +393,7 @@ async def test_list_directory_default_parameters(mcp_server, app, test_project):
 
         # List with minimal parameters (should use defaults)
         list_result = await client.call_tool(
-            "list_directory",
+            "bm_find",
             {"project": test_project.name},  # Add project parameter but use other defaults
         )
 
@@ -436,7 +401,7 @@ async def test_list_directory_default_parameters(mcp_server, app, test_project):
         list_text = list_result.content[0].text
 
         # Should show root directory with depth 1
-        assert "Contents of '/' (depth 1):" in list_text
+        assert "Files under '/':" in list_text
         assert "📁 default-test" in list_text
         assert "Total:" in list_text
 
@@ -448,7 +413,7 @@ async def test_list_directory_deep_recursion(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create very deep structure
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Level 5 Note",
@@ -459,7 +424,7 @@ async def test_list_directory_deep_recursion(mcp_server, app, test_project):
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Level 3 Note",
@@ -471,19 +436,15 @@ async def test_list_directory_deep_recursion(mcp_server, app, test_project):
 
         # List with maximum depth (depth=10)
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/level1",
-                "depth": 10,  # Maximum allowed depth
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/level1", "depth": 10},
         )
 
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text
 
         # Should show deep structure
-        assert "Contents of '/level1' (depth 10):" in list_text
+        assert "Files under '/level1':" in list_text
         assert "📁 level2" in list_text
         assert "📄 Level 3 Note.md" in list_text
         assert "📄 Level 5 Note.md" in list_text
@@ -496,7 +457,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
     async with Client(mcp_server) as client:
         # Create files with different naming patterns
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Alpha Plan",
@@ -507,7 +468,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Project Beta Plan",
@@ -518,7 +479,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Meeting Minutes",
@@ -530,12 +491,8 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
 
         # Test wildcard pattern
         list_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "/patterns",
-                "file_name_glob": "Project*",
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "/patterns", "name": "Project*"},
         )
 
         assert len(list_result.content) == 1
@@ -555,7 +512,7 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
     async with Client(mcp_server) as client:
         # Create test files in a subdirectory
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Artifact One",
@@ -566,7 +523,7 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Artifact Two",
@@ -578,12 +535,8 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
 
         # Test normal path without ./ prefix (should work)
         normal_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "artifacts",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "artifacts", "depth": 1},
         )
 
         assert len(normal_result.content) == 1
@@ -594,12 +547,8 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
 
         # Test with ./ prefix (this was the failing case in the bug report)
         dot_slash_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "./artifacts",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "./artifacts", "depth": 1},
         )
 
         assert len(dot_slash_result.content) == 1
@@ -612,12 +561,8 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
 
         # Test with trailing slash after ./ prefix
         dot_slash_trailing_result = await client.call_tool(
-            "list_directory",
-            {
-                "project": test_project.name,
-                "dir_name": "./artifacts/",
-                "depth": 1,
-            },
+            "bm_find",
+            {"project": test_project.name, "path": "./artifacts/", "depth": 1},
         )
 
         assert len(dot_slash_trailing_result.content) == 1

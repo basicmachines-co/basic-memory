@@ -1,4 +1,4 @@
-"""Agent-task run driver: rich vs POSIX tool surfaces (basic-memory#1401).
+"""Agent-task run driver: 1.0 bm_* tool surface (basic-memory#1401).
 
 Standalone fresh-run driver modeled on ``concurrent_write.run_concurrent_write``:
 isolated benchmark home, pinned clean BM checkout, per-surface warm ``bm mcp``
@@ -155,7 +155,7 @@ class McpAgentSession:
             args=runtime.args,
             env=runtime.env,
             request_timeout_seconds=runtime.tool_timeout_seconds,
-            required_tool="write_note",
+            required_tool="bm_write",
         )
 
     def start(self) -> None:
@@ -770,7 +770,7 @@ def run_agent_tasks(
         surface = SURFACES[surface_name]
         if config.task_manifest:
             # Trigger: manifest-driven (grouped) run.
-            # Why: tasks in a group share one warm project, and a write_note
+            # Why: tasks in a group share one warm project, and a bm_write
             # from an earlier question would pollute later questions' haystack.
             # Outcome: the shared write verbs are dropped from BOTH surfaces
             # symmetrically (fairness preserved; echoed via SurfaceEcho).

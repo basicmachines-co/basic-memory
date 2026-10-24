@@ -10,7 +10,7 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.search import search_notes
+from basic_memory.mcp.tools.ranked_search import bm_search
 
 
 @mcp.prompt(
@@ -39,7 +39,7 @@ async def search_prompt(
     logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
 
     # Use json format to get structured data for result counting and formatting
-    result = await search_notes(query=query, after_date=timeframe, output_format="json")
+    result = await bm_search(query=query, since=timeframe, output_format="json")
 
     # Format the tool output into a prompt with guidance
     if isinstance(result, dict):
@@ -64,10 +64,10 @@ async def search_prompt(
 
         Based on these {result_count} results, you can:
 
-        1. **Read a specific note** - Use `read_note("permalink")` to see full content
-        2. **Build context** - Use `build_context("memory://path")` to see relationships
-        3. **Refine search** - Use `search_notes("refined query")` to narrow results
-        4. **Check recent activity** - Use `recent_activity(timeframe="7d")` for recent changes
+        1. **Read a specific note** - Use `bm_read("permalink")` to see full content
+        2. **Build context** - Use `bm_context("memory://path")` to see relationships
+        3. **Refine search** - Use `bm_search("refined query")` to narrow results
+        4. **Check recent activity** - Use `bm_project(command="recent", since="7d")` for recent changes
     """)
 
 

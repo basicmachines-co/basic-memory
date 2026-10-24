@@ -28,12 +28,12 @@ async def test_real_basic_memory_roundtrip_and_fresh_recall(
     cfg = Settings(command=COMMAND, project="main", timeout_seconds=90)
     tools = discover_sync(cfg)
     by_name = {tool.name: tool for tool in tools}
-    assert {"write_note", "read_note", "search_notes", "recent_activity"} <= by_name.keys()
+    assert {"bm_write", "bm_read", "bm_search", "bm_project"} <= by_name.keys()
     connection = McpConnection(cfg)
     await connection.start()
     try:
         result = await connection.call(
-            "write_note",
+            "bm_write",
             {
                 "title": "Tau continuity checkpoint",
                 "content": "- [decision] Keep the astrolabe blue.",
@@ -44,12 +44,12 @@ async def test_real_basic_memory_roundtrip_and_fresh_recall(
             },
         )
         receipt = confirm_write(result)
-        note = await make_tool(connection, by_name["read_note"]).execute(
+        note = await make_tool(connection, by_name["bm_read"]).execute(
             "read", {"identifier": receipt.file_path, "project": "main"}
         )
         assert "astrolabe blue" in note.text
         search = tool_result(
-            await connection.call("search_notes", {"query": "astrolabe", "project": "main"})
+            await connection.call("bm_search", {"query": "astrolabe", "project": "main"})
         )
         assert "Tau continuity checkpoint" in search.text
     finally:

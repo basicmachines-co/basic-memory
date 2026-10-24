@@ -35,7 +35,7 @@ request. It records what the
 session was doing so the next session can pick up where this one left off.
 
 Sessions are found by the SessionStart hook via structured recall:
-`search_notes(metadata_filters={"type": "session"}, after_date="3d")`.
+`bm_search(filters={"type": "session"}, since="3d")`.
 
 In a **coding setup** (`sessionProfile: "coding"`), checkpoints use the Coding
 Session schema instead — it adds required, queryable Git identity

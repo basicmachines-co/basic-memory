@@ -46,13 +46,13 @@ Do not skip the approval gate between Phase 2 and Phase 3. Building the wrong st
 
 Before asking the user anything:
 
-1. Confirm Basic Memory tools are available (`write_note`, `read_note`, `search_notes`, `list_directory`, and ideally `schema_infer`/`schema_validate`). If they aren't, stop and help the user connect Basic Memory first.
-2. List their projects (`list_memory_projects`). Ask which project to build in, or whether to create a fresh one. **Every subsequent call must pass this project explicitly** — mixed-project writes are one of the most common and painful setup errors.
-3. Check for existing content (`list_directory` at root, depth 2). Three situations:
+1. Confirm Basic Memory tools are available (`bm_write`, `bm_read`, `bm_search`, `bm_list`, and ideally `bm_schema(command="infer")`/`bm_schema(command="validate")`). If they aren't, stop and help the user connect Basic Memory first.
+2. List their projects (`bm_project(command="list")`). Ask which project to build in, or whether to create a fresh one. **Every subsequent call must pass this project explicitly** — mixed-project writes are one of the most common and painful setup errors.
+3. Check for existing content (`bm_find(path="/", depth=2, project="<project>")`). Three situations:
    - **Empty** — greenfield, proceed normally.
    - **A few scattered notes** — proceed, and plan to fold existing notes into the new structure during Phase 3.
    - **Substantial existing content** — this is a restructure, not an onboarding. Still use this skill, but Phase 1 becomes "what's working and what isn't", and Phase 2 must map old → new locations before anything moves.
-4. **Check the live docs when unsure.** Basic Memory's documentation is agent-readable: fetch `https://docs.basicmemory.com/llms.txt` for an index, and any page as clean markdown via its `raw/....md` URL (e.g. `raw/reference/mcp-tools-reference.md`, `raw/concepts/schema-system.md`). Tool names and parameters evolve — when this skill and the docs disagree, the docs are canonical. The server's own manual (the `man` tool, or the `memory://man/<tool>(3)` resource) matches the installed version exactly; prefer it for tool parameters.
+4. **Check the live docs when unsure.** Basic Memory's documentation is agent-readable: fetch `https://docs.basicmemory.com/llms.txt` for an index, and any page as clean markdown via its `raw/....md` URL (e.g. `raw/reference/mcp-tools-reference.md`, `raw/concepts/schema-system.md`). Tool names and parameters evolve — when this skill and the docs disagree, the docs are canonical. The server's own manual (the `bm_man` tool, or the `memory://man/<tool>(3)` resource) matches the installed version exactly; prefer it for tool parameters.
 
 ## Phase 1 — Interview
 
@@ -97,7 +97,7 @@ Build in this order — later items reference earlier ones:
 4. **Index notes** → one per domain that needs one (tables of contents; not every domain does).
 5. **Migrate existing notes** *(restructure path)* → execute the approved old→new mapping from Phase 2 before seeding anything: move each existing note to its new home, set its note type, add the observations its schema requires, and update indexes as notes land. Archive what doesn't fit — never delete. Phase 3 is not done while anything still sits unorganized at the root.
 6. **Seed notes** → 2–3 REAL notes per domain using the examples collected in Phase 1. Never seed with placeholder data — real notes teach the format and are immediately useful; fake ones are noise the user must delete.
-7. **Validate** → run `schema_validate` on the seed notes AND any migrated notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
+7. **Validate** → run `bm_schema(command="validate")` on the seed notes AND any migrated notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
 
 Follow the write discipline in `references/conventions.md` throughout — most importantly: search before creating anything, use exact folder casing, and watch write results for duplicate-suffixed permalinks (`-1`, `-2`).
 
@@ -114,9 +114,9 @@ Identify what mechanism YOUR platform offers and give concrete, platform-specifi
 Teach by doing, with their data — not by lecturing. Run short exercises:
 
 1. **Capture** — "Tell me something that came up today" → create the note together, narrating the schema fields and observations as you fill them.
-2. **Retrieve** — have them ask for something ("what's on my plate?", "what do I know about X?") → demonstrate `search_notes` and reading via `memory://` links; explain title-search vs semantic search for names.
-3. **Update** — change a status, append an observation, add a changelog row — showing `edit_note` for targeted changes vs full overwrites.
-4. **Connect** — add a relation between two of their notes; show how `build_context` walks the graph.
+2. **Retrieve** — have them ask for something ("what's on my plate?", "what do I know about X?") → demonstrate `bm_search` and reading via `memory://` links; explain title-search vs semantic search for names.
+3. **Update** — change a status, append an observation, add a changelog row — showing `bm_edit` for targeted changes vs full overwrites.
+4. **Connect** — add a relation between two of their notes; show how `bm_context` walks the graph.
 
 Then write a **cheat-sheet note** into their KB (`Instructions/` folder): the phrases they can say, what happens for each, and the core rules. This note is theirs — written for a human, not an assistant.
 
@@ -125,7 +125,7 @@ Then write a **cheat-sheet note** into their KB (`Instructions/` folder): the ph
 Close the onboarding by opening doors:
 
 - **Suggest 2–3 specific expansions** drawn from their deferred Phase 1 domains or natural neighbors of what they built (built tasks → suggest meetings; built finances → suggest renewals calendar; built research → suggest a reading log). Frame each as "when you're ready" — never build unrequested.
-- **Maintenance cadence** — suggest a periodic (weekly/monthly) review: `schema_diff` for drift, scan for duplicate or orphaned notes, prune stale statuses. If their platform supports scheduled/recurring tasks, offer to set this up.
+- **Maintenance cadence** — suggest a periodic (weekly/monthly) review: `bm_schema(command="diff")` for drift, scan for duplicate or orphaned notes, prune stale statuses. If their platform supports scheduled/recurring tasks, offer to set this up.
 - **Evolution rule** — when a convention starts to chafe, change the instruction note (with a changelog row), don't silently deviate. The system stays self-describing only if the rules in it stay true.
 
 ## Reference files

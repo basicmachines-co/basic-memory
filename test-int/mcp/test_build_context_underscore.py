@@ -11,7 +11,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
     async with Client(mcp_server) as client:
         # Create parent note
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Parent Entity",
@@ -23,7 +23,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
 
         # Create child notes with different relation formats
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Child with Underscore",
@@ -38,7 +38,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Child with Hyphen",
@@ -56,11 +56,8 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
         # Relation permalinks are: source/relation_type/target
         # So child-with-underscore/part-of/parent-entity
         result_underscore = await client.call_tool(
-            "build_context",
-            {
-                "project": test_project.name,
-                "url": "memory://testing/*/part_of/*parent*",  # Using underscore
-            },
+            "bm_context",
+            {"project": test_project.name, "identifier": "memory://testing/*/part_of/*parent*"},
         )
 
         # Parse response
@@ -74,11 +71,8 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
 
         # Test 2: Search with hyphen format should also return results
         result_hyphen = await client.call_tool(
-            "build_context",
-            {
-                "project": test_project.name,
-                "url": "memory://testing/*/part-of/*parent*",  # Using hyphen
-            },
+            "bm_context",
+            {"project": test_project.name, "identifier": "memory://testing/*/part-of/*parent*"},
         )
 
         response_text_hyphen = result_hyphen.content[0].text  # pyright: ignore
@@ -87,11 +81,8 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
 
         # Test 3: Test with related_to/related-to as well
         result_related = await client.call_tool(
-            "build_context",
-            {
-                "project": test_project.name,
-                "url": "memory://testing/*/related_to/*parent*",  # Using underscore
-            },
+            "bm_context",
+            {"project": test_project.name, "identifier": "memory://testing/*/related_to/*parent*"},
         )
 
         response_text_related = result_related.content[0].text  # pyright: ignore
@@ -102,13 +93,11 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
         # A relation's permalink is source/relation_type/target with the target's
         # own project-qualified permalink, and `part_of` normalizes to `part-of`.
         result_exact = await client.call_tool(
-            "build_context",
+            "bm_context",
             {
                 "project": test_project.name,
-                "url": (
-                    f"memory://testing/child-with-underscore/part_of/"
-                    f"{test_project.name}/testing/parent-entity"
-                ),
+                "identifier": f"memory://testing/child-with-underscore/part_of/"
+                f"{test_project.name}/testing/parent-entity",
             },
         )
 
@@ -120,10 +109,10 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
         # A relation-shaped URL that names no stored address used to fall through to
         # a fuzzy search and return a neighbouring note (#1626). It is now a miss.
         result_miss = await client.call_tool(
-            "build_context",
+            "bm_context",
             {
                 "project": test_project.name,
-                "url": "memory://testing/child-with-underscore/part_of/testing/parent-entity",
+                "identifier": "memory://testing/child-with-underscore/part_of/testing/parent-entity",
             },
         )
         assert '"primary_count":0' in result_miss.content[0].text.replace(" ", "")  # pyright: ignore
@@ -136,7 +125,7 @@ async def test_build_context_complex_underscore_paths(mcp_server, app, test_proj
     async with Client(mcp_server) as client:
         # Create notes with underscores in titles and relations
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "workflow_manager_agent",
@@ -150,7 +139,7 @@ Specification for the workflow manager agent.
         )
 
         await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "task_parser",
@@ -176,7 +165,7 @@ Specification for the workflow manager agent.
 
         for url in test_cases:
             result = await client.call_tool(
-                "build_context", {"project": test_project.name, "url": url}
+                "bm_context", {"project": test_project.name, "identifier": url}
             )
 
             # All variations should work and find the related content

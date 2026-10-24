@@ -29,9 +29,9 @@ for line in sys.stdin:
             }
         case "tools/list":
             names = (
-                ["write_note", "recent_activity"]
+                ["bm_write", "bm_project"]
                 if not params.get("cursor")
-                else ["extra_tool", "read_note", "search_notes", "build_context"]
+                else ["extra_tool", "bm_read", "bm_search", "bm_context"]
             )
             result = {
                 "tools": [
@@ -46,10 +46,10 @@ for line in sys.stdin:
             if arguments.get("sleep"):
                 time.sleep(10)
             data = {"pid": os.getpid(), "name": name, "arguments": arguments}
-            if name == "write_note" and "title" in arguments:
+            if name == "bm_write" and "title" in arguments:
                 path = arguments["directory"] + "/" + arguments["title"] + ".md"
                 if path in notes:
-                    data = {"action": "conflict", "error": "NOTE_ALREADY_EXISTS"}
+                    data = {"error": "ALREADY_EXISTS", "message": "Note already exists"}
                 else:
                     notes[path] = {
                         "file_path": path,
@@ -59,10 +59,12 @@ for line in sys.stdin:
                     if store_path:
                         store_path.write_text(json.dumps(notes))
                     data = {"file_path": path, "action": "created"}
-            elif name == "read_note":
-                data = notes.get(arguments["identifier"], {"error": "not found"})
-            elif name == "search_notes":
-                filters = arguments.get("metadata_filters", {})
+            elif name == "bm_read":
+                data = notes.get(
+                    arguments["identifier"], {"error": "NOT_FOUND", "message": "Note not found"}
+                )
+            elif name == "bm_search":
+                filters = arguments.get("filters", {})
                 data = {
                     "results": [
                         {"file_path": path, "metadata": note["frontmatter"]}
@@ -71,9 +73,9 @@ for line in sys.stdin:
                     ]
                 }
             result = {
-                "content": [{"type": "text", "text": json.dumps(arguments)}],
+                "content": [{"type": "text", "text": json.dumps(data)}],
                 "structuredContent": data,
-                "isError": bool(arguments.get("fail")),
+                "isError": bool(arguments.get("fail") or data.get("error")),
             }
         case _:
             result = {}

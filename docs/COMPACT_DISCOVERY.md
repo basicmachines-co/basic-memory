@@ -17,7 +17,7 @@ observation lists; observations that surface as primary or related results are
 labeled by category and point at their owning file paths. IDs, relation targets,
 and pagination remain available in JSON.
 
-MCP clients use `search_notes(compact=True)` and `build_context(compact=True)`.
+MCP clients use `bm_search(query="deployment", compact=True, project="main")` and `bm_context(identifier="notes/deployment", compact=True, project="main")`.
 Compact search reduces model-visible output, not database search work. Compact
 context also skips loading observations on the server (`include_observations=false`
 on the `/memory` endpoint); the graph traversal itself is unchanged.

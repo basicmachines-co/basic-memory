@@ -50,11 +50,11 @@ find the exact work cursor without parsing prose.
 
 Examples:
 
-`search_notes(note_types=["coding_session"], metadata_filters={"repository": "owner/repo"})`
+`bm_search(note_types=["coding_session"], filters={"repository": "owner/repo"})`
 
-`search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": "123"})`
+`bm_search(note_types=["coding_session"], filters={"pull_request_number": "123"})`
 
-`search_notes(note_types=["coding_session"], metadata_filters={"agent": "codex", "session_id": "<id>"})`
+`bm_search(note_types=["coding_session"], filters={"agent": "codex", "session_id": "<id>"})`
 
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete

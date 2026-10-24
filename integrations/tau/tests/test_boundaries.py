@@ -52,7 +52,7 @@ async def test_recall_controls_truncation_and_failure() -> None:
     async def call(name: str, arguments: dict[str, JsonValue]) -> CallToolResult:
         return CallToolResult(
             content=[TextContent(type="text", text="x" * 1000)],
-            structured_content={"results": []} if name == "search_notes" else None,
+            structured_content={"results": []} if name == "bm_search" else None,
         )
 
     connection.call = AsyncMock(side_effect=call)
@@ -138,7 +138,7 @@ async def test_cancelled_tool_never_calls_server() -> None:
     signal = MagicMock()
     signal.is_cancelled.return_value = True
     with pytest.raises(asyncio.CancelledError):
-        await execute_tool(connection, "write_note", "id", {}, signal=signal)
+        await execute_tool(connection, "bm_write", "id", {}, signal=signal)
     connection.call.assert_not_called()
 
 

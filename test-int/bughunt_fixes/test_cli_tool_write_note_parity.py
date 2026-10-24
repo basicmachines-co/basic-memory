@@ -19,7 +19,7 @@ from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
-from basic_memory.mcp.tools import write_note as mcp_write_note
+from basic_memory.mcp.tools.write import bm_write as mcp_write_note
 
 runner = CliRunner()
 
@@ -115,10 +115,9 @@ def test_mcp_write_note_conflict_emits_error(app, app_config, test_project, conf
 
     second = asyncio.run(_go())
     assert isinstance(second, dict)
-    assert second.get("error") == "NOTE_ALREADY_EXISTS"
-    assert second.get("action") == "conflict"
+    assert second.get("error") == "ALREADY_EXISTS"
     # The refusal names the note that owns the path (#1634).
-    assert second.get("file_path") == "conflict/Conflict Note.md"
+    assert "conflict/Conflict Note.md" in second["message"]
 
 
 def test_cli_write_note_conflict_should_exit_nonzero(app, app_config, test_project, config_manager):

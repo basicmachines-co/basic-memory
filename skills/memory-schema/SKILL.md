@@ -112,12 +112,12 @@ settings:
 
 Look for clusters of notes that share structure but have no schema:
 
-1. **Search by type**: `search_notes(note_types=["meeting"])` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
+1. **Search by type**: `bm_search(note_types=["meeting"])` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
 
-2. **Infer a schema**: Use `schema_infer` to analyze existing notes and generate a suggested schema:
+2. **Infer a schema**: Use `bm_schema(command="infer")` to analyze existing notes and generate a suggested schema:
    ```python
-   schema_infer(note_type="Meeting")
-   schema_infer(note_type="Meeting", threshold=0.5)  # fields in 50%+ of notes
+   bm_schema(command="infer", note_type="Meeting")
+   bm_schema(command="infer", note_type="Meeting", threshold=0.5)  # fields in 50%+ of notes
    ```
    The threshold (0.0–1.0) controls how common a field must be to be included. Default is usually fine; lower it to catch rarer fields.
 
@@ -128,7 +128,7 @@ Look for clusters of notes that share structure but have no schema:
 Write the schema note to `schema/<EntityName>`:
 
 ```python
-write_note(
+bm_write(
   title="Meeting",
   directory="schema",
   note_type="schema",
@@ -168,13 +168,13 @@ Check how well existing notes conform to their schema:
 
 ```python
 # Validate all notes of a type
-schema_validate(note_type="Meeting")
+bm_schema(command="validate", note_type="Meeting")
 
 # Validate a single note
-schema_validate(identifier="meetings/2026-02-10-standup")
+bm_schema(command="validate", identifier="meetings/2026-02-10-standup")
 ```
 
-**Important:** `schema_validate` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
+**Important:** `bm_schema(command="validate")` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
 
 Validation reports **missing required fields** (as observation categories, or relations
 for entity-reference fields) and **invalid enum values**. Undeclared observation categories
@@ -188,10 +188,10 @@ type-checked.
 
 ## Detecting Drift
 
-Over time, notes evolve and schemas lag behind. Use `schema_diff` to find divergence:
+Over time, notes evolve and schemas lag behind. Use `bm_schema(command="diff")` to find divergence:
 
 ```python
-schema_diff(note_type="Meeting")
+bm_schema(command="diff", note_type="Meeting")
 ```
 
 Diff reports:
@@ -203,15 +203,14 @@ Diff reports:
 
 When note structure changes:
 
-1. **Run diff** to see current state: `schema_diff(note_type="Meeting")`
-2. **Update the schema note** via `edit_note` with the `metadata` parameter. Top-level
+1. **Run diff** to see current state: `bm_schema(command="diff", note_type="Meeting")`
+2. **Update the schema note** via `bm_edit` with the `metadata` parameter. Top-level
    keys are replaced whole, so pass the complete updated `schema` map along with the new
    `version`:
    ```python
-   edit_note(
+   bm_edit(
      identifier="schema/Meeting",
-     operation="append",
-     content="",
+     command="set_metadata",
      metadata={
        "version": 2,
        "schema": {
@@ -224,7 +223,7 @@ When note structure changes:
      }
    )
    ```
-3. **Re-validate** to confirm existing notes still pass: `schema_validate(note_type="Meeting")`
+3. **Re-validate** to confirm existing notes still pass: `bm_schema(command="validate", note_type="Meeting")`
 4. **Fix outliers** — update notes that don't conform to the new schema
 
 ### Evolution Guidelines
@@ -238,10 +237,10 @@ When note structure changes:
 ## Workflow Summary
 
 ```
-1. Notice repeated note structure → infer schema (schema_infer)
-2. Review + create schema note   → write to schema/ (write_note)
-3. Validate existing notes       → check conformance (schema_validate)
-4. Fix outliers                  → edit non-conforming notes (edit_note)
-5. Periodically check drift      → detect divergence (schema_diff)
-6. Evolve schema as needed       → update schema note (edit_note)
+1. Notice repeated note structure → infer schema (bm_schema(command="infer"))
+2. Review + create schema note   → write to schema/ (bm_write)
+3. Validate existing notes       → check conformance (bm_schema(command="validate"))
+4. Fix outliers                  → edit non-conforming notes (bm_edit)
+5. Periodically check drift      → detect divergence (bm_schema(command="diff"))
+6. Evolve schema as needed       → update schema note (bm_edit)
 ```

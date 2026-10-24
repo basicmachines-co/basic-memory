@@ -589,7 +589,7 @@ def _format_project_output(
                 f"\nNo recent activity matched the requested type filter in "
                 f"'{project_name}' within {timeframe}."
             )
-            lines.append("Try another type or omit `type` to see recent notes and documents.")
+            lines.append("Try another type or omit `items` to see recent notes and documents.")
             return "\n".join(lines)
 
         lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
@@ -598,7 +598,7 @@ def _format_project_output(
         # (empty) knowledge base and an established one that is merely quiet in this window.
         # Prefer the external id in examples: names collide across cloud workspaces, project_id
         # does not.
-        route = f'project_id="{project_id}"' if project_id else f'project="{project_name}"'
+        route = f'project="{project_id}"' if project_id else f'project="{project_name}"'
         lines.append("")
         lines.append(
             "If the user is just getting started and has no notes yet, briefly explain that "
@@ -607,12 +607,12 @@ def _format_project_output(
             "as their first note — wait for them to agree before writing:"
         )
         lines.append("```")
-        lines.append(f'write_note({route}, title="...", content="...", directory="notes")')
+        lines.append(f'bm_write({route}, title="...", content="...", directory="notes")')
         lines.append("```")
         lines.append(
             f"Otherwise, widen the window with "
-            f'recent_activity({route}, timeframe="30d") or find a topic '
-            f'with search_notes({route}, query="...").'
+            f'bm_project(command="recent", {route}, since="30d") or find a topic '
+            f'with bm_search({route}, query="...").'
         )
         return "\n".join(lines)
 

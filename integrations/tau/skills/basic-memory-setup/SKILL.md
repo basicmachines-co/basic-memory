@@ -12,6 +12,10 @@ find. Tau provides the lifecycle callbacks; it does not define a separate memory
 system. Do not create projects, reorganize notes, change credentials, or install
 packages as incidental setup work.
 
+Tau preserves the server's `bm_*` tool names, including `bm_read`, `bm_write`,
+`bm_search`, and `bm_project`. Other advertised tools receive a `bm_` prefix.
+Use the names and argument schemas advertised by the active Tau runtime.
+
 ## 1. Inspect before changing anything
 
 - Locate the integration directory: the installed `~/.tau/extensions/basic-memory`
@@ -48,7 +52,7 @@ Offer **tools only**, **recall only**, or **full continuity**. Recommend full
 continuity for ordinary coding only after explaining its costs and disclosure.
 
 For recall or continuity, list existing projects using the advertised
-`bm_list_memory_projects` tool when available, or `bm project list`. Check current
+`bm_project(command="list")` tool when available, or `bm project list`. Check current
 CLI help or tool schemas for routing arguments. Identify local/cloud/team routing
 for the exact destination; if routing cannot be established, stop and ask.
 Do not dump Basic Memory's config or authentication material. Ask the user to
@@ -202,7 +206,7 @@ schema notes and read any matching definitions. Offer missing schemas only:
 - `coding-session.md` for coding, or `session.md` for general use.
 - `task.md` and `decision.md` for both profiles.
 
-Use the advertised `bm_write_note` schema with `note_type="schema"`, directory
+Use the advertised `bm_write` schema with `note_type="schema"`, directory
 `schemas`, the schema frontmatter as metadata, and Markdown body as content. Do not
 paste YAML frontmatter into the body. Disable overwrite. Do not replace a user's
 customized schema, even if it differs from the bundle. Explain incompatibilities
@@ -254,14 +258,14 @@ is not an immediate guarantee that the running session has stopped capturing.
    content was inserted. An empty project can connect successfully while having
    nothing to recall; report that distinction.
 4. **Optional write/read:** obtain approval for a uniquely named, non-sensitive
-   setup test note in the exact project. Use the advertised `bm_write_note` schema
-   with overwrite disabled, then `bm_read_note` on the returned path. Compare
+   setup test note in the exact project. Use the advertised `bm_write` schema
+   with overwrite disabled, then `bm_read` on the returned path. Compare
    content. Do not infer a save from a command acknowledgement or a successful
    search alone. An uncertain write must not be automatically retried.
 5. **Optional continuity:** explain that `/bm-checkpoint` summarizes eligible
    public session content, not just a synthetic test marker, and can incur model
    charges. Obtain consent before asking the user to invoke it. Verify the saved
-   path by reading it. Use advertised `bm_schema_validate` on that note when
+   path by reading it. Use advertised `bm_schema(command="validate", identifier="<returned path>")` on that note when
    available. For coding, check repository/root/branch/SHA metadata and a repository
    filter query; then verify recall after an approved reload. Do not compact a
    working session merely as a setup test. A tool unavailable behind a feature

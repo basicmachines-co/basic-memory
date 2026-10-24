@@ -11,6 +11,9 @@ verified: 0.21.6 mcp
 
 # build-context(3)
 
+> Compatibility API: new MCP workflows use [[bm-context(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **build-context** — traverse the knowledge graph outward from a memory:// URL

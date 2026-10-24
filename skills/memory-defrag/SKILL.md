@@ -25,18 +25,18 @@ Walk the whole project, not just recent changes. Stale content is usually in
 notes nobody touched lately.
 
 ```python
-# Every folder and note. Ask for page=2, 3, ... until a page returns fewer
-# than page_size entries.
-list_directory(dir_name="/", depth=10, page_size=200)
+# Every folder and note within depth 10. Page until has_more is false;
+# descend into deeper folders separately if the project has them.
+bm_find(path="/", depth=10, page_size=100, project="<project>")
 
 # Recently busy notes, to look at first
-recent_activity(timeframe="30d", output_format="json", page_size=50)
+bm_project(command="recent", since="30d", output_format="json", page_size=50)
 
 # Notes on one topic, to spot overlap
-search_notes(query="launch plan")
+bm_search(query="launch plan")
 
 # Commitments due on or before today: finished work that lingers, or overdue items
-search_notes(time_kind="due", valid_overlaps="(,2026-10-14]")
+bm_search(time_kind="due", valid_overlaps="(,2026-10-14]")
 ```
 
 Read every note you might change, in full. For each, note its topic, size, last
@@ -105,7 +105,7 @@ status: proposed
 - Make one change at a time. Read each note as JSON before you edit it and pass
   its checksum as `expected_checksum`, so the edit applies only to the revision
   you read; on a checksum conflict, read again and recheck the plan line. Keep
-  relations pointing at the right note after a split or move (`move_note` keeps
+  relations pointing at the right note after a split or move (`bm_move` keeps
   links working; a new note needs links added).
 
 ### 5. Record what was done

@@ -31,16 +31,16 @@ pagination and totals.
 `bm ls` lists files inside one project; the unrelated `bm project ls` lists
 projects.
 
-The MCP `ls` tool lists the session's projects as mount points at `/`. A cloud
+The MCP `bm_list` tool lists the session's projects as mount points at `/`. A cloud
 session that can reach several workspaces also gets their slugs and a note on
 reaching their projects.
 
 Projects in another cloud workspace are not among the session's own
 projects. Address them as `<workspace-slug>/<project>/<path>`, or pass
-`--project-id` (the MCP tool's `project_id`). A bare `<project>/<path>` never
+`--project-id` (pass the UUID as `project` in MCP calls). A bare `<project>/<path>` never
 reaches another workspace; when its first segment names a project there, the
 refusal names the workspace and both spellings that work.
-`list_memory_projects` (`bm project list`) lists every workspace's projects.
+`bm_project(command="list")` (`bm project list`) lists every workspace's projects.
 
 ## OPTIONS
 

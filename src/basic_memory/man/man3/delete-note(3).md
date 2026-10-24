@@ -11,6 +11,9 @@ verified: 0.21.6 mcp+cli
 
 # delete-note(3)
 
+> Compatibility API: new MCP workflows use [[bm-delete(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **delete-note** — delete a note or directory from the knowledge base

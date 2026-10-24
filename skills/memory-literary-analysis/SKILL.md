@@ -28,10 +28,9 @@ Phase 5: Explore       → traverse the graph, write synthesis notes
 
 ## Tools
 
-Writing always goes through `write_note` and `edit_note`. For *reading* — which is most of
-the work in a long analysis — prefer the POSIX read verbs where they are available
-(the MCP `cat`, `find`, `grep`, and `ls` tools are on by default; the `bm` CLI verbs are always
-available):
+Writing goes through `bm_write` and `bm_edit`. MCP reads use `bm_read`, `bm_find`,
+`bm_search`, and `bm_list`. The CLI keeps its POSIX verbs; the table and shell
+examples below are CLI commands (prefix each verb with `bm`):
 
 | Need | Use | Instead of |
 |------|-----|-----------|
@@ -64,15 +63,19 @@ audited:
   `/characters` reaches everything filed under `characters/` (including `characters/major/`),
   and never `characters-cut/`.
 
-If the POSIX verbs are unavailable, every step below still works with `search_notes`,
-`read_note`, and `list_directory` — it just costs more.
+For MCP, use `bm_read(identifier="<note>", section="Observations")` or
+`start_line`/`end_line` for slices, `bm_find(filters={"type": "chapter"},
+fields=["chapter_number", "pov"])` for metadata, and `bm_search(query="doubloon",
+lines=2)` for matching lines. `bm_list` lists one folder level; `bm_find` recurses.
+MCP list/find/search pages cap at 100; follow `has_more` through every page.
+CLI page sizes and flags below are separate from the MCP shapes.
 
 ## Phase 0: Setup
 
 ### Create the Project
 
 ```python
-create_memory_project(project_name="<work-name>", project_path="~/basic-memory/<work-name>")
+bm_project(command="create", name="<work-name>", path="~/basic-memory/<work-name>")
 ```
 
 Use a kebab-case slug of the work's title (e.g., `great-gatsby`, `hamlet`, `beloved`).
@@ -84,7 +87,7 @@ Write 6 schema notes to `schema/`. Each schema defines the entity type's fields,
 #### Character Schema
 
 ```python
-write_note(
+bm_write(
   title="Character",
   directory="schema",
   note_type="schema",
@@ -115,7 +118,7 @@ Add work-specific fields as needed — e.g., `rank` for military fiction, `house
 #### Theme Schema
 
 ```python
-write_note(
+bm_write(
   title="Theme",
   directory="schema",
   note_type="schema",
@@ -142,7 +145,7 @@ Schema for thematic analysis notes.
 #### Chapter Schema
 
 ```python
-write_note(
+bm_write(
   title="Chapter",
   directory="schema",
   note_type="schema",
@@ -171,7 +174,7 @@ Schema for chapter-level analysis notes.
 #### Location Schema
 
 ```python
-write_note(
+bm_write(
   title="Location",
   directory="schema",
   note_type="schema",
@@ -198,7 +201,7 @@ Schema for location and setting notes.
 #### Symbol Schema
 
 ```python
-write_note(
+bm_write(
   title="Symbol",
   directory="schema",
   note_type="schema",
@@ -225,7 +228,7 @@ Schema for symbolic element notes.
 #### LiteraryDevice Schema
 
 ```python
-write_note(
+bm_write(
   title="LiteraryDevice",
   directory="schema",
   note_type="schema",
@@ -276,7 +279,7 @@ Before processing chapters, create stub notes for major entities so `[[wiki-link
 For each major character, create a stub with known metadata:
 
 ```python
-write_note(
+bm_write(
   title="<Character Name>",
   directory="characters/major",
   note_type="Character",
@@ -378,7 +381,7 @@ never work from memory or a summary; textual evidence is the entire point.
 **2. Create the chapter note:**
 
 ```python
-write_note(
+bm_write(
   title="Chapter <N> - <Title>",
   directory="chapters",
   note_type="Chapter",
@@ -414,9 +417,9 @@ write_note(
 **3. Enrich related entities:**
 
 ```python
-edit_note(
+bm_edit(
   identifier="characters/major/<character-slug>",
-  operation="insert_after_section",
+  command="insert_after_section",
   section="Observations",
   content="""- [arc] Ch.<N>: <What happens to this character>
 - [quote] "<Attributed quote>" (Ch.<N>)"""
@@ -452,7 +455,7 @@ As each chapter is processed, append observations to relevant entities:
 
 ### Adding Prose and Interpretation
 
-After the structured observations are in place, consider adding interpretive prose to major entity notes. Insert 2-4 paragraphs of critical essay before the Observations section with `edit_note(operation="insert_before_section", section="Observations", content=...)`. This prose should:
+After the structured observations are in place, consider adding interpretive prose to major entity notes. Insert 2-4 paragraphs of critical essay before the Observations section with `bm_edit(command="insert_before_section", section="Observations", content=...)`. This prose should:
 
 - Argue for a reading of the character, theme, or symbol — not just describe it
 - Connect the entity to the work's larger concerns and to literary tradition
@@ -479,7 +482,7 @@ A field a note never set comes back as a blank cell (`null` under `--json`), so 
 blanks are the work queue. This turns "audit the graph" from a read of every note into one
 call per question.
 
-`write_note` snake-cases `note_type` (`Chapter` is stored as `chapter`), and `--meta`
+`bm_write` snake-cases `note_type` (`Chapter` is stored as `chapter`), and `--meta`
 type predicates are normalized the same way, so either spelling matches. `--page-size 200`
 is not decoration: without it these return the first 10 rows and the work queue looks ten
 items long.
@@ -497,7 +500,7 @@ Add `parallels` and `contrasts_with` relations between structurally similar chap
 Create synthesis notes in `analysis/`:
 
 ```python
-write_note(
+bm_write(
   title="Narrative Structure",
   directory="analysis",
   note_type="note",
@@ -533,23 +536,23 @@ During chapter processing, new minor characters, locations, and symbols will eme
 
 ```python
 # Validate each entity type
-schema_validate(note_type="Character")
-schema_validate(note_type="Theme")
-schema_validate(note_type="Chapter")
-schema_validate(note_type="Location")
-schema_validate(note_type="Symbol")
-schema_validate(note_type="LiteraryDevice")
+bm_schema(command="validate", note_type="Character")
+bm_schema(command="validate", note_type="Theme")
+bm_schema(command="validate", note_type="Chapter")
+bm_schema(command="validate", note_type="Location")
+bm_schema(command="validate", note_type="Symbol")
+bm_schema(command="validate", note_type="LiteraryDevice")
 ```
 
 ### Drift Detection
 
 ```python
-schema_diff(note_type="Character")
+bm_schema(command="diff", note_type="Character")
 # ... for each type
 ```
 
 Fix issues found — common fixes:
-- Missing required observation categories → add them via `edit_note`
+- Missing required observation categories → add them via `bm_edit`
 - Enum values outside allowed set → correct metadata
 - Fields in notes but not schema → add as optional to schema if legitimate
 
@@ -738,7 +741,7 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.
 - **Add prose for depth.** After structured data is in place, add interpretive essays to major notes. The prose captures what observations cannot: argument, nuance, opinion, and voice.
-- **Validate periodically.** Run `schema_validate` after each batch, not just at the end. Catch drift early.
+- **Validate periodically.** Run `bm_schema(command="validate")` after each batch, not just at the end. Catch drift early.
 - **Quote generously.** Literary analysis lives on textual evidence. Include significant quotes as `[quote]` observations with chapter attribution.
 - **Review and revise.** After completing all chapters, review the full graph from an external perspective. Look for thin notes, missing connections, and gaps in coverage. The first pass is never the last.
 - **Analysis comes last.** Synthesis notes in `analysis/` should be written after all chapters are processed, when you have the full picture.

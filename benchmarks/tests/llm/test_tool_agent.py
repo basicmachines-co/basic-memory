@@ -24,7 +24,7 @@ from basic_memory_benchmarks.llm.tool_agent import (
 )
 
 SEARCH_TOOL = ToolDef(
-    name="search_notes",
+    name="bm_search",
     description="Search notes",
     input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
 )
@@ -597,7 +597,7 @@ class TestOpenAICompatToolAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "search_notes",
+                    "name": "bm_search",
                     "description": "Search notes",
                     "parameters": SEARCH_TOOL.input_schema,
                 },
@@ -628,17 +628,17 @@ class TestOpenAICompatToolAgent:
             AssistantTurn(
                 text="",
                 tool_calls=(
-                    ToolCall(call_id="c1", name="search_notes", arguments={"query": "redis"}),
+                    ToolCall(call_id="c1", name="bm_search", arguments={"query": "redis"}),
                 ),
             ),
-            ToolReturn(call_id="c1", name="search_notes", text="2 results", is_error=False),
+            ToolReturn(call_id="c1", name="bm_search", text="2 results", is_error=False),
         ]
         self._agent().propose(transcript, [SEARCH_TOOL])
 
         messages = captured["body"]["messages"]
         assert messages[0] == {"role": "user", "content": "find redis"}
         assert messages[1]["role"] == "assistant"
-        assert messages[1]["tool_calls"][0]["function"]["name"] == "search_notes"
+        assert messages[1]["tool_calls"][0]["function"]["name"] == "bm_search"
         assert json.loads(messages[1]["tool_calls"][0]["function"]["arguments"]) == {
             "query": "redis"
         }
@@ -654,7 +654,7 @@ class TestOpenAICompatToolAgent:
                             {
                                 "id": "call-9",
                                 "function": {
-                                    "name": "search_notes",
+                                    "name": "bm_search",
                                     "arguments": '{"query": "redis"}',
                                 },
                             }
@@ -669,7 +669,7 @@ class TestOpenAICompatToolAgent:
 
         assert turn.text == ""
         assert turn.tool_calls == (
-            ToolCall(call_id="call-9", name="search_notes", arguments={"query": "redis"}),
+            ToolCall(call_id="call-9", name="bm_search", arguments={"query": "redis"}),
         )
 
     def test_malformed_tool_arguments_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -678,7 +678,7 @@ class TestOpenAICompatToolAgent:
                 {
                     "message": {
                         "tool_calls": [
-                            {"id": "c", "function": {"name": "search_notes", "arguments": "{oops"}}
+                            {"id": "c", "function": {"name": "bm_search", "arguments": "{oops"}}
                         ]
                     }
                 }
@@ -728,7 +728,7 @@ class TestScriptedToolAgent:
                         {
                             "tool_calls": [
                                 {
-                                    "name": "search_notes",
+                                    "name": "bm_search",
                                     "arguments": {"query": "x", "project": "{project}"},
                                 }
                             ]
@@ -742,12 +742,12 @@ class TestScriptedToolAgent:
     def test_substring_keying_selects_turn_by_transcript_position(self) -> None:
         agent = self._agent()
         first = agent.propose([UserMessage(text="please find the orphan notes")], [])
-        assert first.tool_calls[0].name == "search_notes"
+        assert first.tool_calls[0].name == "bm_search"
 
         transcript = [
             UserMessage(text="please find the orphan notes"),
             AssistantTurn(text="", tool_calls=first.tool_calls),
-            ToolReturn(call_id="c", name="search_notes", text="results", is_error=False),
+            ToolReturn(call_id="c", name="bm_search", text="results", is_error=False),
         ]
         second = agent.propose(transcript, [])
         assert second.text == "final answer"

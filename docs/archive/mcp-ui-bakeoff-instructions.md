@@ -1,5 +1,9 @@
 # MCP UI Bakeoff - Instructions & Test Plan
 
+> Historical record. Preserved for context; commands, tool contracts, and results below
+> describe the original work, not the current release. For current verification, see
+> [AGENTS.md](../../AGENTS.md) and the [manual guide](../manual-pages.md).
+
 Last updated: 2026-02-02
 
 ## Scope

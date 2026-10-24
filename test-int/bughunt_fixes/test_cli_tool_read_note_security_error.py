@@ -11,7 +11,8 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
-from basic_memory.mcp.tools import read_note as mcp_read_note
+from basic_memory.mcp.tools.read import bm_read
+from basic_memory.mcp.refusals import Refusal
 
 runner = CliRunner()
 
@@ -22,14 +23,12 @@ TRAVERSAL_IDENTIFIER = "../../../../etc/passwd"
 async def test_read_note_security_error_mcp_emits_error_field(
     app, app_config, test_project, config_manager
 ):
-    """MCP read_note JSON flags the path traversal with a SECURITY_VALIDATION_ERROR."""
-    result = await mcp_read_note(
-        identifier=TRAVERSAL_IDENTIFIER,
-        project=test_project.name,
-        output_format="json",
-    )
-    assert isinstance(result, dict)
-    assert result.get("error") == "SECURITY_VALIDATION_ERROR"
+    """Exact indexed reads refuse traversal-shaped identifiers without opening files."""
+    with pytest.raises(Refusal) as caught:
+        await bm_read(
+            identifier=TRAVERSAL_IDENTIFIER, project=test_project.name, output_format="json"
+        )
+    assert caught.value.code == "NOT_FOUND"
 
 
 def test_read_note_security_error_cli_exit_code_matches_other_tools(

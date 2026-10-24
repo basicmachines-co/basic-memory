@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import json
+
 import pytest
 from fastmcp import Client
 
@@ -30,13 +32,14 @@ async def test_binary_uuid_line_read_reports_content_error(
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "read_note",
+            "bm_read",
             {
                 "identifier": entity.external_id,
                 "project": test_project.name,
                 "output_format": "json",
                 "start_line": 1,
                 "end_line": 10,
+                "include_frontmatter": False,
             },
             raise_on_error=False,
         )
@@ -44,7 +47,6 @@ async def test_binary_uuid_line_read_reports_content_error(
     assert result.is_error
     block = result.content[0]
     assert block.type == "text"
-    assert "no markdown content to slice" in block.text
-    assert "NOTE_NOT_FOUND" not in block.text
+    assert json.loads(block.text)["error"] == "UNSUPPORTED"
     async with db.scoped_session(session_maker) as session:
         assert await entity_repository.get_by_external_id(session, entity.external_id) is not None

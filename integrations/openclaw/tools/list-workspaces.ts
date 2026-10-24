@@ -4,10 +4,9 @@ import type { BmClient, WorkspaceResult } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 function formatWorkspace(ws: WorkspaceResult, idx: number): string {
-  const subscription = ws.has_active_subscription ? "active" : "none"
   return (
     `${idx + 1}. **${ws.name}**\n` +
-    `   Type: ${ws.workspace_type} | Role: ${ws.role} | Subscription: ${subscription}`
+    `   Type: ${ws.workspace_type ?? "unknown"}`
   )
 }
 
@@ -20,7 +19,7 @@ export function registerWorkspaceListTool(
       name: "list_workspaces",
       label: "List Workspaces",
       description:
-        "List all Basic Memory workspaces (personal and organization) accessible to this user. " +
+        "List workspaces represented by accessible Basic Memory projects. " +
         "Use it to find the workspace to pass to list_memory_projects when the same " +
         "project name may exist in more than one workspace.",
       parameters: Type.Object({}),

@@ -337,16 +337,16 @@ class WriterOutcome:
 
 def _tool_call_for(op: PlannedOp, project_name: str) -> tuple[str, dict[str, Any]]:
     if op.op_type in ("create", "create_hub"):
-        return "write_note", {
+        return "bm_write", {
             "title": op.title,
             "directory": op.directory,
             "content": op.content,
             "project": project_name,
             "output_format": "json",
         }
-    return "edit_note", {
+    return "bm_edit", {
         "identifier": op.identifier,
-        "operation": "append",
+        "command": "append",
         "content": op.content,
         "project": project_name,
         "output_format": "json",
@@ -890,7 +890,7 @@ def run_concurrent_write(config: ConcurrentWriteConfig) -> Path:
             args=mcp_args,
             env=env,
             request_timeout_seconds=config.op_timeout_seconds,
-            required_tool="write_note",
+            required_tool="bm_write",
         )
         for _ in range(config.writers)
     ]

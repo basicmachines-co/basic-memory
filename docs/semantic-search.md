@@ -73,12 +73,7 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=fastembed
 pip install basic-memory
 ```
 
-2. (Optional) Explicitly enable semantic search:
-
-```bash
-```
-
-3. Index your project files and build vector embeddings:
+2. Index your project files and build vector embeddings:
 
 ```bash
 bm reindex
@@ -87,17 +82,17 @@ bm reindex
 Use `bm reindex --embeddings` only after the notes have already been indexed. That flag rebuilds
 derived vectors from database entities; it does not discover new files on disk.
 
-4. Search using semantic modes:
+3. Search using semantic modes:
 
 ```python
 # Pure vector similarity
-search_notes("login process", search_type="vector")
+bm_search("login process", mode="semantic")
 
 # Hybrid: combines FTS precision with vector recall (recommended)
-search_notes("login process", search_type="hybrid")
+bm_search("login process", mode="hybrid")
 
 # Explicit full-text search
-search_notes("login process", search_type="text")
+bm_search("login process", mode="text")
 ```
 
 ## Configuration Reference
@@ -420,32 +415,33 @@ bm reindex --embeddings
 
 ## Search Modes
 
-### `text` (default)
+### `text`
 
 Full-text keyword search using FTS5 (SQLite) or tsvector (Postgres). Supports boolean operators (`AND`, `OR`, `NOT`), phrase matching, and prefix wildcards.
 
 ```python
-search_notes("project AND planning", search_type="text")
+bm_search("project AND planning", mode="text")
 ```
 
-This is the existing default and does not require semantic search to be enabled.
+This is the default when semantic search is unavailable. Otherwise the default is hybrid.
 
-### `vector`
+### `semantic` (vector)
 
 Pure semantic similarity search. Embeds your query and finds the nearest content vectors. Good for conceptual or paraphrase queries where exact keywords may not appear in the content.
 
 ```python
-search_notes("how to speed up the app", search_type="vector")
+bm_search("how to speed up the app", mode="semantic")
 ```
 
-Returns results ranked by cosine similarity. Individual observations and relations surface as first-class results, not collapsed into parent entities.
+Returns results ranked by cosine similarity. To include observations and relations as
+first-class results, pass `items=["note", "observation", "relation"]`; the default is notes.
 
 ### `hybrid`
 
 Combines FTS and vector results using score-based fusion. This is generally the best mode when you want both keyword precision and semantic recall.
 
 ```python
-search_notes("authentication security", search_type="hybrid")
+bm_search("authentication security", mode="hybrid")
 ```
 
 Score-based fusion uses the formula `max(vec, fts) + bonus * min(vec, fts)` to preserve the dominant signal while rewarding results found by both methods.
@@ -455,7 +451,7 @@ Score-based fusion uses the formula `max(vec, fts) + bonus * min(vec, fts)` to p
 | Mode | Best For |
 |---|---|
 | `text` | Exact keyword matching, boolean queries, tag/category searches |
-| `vector` | Conceptual queries, paraphrase matching, exploratory searches |
+| `semantic` | Conceptual queries, paraphrase matching, exploratory searches |
 | `hybrid` | General-purpose search combining precision and recall |
 
 ## Cross-Encoder Reranking
@@ -573,7 +569,7 @@ not change stored embeddings, so it does not require `bm reindex --embeddings`.
 
 ## Similar Notes on Write
 
-When the project's server has semantic search enabled, `write_note` checks the
+When the project's server has semantic search enabled, `bm_write` checks the
 vector index after it creates a note and appends a **Similar existing notes**
 section when the index holds close neighbors:
 
@@ -585,7 +581,7 @@ This note looks similar to notes that already exist. Did you mean to write to on
 
 | If it is... | Then |
 |---|---|
-| The same topic | `read_note("main/reference/reference-bu-product-mapping")`, then `edit_note(..., operation="append", ...)` and `delete_note("main/analysis/bu-mapping-analysis")` |
+| The same topic | `bm_read("main/reference/reference-bu-product-mapping")`, then `bm_edit(..., command="append", ...)` and `bm_delete("main/analysis/bu-mapping-analysis")` |
 | Related but distinct | Add a relation here, e.g. `- relates_to [[Reference BU Product Mapping]]` |
 | Unrelated | Nothing to do |
 ```
@@ -689,7 +685,8 @@ The dominant signal (whichever source scored higher) is preserved, and dual-sour
 
 ### Observation-Level Results
 
-Vector and hybrid modes return individual observations and relations as first-class search results, not just parent entities. This means a search for "water temperature for brewing" can surface the specific observation about 205°F without returning the entire "Coffee Brewing Methods" entity.
+Vector and hybrid modes can return individual observations and relations as first-class
+search results with `items=["note", "observation", "relation"]`, instead of only notes. This means a search for "water temperature for brewing" can surface the specific observation about 205°F without returning the entire "Coffee Brewing Methods" entity.
 
 ### Result Content
 
@@ -697,7 +694,7 @@ Search results include a `content` preview of up to 4,000 characters, with
 `content_length` and `content_truncated` describing the indexed content. Vector
 matches also include `matched_chunk`, containing the existing relevant passages.
 Hybrid results found only by full-text search leave `matched_chunk` empty and use
-the bounded preview. Use `read_note` to retrieve the complete note when needed;
+the bounded preview. Use `bm_read` to retrieve the complete note when needed;
 the preview is the beginning of the content, not a query-centered excerpt.
 
 This response change requires no reindex. Existing cached responses can retain

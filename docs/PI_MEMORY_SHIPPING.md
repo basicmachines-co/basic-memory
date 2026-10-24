@@ -74,7 +74,7 @@ Minimum scenarios:
 
 1. CLI capture to Basic Memory, then fresh Pi session CLI recall.
 2. CLI-written note recalled through `pi-mcp-adapter` MCP mode.
-3. MCP adapter `write_note`, then CLI recall/search finds the MCP-written note.
+3. MCP adapter `bm_write`, then CLI recall/search finds the MCP-written note.
 4. Missing adapter in MCP mode reports a warning and leaves Pi usable.
 5. Missing or broken `bmPath` reports a visible capture/recall failure and does not claim persistence.
 

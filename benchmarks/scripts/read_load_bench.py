@@ -1,6 +1,6 @@
 """Read-path load benchmark for Basic Memory.
 
-Drives direct-permalink `read_note` calls over a warm `bm mcp` stdio session
+Drives direct-permalink `bm_read` calls over a warm `bm mcp` stdio session
 and measures caller-perceived latency, throughput, response bandwidth, and
 content correctness across note sizes and concurrency levels.
 
@@ -91,7 +91,7 @@ def synthetic_read_note(size_bytes: int, index: int) -> tuple[str, str, str]:
     prefix = (
         f"# {title}\n\n"
         f"{_CORPUS_SEARCH_TOKEN} {marker}\n\n"
-        "This note exercises direct content reads through the public MCP read_note tool.\n\n"
+        "This note exercises direct content reads through the public MCP bm_read tool.\n\n"
     )
     if len(prefix) > size_bytes:
         raise ValueError(f"size {size_bytes} is too small for benchmark metadata")
@@ -507,7 +507,7 @@ async def write_target(
     title, marker, content = synthetic_read_note(size_bytes, index)
     directory = f"read-load/{size_label(size_bytes)}"
     result = await session.call_tool(
-        "write_note",
+        "bm_write",
         {
             "project": project,
             "title": title,
@@ -517,7 +517,7 @@ async def write_target(
         },
     )
     if result.is_error:
-        raise RuntimeError(f"write_note failed while seeding {title}")
+        raise RuntimeError(f"bm_write failed while seeding {title}")
     payload = result_payload(result)
     identifier = payload.get("permalink")
     if not isinstance(identifier, str) or not identifier:
@@ -562,11 +562,11 @@ async def seed_corpus(
 
 async def searchable_count(session: ClientSession, project: str) -> int:
     result = await session.call_tool(
-        "search_notes",
+        "bm_search",
         {
             "project": project,
             "query": _CORPUS_SEARCH_TOKEN,
-            "search_type": "text",
+            "mode": "text",
             "page": 1,
             "page_size": 1,
             "output_format": "json",
@@ -586,7 +586,7 @@ async def warm_targets(session: ClientSession, project: str, targets: list[ReadT
     """Validate each direct permalink once and warm database/filesystem caches."""
     for target in targets:
         result = await session.call_tool(
-            "read_note",
+            "bm_read",
             {"project": project, "identifier": target.identifier},
         )
         content = result_text(result)
@@ -621,7 +621,7 @@ async def read_burst(
             started = time.perf_counter()
             try:
                 result = await session.call_tool(
-                    "read_note",
+                    "bm_read",
                     {"project": project, "identifier": target.identifier},
                 )
             # Each request is an observation. Transport/protocol failures count as benchmark

@@ -482,7 +482,7 @@ def run_concurrent_write_command(
 @run_app.command("agent-tasks")
 def run_agent_tasks_command(
     surfaces: str = typer.Option(
-        "rich", "--surfaces", help="Comma-separated tool surfaces: rich,posix (issue #1401)"
+        "bm", "--surfaces", help="Comma-separated tool surfaces: bm (1.0)"
     ),
     model: str = typer.Option(
         ...,

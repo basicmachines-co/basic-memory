@@ -6,7 +6,8 @@ from typing import Any, cast
 import pytest
 
 from basic_memory.mcp.client_info import MCP_CLIENT_INFO_STATE_KEY
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools.write import bm_write
+from basic_memory.mcp.refusals import refusal
 from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 
 
@@ -21,13 +22,13 @@ async def _openai_mcp_context(context_state) -> Any:
 @pytest.mark.asyncio
 async def test_search_successful_results(client, test_project, context_state):
     """Test search with successful results returns proper MCP content array format."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Document 1",
         directory="docs",
         content="# Test Document 1\n\nThis is test content for document 1",
     )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Document 2",
         directory="docs",
@@ -56,15 +57,15 @@ async def test_search_successful_results(client, test_project, context_state):
 
 @pytest.mark.asyncio
 async def test_search_with_error_response(monkeypatch, client, test_project, context_state):
-    """Test search when underlying search_notes returns an error string."""
+    """Test search when underlying bm_search returns an error string."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
     error_message = "# Search Failed - Invalid Syntax\n\nThe search query contains errors..."
 
-    async def fake_search_notes_fn(*args, **kwargs):
-        return error_message
+    async def fake_bm_search_fn(*args, **kwargs):
+        raise refusal("INVALID_ARGUMENTS", error_message)
 
-    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", fake_bm_search_fn)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.search("invalid query", context=context)
@@ -76,20 +77,20 @@ async def test_search_with_error_response(monkeypatch, client, test_project, con
     content = json.loads(result[0]["text"])
     assert content["results"] == []
     assert content["error"] == "Search failed"
-    assert "error_details" in content
+    assert content["error_message"] == error_message
 
 
 @pytest.mark.asyncio
 async def test_search_retryable_outage_returns_explicit_retry_message(
     monkeypatch, client, test_project, context_state
 ):
-    """The search_notes 503 shape remains retryable through the ChatGPT adapter."""
+    """The bm_search 503 shape remains retryable through the ChatGPT adapter."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
-    async def fake_search_notes_fn(*args, **kwargs):
-        return f"{chatgpt_tools._SERVICE_UNAVAILABLE_HEADING}\n\nReranker temporarily unavailable"
+    async def fake_bm_search_fn(*args, **kwargs):
+        raise refusal("UNAVAILABLE", "Reranker temporarily unavailable")
 
-    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", fake_bm_search_fn)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.search("retryable query", context=context)
@@ -103,41 +104,39 @@ async def test_search_retryable_outage_returns_explicit_retry_message(
 
 
 @pytest.mark.asyncio
-async def test_search_uses_dynamic_default_search_type(
-    monkeypatch, client, test_project, context_state
-):
-    """ChatGPT adapter should not hardcode search_type so search_notes can pick defaults."""
+async def test_search_uses_dynamic_default_mode(monkeypatch, client, test_project, context_state):
+    """ChatGPT adapter should not hardcode mode so bm_search can pick defaults."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
     captured_kwargs: dict[str, Any] = {}
 
-    async def fake_search_notes_fn(*args, **kwargs):
+    async def fake_bm_search_fn(*args, **kwargs):
         captured_kwargs.update(kwargs)
         return {"results": []}
 
-    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", fake_bm_search_fn)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.search("default search mode query", context=context)
 
     assert isinstance(result, list)
-    assert "search_type" not in captured_kwargs
+    assert "mode" not in captured_kwargs
 
 
 @pytest.mark.asyncio
-async def test_search_delegates_to_search_notes_without_project_iteration(
+async def test_search_delegates_to_bm_search_without_project_iteration(
     monkeypatch, client, test_project, context_state
 ):
-    """ChatGPT search is only a compatibility wrapper around search_notes."""
+    """ChatGPT search is only a compatibility wrapper around bm_search."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
     captured_kwargs: dict[str, Any] = {}
 
-    async def fake_search_notes_fn(*args, **kwargs):
+    async def fake_bm_search_fn(*args, **kwargs):
         captured_kwargs.update(kwargs)
         return {"results": []}
 
-    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", fake_bm_search_fn)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.search("MCP Test Note", context=context)
@@ -146,6 +145,7 @@ async def test_search_delegates_to_search_notes_without_project_iteration(
     assert content["results"] == []
     assert content["query"] == "MCP Test Note"
     assert captured_kwargs == {
+        "project": test_project.name,
         "query": "MCP Test Note",
         "page": 1,
         "page_size": 10,
@@ -157,7 +157,7 @@ async def test_search_delegates_to_search_notes_without_project_iteration(
 @pytest.mark.asyncio
 async def test_fetch_successful_document(client, test_project, context_state):
     """Test fetch with successful document retrieval."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Document",
         directory="docs",
@@ -207,11 +207,13 @@ async def test_fetch_routes_path_ids_as_memory_urls(
 
     captured: dict[str, str] = {}
 
-    async def fake_read_note(*, identifier: str, context=None):
+    async def fake_bm_read(
+        *, identifier: str, include_frontmatter: bool, project=None, context=None
+    ):
         captured["identifier"] = identifier
         return "# MCP Test Note\n\nFetched from the requested workspace."
 
-    monkeypatch.setattr(chatgpt_tools, "read_note", fake_read_note)
+    monkeypatch.setattr(chatgpt_tools, "bm_read", fake_bm_read)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.fetch("team-paul/main/tests/mcp-test-note", context=context)
@@ -310,7 +312,7 @@ def test_format_document_error_handling():
     assert result["id"] == "missing-doc"
     assert result["title"] == "Missing Doc"
     assert result["text"] == error_content
-    assert result["metadata"]["error"] == "Document not found"
+    assert result["metadata"]["format"] == "markdown"
 
 
 def test_format_document_untitled_fallback_for_empty_identifier():
@@ -331,7 +333,7 @@ async def test_search_internal_exception_returns_error_payload(
     async def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chatgpt_tools, "search_notes", boom)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", boom)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.search("anything", context=context)
@@ -351,7 +353,7 @@ async def test_fetch_internal_exception_returns_error_payload(
     async def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chatgpt_tools, "read_note", boom)
+    monkeypatch.setattr(chatgpt_tools, "bm_read", boom)
 
     context = await _openai_mcp_context(context_state)
     result = await chatgpt_tools.fetch("docs/test", context=context)
@@ -368,7 +370,7 @@ async def test_search_rejects_non_openai_mcp_client(monkeypatch, context_state):
 
     called = False
 
-    async def fake_search_notes_fn(*args, **kwargs):
+    async def fake_bm_search_fn(*args, **kwargs):
         nonlocal called
         called = True
         return {"results": []}
@@ -377,7 +379,7 @@ async def test_search_rejects_non_openai_mcp_client(monkeypatch, context_state):
         MCP_CLIENT_INFO_STATE_KEY,
         {"name": "claude-code", "title": "Claude Code", "version": "1.2.3"},
     )
-    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "bm_search", fake_bm_search_fn)
 
     result = await chatgpt_tools.search("anything", context=cast(Any, context_state))
 
@@ -385,7 +387,7 @@ async def test_search_rejects_non_openai_mcp_client(monkeypatch, context_state):
     assert called is False
     assert content["results"] == []
     assert content["error"] == "Unsupported MCP client"
-    assert "search_notes" in content["error_message"]
+    assert "bm_search" in content["error_message"]
 
 
 @pytest.mark.asyncio
@@ -395,12 +397,12 @@ async def test_fetch_rejects_missing_client_info(monkeypatch, context_state):
 
     called = False
 
-    async def fake_read_note(*args, **kwargs):
+    async def fake_bm_read(*args, **kwargs):
         nonlocal called
         called = True
         return "# Should Not Be Read"
 
-    monkeypatch.setattr(chatgpt_tools, "read_note", fake_read_note)
+    monkeypatch.setattr(chatgpt_tools, "bm_read", fake_bm_read)
 
     result = await chatgpt_tools.fetch("docs/test", context=cast(Any, context_state))
 
@@ -408,4 +410,4 @@ async def test_fetch_rejects_missing_client_info(monkeypatch, context_state):
     assert called is False
     assert content["id"] == "docs/test"
     assert content["metadata"]["error"] == "Unsupported MCP client"
-    assert "read_note" in content["text"]
+    assert "bm_read" in content["text"]

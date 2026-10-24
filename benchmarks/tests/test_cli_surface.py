@@ -311,7 +311,7 @@ def test_run_agent_tasks_dedupes_repeated_surfaces(
             "run",
             "agent-tasks",
             "--surfaces",
-            "rich,rich",
+            "bm,bm",
             "--model",
             f"scripted:{script}",
             "--bm-local-path",
@@ -320,7 +320,7 @@ def test_run_agent_tasks_dedupes_repeated_surfaces(
     )
 
     assert result.exit_code == 0, result.output
-    assert captured["surfaces"] == ["rich"]
+    assert captured["surfaces"] == ["bm"]
 
 
 def test_run_agent_tasks_rejects_malformed_model_header(tmp_path: Path) -> None:

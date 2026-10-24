@@ -16,8 +16,7 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.project_management import list_memory_projects
-from basic_memory.mcp.tools.recent_activity import recent_activity
+from basic_memory.mcp.tools.projects import bm_project
 
 
 type ProjectMetadata = dict[str, object]
@@ -37,7 +36,7 @@ def _project_route_argument(project: ProjectMetadata) -> tuple[str, str] | None:
             return "project", project_name
 
     project_id = _project_string(project, "external_id")
-    return ("project_id", project_id) if project_id else None
+    return ("project", project_id) if project_id else None
 
 
 def _select_project(
@@ -122,8 +121,8 @@ def _selection_guide(
         next_step = dedent(
             """
             No Basic Memory projects are available yet. Ask the user to create or connect a
-            project first. Then call `list_memory_projects()` and continue with
-            `recent_activity(project_id="...", timeframe="30d")` using the selected project's
+            project first. Then call `bm_project(command="list")` and continue with
+            `bm_project(command="recent", project="...", since="30d")` using the selected project's
             returned `external_id`.
 
             Do not read, search, or write notes until a concrete project has been selected.
@@ -144,11 +143,11 @@ def _selection_guide(
             argument_name, argument_value = route_argument
             options.append(f'- `{name}` (`{argument_name}="{argument_value}"`)')
 
-    project_options = "\n".join(options) if options else "- Call `list_memory_projects()`"
+    project_options = "\n".join(options) if options else '- Call `bm_project(command="list")`'
     next_step = dedent(
         """
         Ask the user which project to use. Once they choose, continue with
-        `recent_activity(...)` using the route argument listed for that choice, and keep that
+        `bm_project(command="recent", ...)` using the route argument listed for that choice, and keep that
         same argument in later note calls. Do not read, search, or write notes until one concrete
         project has been selected.
         """
@@ -183,7 +182,7 @@ async def getting_started(
     """
     logger.info("Rendering getting_started prompt")
 
-    project_listing = await list_memory_projects(output_format="json")
+    project_listing = await bm_project(command="list", output_format="json")
     if not isinstance(project_listing, dict):
         raise TypeError("Structured project listing returned text")
 
@@ -212,10 +211,7 @@ async def getting_started(
     # timeframe-limited, so an established base that is simply quiet looks identical to a
     # brand-new one. Let the model judge from the activity output (which already carries its own
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
-    if argument_name == "project":
-        activity = await recent_activity(timeframe="30d", project=argument_value)
-    else:
-        activity = await recent_activity(timeframe="30d", project_id=argument_value)
+    activity = await bm_project(command="recent", since="30d", project=argument_value)
     activity_text = str(activity).strip()
 
     # Every example call keeps the exact route the prompt inspected. Cloud-only rows use their
@@ -240,12 +236,12 @@ async def getting_started(
           save something useful from this conversation as their first note.
           Wait for them to say yes before writing anything:
           ```
-          write_note({project_arg}title="...", content="...", directory="notes")
+          bm_write({project_arg}title="...", content="...", directory="notes")
           ```
         - **If they already have notes**, help them keep the loop going:
-          `read_note({project_arg}identifier="permalink")` to open one,
-          `search_notes({project_arg}query="...")` to find a topic, or
-          `write_note({project_arg}...)` to capture something new (offer first; don't write
+          `bm_read({project_arg}identifier="permalink")` to open one,
+          `bm_search({project_arg}query="...")` to find a topic, or
+          `bm_write({project_arg}...)` to capture something new (offer first; don't write
           unprompted).
         """
     ).strip()

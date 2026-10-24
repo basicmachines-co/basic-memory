@@ -7,17 +7,18 @@ const DEFAULT_RETRY_DELAYS_MS = [500, 1000, 2000]
 
 export class NoteAlreadyExistsError extends Error {
   readonly permalink: string
-  constructor(title: string, permalink: string) {
-    super(`Note already exists: "${title}" (${permalink})`)
+  constructor(title: string, permalink: string, message?: string) {
+    super(message ?? `Note already exists: "${title}" (${permalink})`)
     this.name = "NoteAlreadyExistsError"
     this.permalink = permalink
   }
 }
 
 /**
- * write_note refused a conditional overwrite: the note is no longer the
+ * bm_write refused a conditional overwrite: the note is no longer the
  * revision named by expected_checksum. Nothing was written; currentChecksum is
- * the revision to re-read and retry against (null once no note owns the path).
+ * available revision when supplied by a server. A null value means unknown;
+ * 1.0 puts revision details in the refusal message, not a checksum field.
  */
 export class NoteRevisionConflictError extends Error {
   readonly permalink: string | null
@@ -26,8 +27,11 @@ export class NoteRevisionConflictError extends Error {
     title: string,
     permalink: string | null,
     currentChecksum: string | null,
+    message?: string,
   ) {
-    super(`Note revision conflict: "${title}" changed since it was read`)
+    super(
+      message ?? `Note revision conflict: "${title}" changed since it was read`,
+    )
     this.name = "NoteRevisionConflictError"
     this.permalink = permalink
     this.currentChecksum = currentChecksum
@@ -49,20 +53,15 @@ export class BmToolError extends Error {
 }
 
 const REQUIRED_TOOLS = [
-  "search_notes",
-  "read_note",
-  "write_note",
-  "edit_note",
-  "build_context",
-  "recent_activity",
-  "list_memory_projects",
-  "list_workspaces",
-  "create_memory_project",
-  "delete_note",
-  "move_note",
-  "schema_validate",
-  "schema_infer",
-  "schema_diff",
+  "bm_search",
+  "bm_read",
+  "bm_write",
+  "bm_edit",
+  "bm_context",
+  "bm_project",
+  "bm_delete",
+  "bm_move",
+  "bm_schema",
 ]
 
 export interface SearchResult {
@@ -158,10 +157,7 @@ export interface ProjectListResult {
 export interface WorkspaceResult {
   tenant_id: string
   name: string
-  workspace_type: string
-  role: string
-  organization_id?: string | null
-  has_active_subscription: boolean
+  workspace_type: string | null
 }
 
 export interface SchemaValidationResult {
@@ -250,13 +246,9 @@ function isRecoverableConnectionError(err: unknown): boolean {
 }
 
 function isNoteNotFoundError(err: unknown): boolean {
-  const msg = getErrorMessage(err).toLowerCase()
   return (
-    msg.includes("entity not found") ||
-    msg.includes("note not found") ||
-    msg.includes("resource not found") ||
-    msg.includes("could not find note matching") ||
-    msg.includes("404")
+    err instanceof BmToolError &&
+    parseRefusalPayload(err.toolMessage)?.error === "NOT_FOUND"
   )
 }
 
@@ -265,7 +257,7 @@ function asString(value: unknown): string | null {
 }
 
 // In JSON mode BM reports a refused write as a tool error whose text is the
-// refusal payload itself ({"error": "NOTE_ALREADY_EXISTS", ...}). Any other
+// refusal payload itself ({"error": "ALREADY_EXISTS", ...}). Any other
 // error text (plain-text failures, older servers) is not a refusal payload.
 function parseRefusalPayload(text: string): Record<string, unknown> | null {
   let parsed: unknown
@@ -546,44 +538,44 @@ export class BmClient {
     return project ?? this.project
   }
 
-  // project_id names one exact project, so it is sent alone: pairing it with
-  // a name (or the plugin's default project) would make routing depend on
-  // server-side precedence rather than on what the caller asked for.
-  private routing(
-    project?: string,
-    projectId?: string,
-  ): { project: string } | { project_id: string } {
-    if (projectId !== undefined) return { project_id: projectId }
+  // The 1.0 project parameter accepts either a name or an exact project UUID.
+  private routing(project?: string, projectId?: string): { project: string } {
+    if (projectId !== undefined) return { project: projectId }
     return { project: this.routedProject(project) }
   }
 
   async ensureProject(projectPath: string): Promise<void> {
-    const payload = await this.callTool("create_memory_project", {
-      project_name: this.project,
-      project_path: projectPath,
+    const payload = await this.callTool("bm_project", {
+      command: "create",
+      name: this.project,
+      path: projectPath,
       set_default: true,
       output_format: "json",
     })
 
     if (!isRecord(payload)) {
-      throw new Error("invalid create_memory_project response")
+      throw new Error("invalid bm_project response")
     }
   }
 
   async listWorkspaces(): Promise<WorkspaceResult[]> {
-    const payload = await this.callTool("list_workspaces", {
-      output_format: "json",
-    })
-
-    if (isRecord(payload) && Array.isArray(payload.workspaces)) {
-      return payload.workspaces as WorkspaceResult[]
+    const projects = await this.listProjects()
+    const workspaces = new Map<string, WorkspaceResult>()
+    for (const project of projects) {
+      if (project.workspace_tenant_id && project.workspace_name) {
+        workspaces.set(project.workspace_tenant_id, {
+          tenant_id: project.workspace_tenant_id,
+          name: project.workspace_name,
+          workspace_type: project.workspace_type ?? null,
+        })
+      }
     }
-
-    throw new Error("invalid list_workspaces response")
+    return [...workspaces.values()]
   }
 
   async listProjects(workspace?: string): Promise<ProjectListResult[]> {
-    const payload = await this.callTool("list_memory_projects", {
+    const payload = await this.callTool("bm_project", {
+      command: "list",
       output_format: "json",
     })
 
@@ -597,7 +589,7 @@ export class BmClient {
       return projects
     }
 
-    throw new Error("invalid list_memory_projects response")
+    throw new Error("invalid bm_project response")
   }
 
   async search(
@@ -619,16 +611,20 @@ export class BmClient {
       project: this.routedProject(project),
     }
     if (query) args.query = query
-    if (metadata?.filters) args.metadata_filters = metadata.filters
-    if (metadata?.tags) args.tags = metadata.tags
-    if (metadata?.status) args.status = metadata.status
+    const filters = { ...metadata?.filters }
+    if (metadata?.tags) filters.tags = { $contains: metadata.tags }
+    if (metadata?.status) filters.status = metadata.status
+    if (Object.keys(filters).length) args.filters = filters
     if (metadata?.note_types) args.note_types = metadata.note_types
-    if (metadata?.entity_types) args.entity_types = metadata.entity_types
+    if (metadata?.entity_types)
+      args.items = metadata.entity_types.map((item) =>
+        item === "entity" ? "note" : item,
+      )
 
-    const payload = await this.callTool("search_notes", args)
+    const payload = await this.callTool("bm_search", args)
 
     if (!isRecord(payload) || !Array.isArray(payload.results)) {
-      throw new Error("invalid search_notes response")
+      throw new Error("invalid bm_search response")
     }
 
     return payload.results as SearchResult[]
@@ -646,10 +642,10 @@ export class BmClient {
       ...this.routing(project, options.projectId),
     }
 
-    const payload = await this.callTool("read_note", args)
+    const payload = await this.callTool("bm_read", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid read_note response")
+      throw new Error("invalid bm_read response")
     }
 
     const title = asString(payload.title)
@@ -658,7 +654,7 @@ export class BmClient {
     const filePath = asString(payload.file_path)
 
     if (!title || !permalink || content === null || !filePath) {
-      throw new Error("invalid read_note payload")
+      throw new Error("invalid bm_read payload")
     }
 
     return {
@@ -695,36 +691,30 @@ export class BmClient {
 
     let payload: unknown
     try {
-      payload = await this.callTool("write_note", args)
+      payload = await this.callTool("bm_write", args)
     } catch (err) {
       const refusal =
         err instanceof BmToolError ? parseRefusalPayload(err.toolMessage) : null
-      if (refusal?.error === "NOTE_ALREADY_EXISTS") {
+      if (refusal?.error === "ALREADY_EXISTS") {
         throw new NoteAlreadyExistsError(
           asString(refusal.title) ?? title,
           asString(refusal.permalink) ?? "",
+          asString(refusal.message) ?? undefined,
         )
       }
-      if (refusal?.error === "NOTE_REVISION_CONFLICT") {
+      if (refusal?.error === "REVISION_CONFLICT") {
         throw new NoteRevisionConflictError(
           asString(refusal.title) ?? title,
           asString(refusal.permalink),
           asString(refusal.currentChecksum),
+          asString(refusal.message) ?? undefined,
         )
       }
       throw err
     }
 
     if (!isRecord(payload)) {
-      throw new Error("invalid write_note response")
-    }
-
-    // Older servers returned the refusal as a successful payload.
-    if (payload.error === "NOTE_ALREADY_EXISTS") {
-      throw new NoteAlreadyExistsError(
-        asString(payload.title) ?? title,
-        asString(payload.permalink) ?? "",
-      )
+      throw new Error("invalid bm_write response")
     }
 
     const resultTitle = asString(payload.title)
@@ -732,7 +722,7 @@ export class BmClient {
     const filePath = asString(payload.file_path)
 
     if (!resultTitle || !permalink || !filePath) {
-      throw new Error("invalid write_note payload")
+      throw new Error("invalid bm_write payload")
     }
 
     return {
@@ -754,16 +744,16 @@ export class BmClient {
     project?: string,
   ): Promise<ContextResult> {
     const args: Record<string, unknown> = {
-      url,
+      identifier: url,
       depth,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("build_context", args)
+    const payload = await this.callTool("bm_context", args)
 
     if (!isRecord(payload) || !Array.isArray(payload.results)) {
-      throw new Error("invalid build_context response")
+      throw new Error("invalid bm_context response")
     }
 
     return payload as unknown as ContextResult
@@ -774,18 +764,19 @@ export class BmClient {
     project?: string,
   ): Promise<RecentResult[]> {
     const args: Record<string, unknown> = {
-      timeframe,
+      command: "recent",
+      since: timeframe,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("recent_activity", args)
+    const payload = await this.callTool("bm_project", args)
 
-    if (Array.isArray(payload)) {
-      return payload as RecentResult[]
+    if (isRecord(payload) && Array.isArray(payload.results)) {
+      return payload.results as RecentResult[]
     }
 
-    throw new Error("invalid recent_activity response")
+    throw new Error("invalid bm_project response")
   }
 
   async editNote(
@@ -797,7 +788,7 @@ export class BmClient {
   ): Promise<EditNoteResult> {
     const args: Record<string, unknown> = {
       identifier,
-      operation,
+      command: operation,
       content,
       output_format: "json",
       project: this.routedProject(project),
@@ -808,10 +799,10 @@ export class BmClient {
       args.expected_replacements = options.expected_replacements
     if (options.metadata !== undefined) args.metadata = options.metadata
 
-    const payload = await this.callTool("edit_note", args)
+    const payload = await this.callTool("bm_edit", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid edit_note response")
+      throw new Error("invalid bm_edit response")
     }
 
     const title = asString(payload.title)
@@ -819,7 +810,7 @@ export class BmClient {
     const filePath = asString(payload.file_path)
 
     if (!title || !permalink || !filePath) {
-      throw new Error("invalid edit_note payload")
+      throw new Error("invalid bm_edit payload")
     }
 
     return {
@@ -841,14 +832,14 @@ export class BmClient {
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("delete_note", args)
+    const payload = await this.callTool("bm_delete", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid delete_note response")
+      throw new Error("invalid bm_delete response")
     }
 
-    if (payload.deleted !== true) {
-      throw new Error(`delete_note did not delete "${identifier}"`)
+    if (payload.action !== "deleted") {
+      throw new Error(`bm_delete did not delete "${identifier}"`)
     }
 
     return {
@@ -865,21 +856,21 @@ export class BmClient {
   ): Promise<NoteResult> {
     const args: Record<string, unknown> = {
       identifier,
-      destination_folder: newFolder,
+      destination: `${newFolder.replace(/\/+$/, "")}/`,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("move_note", args)
+    const payload = await this.callTool("bm_move", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid move_note response")
+      throw new Error("invalid bm_move response")
     }
 
-    if (payload.moved !== true) {
+    if (payload.action !== "moved") {
       throw new Error(
         asString(payload.error) ??
-          `move_note did not move "${identifier}" to "${newFolder}"`,
+          `bm_move did not move "${identifier}" to "${newFolder}"`,
       )
     }
 
@@ -897,16 +888,17 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaValidationResult> {
     const args: Record<string, unknown> = {
+      command: "validate",
       output_format: "json",
       project: this.routedProject(project),
     }
     if (noteType) args.note_type = noteType
     if (identifier) args.identifier = identifier
 
-    const payload = await this.callTool("schema_validate", args)
+    const payload = await this.callTool("bm_schema", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid schema_validate response")
+      throw new Error("invalid bm_schema response")
     }
 
     return payload as unknown as SchemaValidationResult
@@ -918,16 +910,17 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaInferResult> {
     const args: Record<string, unknown> = {
+      command: "infer",
       note_type: noteType,
       threshold,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("schema_infer", args)
+    const payload = await this.callTool("bm_schema", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid schema_infer response")
+      throw new Error("invalid bm_schema response")
     }
 
     return payload as unknown as SchemaInferResult
@@ -938,15 +931,16 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaDiffResult> {
     const args: Record<string, unknown> = {
+      command: "diff",
       note_type: noteType,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("schema_diff", args)
+    const payload = await this.callTool("bm_schema", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid schema_diff response")
+      throw new Error("invalid bm_schema response")
     }
 
     return payload as unknown as SchemaDiffResult

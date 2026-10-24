@@ -15,7 +15,7 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
             ("Context Source", body + "\n- relates_to [[Context Target]]"),
         ]:
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "title": title,
                     "content": content,
@@ -28,8 +28,8 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
             "project": test_project.name,
             "depth": 2,
         }
-        full_result = await client.call_tool("build_context", arguments)
-        compact_result = await client.call_tool("build_context", {**arguments, "compact": True})
+        full_result = await client.call_tool("bm_context", arguments)
+        compact_result = await client.call_tool("bm_context", {**arguments, "compact": True})
         full = json.loads(full_result.content[0].text)
         compact = json.loads(compact_result.content[0].text)
         assert full["results"]
@@ -57,7 +57,12 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
         assert len(compact_result.content[0].text) < len(full_result.content[0].text) / 2
         selected = compact["results"][0]["primary_result"]
         read = await client.call_tool(
-            "read_note", {"identifier": selected["external_id"], "project": test_project.name}
+            "bm_read",
+            {
+                "identifier": selected["external_id"],
+                "project": test_project.name,
+                "include_frontmatter": False,
+            },
         )
         assert body in read.content[0].text
         # Related notes stay navigable from compact output.
@@ -65,11 +70,16 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
             row for row in compact["results"][0]["related_results"] if row["type"] == "entity"
         )
         related_note = await client.call_tool(
-            "read_note", {"identifier": related_entity["permalink"], "project": test_project.name}
+            "bm_read",
+            {
+                "identifier": related_entity["permalink"],
+                "project": test_project.name,
+                "include_frontmatter": False,
+            },
         )
         assert "Target body" in related_note.content[0].text
         text_result = await client.call_tool(
-            "build_context", {**arguments, "compact": True, "output_format": "text"}
+            "bm_context", {**arguments, "compact": True, "output_format": "text"}
         )
         assert "Context Source" in text_result.content[0].text
         assert "Long context body" not in text_result.content[0].text

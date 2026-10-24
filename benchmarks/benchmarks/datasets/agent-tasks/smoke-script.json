@@ -5,7 +5,7 @@
       {
         "tool_calls": [
           {
-            "name": "search_notes",
+            "name": "bm_search",
             "arguments": {"query": "redis", "project": "{project}"}
           }
         ]

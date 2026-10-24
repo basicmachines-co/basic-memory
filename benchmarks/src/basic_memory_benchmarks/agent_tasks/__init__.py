@@ -1,4 +1,4 @@
-"""Agent-in-the-loop task eval: rich vs POSIX tool surfaces (basic-memory#1401)."""
+"""Agent-in-the-loop task eval: 1.0 bm_* tool surface (basic-memory#1401)."""
 
 from basic_memory_benchmarks.agent_tasks.driver import (
     AgentSession,

@@ -46,7 +46,7 @@ async def test_edit_note_handles_long_prose_around_wikilink(
         # Create the note (file-write side; would already fail at index time
         # if RelationType MaxLen were back).
         write_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Long Relation Type Repro",
@@ -56,22 +56,22 @@ async def test_edit_note_handles_long_prose_around_wikilink(
         )
         assert len(write_result.content) == 1
         write_text = write_result.content[0].text
-        assert "Created note" in write_text or "Updated note" in write_text
+        assert "Created " in write_text or "Updated " in write_text
 
         # Edit the note. This triggers re-index → response model validation.
         # With the historical MaxLen(200) cap, this would raise:
         #   "relations.0.relation_type String should have at most 200 characters"
         edit_result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": test_project.name,
                 "identifier": "Long Relation Type Repro",
-                "operation": "append",
+                "command": "append",
                 "content": "\n\nappended line\n",
             },
         )
         assert len(edit_result.content) == 1
-        assert "Edited note (append)" in edit_result.content[0].text
+        assert "(append)" in edit_result.content[0].text
 
     _, session_maker = engine_factory
     relation_repository = RelationRepository(project_id=test_project.id)

@@ -66,7 +66,7 @@ Never call Phase 4 done without testing. With the user:
 1. **Simulate a fresh session** — new conversation on their platform (or in this session, deliberately act as if starting cold).
 2. Give a natural task from one of their domains: "add a task: call the dentist Tuesday."
 3. **Watch the order of operations.** Pass = the assistant reads the router, loads the dispatched instruction note(s), THEN writes — correct folder, correct schema fields, correct naming. Fail = it writes first or freelances the format.
-4. If it fails: is the stub actually saved? Does the router reference resolve (test with `read_note`)? Is the "before any knowledge-base work" wording strong enough? Fix and re-test.
+4. If it fails: is the stub actually saved? Does the router reference resolve (test with `bm_read`)? Is the "before any knowledge-base work" wording strong enough? Fix and re-test.
 5. Also verify the **escape hatch**: ask something ambiguous ("save this somewhere") and confirm the assistant asks rather than guesses.
 
 Leave the user with this framing: the stub + router is the system's ignition. If future sessions ever start behaving inconsistently, the first diagnostic is always "did the router get loaded?"

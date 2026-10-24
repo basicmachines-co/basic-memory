@@ -67,7 +67,7 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
     guarded MCP create path the server's ``detect_potential_file_conflicts``
     pre-check catches the permalink collision BEFORE the repository layer, so with
     the default ``overwrite=False`` the second write returns a structured
-    ``conflict`` (``NOTE_ALREADY_EXISTS``) rather than clobbering the first note
+    ``conflict`` (``ALREADY_EXISTS``) rather than clobbering the first note
     or forking a new permalink. This is the deterministic collision oracle a real
     MCP client observes; it asserts on the JSON response, and the read-back proves
     the first write's body survived untouched.
@@ -81,7 +81,7 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
     async with Client(mcp_server) as client:
         first = _parse(
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Collision Note",
@@ -93,7 +93,7 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
         )
         # A refused write is a tool error whose message is the JSON conflict payload.
         second_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": test_project.name,
                 "title": "Collision Note",
@@ -110,22 +110,22 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
         # a conflict (overwrite disabled by default).
         assert first["action"] == "created", first
         assert "error" not in first, first
-        assert second["action"] == "conflict", second
-        assert second["error"] == "NOTE_ALREADY_EXISTS", second
+        assert second["error"] == "ALREADY_EXISTS", second
 
         # Both writes normalize to the same permalink (project prefix aside).
         assert first["permalink"].endswith("collision/collision-note"), first
-        assert second["permalink"].endswith("collision/collision-note"), second
+        assert "Collision Note.md" in second["message"], second
 
         # The first write wins: reading back returns the original body, proving
         # the conflicting write left the committed note untouched.
         read_payload = _parse(
             await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": "Collision Note",
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
         )
@@ -151,28 +151,24 @@ async def test_permalink_suffix_collision_recovery(mcp_server, app, test_project
     async with Client(mcp_server) as client:
         first = _parse(
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Suffix Alpha",
                     "directory": "suffix",
-                    "content": (
-                        f"---\npermalink: {shared_permalink}\n---\n\n# Suffix Alpha\n\nAlpha body."
-                    ),
+                    "content": f"---\npermalink: {shared_permalink}\n---\n\n# Suffix Alpha\n\nAlpha body.",
                     "output_format": "json",
                 },
             )
         )
         second = _parse(
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Suffix Beta",
                     "directory": "suffix",
-                    "content": (
-                        f"---\npermalink: {shared_permalink}\n---\n\n# Suffix Beta\n\nBeta body."
-                    ),
+                    "content": f"---\npermalink: {shared_permalink}\n---\n\n# Suffix Beta\n\nBeta body.",
                     "output_format": "json",
                 },
             )
@@ -193,21 +189,23 @@ async def test_permalink_suffix_collision_recovery(mcp_server, app, test_project
         # Each note reads back at its own permalink with its own body.
         first_read = _parse(
             await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": first["permalink"],
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
         )
         second_read = _parse(
             await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": second["permalink"],
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
         )
@@ -221,7 +219,7 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
 
     Fires many identical-title writes into one folder at once. However the
     exists-check / write / upsert steps interleave, every result is EITHER a
-    ``created`` or a ``conflict`` (``NOTE_ALREADY_EXISTS``), at least one is
+    ``created`` or a ``conflict`` (``ALREADY_EXISTS``), at least one is
     created, and every result resolves to the SAME base permalink with no numeric
     suffix — overlapping same-key writes must converge to one note, not fork into
     duplicates. Reading back returns exactly that single note.
@@ -235,7 +233,7 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
         async def write_one(index: int):
             # Losers of the race get a tool error carrying the JSON conflict payload.
             result = await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Race Note",
@@ -246,31 +244,32 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
                 raise_on_error=False,
             )
             payload = _parse(result)
-            assert result.is_error == (payload["action"] == "conflict"), payload
+            assert result.is_error == ("error" in payload), payload
             return payload
 
         payloads = await asyncio.gather(*(write_one(i) for i in range(write_count)))
 
-        actions = [payload["action"] for payload in payloads]
+        actions = [payload.get("action", "conflict") for payload in payloads]
         assert set(actions) <= {"created", "conflict"}, actions
         assert "created" in actions, actions
 
         # No collision may fork the permalink: every result resolves to the
         # single base permalink with no numeric suffix.
-        for payload in payloads:
+        for payload in (p for p in payloads if "error" not in p):
             assert payload["permalink"].endswith(base), payload
             assert not payload["permalink"][len(base) :].startswith("-"), payload
-        for payload in (p for p in payloads if p["action"] == "conflict"):
-            assert payload["error"] == "NOTE_ALREADY_EXISTS", payload
+        for payload in (p for p in payloads if "error" in p):
+            assert payload["error"] == "ALREADY_EXISTS", payload
 
         # Exactly one note exists at that permalink and it reads back cleanly.
         read_payload = _parse(
             await client.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": "Race Note",
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
         )
@@ -301,7 +300,7 @@ async def test_concurrent_write_different_notes(mcp_server, app, test_project) -
         async def write_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": test_project.name,
                         "title": f"Different Note {index}",
@@ -326,11 +325,12 @@ async def test_concurrent_write_different_notes(mcp_server, app, test_project) -
         async def read_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "read_note",
+                    "bm_read",
                     {
                         "project": test_project.name,
                         "identifier": f"Different Note {index}",
                         "output_format": "json",
+                        "include_frontmatter": False,
                     },
                 )
             )
@@ -358,7 +358,7 @@ async def test_concurrent_write_same_directory(mcp_server, app, test_project) ->
         async def write_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": test_project.name,
                         "title": f"Shared Dir Note {index}",
@@ -402,15 +402,13 @@ async def test_concurrent_write_then_search(mcp_server, app, test_project) -> No
         async def write_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": test_project.name,
                         "title": f"Searchable Note {index}",
                         "directory": "searchable",
-                        "content": (
-                            f"# Searchable Note {index}\n\n"
-                            f"Contains unique token zylophon{index} for lookup."
-                        ),
+                        "content": f"# Searchable Note {index}\n\n"
+                        f"Contains unique token zylophon{index} for lookup.",
                         "output_format": "json",
                     },
                 )
@@ -424,7 +422,7 @@ async def test_concurrent_write_then_search(mcp_server, app, test_project) -> No
         async def search_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "search_notes",
+                    "bm_search",
                     {
                         "project": test_project.name,
                         "query": f"zylophon{index}",
@@ -479,7 +477,7 @@ async def test_concurrent_write_and_read(mcp_server, app, test_project) -> None:
     async with Client(mcp_server) as client:
         anchor = _parse(
             await client.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Anchor Note",
@@ -494,7 +492,7 @@ async def test_concurrent_write_and_read(mcp_server, app, test_project) -> None:
         async def write_extra(index: int):
             return _parse(
                 await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": test_project.name,
                         "title": f"Extra Note {index}",
@@ -508,11 +506,12 @@ async def test_concurrent_write_and_read(mcp_server, app, test_project) -> None:
         async def read_anchor():
             return _parse(
                 await client.call_tool(
-                    "read_note",
+                    "bm_read",
                     {
                         "project": test_project.name,
                         "identifier": "Anchor Note",
                         "output_format": "json",
+                        "include_frontmatter": False,
                     },
                 )
             )
@@ -553,7 +552,7 @@ async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> No
         async def write_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "write_note",
+                    "bm_write",
                     {
                         "project": test_project.name,
                         "title": f"Volume Note {index}",
@@ -571,11 +570,12 @@ async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> No
         async def read_one(index: int):
             return _parse(
                 await client.call_tool(
-                    "read_note",
+                    "bm_read",
                     {
                         "project": test_project.name,
                         "identifier": f"Volume Note {index}",
                         "output_format": "json",
+                        "include_frontmatter": False,
                     },
                 )
             )
@@ -609,7 +609,7 @@ async def test_concurrent_edit_append_reports_every_refusal(mcp_server, app, tes
     async with Client(mcp_server) as setup:
         note = _parse(
             await setup.call_tool(
-                "write_note",
+                "bm_write",
                 {
                     "project": test_project.name,
                     "title": "Shared Page",
@@ -626,11 +626,11 @@ async def test_concurrent_edit_append_reports_every_refusal(mcp_server, app, tes
         async with Client(mcp_server) as client:
             for index in range(appends_per_writer):
                 result = await client.call_tool(
-                    "edit_note",
+                    "bm_edit",
                     {
                         "project": test_project.name,
                         "identifier": note["permalink"],
-                        "operation": "append",
+                        "command": "append",
                         "content": f"\n{tag}-{index}\n",
                         "output_format": "json",
                     },
@@ -643,11 +643,12 @@ async def test_concurrent_edit_append_reports_every_refusal(mcp_server, app, tes
     async with Client(mcp_server) as reader:
         body = _parse(
             await reader.call_tool(
-                "read_note",
+                "bm_read",
                 {
                     "project": test_project.name,
                     "identifier": note["permalink"],
                     "output_format": "json",
+                    "include_frontmatter": False,
                 },
             )
         )["content"]

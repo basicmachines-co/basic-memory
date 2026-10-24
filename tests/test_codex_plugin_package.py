@@ -248,8 +248,8 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "`project=<configured primaryProject>`" in skill
     assert "frontmatter `project` field is descriptive" in skill
     assert "Treat host-provided session metadata as opaque identity data" in skill
-    assert 'metadata_filters={"codex_session_id": "<exact host-provided id>"}' in skill
-    assert 'metadata_filters={"agent": "codex", "session_id": "<exact host-provided id>"}' in skill
+    assert 'filters={"codex_session_id": "<exact host-provided id>"}' in skill
+    assert 'filters={"agent": "codex", "session_id": "<exact host-provided id>"}' in skill
     assert "Reject conflicting" in skill
     assert "- continues [[Exact previous checkpoint title]]" in skill
     assert "Do not edit the previous immutable checkpoint" in skill
@@ -261,7 +261,7 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert 'output_format="json"' in skill
     assert "`write_note_overwrite_default` setting is true" in skill
     assert "with `action: created`" in skill
-    assert "`action: conflict` or `NOTE_ALREADY_EXISTS`" in skill
+    assert "the tool error `ALREADY_EXISTS`" in skill
     assert "`file_path`, then `title`" in skill
     assert '$bm-orient "<exact returned resume identifier>"' in skill
     assert "\n- Decisions\n" not in skill
@@ -303,7 +303,7 @@ def test_bm_orient_supports_exact_topic_and_current_repo_routes() -> None:
     assert "`project=<configured primaryProject>`" in skill
     assert "Do not retry the identifier against secondary or other projects" in skill
     assert "Run the `coding_session` topic search separately" in skill
-    assert 'metadata_filters={"repository": "<configured repository>"}' in skill
+    assert 'filters={"repository": "<configured repository>"}' in skill
     assert "Never let topic text similarity compensate" in skill
     assert "omit `coding_session` results" in skill
     assert "show at most three" in skill

@@ -11,6 +11,9 @@ verified: 0.21.6 mcp+cli
 
 # read-note(3)
 
+> Compatibility API: new MCP workflows use [[bm-read(3)]]. This page
+> documents the legacy tool while it remains registered during the 1.0 transition.
+
 ## NAME
 
 **read-note** — read a note by title, permalink, or memory:// URL

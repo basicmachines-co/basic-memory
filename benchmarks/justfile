@@ -129,7 +129,7 @@ bench-prepare-xafs: bench-fetch-xafs bench-convert-xafs
 
 # xAFS agent-task run: grouped per-persona corpora, read-only surfaces,
 # tokens-per-correct-answer headline judged semantically (docs/benchmarks.md 6d)
-bench-run-xafs-agent surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1" judge=agent_judge:
+bench-run-xafs-agent surfaces="bm" model="openai-compat:qwen3@http://localhost:11434/v1" judge=agent_judge:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{bm_local_path}}" ]]; then
@@ -287,9 +287,9 @@ bench-concurrent-write-load writers="8" notes="200":
       --writers {{writers}} --notes-per-writer {{notes}} \
       --bm-local-path "{{bm_local_path}}"
 
-# --- Agent-task eval: rich vs POSIX tool surfaces (basic-memory#1401) ---
+# --- Agent-task eval: 1.0 bm_* tool surface (basic-memory#1401) ---
 
-# LLM-free plumbing smoke: scripted model, rich surface, one read-only task, strict
+# LLM-free plumbing smoke: scripted model, bm surface, one read-only task, strict
 bench-agent-smoke:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -298,15 +298,14 @@ bench-agent-smoke:
         exit 2
     fi
     uv run bm-bench run agent-tasks \
-      --surfaces rich \
+      --surfaces bm \
       --model scripted:benchmarks/datasets/agent-tasks/smoke-script.json \
       --tasks curate-orphans \
       --bm-local-path "{{bm_local_path}}" \
       --strict
 
-# Full A/B: same tasks, model, budgets, corpus; only the tool surface varies.
-# The posix surface needs a checkout with enable_posix_tools (#1399/#1406 stack).
-bench-agent-tasks surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1":
+# Full run with the new tools. Historical rich/POSIX runs require their original harness revision.
+bench-agent-tasks surfaces="bm" model="openai-compat:qwen3@http://localhost:11434/v1":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{bm_local_path}}" ]]; then

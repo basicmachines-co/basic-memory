@@ -248,31 +248,18 @@ Service Layer (business logic)
 Repository Layer (data access)
 ```
 
-Example tool using typed client:
+The 1.0 MCP tools expose `bm_*` names and translate their compact arguments into
+internal API models. For example, `bm_search(filters=..., since=..., mode=...)`
+constructs a `SearchQuery`; the internal model still calls these fields
+`metadata_filters`, `after_date`, and `search_type`. Those internal names are not
+MCP arguments.
 
-```python
-@mcp.tool()
-async def search_notes(
-    query: str,
-    project: str | None = None,
-    metadata_filters: dict | None = None,
-    tags: list[str] | None = None,
-    status: str | None = None,
-) -> SearchResponse:
-    async with get_project_client(project, context) as (client, active_project):
-        # Import client inside function to avoid circular imports
-        from basic_memory.mcp.clients import SearchClient
-        from basic_memory.schemas.search import SearchQuery
-
-        search_query = SearchQuery(
-            text=query,
-            metadata_filters=metadata_filters,
-            tags=tags,
-            status=status,
-        )
-        search_client = SearchClient(client, active_project.external_id)
-        return await search_client.search(search_query.model_dump())
-```
+See [`ranked_search.py`](../src/basic_memory/mcp/tools/ranked_search.py) for the
+current search adapter and [`note_targets.py`](../src/basic_memory/mcp/note_targets.py)
+for project-qualified path resolution. Note-addressing tools use `open_project_target`
+to combine routing, typed clients, and output paths; project-only operations use
+`get_project_client` directly. The installed `bm_man` pages define the public tool
+contracts, including accepted project names, qualified names, and external UUIDs.
 
 ### Per-Project Client Routing
 
@@ -365,7 +352,7 @@ Tests verify:
 When testing MCP tools, mock at the client level:
 
 ```python
-def test_search_notes(monkeypatch):
+def test_search_client(monkeypatch):
     import basic_memory.mcp.clients as clients_mod
 
     class MockSearchClient:

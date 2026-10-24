@@ -23,11 +23,12 @@ async def test_project_state_sync_after_default_change(
     async with Client(mcp_server) as client:
         # Step 1: Create a second project that we can switch to
         create_result = await client.call_tool(
-            "create_memory_project",
+            "bm_project",
             {
-                "project_name": "minerva",
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "minerva"),
-                "set_default": False,  # Don't set as default yet
+                "name": "minerva",
+                "path": str(tmp_path.parent / (tmp_path.name + "-projects") / "minerva"),
+                "set_default": False,
+                "command": "create",
             },
         )
         assert len(create_result.content) == 1
@@ -37,7 +38,7 @@ async def test_project_state_sync_after_default_change(
         # Step 2: Test that note operations work in the new project context
         # This validates that the identifier resolution works correctly
         write_result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 "project": "minerva",
                 "title": "Test Consistency Note",
@@ -51,7 +52,12 @@ async def test_project_state_sync_after_default_change(
 
         # Step 3: Test that we can read the note we just created
         read_result = await client.call_tool(
-            "read_note", {"project": "minerva", "identifier": "Test Consistency Note"}
+            "bm_read",
+            {
+                "project": "minerva",
+                "identifier": "Test Consistency Note",
+                "include_frontmatter": True,
+            },
         )
         assert len(read_result.content) == 1
         assert "Test Consistency Note" in read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -59,23 +65,25 @@ async def test_project_state_sync_after_default_change(
 
         # Step 4: Test that edit operations work (this was failing in the original issue)
         edit_result = await client.call_tool(
-            "edit_note",
+            "bm_edit",
             {
                 "project": "minerva",
                 "identifier": "Test Consistency Note",
-                "operation": "append",
+                "command": "append",
                 "content": "\n\n## Update\n\nEdit operation successful after project switch!",
             },
         )
         assert len(edit_result.content) == 1
-        assert (
-            "added" in edit_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
-            and "lines" in edit_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
-        )
+        assert "(append)" in edit_result.content[0].text
 
         # Step 5: Verify the edit was applied
         final_read_result = await client.call_tool(
-            "read_note", {"project": "minerva", "identifier": "Test Consistency Note"}
+            "bm_read",
+            {
+                "project": "minerva",
+                "identifier": "Test Consistency Note",
+                "include_frontmatter": True,
+            },
         )
         assert len(final_read_result.content) == 1
         final_content = final_read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]

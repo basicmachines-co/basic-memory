@@ -382,7 +382,7 @@ def test_memory_quest_fields_round_trip(provider, bm):
             dict(write_args, content="Stale.", overwrite=True, expected_checksum="0" * 64),
         )
     )
-    assert "revision conflict" in stale["error"].lower()
+    assert "REVISION_CONFLICT" in stale["error"]
     assert checksum in stale["error"]
     assert "Memory Master body." in read_json()["content"]
 

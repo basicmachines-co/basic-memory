@@ -1,6 +1,6 @@
 > Pi package reference only.
 > These canonical Basic Memory instructions may mention direct MCP tools such as
-> `read_note`, `write_note`, `search_notes`, or `build_context`.
+> `bm_read`, `bm_write`, `bm_search`, or `bm_context`.
 > In Pi CLI mode, use the active `basic-memory-pi` skill with `bm_recall` and
 > `bm_capture` instead. In Pi MCP mode, only use direct Basic Memory tool names
 > if the MCP adapter exposes them in the current runtime.
@@ -40,31 +40,31 @@ To rewrite the same note on re-capture instead of duplicating, key the note to a
 
 > **Example (hosts with a JSONL transcript):** some agents write a per-session transcript whose filename is a stable session UUID. If yours does, you can derive the id from the most-recently-modified transcript file and use it as `thread_id`. This is optional — only do it if your host actually exposes such a transcript.
 
-**If no stable id is available**, match the existing note by title/topic instead: search for a note covering the same thread (`search_notes(query="<topic>")`), and if you find the one this thread already produced, rewrite it. Omit `thread_id` and rely on a consistent title.
+**If no stable id is available**, match the existing note by title/topic instead: search for a note covering the same thread (`bm_search(query="<topic>")`), and if you find the one this thread already produced, rewrite it. Omit `thread_id` and rely on a consistent title.
 
 ## Decision Flow
 
 1. **Determine the thread key.** Use a stable session/thread id if your agent exposes one; otherwise plan to match by title/topic.
 2. **Search Basic Memory** for the existing thread note.
-   - With a thread id, use `metadata_filters` (not `query`) — full-text query doesn't reliably match YAML frontmatter custom fields:
+   - With a thread id, use `filters` (not `query`) — full-text query doesn't reliably match YAML frontmatter custom fields:
      ```python
-     search_notes(
-         metadata_filters={"thread_id": "<thread-id>"},
+     bm_search(
+         filters={"thread_id": "<thread-id>"},
          project="<project>"
      )
      ```
    - Without one, search by topic and identify the note this thread already produced:
      ```python
-     search_notes(query="<thread topic>", project="<project>")
+     bm_search(query="<thread topic>", project="<project>")
      ```
 3. **If a match is found:**
    - Read the existing note as JSON (use the full permalink returned by search) and keep its `checksum`
    - Synthesize a new version that integrates the latest understanding from the conversation
-   - Overwrite via `write_note` with `overwrite=True` and `expected_checksum` set to that checksum (same title, same `thread_id` if used, same directory). A `NOTE_REVISION_CONFLICT` error means another session changed the note since you read it: read it again and re-synthesize
+   - Overwrite via `bm_write` with `overwrite=True` and `expected_checksum` set to that checksum using the returned `file_path` as `identifier` (same `thread_id` if used). A `REVISION_CONFLICT` error means another session changed the note since you read it: read it again and re-synthesize
 4. **If no match is found:**
    - Synthesize the note from the conversation
-   - If you have a thread id, pass `metadata={"thread_id": "<thread-id>"}` to `write_note` (it surfaces as a custom frontmatter field)
-   - Save it. If `write_note` lists similar existing notes, check whether one of them is this thread's note before keeping the new one
+   - If you have a thread id, pass `metadata={"thread_id": "<thread-id>"}` to `bm_write` (it surfaces as a custom frontmatter field)
+   - Save it. If `bm_write` lists similar existing notes, check whether one of them is this thread's note before keeping the new one
 
 ## Synthesis Rules
 
@@ -132,23 +132,23 @@ The title should reflect the thread's topic. On update, the title can be refined
 ## MCP Tools Used
 
 ```python
-# Find existing thread note by thread id (use metadata_filters, not query)
-search_notes(
-    metadata_filters={"thread_id": "<thread-id>"},
+# Find existing thread note by thread id (use filters, not query)
+bm_search(
+    filters={"thread_id": "<thread-id>"},
     project="<project>"
 )
 
 # Or, without a thread id, find it by topic
-search_notes(query="<thread topic>", project="<project>")
+bm_search(query="<thread topic>", project="<project>")
 
 # Read existing thread note (use the full permalink from search results)
-read_note(
+bm_read(
     identifier="<full-permalink>",
     project="<project>"
 )
 
 # Create
-write_note(
+bm_write(
     title="<title>",
     content="<markdown body — frontmatter is generated from title/tags/metadata>",
     directory="<folder>",
@@ -158,11 +158,11 @@ write_note(
 )
 
 # Overwrite an existing note (same path), only the revision you read
-existing = read_note(identifier="<full-permalink>", output_format="json", project="<project>")
-write_note(
-    title="<same title>",
+existing = bm_read(identifier="<full-permalink>", output_format="json", project="<project>")
+bm_write(
+    identifier=existing["file_path"],
+    title="<updated title>",
     content="<new content>",
-    directory="<same folder>",
     tags=["..."],
     metadata={"thread_id": "<same thread-id>"},  # omit if no stable id
     overwrite=True,

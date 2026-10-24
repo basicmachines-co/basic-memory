@@ -26,7 +26,7 @@ from basic_memory_benchmarks.llm.tool_agent import (
     TranscriptItem,
 )
 
-SEARCH_TOOL = ToolDef(name="search_notes", description="", input_schema={"type": "object"})
+SEARCH_TOOL = ToolDef(name="bm_search", description="", input_schema={"type": "object"})
 TOOLS = [SEARCH_TOOL]
 
 
@@ -83,7 +83,7 @@ def test_multi_turn_feeds_tool_results_back() -> None:
             if len(self.seen) == 1:
                 return AgentTurn(
                     text="",
-                    tool_calls=(ToolCall(call_id="c1", name="search_notes", arguments={"q": "x"}),),
+                    tool_calls=(ToolCall(call_id="c1", name="bm_search", arguments={"q": "x"}),),
                     model="spy",
                     input_tokens=10,
                     output_tokens=2,
@@ -103,7 +103,7 @@ def test_multi_turn_feeds_tool_results_back() -> None:
     result = _run(model, dispatch)
 
     assert result.final_answer == "done"
-    assert dispatch.calls == [("search_notes", {"q": "x"})]
+    assert dispatch.calls == [("bm_search", {"q": "x"})]
     # The second propose sees the assistant turn plus the tool result.
     second_transcript = model.seen[1]
     assert isinstance(second_transcript[1], AssistantTurn)
@@ -115,7 +115,7 @@ def test_multi_turn_feeds_tool_results_back() -> None:
 
 
 def test_turn_budget_stop() -> None:
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {}}]}] * 5)
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {}}]}] * 5)
     dispatch = RecordingDispatch()
     result = _run(model, dispatch, max_turns=2)
 
@@ -127,7 +127,7 @@ def test_turn_budget_stop() -> None:
 def test_token_budget_stop() -> None:
     # Scripted turns cost 15 fake tokens each; a 25-token budget allows two
     # model calls (gate checks BEFORE the call: 0 < 25, 15 < 25, 30 >= 25).
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {}}]}] * 5)
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {}}]}] * 5)
     result = _run(model, RecordingDispatch(), max_total_tokens=25)
 
     assert result.stopped_reason == "tokens"
@@ -136,7 +136,7 @@ def test_token_budget_stop() -> None:
 
 def test_wall_clock_budget_stop_uses_injected_clock() -> None:
     ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0])
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {}}]}] * 5)
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {}}]}] * 5)
     result = run_agent_loop(
         model=model,
         dispatch=RecordingDispatch(),
@@ -186,7 +186,7 @@ def test_tool_result_truncated_at_fixed_cap() -> None:
             if self.fed_back is None:
                 return AgentTurn(
                     text="",
-                    tool_calls=(ToolCall(call_id="c", name="search_notes", arguments={}),),
+                    tool_calls=(ToolCall(call_id="c", name="bm_search", arguments={}),),
                     model="spy",
                     input_tokens=1,
                     output_tokens=1,
@@ -226,7 +226,7 @@ def test_model_error_is_wrapped_with_partial_accounting() -> None:
 def test_mid_loop_model_error_keeps_spent_tokens() -> None:
     # One scripted turn, then the script exhausts: the second propose fails
     # AFTER a real model call and tool dispatch — that cost must be preserved.
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {}}]}])
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {}}]}])
     with pytest.raises(AgentLoopError) as excinfo:
         _run(model, RecordingDispatch())
 
@@ -244,7 +244,7 @@ def test_dispatch_error_is_wrapped_and_records_the_dying_call() -> None:
         def __call__(self, name: str, arguments: dict[str, Any]) -> ToolOutcome:
             raise RuntimeError("stdio session lost")
 
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {"q": "x"}}]}])
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {"q": "x"}}]}])
     with pytest.raises(AgentLoopError) as excinfo:
         run_agent_loop(
             model=model,
@@ -260,7 +260,7 @@ def test_dispatch_error_is_wrapped_and_records_the_dying_call() -> None:
     assert partial.tool_call_count == 1
     tool_record = partial.turn_records[-1]
     assert tool_record.kind == "tool"
-    assert tool_record.tool_name == "search_notes"
+    assert tool_record.tool_name == "bm_search"
     assert tool_record.is_error is True
     assert tool_record.arguments_excerpt == '{"q": "x"}'
     assert tool_record.error_excerpt == str(excinfo.value.cause)
@@ -270,7 +270,7 @@ def test_wall_clock_gate_between_tool_dispatches() -> None:
     # One assistant turn with three tool calls; the injected clock breaches the
     # budget after the first dispatch, so the remaining calls never dispatch.
     ticks = iter([0.0, 0.0, 10.0, 100.0, 100.0])
-    model = _scripted([{"tool_calls": [{"name": "search_notes", "arguments": {}}] * 3}])
+    model = _scripted([{"tool_calls": [{"name": "bm_search", "arguments": {}}] * 3}])
     dispatch = RecordingDispatch()
     result = run_agent_loop(
         model=model,
@@ -290,7 +290,7 @@ def test_wall_clock_gate_between_tool_dispatches() -> None:
 def test_per_turn_records_account_tokens_and_counts() -> None:
     model = _scripted(
         [
-            {"tool_calls": [{"name": "search_notes", "arguments": {"q": "a"}}]},
+            {"tool_calls": [{"name": "bm_search", "arguments": {"q": "a"}}]},
             {"text": "done"},
         ]
     )
@@ -302,7 +302,7 @@ def test_per_turn_records_account_tokens_and_counts() -> None:
     assert sum(record.input_tokens for record in model_records) == result.total_input_tokens
     assert sum(record.output_tokens for record in model_records) == result.total_output_tokens
     tool_record = result.turn_records[1]
-    assert tool_record.tool_name == "search_notes"
+    assert tool_record.tool_name == "bm_search"
     assert tool_record.result_chars == len("ok")
     assert result.tool_call_count == 1
 
@@ -311,7 +311,7 @@ def test_successful_tool_turns_carry_no_excerpts() -> None:
     """Excerpts are for diagnosis of failures; success payloads stay out of the artifact."""
     model = _scripted(
         [
-            {"tool_calls": [{"name": "search_notes", "arguments": {"q": "x"}}]},
+            {"tool_calls": [{"name": "bm_search", "arguments": {"q": "x"}}]},
             {"text": "done"},
         ]
     )
@@ -330,7 +330,7 @@ def test_error_excerpts_are_capped() -> None:
     long_argument = {"identifier": "a" * (ERROR_EXCERPT_MAX_CHARS * 3)}
     model = _scripted(
         [
-            {"tool_calls": [{"name": "search_notes", "arguments": long_argument}]},
+            {"tool_calls": [{"name": "bm_search", "arguments": long_argument}]},
             {"text": "done"},
         ]
     )

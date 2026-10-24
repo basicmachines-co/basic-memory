@@ -16,6 +16,7 @@ from basic_memory.mcp.clients import MemoryClient
 from basic_memory.mcp.note_targets import open_project_target
 from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat, Page, Pagination, ProjectParam, Since
 from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
 from basic_memory.mcp.tools.build_context import (
@@ -92,6 +93,12 @@ async def bm_context(
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Build graph context from a starting note or pattern."""
+    if not identifier.strip():
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "identifier cannot be empty or whitespace.",
+            output_format=output_format,
+        )
     async with open_project_target(
         identifier, project, context, kind="identifier", output_format=output_format
     ) as target:

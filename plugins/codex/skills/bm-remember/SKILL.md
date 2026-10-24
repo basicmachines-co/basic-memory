@@ -22,7 +22,7 @@ a small fact that should survive the current thread.
    wording. If the user said "remember that" and the referent is unclear, ask one
    short question.
 
-3. Write with `write_note`:
+3. Write with `bm_write`:
    - `title`: first line trimmed to 80 characters, or a short descriptive title
    - `directory`: `rememberFolder`
    - `content`: the text to remember

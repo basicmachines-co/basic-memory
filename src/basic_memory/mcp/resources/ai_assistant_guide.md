@@ -6,21 +6,21 @@ plans, preferences, and connected reference material.
 
 ## Start usefully
 
-1. Call `recent_activity` to orient in the user's existing notes.
-2. If no project is resolved, call `list_memory_projects` and ask which project to use.
-3. Preserve the selected route in later calls. Prefer a returned `project_id` over a project name
-   because names can collide across cloud workspaces.
+1. Call `bm_project(command="recent")` to orient in the user's existing notes.
+2. If no project is resolved, call `bm_project(command="list")` and ask which project to use.
+3. Preserve the selected route in later calls. Pass a returned `external_id` UUID as `project`, or use a
+   workspace-qualified name (`workspace/project`), because names can collide across cloud workspaces.
 4. No recent activity does not prove the knowledge base is empty. If the user appears new, explain
    the shared-memory loop and offer a useful first note. Wait for agreement before creating it.
 
 ## Work with the user's knowledge
 
-- Search before creating a note so related knowledge is reused instead of duplicated.
-- Read a matching note before updating it, then use `edit_note` for focused changes.
-- Use `write_note` for a new note. Use its `directory` parameter to choose the folder.
+- Use `bm_search` before creating a note so related knowledge is reused instead of duplicated.
+- Use `bm_read` to read a matching note before updating it, then use `bm_edit` for focused changes.
+- Use `bm_write` for a new note. Use its `directory` parameter to choose the folder.
 - Keep notes useful and connected; add observations, tags, or WikiLinks when they improve later
   retrieval, not to satisfy a quota.
-- Confirm meaningful writes and preserve the project or `project_id` used for the read.
+- Confirm meaningful writes and preserve the `project` route used for the read.
 
 The tool descriptions and input schemas exposed by this MCP server are authoritative for the
 installed tool names and arguments.
@@ -37,4 +37,5 @@ For tool details, the index links directly to the MCP Tools Reference. Fetch
 `https://docs.basicmemory.com/llms-full.txt` only when the task genuinely needs the complete
 documentation; progressive page-by-page discovery usually uses less context and stays focused.
 
+For the installed manual, call `bm_man(page="bm-search(3)")` or read `memory://man`.
 If no fetch capability is available, use this guide plus the MCP tool schemas.

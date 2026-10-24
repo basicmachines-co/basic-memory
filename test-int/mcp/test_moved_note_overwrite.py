@@ -24,19 +24,19 @@ async def test_overwrite_after_rename_refuses_without_changing_files(
             "directory": "app/probe",
             "content": f"{frontmatter}# original\nfirst body",
         }
-        await client.call_tool("write_note", arguments)
+        await client.call_tool("bm_write", arguments)
         await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "song-sketching",
-                "destination_path": "app/probe/SKILL.md",
+                "destination": "app/probe/SKILL.md",
             },
         )
         moved = Path(test_project.path) / "app/probe/SKILL.md"
         original = moved.read_bytes()
         result = await client.call_tool(
-            "write_note",
+            "bm_write",
             {
                 **arguments,
                 "content": f"{frontmatter}# replacement\nsecond body",
@@ -49,11 +49,10 @@ async def test_overwrite_after_rename_refuses_without_changing_files(
         assert result.content[0].type == "text"
         if output_format == "json":
             payload = json.loads(result.content[0].text)
-            assert payload["action"] == "conflict"
-            assert payload["error"] == "NOTE_PATH_CONFLICT"
-            assert payload["file_path"] == "app/probe/SKILL.md"
+            assert payload["error"] == "ALREADY_EXISTS"
+            assert "app/probe/SKILL.md" in payload["message"]
         else:
-            assert "different path" in result.content[0].text
+            assert "has moved to" in result.content[0].text
             assert "app/probe/SKILL.md" in result.content[0].text
         assert moved.read_bytes() == original
         assert sorted(path.name for path in moved.parent.glob("*.md")) == ["SKILL.md"]
@@ -73,22 +72,22 @@ async def test_overwrite_prefers_replacement_at_exact_path(
             "content": "Original moved body",
             "output_format": "json",
         }
-        await client.call_tool("write_note", arguments)
+        await client.call_tool("bm_write", arguments)
         await client.call_tool(
-            "move_note",
+            "bm_move",
             {
                 "project": test_project.name,
                 "identifier": "song-sketching",
-                "destination_path": "app/probe/SKILL.md",
+                "destination": "app/probe/SKILL.md",
             },
         )
         moved = Path(test_project.path) / "app/probe/SKILL.md"
         original = moved.read_bytes()
         await client.call_tool(
-            "write_note", {**arguments, "content": "Replacement", "overwrite": False}
+            "bm_write", {**arguments, "content": "Replacement", "overwrite": False}
         )
         result = await client.call_tool(
-            "write_note", {**arguments, "content": "Updated replacement", "overwrite": True}
+            "bm_write", {**arguments, "content": "Updated replacement", "overwrite": True}
         )
         assert result.content[0].type == "text"
         assert json.loads(result.content[0].text)["action"] == "updated"

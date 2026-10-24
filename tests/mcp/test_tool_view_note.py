@@ -4,14 +4,16 @@ from textwrap import dedent
 
 import pytest
 
-from basic_memory.mcp.tools import write_note, view_note
+from basic_memory.mcp.tools.view_note import view_note
+from basic_memory.mcp.tools.write import bm_write
+from basic_memory.mcp.refusals import Refusal
 
 
 @pytest.mark.asyncio
 async def test_view_note_basic_functionality(app, test_project):
     """Test viewing a note creates an artifact."""
     # First create a note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test View Note",
         directory="test",
@@ -53,7 +55,7 @@ async def test_view_note_with_frontmatter_title(app, test_project):
         Content with frontmatter title.
     """).strip()
 
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Frontmatter Title", directory="test", content=content
     )
 
@@ -71,7 +73,7 @@ async def test_view_note_with_heading_title(app, test_project):
     # Create note with heading but no frontmatter title
     content = "# Heading Title\n\nContent with heading title."
 
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Heading Title", directory="test", content=content
     )
 
@@ -88,7 +90,7 @@ async def test_view_note_unicode_content(app, test_project):
     """Test viewing a note with Unicode content."""
     content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦"
 
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Unicode Test 🚀", directory="test", content=content
     )
 
@@ -105,7 +107,7 @@ async def test_view_note_unicode_content(app, test_project):
 @pytest.mark.asyncio
 async def test_view_note_by_permalink(app, test_project):
     """Test viewing a note by its permalink."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Permalink Test",
         directory="test",
@@ -124,7 +126,7 @@ async def test_view_note_by_permalink(app, test_project):
 @pytest.mark.asyncio
 async def test_view_note_with_memory_url(app, test_project):
     """Test viewing a note using a memory:// URL."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Memory URL Test",
         directory="test",
@@ -143,21 +145,14 @@ async def test_view_note_with_memory_url(app, test_project):
 @pytest.mark.asyncio
 async def test_view_note_not_found(app, test_project):
     """Test viewing a non-existent note returns error without artifact."""
-    # Try to view non-existent note
-    result = await view_note("NonExistent Note", project=test_project.name)
-
-    # Should return error message without artifact instructions
-    assert "# Note Not Found" in result
-    assert "NonExistent Note" in result
-    assert "Display this note as a markdown artifact" not in result  # No artifact for errors
-    assert "Titles and permalinks must match" in result
-    assert 'search_notes(query="NonExistent Note"' in result
+    with pytest.raises(Refusal, match="NOT_FOUND"):
+        await view_note("NonExistent Note", project=test_project.name)
 
 
 @pytest.mark.asyncio
 async def test_view_note_project_parameter(app, test_project):
     """Test viewing a note with project parameter."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Project Test",
         directory="test",
@@ -177,10 +172,10 @@ async def test_view_note_project_parameter(app, test_project):
 async def test_view_note_artifact_identifier_unique(app, test_project):
     """Test that different notes are retrieved correctly with unique identifiers."""
     # Create two notes
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Note One", directory="test", content="Content one"
     )
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Note Two", directory="test", content="Content two"
     )
 
@@ -199,7 +194,7 @@ async def test_view_note_artifact_identifier_unique(app, test_project):
 async def test_view_note_fallback_identifier_as_title(app, test_project):
     """Test that view_note uses identifier as title when no title is extractable."""
     # Create a note with no clear title structure
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Simple Note",
         directory="test",
@@ -217,7 +212,7 @@ async def test_view_note_fallback_identifier_as_title(app, test_project):
 @pytest.mark.asyncio
 async def test_view_note_direct_success(app, test_project):
     """Direct permalink lookup should succeed without mocks via the full integration path."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",

@@ -258,10 +258,10 @@ def test_recent_activity_format_project_output_no_results():
     )
     assert "No recent activity in 'proj' within 7d" in out
     # Empty orientation call carries the offer-not-act first-note guidance.
-    assert "write_note" in out
+    assert "bm_write" in out
     assert "wait for them to agree" in out
     # Without a route-safe id, examples fall back to the display name.
-    assert 'write_note(project="proj"' in out
+    assert 'bm_write(project="proj"' in out
 
     # With an external id, examples route by id so they cannot hit a same-named project in
     # another cloud workspace.
@@ -272,9 +272,9 @@ def test_recent_activity_format_project_output_no_results():
         page=1,
         project_id="ext-123",
     )
-    assert 'write_note(project_id="ext-123"' in out_routed
-    assert 'recent_activity(project_id="ext-123"' in out_routed
-    assert 'search_notes(project_id="ext-123"' in out_routed
+    assert 'bm_write(project="ext-123"' in out_routed
+    assert 'bm_project(command="recent", project="ext-123"' in out_routed
+    assert 'bm_search(project="ext-123"' in out_routed
     assert 'project="proj"' not in out_routed
 
 
@@ -297,8 +297,8 @@ def test_recent_activity_format_project_output_filtered_no_results():
     )
 
     assert "No recent activity matched the requested type filter" in out
-    assert "omit `type`" in out
-    assert "write_note" not in out
+    assert "omit `items`" in out
+    assert "bm_write" not in out
     assert "wait for them to agree" not in out
 
 
@@ -321,7 +321,7 @@ def test_recent_activity_format_project_output_later_page_no_results():
 
     assert "No recent activity was found on page 3" in out
     assert "Try page=2 or return to page=1" in out
-    assert "write_note" not in out
+    assert "bm_write" not in out
     assert "wait for them to agree" not in out
 
 
