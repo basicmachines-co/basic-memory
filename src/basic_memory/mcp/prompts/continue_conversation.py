@@ -7,10 +7,12 @@ providing context from previous interactions to maintain continuity.
 from textwrap import dedent
 from typing import Any, Annotated, Optional
 
+from fastmcp import Context
 from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.project_context import resolve_project_parameter
 from basic_memory.mcp.tools.projects import bm_project
 from basic_memory.mcp.tools.ranked_search import bm_search
 
@@ -25,6 +27,10 @@ async def continue_conversation(
         Optional[str],
         Field(description="How far back to look for activity (e.g. '1d', '1 week')"),
     ] = None,
+    project: Annotated[
+        str | None, Field(description="Project to search; omitted uses the configured default")
+    ] = None,
+    context: Context | None = None,
 ) -> str:
     """Continue a previous conversation or work session.
 
@@ -34,6 +40,8 @@ async def continue_conversation(
     Args:
         topic: Topic or keyword to search for (optional)
         timeframe: How far back to look for activity
+        project: Explicit project, or the configured default
+        context: MCP request context
 
     Returns:
         Context from previous sessions on this topic
@@ -42,7 +50,11 @@ async def continue_conversation(
 
     if topic:
         # Use json format to get structured data for result counting and branching
-        result = await bm_search(query=topic, since=timeframe, output_format="json")
+        # Choose the prompt's default explicitly before using the stricter search tool.
+        project = await resolve_project_parameter(project=project, context=context)
+        result = await bm_search(
+            query=topic, since=timeframe, project=project, context=context, output_format="json"
+        )
 
         if isinstance(result, dict):
             results = result.get("results", [])
@@ -55,7 +67,9 @@ async def continue_conversation(
     else:
         # No topic — show recent activity
         effective_timeframe = timeframe or "7d"
-        activity_text = await bm_project(command="recent", since=effective_timeframe)
+        activity_text = await bm_project(
+            command="recent", since=effective_timeframe, project=project, context=context
+        )
         context_text = str(activity_text)
         result_count = -1  # Signals we used recent_activity
 
@@ -75,6 +89,9 @@ async def continue_conversation(
 
         ## Next Steps
     """)
+
+    if project is not None:
+        prompt += f"\nPass `project={project!r}` on follow-up note and search calls.\n"
 
     if topic and result_count > 0:
         prompt += dedent(f"""
