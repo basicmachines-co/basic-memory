@@ -15,14 +15,14 @@ opens a database connection.
 """
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, override
 
 import logfire
 from fastapi import Depends, Request
-from fastapi.dependencies.utils import get_flat_dependant
+from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from pydantic import TypeAdapter
 from redis_fastapi.cache import CacheHitException, cache
@@ -300,7 +300,11 @@ async def _request_identity(request: Request) -> str:
 
 def _validated_body(request: Request, raw_body: object) -> object:
     """The QUERY body as the route will see it, raising ValueError when invalid."""
-    body_params = get_flat_dependant(_api_route(request).dependant).body_params
+    body_params = [
+        param
+        for dependant in _route_dependencies(_api_route(request).dependant)
+        for param in dependant.body_params
+    ]
     if len(body_params) != 1:
         raise TypeError("cached QUERY routes take exactly one body model")
     adapter = _body_adapter(body_params[0].field_info.annotation)
@@ -324,8 +328,22 @@ def _api_route(request: Request) -> APIRoute:
 
 def _declared_query_params(request: Request) -> frozenset[str]:
     """Query parameter names the matched route and its dependencies read."""
-    dependant = get_flat_dependant(_api_route(request).dependant)
-    return frozenset(param.alias for param in dependant.query_params)
+    return frozenset(
+        param.alias
+        for dependant in _route_dependencies(_api_route(request).dependant)
+        for param in dependant.query_params
+    )
+
+
+def _route_dependencies(dependant: Dependant) -> Iterator[Dependant]:
+    """Include nested dependencies so their inputs cannot collide in cache keys.
+
+    FastAPI no longer exposes get_flat_dependant; walk the route's dependency
+    tree directly instead of constructing a synthetic flattened dependant.
+    """
+    yield dependant
+    for dependency in dependant.dependencies:
+        yield from _route_dependencies(dependency)
 
 
 # --- Groups by route ---
