@@ -73,7 +73,12 @@ def setup(tau: ExtensionAPI) -> None:
     tools = discover_sync(settings)
     connection = McpConnection(settings)
     lifecycle = MemoryLifecycle(tau, settings, connection)
+    native_names = {tool.name for tool in tools if tool.name.startswith("bm_")}
     for tool in tools:
+        # Tau keeps the first registration for a name. Skip a compatibility
+        # alias when the server advertises that native bm_* tool, in either order.
+        if not tool.name.startswith("bm_") and f"bm_{tool.name}" in native_names:
+            continue
         tau.register_tool(make_tool(connection, tool))
     tau.add_prompt_section(
         "Basic Memory",
