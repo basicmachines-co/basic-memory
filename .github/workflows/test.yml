@@ -20,7 +20,7 @@ env:
   # pull_request trigger) select only impacted tests from the cached testmon
   # baseline (branch cache falling back to main's full-run recording). Pushes
   # to main run the full suite with --testmon-noselect to refresh the baseline.
-  BASIC_MEMORY_TESTMON_FLAGS: ${{ github.ref_name == 'main' && '--testmon-noselect' || '--testmon --testmon-forceselect' }}
+  BASIC_MEMORY_ENV: test
 
 # Every job that builds a uv environment sets UV_PYTHON. Without it, `uv run`
 # — which every `just` recipe shells out to — resolves its interpreter from
@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      pytest-flags: ${{ (github.ref_name == 'main' || steps.filter.outputs.full == 'true') && '--import-mode=importlib --testmon-noselect' || '--import-mode=importlib --testmon --testmon-forceselect' }}
     steps:
       - uses: actions/checkout@v6
       - id: filter
@@ -53,6 +54,23 @@ jobs:
               - 'uv.lock'
               - 'justfile'
               - '.github/workflows/test.yml'
+              - 'scripts/**'
+              - '.test_durations'
+            # Testmon tracks Python execution, not arbitrary resource reads or
+            # subprocesses. Changes to test inputs/configuration require a full run.
+            full:
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'justfile'
+              - '.github/workflows/test.yml'
+              - 'scripts/**'
+              - '.test_durations'
+              - 'tests/**'
+              - 'test-int/**'
+              - 'src/**/*.md'
+              - 'src/**/*.json'
+              - 'src/**/*.yaml'
+              - 'src/**/*.yml'
 
   static-checks:
     needs: changes
@@ -101,11 +119,12 @@ jobs:
   test-sqlite-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/4)
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        group: [1, 2, 3, 4]
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.12", "3.13", "3.14"]
         exclude:
@@ -121,6 +140,7 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
+      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
@@ -147,11 +167,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-main-
-            ${{ runner.os }}-testmon-sqlite-unit-py${{ matrix.python-version }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -163,16 +182,26 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-unit-sqlite
+          just test-unit-sqlite --splits 4 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-sqlite-unit-${{ runner.os }}-py${{ matrix.python-version }}-g${{ matrix.group }}
+          path: |
+            test-results.xml
+            test-files.txt
 
   test-sqlite-integration:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/2)
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        group: [1, 2]
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.12", "3.13", "3.14"]
         exclude:
@@ -188,6 +217,7 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
+      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
@@ -214,11 +244,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-main-
-            ${{ runner.os }}-testmon-sqlite-integration-py${{ matrix.python-version }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -230,22 +259,31 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-int-sqlite
+          just test-int-sqlite --splits 2 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-sqlite-integration-${{ runner.os }}-py${{ matrix.python-version }}-g${{ matrix.group }}
+          path: |
+            test-results.xml
+            test-files.txt
 
   test-postgres-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/3)
+    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/6)
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         # Shard the largest suite across parallel jobs: each shard is a full job
-        # with its own Postgres service running 1/3 of the collection, balanced
+        # with its own Postgres service running 1/6 of the files, balanced
         # by the recorded .test_durations (refresh with `just test-durations-postgres`).
         # Postgres runs on the latest Python only — the SQLite matrix carries
         # Python-version coverage; Postgres carries backend coverage.
-        group: [1, 2, 3]
+        group: [1, 2, 3, 4, 5, 6]
         python-version: ["3.14"]
     runs-on: ubuntu-latest
     services:
@@ -263,6 +301,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
+      BASIC_MEMORY_TEST_POSTGRES: "1"
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
@@ -291,12 +331,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-main-
-            ${{ runner.os }}-testmon-postgres-unit-py${{ matrix.python-version }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -308,16 +346,26 @@ jobs:
 
       - name: Run tests
         run: |
-          BASIC_MEMORY_PYTEST_SPLIT_FLAGS="--splits 3 --group ${{ matrix.group }}" just test-unit-postgres
+          just test-unit-postgres --splits 6 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-postgres-unit-${{ runner.os }}-py${{ matrix.python-version }}-g${{ matrix.group }}
+          path: |
+            test-results.xml
+            test-files.txt
 
   test-postgres-integration:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Test Postgres Integration (Python ${{ matrix.python-version }})
+    name: Test Postgres Integration (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/4)
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
+        group: [1, 2, 3, 4]
         # Latest Python only: SQLite carries version coverage, Postgres carries
         # backend coverage.
         python-version: ["3.14"]
@@ -337,6 +385,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
+      BASIC_MEMORY_TEST_POSTGRES: "1"
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
@@ -365,11 +415,10 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-main-
-            ${{ runner.os }}-testmon-postgres-integration-py${{ matrix.python-version }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -381,7 +430,16 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-int-postgres
+          just test-int-postgres --splits 4 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-postgres-integration-${{ runner.os }}-py${{ matrix.python-version }}-g${{ matrix.group }}
+          path: |
+            test-results.xml
+            test-files.txt
 
   test-semantic:
     needs: changes
@@ -392,6 +450,7 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
+      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: "3.12"
 
     steps:
@@ -418,11 +477,11 @@ jobs:
             .testmondata
             .testmondata-shm
             .testmondata-wal
-          key: ${{ runner.os }}-testmon-semantic-py3.12-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-testmon-semantic-py3.12-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-semantic-py3.12-main-
-            ${{ runner.os }}-testmon-semantic-py3.12-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-${{ github.ref_name }}-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-main-
+            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-
 
       - name: Create virtual env
         run: |
@@ -434,7 +493,14 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-semantic
+          just test-semantic --durations=30 --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-py3.12
+          path: test-results.xml
 
   test-milvus:
     needs: changes

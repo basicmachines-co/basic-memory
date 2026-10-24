@@ -1,0 +1,257 @@
+"""Exercise CI partitioning and real testmon selection with isolated tiny suites."""
+
+import importlib.util
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "run_tests.py"
+SPEC = importlib.util.spec_from_file_location("run_tests", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+splitter = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(splitter)
+
+
+def test_partitions_are_balanced_disjoint_and_exhaustive() -> None:
+    files = [Path(f"tests/test_{index}.py") for index in range(6)]
+    durations = {f"{path}::test_example": float(index + 1) for index, path in enumerate(files)}
+    shards = splitter.split_files(files, durations, 3)
+    assert sorted(path for shard in shards for path in shard) == files
+    totals = [sum(durations[f"{path}::test_example"] for path in shard) for shard in shards]
+    assert totals == [7.0, 7.0, 7.0]
+    assert splitter.split_files(list(reversed(files)), durations, 3) == shards
+
+
+def test_new_files_are_included_and_obsolete_timings_are_ignored() -> None:
+    files = [Path("tests/test_known.py"), Path("tests/test_new.py")]
+    durations = {"tests/test_known.py::test_one": 5.0, "deleted.py::test_old": 1000.0}
+    assert splitter.split_files(files, durations, 2) == [[files[0]], [files[1]]]
+
+
+def test_cold_suite_balances_file_sizes(tmp_path: Path) -> None:
+    files = [tmp_path / f"test_{index}.py" for index in range(4)]
+    for index, path in enumerate(files):
+        path.write_text("#" * (index + 1))
+    shards = splitter.split_files(files, {}, 2)
+    assert [sum(path.stat().st_size for path in shard) for shard in shards] == [5, 5]
+
+
+def test_zero_duration_files_do_not_all_land_on_one_shard() -> None:
+    files = [Path(f"test_{index}.py") for index in range(4)]
+    durations = {f"{path}::test_one": 0.0 for path in files}
+    assert [len(shard) for shard in splitter.split_files(files, durations, 2)] == [2, 2]
+    with pytest.raises(ValueError, match="positive"):
+        splitter.split_files(files, durations, 0)
+
+
+def test_cli_rejects_missing_suite(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(tmp_path), "--groups", "2", "--group", "1"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "no test files found" in result.stderr
+
+
+def test_cli_lists_files_and_does_not_discover_tests_for_an_empty_shard(tmp_path: Path) -> None:
+    test_file = tmp_path / "test_example.py"
+    test_file.write_text("raise AssertionError('must not be imported')\n")
+    assigned = tmp_path / "assigned.txt"
+    command = [sys.executable, str(SCRIPT), str(tmp_path), "--splits", "2"]
+    listed = subprocess.run(
+        [*command, "--group", "1", "--list-files", "--file-list", str(assigned)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert listed.returncode == 0, listed.stderr
+    assert listed.stdout.strip() == test_file.as_posix()
+    assert assigned.read_text() == listed.stdout
+    empty = subprocess.run([*command, "--group", "2"], capture_output=True, text=True, check=False)
+    assert empty.returncode == 0, empty.stderr
+    assert "has no test files" in empty.stdout
+    invalid = subprocess.run(
+        [*command, "--group", "3"], capture_output=True, text=True, check=False
+    )
+    assert invalid.returncode == 2
+
+
+@pytest.mark.parametrize("exit_code", [1, 137])
+def test_runner_preserves_abrupt_pytest_exit(tmp_path: Path, exit_code: int) -> None:
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    (tmp_path / "test_exit.py").write_text(
+        f"import os\ndef test_exit():\n    os._exit({exit_code})\n"
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(tmp_path), "-p", "testmon.pytest_testmon", "-q"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == exit_code, result.stdout + result.stderr
+
+
+def test_real_testmon_shards_record_select_and_detect_changed_dependencies(tmp_path: Path) -> None:
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    source = tmp_path / "calculation.py"
+    source.write_text("def value():\n    return 1\n")
+    files = [tmp_path / f"test_{index}.py" for index in range(4)]
+    for index, path in enumerate(files):
+        path.write_text(
+            f"from calculation import value\ndef test_value_{index}():\n    assert value() == 1\n"
+        )
+    shards = splitter.split_files(files, {}, 2)
+
+    for group in range(len(shards)):
+        env = {
+            **os.environ,
+            "COVERAGE_CORE": "sysmon",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            "PYTHONPATH": str(tmp_path),
+            "TESTMON_DATAFILE": str(tmp_path / f".testmondata-{group}"),
+        }
+        command = [
+            sys.executable,
+            str(SCRIPT),
+            str(tmp_path),
+            "--splits",
+            "2",
+            "--group",
+            str(group + 1),
+            "-p",
+            "testmon.pytest_testmon",
+            "--import-mode=importlib",
+            "-q",
+        ]
+        for flags, expected in [
+            (["--testmon-noselect"], "2 passed"),
+            (["--testmon", "--testmon-forceselect"], "2 deselected"),
+        ]:
+            result = subprocess.run(
+                [*command, *flags],
+                cwd=tmp_path,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert expected in result.stdout
+
+    source.write_text("def value():\n    return 100\n")
+    for group in range(len(shards)):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                str(tmp_path),
+                "--splits",
+                "2",
+                "--group",
+                str(group + 1),
+                "-p",
+                "testmon.pytest_testmon",
+                "--import-mode=importlib",
+                "--testmon",
+                "--testmon-forceselect",
+                "-q",
+            ],
+            cwd=tmp_path,
+            env={
+                **os.environ,
+                "COVERAGE_CORE": "sysmon",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                "PYTHONPATH": str(tmp_path),
+                "TESTMON_DATAFILE": str(tmp_path / f".testmondata-{group}"),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "2 failed" in result.stdout
+
+
+def test_workflow_passes_selection_flags_to_every_cached_suite() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    assert "BASIC_MEMORY_TESTMON_FLAGS" not in workflow["env"]
+    for job in workflow["jobs"].values():
+        if not any(step.get("name") == "Cache pytest-testmon results" for step in job["steps"]):
+            continue
+        assert (
+            job["env"]["BASIC_MEMORY_PYTEST_FLAGS"] == "${{ needs.changes.outputs.pytest-flags }}"
+        )
+        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run tests")
+        assert "just test-" in run
+
+
+@pytest.mark.parametrize("exit_code", [1, 2, 137])
+def test_postgres_recipe_propagates_failed_or_killed_pytest(tmp_path: Path, exit_code: int) -> None:
+    # Replace only the external process: exercise the actual just recipe without
+    # starting a database or waiting ten minutes to reproduce a killed test run.
+    uv = tmp_path / "uv"
+    uv.write_text(f"#!/bin/sh\necho 'test process invoked'\nexit {exit_code}\n")
+    uv.chmod(0o755)
+    result = subprocess.run(
+        ["just", "test-int-postgres"],
+        cwd=ROOT,
+        env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "test process invoked" in result.stdout, result.stderr
+    assert result.returncode != 0
+
+
+def test_just_preserves_quoted_pytest_arguments(tmp_path: Path) -> None:
+    uv = tmp_path / "uv"
+    uv.write_text('#!/bin/sh\nprintf "<%s>\\n" "$@"\n')
+    uv.chmod(0o755)
+    result = subprocess.run(
+        ["just", "test-unit-sqlite", "-k", "first_case or second_case"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "BASIC_MEMORY_PYTEST_FLAGS": "--import-mode=importlib --testmon-noselect",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "<first_case or second_case>" in result.stdout
+    assert "<--testmon-noselect>" in result.stdout
+
+
+def test_refresh_records_the_environment_used_by_fast_test(tmp_path: Path) -> None:
+    uv = tmp_path / "uv"
+    uv.write_text('#!/bin/sh\nprintf "<%s>\\n" "$@"\n')
+    uv.chmod(0o755)
+    outputs = []
+    for recipe in ["testmon-refresh", "fast-test"]:
+        result = subprocess.run(
+            ["just", recipe],
+            cwd=ROOT,
+            env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        outputs.append(result.stdout)
+    assert "<--testmon-noselect>" in outputs[0]
+    assert "<--testmon-forceselect>" in outputs[1]
+    assert next(line for line in outputs[0].splitlines() if "--testmon-env=" in line) == next(
+        line for line in outputs[1].splitlines() if "--testmon-env=" in line
+    )

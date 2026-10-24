@@ -3,7 +3,7 @@
 PYTEST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_FLAGS", "--import-mode=importlib")
 TESTMON_SELECT_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_SELECT_FLAGS", "--import-mode=importlib --testmon --testmon-forceselect")
 TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS", "--import-mode=importlib --testmon-noselect")
-# CI shards the Postgres unit suite across parallel jobs via pytest-split
+# Optional file sharding, shared by local recipes and CI
 # (e.g. "--splits 3 --group 2"). Empty locally.
 PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
 
@@ -45,44 +45,35 @@ test-sqlite: test-unit-sqlite test-int-sqlite
 test-postgres: test-unit-postgres test-int-postgres
 
 # Run unit tests against SQLite
-test-unit-sqlite:
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests
+[positional-arguments]
+test-unit-sqlite *args:
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}}
 
-# Run unit tests against Postgres
-# Exit code 5 (no tests collected) is success: a pytest-split shard can be empty.
-test-unit-postgres:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} {{PYTEST_SPLIT_FLAGS}} tests || test $? -eq 5
+# Run unit tests against Postgres; e.g. just test-unit-postgres --splits 6 --group 1
+[positional-arguments]
+test-unit-postgres *args:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}}
 
-# Re-record Postgres unit test durations so CI's pytest-split shards stay balanced.
-# Without .test_durations the shards split by test count and the slowest one sets CI time.
+# Re-record Postgres unit test durations so CI's file shards stay balanced.
+# Without .test_durations the file splitter estimates work from file sizes.
 test-durations-postgres:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -q --no-cov --store-durations --durations-path .test_durations tests
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
-test-int-sqlite:
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
+[positional-arguments]
+test-int-sqlite *args:
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
-# Run integration tests against Postgres
-# Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
-# See: https://github.com/jlowin/fastmcp/issues/1311
-test-int-postgres:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # Use gtimeout (macOS/Homebrew) or timeout (Linux)
-    TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
-    if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int' || test $? -eq 137
-    else
-        echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark" test-int
-    fi
+# Run integration tests against Postgres. Per-test and CI job timeouts fail normally;
+# a killed process does not prove that the selected suite finished successfully.
+[positional-arguments]
+test-int-postgres *args:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
 # Fast test selection for local iteration; run targeted tests explicitly when possible.
 fast-test *args: testmon-seed
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{TESTMON_SELECT_FLAGS}} --testmon-env=local {{args}}
+    BASIC_MEMORY_ENV=test COVERAGE_CORE=ctrace uv run pytest -p pytest_mock -v --no-cov {{TESTMON_SELECT_FLAGS}} --testmon-env=local-ctrace-v1 {{args}}
 
 # Run tests impacted by recent changes (requires pytest-testmon).
 # Backcompat alias for the fast-test recipe.
@@ -93,11 +84,12 @@ testmon *args:
 testmon-seed:
     uv run python scripts/testmon_cache.py seed
 
-# Refresh the shared pytest-testmon cache from a full backend test run.
+# Record the same collection and environment that fast-test selects from.
+# Backend/shard-specific baselines can be recorded with each test recipe's --testmon-noselect.
 testmon-refresh:
     #!/usr/bin/env bash
     set -euo pipefail
-    BASIC_MEMORY_PYTEST_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just test
+    BASIC_MEMORY_TESTMON_SELECT_FLAGS="{{TESTMON_REFRESH_FLAGS}}" just fast-test
     uv run python scripts/testmon_cache.py refresh
 
 # Show local and shared pytest-testmon cache locations.
@@ -385,8 +377,9 @@ test-benchmark:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m benchmark tests test-int
 
 # Run semantic search quality benchmarks (all combos)
-test-semantic:
-    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic test-int/semantic/
+[positional-arguments]
+test-semantic *args:
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int/semantic {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic
 
 # Run semantic benchmarks with JSON artifact output, then show report
 test-semantic-report:
