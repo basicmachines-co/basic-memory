@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import Callable, Iterable
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from httpx import ASGITransport, AsyncClient as HttpxAsyncClient
 
 from basic_memory import db
@@ -250,6 +250,48 @@ async def _search_permalink_exact(
     result_permalink = matching_results[0].get("permalink")
     assert isinstance(result_permalink, str)
     return result_permalink
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["local", "personal-legacy", "team-legacy", "team"])
+@pytest.mark.parametrize("glob", [False, True])
+async def test_memory_search_normalizes_display_project_prefix(
+    mcp_server: FastMCP,
+    alternate_project: Project,
+    app_config: BasicMemoryConfig,
+    personal_workspace: WorkspaceInfo,
+    team_workspace: WorkspaceInfo,
+    route_workspaces: Callable[..., AbstractContextManager[None]],
+    scope: str,
+    glob: bool,
+) -> None:
+    """Display-name prefixes match canonical stored IDs without changing their shape."""
+    _save_permalink_config(app_config, include_project=True, default_project=None)
+    title = "Display Prefix Search"
+    project = alternate_project.name
+    short_permalink = "permalink-suite/display-prefix-search"
+    expected_permalink = f"{project}/{short_permalink}"
+    if scope == "team":
+        project = f"{team_workspace.slug}/{project}"
+        expected_permalink = f"{team_workspace.slug}/{expected_permalink}"
+    else:
+        await _write_json(mcp_server, project=project, title=title)
+
+    workspace = personal_workspace if scope == "personal-legacy" else team_workspace
+    with nullcontext() if scope == "local" else route_workspaces(workspace):
+        if scope == "team":
+            await _write_json(mcp_server, project=project, title=title)
+        prefix = project.replace(alternate_project.name, "Alternate Project")
+        suffix = "permalink-suite/*" if glob else short_permalink
+        payload = await _call_json(
+            mcp_server,
+            "bm_search",
+            {
+                "query": f"memory://{prefix}/{suffix}",
+                "output_format": "json",
+            },
+        )
+        assert [row["permalink"] for row in payload["results"]] == [expected_permalink]
 
 
 @pytest.mark.asyncio
