@@ -185,8 +185,12 @@ async def test_duplicate_entity_row_cannot_hide_a_missing_one(
 @pytest.mark.asyncio
 async def test_missing_index_is_an_error(session_maker, test_project, db_backend):
     async with db.scoped_session(session_maker) as session:
-        cascade = " CASCADE" if db_backend == "postgres" else ""
-        await session.execute(text(f"DROP TABLE search_index{cascade}"))
+        if db_backend == "postgres":
+            # Drop the chunk table too: CASCADE alone strips its foreign key and
+            # leaves the table, so the next test's reset skips recreating it and
+            # its rows stop being cleared with search_index.
+            await session.execute(text("DROP TABLE IF EXISTS search_index_fts_chunks"))
+        await session.execute(text("DROP TABLE search_index"))
     with pytest.raises(Exception, match="search_index"):
         await inspect_index_integrity(session_maker, test_project.id)
 

@@ -144,6 +144,9 @@ def _postgres_reset_tables() -> list[str]:
     """
     return [table.name for table in Base.metadata.sorted_tables] + [
         "search_index",
+        # Named, not left to search_index's CASCADE: a test that drops tables can
+        # leave this one without its foreign key, and its rows would then leak.
+        "search_index_fts_chunks",
         "search_vector_chunks",
     ]
 
