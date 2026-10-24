@@ -613,7 +613,7 @@ export class BmClient {
     if (query) args.query = query
     const filters = { ...metadata?.filters }
     // Explicit predicates take precedence over convenience shortcuts.
-    if (metadata?.tags && !("tags" in filters))
+    if (metadata?.tags?.length && !("tags" in filters))
       filters.tags = { $contains: metadata.tags }
     if (metadata?.status && !("status" in filters))
       filters.status = metadata.status
