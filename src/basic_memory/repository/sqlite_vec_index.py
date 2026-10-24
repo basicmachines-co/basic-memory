@@ -252,45 +252,58 @@ class SQLiteVecIndex:
             )
             await session.commit()
 
+    # SQLite caps expression-tree depth at SQLITE_MAX_EXPR_DEPTH (1000). Each
+    # pending-row predicate is a 4-term AND under an OR chain, so a single
+    # statement fails above ~995 deletions (#1850). Batch below that ceiling.
+    _DELETE_BATCH_SIZE = 200
+
     async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
-            params: dict[str, object] = {"project_id": project_id}
-            predicates: list[str] = []
-            for index, record in enumerate(records):
-                params[f"entity_id_{index}"] = record.key.entity_id
-                params[f"chunk_key_{index}"] = record.key.chunk_key
-                params[f"source_hash_{index}"] = record.source_hash
-                predicates.append(
-                    f"(entity_id = :entity_id_{index} "
-                    f"AND chunk_key = :chunk_key_{index} "
-                    f"AND source_hash = :source_hash_{index} "
-                    "AND embedding_status = 'pending')"
-                )
-            result = await session.execute(
-                text(
-                    "UPDATE search_vector_chunks SET source_hash = source_hash "
-                    "WHERE project_id = :project_id AND ("
-                    + " OR ".join(predicates)
-                    + ") RETURNING id"
-                ),
-                params,
-            )
-            rowids = [int(row_id) for row_id in result.scalars().all()]
-            if rowids:
-                params = {f"rowid_{index}": rowid for index, rowid in enumerate(rowids)}
-                placeholders = ", ".join(f":rowid_{index}" for index in range(len(rowids)))
-                await session.execute(
-                    text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
+            all_rowids: list[int] = []
+            for start in range(0, len(records), self._DELETE_BATCH_SIZE):
+                batch = records[start : start + self._DELETE_BATCH_SIZE]
+                params: dict[str, object] = {"project_id": project_id}
+                predicates: list[str] = []
+                for index, record in enumerate(batch):
+                    params[f"entity_id_{index}"] = record.key.entity_id
+                    params[f"chunk_key_{index}"] = record.key.chunk_key
+                    params[f"source_hash_{index}"] = record.source_hash
+                    predicates.append(
+                        f"(entity_id = :entity_id_{index} "
+                        f"AND chunk_key = :chunk_key_{index} "
+                        f"AND source_hash = :source_hash_{index} "
+                        "AND embedding_status = 'pending')"
+                    )
+                result = await session.execute(
+                    text(
+                        "UPDATE search_vector_chunks SET source_hash = source_hash "
+                        "WHERE project_id = :project_id AND ("
+                        + " OR ".join(predicates)
+                        + ") RETURNING id"
+                    ),
                     params,
                 )
-                await session.execute(
-                    text(f"DELETE FROM search_vector_chunks WHERE id IN ({placeholders})"),
-                    params,
-                )
+                all_rowids.extend(int(row_id) for row_id in result.scalars().all())
+            if all_rowids:
+                # IN-lists are shallow; still batch to keep statement size bounded.
+                for start in range(0, len(all_rowids), self._DELETE_BATCH_SIZE):
+                    batch_ids = all_rowids[start : start + self._DELETE_BATCH_SIZE]
+                    params = {f"rowid_{index}": rowid for index, rowid in enumerate(batch_ids)}
+                    placeholders = ", ".join(f":rowid_{index}" for index in range(len(batch_ids)))
+                    await session.execute(
+                        text(
+                            f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"
+                        ),
+                        params,
+                    )
+                    await session.execute(
+                        text(f"DELETE FROM search_vector_chunks WHERE id IN ({placeholders})"),
+                        params,
+                    )
                 await session.commit()
 
     async def delete_entity(self, project_id: int, entity_id: int) -> None:
