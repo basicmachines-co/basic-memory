@@ -16,10 +16,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  # Branch builds (PRs arrive as push events — this workflow has no
-  # pull_request trigger) select only impacted tests from the cached testmon
-  # baseline (branch cache falling back to main's full-run recording). Pushes
-  # to main run the full suite with --testmon-noselect to refresh the baseline.
+  # CI always runs the full suite, partitioned across parallel jobs.
   BASIC_MEMORY_ENV: test
 
 # Every job that builds a uv environment sets UV_PYTHON. Without it, `uv run`
@@ -35,7 +32,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
-      pytest-flags: ${{ (github.ref_name == 'main' || steps.filter.outputs.full == 'true') && '--import-mode=importlib --testmon-noselect' || '--import-mode=importlib --testmon --testmon-forceselect' }}
     steps:
       - uses: actions/checkout@v6
       - id: filter
@@ -56,21 +52,6 @@ jobs:
               - '.github/workflows/test.yml'
               - 'scripts/**'
               - '.test_durations'
-            # Testmon tracks Python execution, not arbitrary resource reads or
-            # subprocesses. Changes to test inputs/configuration require a full run.
-            full:
-              - 'pyproject.toml'
-              - 'uv.lock'
-              - 'justfile'
-              - '.github/workflows/test.yml'
-              - 'scripts/**'
-              - '.test_durations'
-              - 'tests/**'
-              - 'test-int/**'
-              - 'src/**/*.md'
-              - 'src/**/*.json'
-              - 'src/**/*.yaml'
-              - 'src/**/*.yml'
 
   static-checks:
     needs: changes
@@ -168,7 +149,6 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
-      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
@@ -187,18 +167,6 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
-
-      - name: Cache pytest-testmon results
-        uses: actions/cache@v4
-        with:
-          path: |
-            .testmondata
-            .testmondata-shm
-            .testmondata-wal
-          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -245,7 +213,6 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
-      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
@@ -264,18 +231,6 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
-
-      - name: Cache pytest-testmon results
-        uses: actions/cache@v4
-        with:
-          path: |
-            .testmondata
-            .testmondata-shm
-            .testmondata-wal
-          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-sqlite-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -329,7 +284,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       BASIC_MEMORY_TEST_POSTGRES: "1"
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
@@ -351,18 +305,6 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
-
-      - name: Cache pytest-testmon results
-        uses: actions/cache@v4
-        with:
-          path: |
-            .testmondata
-            .testmondata-shm
-            .testmondata-wal
-          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-unit-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -413,7 +355,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       BASIC_MEMORY_TEST_POSTGRES: "1"
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
@@ -435,18 +376,6 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
-
-      - name: Cache pytest-testmon results
-        uses: actions/cache@v4
-        with:
-          path: |
-            .testmondata
-            .testmondata-shm
-            .testmondata-wal
-          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-postgres-integration-py${{ matrix.python-version }}-g${{ matrix.group }}-main-
 
       - name: Create virtual env
         run: |
@@ -478,7 +407,6 @@ jobs:
 
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
-      BASIC_MEMORY_PYTEST_FLAGS: ${{ needs.changes.outputs.pytest-flags }}
       UV_PYTHON: "3.12"
 
     steps:
@@ -497,19 +425,6 @@ jobs:
           pip install uv
 
       - uses: extractions/setup-just@v4
-
-      - name: Cache pytest-testmon results
-        uses: actions/cache@v4
-        with:
-          path: |
-            .testmondata
-            .testmondata-shm
-            .testmondata-wal
-          key: ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-${{ github.ref_name }}-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-main-
-            ${{ runner.os }}-testmon-v2-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/run_tests.py', '.test_durations', 'tests/**/conftest.py', 'test-int/**/conftest.py') }}-semantic-py3.12-
 
       - name: Create virtual env
         run: |

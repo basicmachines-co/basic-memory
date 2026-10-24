@@ -1,4 +1,4 @@
-"""Exercise CI partitioning and real testmon selection with isolated tiny suites."""
+"""Exercise complete CI partitions and the separate local incremental recipes."""
 
 import importlib.util
 import os
@@ -90,7 +90,7 @@ def test_runner_preserves_abrupt_pytest_exit(tmp_path: Path, exit_code: int) -> 
         f"import os\ndef test_exit():\n    os._exit({exit_code})\n"
     )
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), str(tmp_path), "-p", "testmon.pytest_testmon", "-q"],
+        [sys.executable, str(SCRIPT), str(tmp_path), "-q"],
         cwd=tmp_path,
         env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         capture_output=True,
@@ -100,98 +100,41 @@ def test_runner_preserves_abrupt_pytest_exit(tmp_path: Path, exit_code: int) -> 
     assert result.returncode == exit_code, result.stdout + result.stderr
 
 
-def test_real_testmon_shards_record_select_and_detect_changed_dependencies(tmp_path: Path) -> None:
+def test_shards_run_all_tests_without_testmon_or_tracing(tmp_path: Path) -> None:
     (tmp_path / "pytest.ini").write_text("[pytest]\n")
-    source = tmp_path / "calculation.py"
-    source.write_text("def value():\n    return 1\n")
-    files = [tmp_path / f"test_{index}.py" for index in range(4)]
-    for index, path in enumerate(files):
-        path.write_text(
-            f"from calculation import value\ndef test_value_{index}():\n    assert value() == 1\n"
+    for index in range(4):
+        (tmp_path / f"test_{index}.py").write_text(
+            f"import sys\ndef test_value_{index}():\n    assert sys.gettrace() is None\n"
         )
-    shards = splitter.split_files(files, {}, 2)
-
-    for group in range(len(shards)):
-        env = {
-            **os.environ,
-            "COVERAGE_CORE": "sysmon",
-            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-            "PYTHONPATH": str(tmp_path),
-            "TESTMON_DATAFILE": str(tmp_path / f".testmondata-{group}"),
-        }
-        command = [
-            sys.executable,
-            str(SCRIPT),
-            str(tmp_path),
-            "--splits",
-            "2",
-            "--group",
-            str(group + 1),
-            "-p",
-            "testmon.pytest_testmon",
-            "--import-mode=importlib",
-            "-q",
-        ]
-        for flags, expected in [
-            (["--testmon-noselect"], "2 passed"),
-            (["--testmon", "--testmon-forceselect"], "2 deselected"),
-        ]:
+    for _ in range(2):
+        for group in (1, 2):
             result = subprocess.run(
-                [*command, *flags],
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    str(tmp_path),
+                    "--splits",
+                    "2",
+                    "--group",
+                    str(group),
+                    "-q",
+                ],
                 cwd=tmp_path,
-                env=env,
+                env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
                 capture_output=True,
                 text=True,
                 check=False,
             )
             assert result.returncode == 0, result.stdout + result.stderr
-            assert expected in result.stdout
-
-    source.write_text("def value():\n    return 100\n")
-    for group in range(len(shards)):
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT),
-                str(tmp_path),
-                "--splits",
-                "2",
-                "--group",
-                str(group + 1),
-                "-p",
-                "testmon.pytest_testmon",
-                "--import-mode=importlib",
-                "--testmon",
-                "--testmon-forceselect",
-                "-q",
-            ],
-            cwd=tmp_path,
-            env={
-                **os.environ,
-                "COVERAGE_CORE": "sysmon",
-                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-                "PYTHONPATH": str(tmp_path),
-                "TESTMON_DATAFILE": str(tmp_path / f".testmondata-{group}"),
-            },
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 1, result.stdout + result.stderr
-        assert "2 failed" in result.stdout
+            assert "2 passed" in result.stdout
+    assert not (tmp_path / ".testmondata").exists()
 
 
-def test_workflow_passes_selection_flags_to_every_cached_suite() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
-    assert "BASIC_MEMORY_TESTMON_FLAGS" not in workflow["env"]
-    for job in workflow["jobs"].values():
-        if not any(step.get("name") == "Cache pytest-testmon results" for step in job["steps"]):
-            continue
-        assert (
-            job["env"]["BASIC_MEMORY_PYTEST_FLAGS"] == "${{ needs.changes.outputs.pytest-flags }}"
-        )
-        run = next(step["run"] for step in job["steps"] if step.get("name") == "Run tests")
-        assert "just test-" in run
+def test_ci_has_no_dependency_selection_or_testmon_caches() -> None:
+    workflow_text = (ROOT / ".github/workflows/test.yml").read_text()
+    assert "testmon" not in workflow_text
+    workflow = yaml.safe_load(workflow_text)
+    assert "pytest-flags" not in workflow["jobs"]["changes"]["outputs"]
 
 
 @pytest.mark.parametrize("exit_code", [1, 2, 137])

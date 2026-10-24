@@ -1,7 +1,7 @@
 # Test performance and incremental runs
 
-CI and local runs use the same root justfile recipes. Full runs remain the default;
-incremental selection and sharding are explicit options.
+CI and local runs use the same root justfile recipes. CI runs complete suites in parallel shards without dependency tracing or caches.
+Local incremental selection remains available through `just fast-test`.
 
 ## Local iteration
 
@@ -10,10 +10,6 @@ incremental selection and sharding are explicit options.
 # to the shared Git cache. This is intentionally a full, potentially slow run.
 just testmon-refresh
 just fast-test
-
-# Record/select within one backend suite instead.
-just test-unit-sqlite --testmon-noselect
-just test-unit-sqlite --testmon --testmon-forceselect
 
 # Run the same shard as CI, or inspect its assigned files without executing tests.
 just test-unit-sqlite --splits 4 --group 1
@@ -25,27 +21,18 @@ just test-unit-sqlite -k 'test_ci_test_selection or test_pr_title_workflow'
 just test-int-postgres --durations=30 --junitxml=postgres-results.xml
 ```
 
-The suite recipes keep separate testmon environments for the backend, suite, and
-shard topology. Recording an unsharded baseline does not populate a sharded baseline.
 `testmon-refresh` records the same collection/environment as `fast-test`; it does not
 also execute the Postgres suite. Use `just test-postgres` for full Postgres validation.
+Local `fast-test` retains `COVERAGE_CORE=ctrace` and its separate testmon environment
+so repeated per-test dependencies are recorded correctly on Python 3.14.
 
-On Python 3.14, coverage.py's default sysmon tracer misses repeated per-test contexts
-with the current testmon collector. The runner and `fast-test` use `COVERAGE_CORE=ctrace`.
-New environment names prevent reuse of older dependency recordings. The regression
-test runs two independent shards, confirms unchanged tests are skipped, then changes
-a shared function and requires every affected test to run and fail.
+## CI partitioning
 
-## CI partitioning and selection
-
-`scripts/run_tests.py` assigns files before pytest or testmon can omit stable tests.
-All jobs compute the same disjoint partition from the complete file list and committed
+`scripts/run_tests.py` assigns complete files to disjoint groups using committed
 `.test_durations`. Files with recorded durations are balanced by their aggregate time;
 new files use the suite's mean file time. A suite with no timing history uses file sizes.
 `just test-durations-postgres` refreshes the existing unit timing file.
-
-This ordering matters: selecting tests first and then splitting each job's different
-collection can omit tests. The partition also keeps tests sharing a file together.
+The partition keeps tests sharing a file together and runs every assigned test.
 
 Current parallelism:
 
@@ -56,18 +43,10 @@ Current parallelism:
 | Postgres unit | 6 |
 | Postgres integration | 4 |
 
-Main records full dependency baselines. Branches select impacted tests, except changes
-to test inputs, fixtures, dependencies, test infrastructure, or listed non-Python source
-resources force full runs. Dependency tracking is an optimization, not a replacement
-for the full main gate. Cache keys separate platform, Python version, suite, shard,
-dependency/fixture versions, and partition implementation/timings.
-
-`just test-cli-smoke` always runs the small CLI startup/exit suite, with testmon
-disabled. CI runs it separately on every code change, including source-only PRs.
-It covers help/version startup, initialization, schema validation, and reset exit
-behavior. Other subprocess-only dependencies can still evade incremental selection;
-the full main suite remains the broader check. This intentionally keeps the PR
-smoke gate small rather than tracing every child process.
+Both main and branch builds run complete suites. There are no testmon baselines,
+selection flags, or dependency caches in CI. Subprocess tests are included normally.
+`just test-cli-smoke` also provides a small, early startup/exit check covering
+help/version startup, initialization, schema validation, and reset exit behavior.
 
 Each job publishes its assigned file list and JUnit results and prints its 30 slowest
 test phases. Use those results to evaluate fixture costs and duplicate scenarios before
@@ -97,3 +76,7 @@ not be reported as a successful full run.
 
 No tests were removed or moved off the PR gate in this change. An after-change CI run
 is still required to measure the actual wall-clock improvement and shard imbalance.
+
+The first traced CI trial hit heavy-test timeouts. Locally, the same overlapping-save
+test passed in 52.95 seconds without tracing and 136.05 seconds with testmon C tracing.
+CI therefore uses sharding alone; local incremental selection remains opt-in.

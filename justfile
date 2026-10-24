@@ -85,7 +85,7 @@ testmon-seed:
     uv run python scripts/testmon_cache.py seed
 
 # Record the same collection and environment that fast-test selects from.
-# Backend/shard-specific baselines can be recorded with each test recipe's --testmon-noselect.
+# CI's sharded recipes run complete suites independently of this local cache.
 testmon-refresh:
     #!/usr/bin/env bash
     set -euo pipefail

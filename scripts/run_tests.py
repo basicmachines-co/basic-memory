@@ -1,13 +1,7 @@
-"""Run the justfile test suites, optionally sharding before testmon selects tests.
-
-Every job computes the same partition from repository files and committed timings.
-Splitting pytest's collected items instead is unsafe with independent testmon caches:
-each job can collect a different subset before pytest-split assigns ownership.
-"""
+"""Run complete justfile test suites in optional timing-balanced file shards."""
 
 import argparse
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -70,21 +64,14 @@ def main() -> int:
         print(f"Shard {args.group}/{args.groups} has no test files")
         return 0
 
-    postgres = os.environ.get("BASIC_MEMORY_TEST_POSTGRES", "").lower() in ("1", "true", "yes")
-    backend = "postgres" if postgres else "sqlite"
-    environment = f"{backend}-{args.root.name}-{args.group}of{args.groups}-ctrace-v1"
-    # Python 3.14 defaults to sysmon, which misses repeated per-test contexts
-    # with the current testmon collector. C tracing records every dependency.
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "pytest",
-            f"--testmon-env={environment}",
             *pytest_args,
             *map(str, selected),
         ],
-        env={**os.environ, "COVERAGE_CORE": "ctrace"},
         check=False,
     )
     return result.returncode if result.returncode >= 0 else 128 - result.returncode
