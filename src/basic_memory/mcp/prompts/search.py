@@ -6,10 +6,12 @@ These prompts help users search and explore their knowledge base.
 from textwrap import dedent
 from typing import Any, Annotated, Optional
 
+from fastmcp import Context
 from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.project_context import resolve_project_parameter
 from basic_memory.mcp.tools.ranked_search import bm_search
 
 
@@ -23,6 +25,10 @@ async def search_prompt(
         Optional[str],
         Field(description="How far back to search (e.g. '1d', '1 week')"),
     ] = None,
+    project: Annotated[
+        str | None, Field(description="Project to search; omitted uses the configured default")
+    ] = None,
+    context: Context | None = None,
 ) -> str:
     """Search across all content in basic-memory.
 
@@ -32,6 +38,8 @@ async def search_prompt(
     Args:
         query: The search text to look for
         timeframe: Optional timeframe to limit results (e.g. '1d', '1 week')
+        project: Explicit project, or the configured default
+        context: MCP request context
 
     Returns:
         Formatted search results with context
@@ -39,7 +47,11 @@ async def search_prompt(
     logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
 
     # Use json format to get structured data for result counting and formatting
-    result = await bm_search(query=query, since=timeframe, output_format="json")
+    # Prompts preserve their default-project workflow; bm_search requires explicit scope.
+    project = await resolve_project_parameter(project=project, context=context)
+    result = await bm_search(
+        query=query, since=timeframe, project=project, context=context, output_format="json"
+    )
 
     # Format the tool output into a prompt with guidance
     if isinstance(result, dict):
@@ -61,6 +73,8 @@ async def search_prompt(
         ---
 
         ## Next Steps
+
+        Pass `project={project!r}` on follow-up note and search calls.
 
         Based on these {result_count} results, you can:
 

@@ -13,7 +13,11 @@ from loguru import logger
 
 from basic_memory.mcp.client_info import is_openai_mcp_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.project_context import resolve_project_parameter
+from basic_memory.config import ConfigManager
+from basic_memory.mcp.project_context import (
+    detect_project_from_identifier_prefix,
+    resolve_project_parameter,
+)
 from basic_memory.mcp.tools.read import bm_read
 from basic_memory.mcp.refusals import Refusal
 from basic_memory.mcp.tools.ranked_search import bm_search
@@ -253,13 +257,19 @@ async def fetch(
     logger.debug(f"ChatGPT fetch request: id='{id}'")
 
     try:
-        # Let bm_read resolve the default project via get_project_client(),
-        # which works in both local mode (ConfigManager) and cloud mode (database).
+        # Folder separators do not establish project scope. Only a recognized
+        # project prefix overrides this connector's default-project workflow.
+        detected = await detect_project_from_identifier_prefix(id, ConfigManager().config, context)
+        project = (
+            detected.project_id or detected.project
+            if detected is not None
+            else await resolve_project_parameter(context=context)
+        )
         content = str(
             await bm_read(
                 identifier=_identifier_for_bm_read(id),
                 include_frontmatter=False,
-                project=await resolve_project_parameter(context=context) if "/" not in id else None,
+                project=project,
                 context=context,
             )
         )
