@@ -255,3 +255,31 @@ def test_refresh_records_the_environment_used_by_fast_test(tmp_path: Path) -> No
     assert next(line for line in outputs[0].splitlines() if "--testmon-env=" in line) == next(
         line for line in outputs[1].splitlines() if "--testmon-env=" in line
     )
+
+
+def test_cli_smoke_ignores_incremental_selection_flags(tmp_path: Path) -> None:
+    uv = tmp_path / "uv"
+    uv.write_text('#!/bin/sh\nprintf "<%s>\\n" "$@"\n')
+    uv.chmod(0o755)
+    result = subprocess.run(
+        ["just", "test-cli-smoke", "--durations=15"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "BASIC_MEMORY_PYTEST_FLAGS": "--testmon --testmon-forceselect",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "<no:pytest-testmon>" in result.stdout
+    assert "<--testmon>" not in result.stdout
+    assert "<--testmon-forceselect>" not in result.stdout
+    assert "<tests/cli/test_cli_tool_exit.py>" in result.stdout
+    assert "<--durations=15>" in result.stdout
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    job = workflow["jobs"]["test-cli-smoke"]
+    assert job["if"] == "needs.changes.outputs.code == 'true'"
+    assert any("just test-cli-smoke" in step.get("run", "") for step in job["steps"])

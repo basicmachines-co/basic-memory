@@ -96,6 +96,12 @@ testmon-refresh:
 testmon-status:
     uv run python scripts/testmon_cache.py status
 
+# Child-process dependencies are invisible to testmon. Always run this small
+# startup/exit gate, regardless of the ordinary suite's selection flags.
+[positional-arguments]
+test-cli-smoke *args:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -p no:pytest-testmon -q --no-cov --import-mode=importlib tests/cli/test_cli_tool_exit.py tests/cli/test_cli_exit.py tests/cli/test_db_reset_exit.py "$@"
+
 # Run MCP smoke test (fast end-to-end loop)
 test-smoke:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m smoke test-int/mcp/test_smoke_integration.py

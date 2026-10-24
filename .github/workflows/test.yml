@@ -116,6 +116,34 @@ jobs:
         run: |
           just lint
 
+  test-cli-smoke:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: CLI startup and exit smoke
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - uses: extractions/setup-just@v4
+      - name: Install dependencies
+        run: uv sync --locked --extra pdf
+      # No dependency selection: these tests execute product code in children.
+      - name: Run tests
+        run: just test-cli-smoke --durations=15 --junitxml=cli-smoke.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-smoke
+          path: cli-smoke.xml
+
   test-sqlite-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'

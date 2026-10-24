@@ -62,6 +62,13 @@ resources force full runs. Dependency tracking is an optimization, not a replace
 for the full main gate. Cache keys separate platform, Python version, suite, shard,
 dependency/fixture versions, and partition implementation/timings.
 
+`just test-cli-smoke` always runs the small CLI startup/exit suite, with testmon
+disabled. CI runs it separately on every code change, including source-only PRs.
+It covers help/version startup, initialization, schema validation, and reset exit
+behavior. Other subprocess-only dependencies can still evade incremental selection;
+the full main suite remains the broader check. This intentionally keeps the PR
+smoke gate small rather than tracing every child process.
+
 Each job publishes its assigned file list and JUnit results and prints its 30 slowest
 test phases. Use those results to evaluate fixture costs and duplicate scenarios before
 removing coverage. Increased job counts can hit account concurrency limits; compare
