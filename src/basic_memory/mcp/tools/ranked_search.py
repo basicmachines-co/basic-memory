@@ -28,7 +28,10 @@ from basic_memory.mcp.note_targets import (
     open_project_target,
     resolve_note,
 )
-from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
+from basic_memory.mcp.project_context_identifiers import (
+    canonical_memory_path_for_active_route,
+    split_project_permalink_prefix,
+)
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
@@ -415,7 +418,7 @@ async def bm_search(
     # Trigger: the query is a memory:// URL (no other scope, as checked above).
     # Why: the URL may name its project ('memory://research/foo'), which must route
     #      the search the way it routes a read, not fall to the active project.
-    # Outcome: the URL selects the route while retaining its permalink spelling.
+    # Outcome: the URL selects the route while retaining its permalink qualification.
     routed = query if memory_query and query is not None else path or ""
     kind = "identifier" if memory_query else "path"
     async with open_project_target(
@@ -427,6 +430,17 @@ async def bm_search(
             # A routed URL can name a legacy project-qualified stored permalink.
             # Preserve that identity rather than adding the current workspace prefix.
             query = memory_url_path(query if include_project else target.route.path)
+            if include_project and target.route.stripped:
+                # Normalize only the recognized prefix, leaving note patterns intact.
+                # Both legacy project and workspace/project forms can be stored;
+                # selecting a workspace must not rewrite one form into the other.
+                prefixes = [target.project.permalink]
+                if target.route.project is not None:
+                    prefixes.append(generate_permalink(target.route.project))
+                claimed = split_project_permalink_prefix(query, prefixes)
+                if claimed is not None:
+                    prefix, remainder = claimed
+                    query = f"{prefix}/{remainder}" if remainder else prefix
             search_mode = "permalink"
         # Trigger: a permalink search ('core/*' or an exact permalink).
         # Why: permalinks are stored in index form, with the project prefix when
