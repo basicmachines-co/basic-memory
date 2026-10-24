@@ -436,14 +436,45 @@ def test_plan_note_materialization_preflight_returns_stale_terminal_result() -> 
         attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
     )
 
+    # A superseded move still cleans up the path it left; only its job knew it.
     assert result == NoteMaterializationPreflightResult.terminal(
         RuntimeNoteMaterializationResult(
             entity_id=42,
             status=RuntimeNoteMaterializationStatus.stale,
             reason="accepted note changed before file write: 42",
             file_path="notes/a.md",
-        )
+        ),
+        cleanup_file=RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-cleanup-sum",
+            live_file_path="notes/a.md",
+        ),
     )
+
+
+def test_plan_note_materialization_preflight_keeps_a_stale_moves_path_the_note_returned_to() -> (
+    None
+):
+    """A to B, then B to A: the note lives at the path the first move left, so it stays."""
+    request = materialization_request()
+
+    result = plan_note_materialization_preflight(
+        request,
+        entity=SimpleNamespace(file_path="notes/old.md", sync_checksum=None),
+        note_content=SimpleNamespace(
+            db_version=5,
+            db_checksum="newer-db-checksum",
+            markdown_content="# Newer\n",
+            file_checksum="old-file-sum",
+        ),
+        attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
+    )
+
+    assert result.terminal_result is not None
+    assert result.terminal_result.status is RuntimeNoteMaterializationStatus.stale
+    assert result.cleanup_file is None
 
 
 def test_plan_note_materialization_preflight_returns_prepared_write() -> None:

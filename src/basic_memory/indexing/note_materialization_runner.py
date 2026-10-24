@@ -281,7 +281,10 @@ def plan_note_materialization_preflight(
                 status=RuntimeNoteMaterializationStatus.stale,
                 reason=f"accepted note changed before file write: {request.entity_id}",
                 file_path=entity.file_path,
-            )
+            ),
+            cleanup_file=plan_stale_move_cleanup_file_delete(
+                request, live_file_path=entity.file_path
+            ),
         )
 
     return NoteMaterializationPreflightResult.prepared(
@@ -294,6 +297,32 @@ def plan_note_materialization_preflight(
             attempted_at=attempted_at,
         )
     )
+
+
+def plan_stale_move_cleanup_file_delete(
+    request: RuntimeNoteMaterializationJobRequest,
+    *,
+    live_file_path: str,
+) -> RuntimePendingNoteFileDelete | None:
+    """Keep a superseded move's old-path cleanup instead of dropping it.
+
+    A move's job is the only one that knows the path the note left. When a later
+    write to the note lands before that job runs, the job exits as stale and the
+    later job writes the note's current path, but its request carries no cleanup,
+    so without this the old file stays in storage with old content and a later
+    move onto that path is refused as a conflict.
+
+    The delete is checksum-guarded, so it removes the old file only while it
+    still holds what was moved away. A note moved back onto the path it left
+    (A to B, then B to A) lives there again: that path is skipped rather than
+    deleted out from under the live note and written back moments later.
+    """
+    cleanup_file = plan_note_materialization_cleanup_file_delete(request)
+    if cleanup_file is None or cleanup_file.file_path == live_file_path:
+        return None
+    # Storage keys are case-sensitive; the live path lets a local adapter skip
+    # an old path that only differs in case and so aliases the live file.
+    return replace(cleanup_file, live_file_path=live_file_path)
 
 
 async def claim_note_materialization_content(
