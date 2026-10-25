@@ -211,7 +211,7 @@ async def test_invalid_arguments(client, test_project, arguments, message):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", [" ", " / ", "\t"])
+@pytest.mark.parametrize("path", [" ", " / ", "\t", "\t/\t"])
 async def test_a_blank_path_never_deletes_the_project(client, test_project, path):
     """The API reads a blank directory as the project root; bm_delete refuses it."""
     await bm_write(identifier="notes/keep.md", content="# Keep", project=test_project.name)

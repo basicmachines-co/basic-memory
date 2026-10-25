@@ -208,11 +208,12 @@ async def test_create_memory_project_refuses_same_name_different_path(app, tmp_p
                 project_path=str(requested_root),
             )
 
-    assert str(refused.value) == (
+    # Project paths are serialized with '/', while requested paths may use '\\' on Windows.
+    assert str(refused.value).replace("\\", "/") == (
         f"ALREADY_EXISTS: Project 'Path Mismatch Project' already exists at "
-        f"{existing_root}, not {requested_root}.\n"
+        f"{existing_root.as_posix()}, not {requested_root.as_posix()}.\n"
         f"Try instead: another name, or create_memory_project(project_name="
-        f"'Path Mismatch Project', project_path='{existing_root}')"
+        f"'Path Mismatch Project', project_path='{existing_root.as_posix()}')"
     )
     mock_index.assert_not_awaited()
 
@@ -236,8 +237,9 @@ async def test_create_memory_project_refuses_different_path_as_json(app, tmp_pat
 
     payload = json.loads(str(refused.value))
     assert payload["error"] == "ALREADY_EXISTS"
-    assert payload["message"] == (
-        f"Project 'Path Mismatch JSON' already exists at {existing_root}, not {requested_root}."
+    assert payload["message"].replace("\\", "/") == (
+        f"Project 'Path Mismatch JSON' already exists at "
+        f"{existing_root.as_posix()}, not {requested_root.as_posix()}."
     )
 
 

@@ -6,7 +6,9 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from basic_memory import db
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.wiki import (
     WikiCommandReport,
     WikiProjectReport,
@@ -194,7 +196,12 @@ def test_wiki_rebuild_rejects_recorded_index_failures():
         _require_successful_index(result)
 
 
+# The CLI opens its own sessions; reset shared Postgres state before it reads projects.
+@pytest.mark.usefixtures("engine_factory")
 def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):
+    # Each CLI invocation closes its engine. Start with the persistent database,
+    # rather than the SQLite fixture's in-memory engine that the first call would lose.
+    run_with_cleanup(db.shutdown_db())
     note = config_home / "guides" / "start.md"
     note.parent.mkdir()
     note.write_text(

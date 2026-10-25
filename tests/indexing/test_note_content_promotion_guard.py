@@ -413,7 +413,8 @@ async def test_local_filesystem_confirms_restored_older_version(
     )
     note_path = Path(file_service.base_path) / sample_entity.file_path
     note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text(FIRST_ACCEPTED, encoding="utf-8")
+    # Confirmation hashes file bytes, so Windows must not translate LF to CRLF here.
+    note_path.write_bytes(FIRST_ACCEPTED.encode("utf-8"))
 
     reader = local_promotion_confirmation_reader(file_service)
     assert reader is file_service

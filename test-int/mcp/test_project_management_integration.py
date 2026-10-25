@@ -152,7 +152,8 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
                     "command": "create",
                 },
             )
-        assert f"already exists at {original_path}, not {other_path}." in str(refused.value)
+        expected_paths = f"already exists at {original_path}, not {other_path}.".replace("\\", "/")
+        assert expected_paths in str(refused.value).replace("\\", "/")
 
         same = await client.call_tool(
             "bm_project",
