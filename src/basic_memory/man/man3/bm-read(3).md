@@ -23,6 +23,16 @@ bm_read(identifier, section=None, start_line=None, end_line=None,
         output_format="text", project=None)
 ```
 
+Cloud additionally supports the following hosted signature. These options are not
+available on the local core tool:
+
+```
+bm_read(identifier, section=None, start_line=None, end_line=None,
+        max_tokens=None, include_frontmatter=True, include_content=True,
+        review_mode="structured", view="markdown", version=None,
+        versions=False, cursor=None, output_format="text", project=None)
+```
+
 ## DESCRIPTION
 
 Returns one note's Markdown, frontmatter included. The identifier can be a file
@@ -54,6 +64,22 @@ The shell counterpart is cat(1).
 - **include_content** (boolean, optional, default: True) — False returns only title, paths, checksum and updated_at.
 - **output_format** (optional, default: "text")
 - **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
+
+## CLOUD PARAMETERS
+
+Cloud's `bm_read` adds these parameters to the core parameters above:
+
+- **review_mode** ("structured" | "raw", optional, default: "structured") — Return prose with open review comments and suggestions as threads, or the stored bytes including review markup with "raw".
+- **view** ("markdown" | "text", optional, default: "markdown") — "text" renders `::bm-*` components as Markdown and runs their live queries. Edit from the Markdown view.
+- **version** (string | null, optional, default: None) — Read a stored note version, using a `version_id` from `versions=True`.
+- **versions** (boolean, optional, default: False) — List stored note versions, newest first, instead of reading the note.
+- **cursor** (string | null, optional, default: None) — With `versions=True`, continue from the previous page's `next_cursor`.
+
+A versions listing cannot be combined with a version, slices, `view="text"`,
+or `include_content=False`. A cursor requires `versions=True`. Stored versions
+and the text view must be read whole. The text view requires
+`review_mode="structured"` and cannot read a stored version because live queries
+show current data. Stored versions are available for Markdown notes only.
 
 ## EXAMPLES
 

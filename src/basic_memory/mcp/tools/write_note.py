@@ -90,7 +90,7 @@ def _compose_workspace_project_route(
     description=(
         "Create a markdown note. If the note already exists, returns an error by default "
         "— pass overwrite=True to replace. directory is required. For incremental changes "
-        "to an existing note use edit_note. A new note's result may list similar existing "
+        "to an existing note use bm_edit. A new note's result may list similar existing "
         "notes; that is advisory and does not block the write. Pass expected_checksum with "
         "overwrite=True to replace the note only if it is still the revision you read."
     ),
@@ -126,7 +126,7 @@ async def write_note(
 
     Creates a markdown note with semantic observations and relations.
     If the note already exists, returns an error by default. Pass overwrite=True
-    to replace the existing note. For incremental updates, use edit_note instead.
+    to replace the existing note. For incremental updates, use bm_edit instead.
 
     Project Resolution:
     Server resolves projects using a unified priority chain (same in local and cloud modes):
@@ -200,9 +200,9 @@ async def write_note(
                    keys this write sets (title, type, tags, metadata, or frontmatter in
                    content) replace the old values. Existing frontmatter that cannot be
                    parsed is discarded rather than merged. To remove a key, rewrite it
-                   with edit_note or edit the file.
+                   with bm_edit or edit the file.
         expected_checksum: Optional revision precondition for overwrite=True: the checksum
-                   of the note you read (from a JSON read_note, write_note or edit_note
+                   of the note you read (from a JSON bm_read, bm_write or bm_edit
                    result). The
                    note is replaced only while it is still that revision; otherwise the
                    tool reports a revision conflict with the current checksum and changes
@@ -574,9 +574,9 @@ async def write_note(
                     format_similar_notes_section(
                         similar_notes,
                         same_topic=lambda closest_ref: (
-                            f'`read_note("{closest_ref}")`, then '
-                            f'`edit_note("{closest_ref}", operation="append", content="...")` '
-                            f'and `delete_note("{response_permalink}")`'
+                            f'`bm_read("{closest_ref}")`, then '
+                            f'`bm_edit("{closest_ref}", command="append", content="...")` '
+                            f'and `bm_delete("{response_permalink}")`'
                         ),
                     )
                 )
@@ -646,14 +646,14 @@ def _format_overwrite_error(title: str, identifier: str, project_name: str) -> s
 
         **"{title}"** already exists (`{identifier}`).
 
-        `write_note` does not overwrite by default. Choose an option:
+        `bm_write` does not overwrite by default. Choose an option:
 
         | Goal | Action |
         |------|--------|
-        | Append content | `edit_note("{identifier}", operation="append", content="...")` |
-        | Prepend content | `edit_note("{identifier}", operation="prepend", content="...")` |
-        | Replace a section | `edit_note("{identifier}", operation="replace_section", section="...", content="...")` |
-        | Full replace | `write_note(title="{title}", content="...", directory="...", overwrite=True)` |
-        | Inspect first | `read_note("{identifier}")` |
+        | Append content | `bm_edit("{identifier}", command="append", content="...")` |
+        | Prepend content | `bm_edit("{identifier}", command="prepend", content="...")` |
+        | Replace a section | `bm_edit("{identifier}", command="replace_section", section="...", content="...")` |
+        | Full replace | `bm_write(identifier="{identifier}", content="...", overwrite=True)` |
+        | Inspect first | `bm_read("{identifier}")` |
 
         Project: {project_name}""")

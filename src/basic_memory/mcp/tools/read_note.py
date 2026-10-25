@@ -168,7 +168,7 @@ async def read_note(
         include_content: Default true. Set to false to return only the note's metadata —
             title, permalink, file_path, the full accepted-revision checksum, and
             updated_at — without the body. Use it to refresh the checksum that
-            edit_note/write_note take as expected_checksum without reading the whole
+            bm_edit/bm_write take as expected_checksum without reading the whole
             note. Cannot be combined with start_line/end_line.
         context: Optional FastMCP context for performance caching.
 
@@ -616,9 +616,9 @@ def format_not_found_message(project: str | None, identifier: str) -> str:
         No note matches "{identifier}" in {project}. Titles and permalinks must match
         exactly; title and text search found nothing either.
 
-        To look further, try `search_notes(query="{identifier}", project="{project}")` or
-        `recent_activity(timeframe="7d", project="{project}")`. If the user wants this note
-        created, use `write_note`.
+        To look further, try `bm_search(query="{identifier}", project="{project}")` or
+        `bm_search(since="7d", project="{project}")`. If the user wants this note
+        created, use `bm_write`.
     """)
 
 
@@ -657,8 +657,8 @@ def format_related_results(project: str | None, identifier: str, results) -> str
             """)
 
     message += dedent(f"""
-        Read one with `read_note(identifier="<permalink>", project="{project}")`, or search
-        further with `search_notes(query="{identifier}", project="{project}")`.
+        Read one with `bm_read(identifier="<permalink>", project="{project}")`, or search
+        further with `bm_search(query="{identifier}", project="{project}")`.
     """)
 
     return message

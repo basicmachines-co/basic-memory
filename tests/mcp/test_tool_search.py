@@ -562,7 +562,7 @@ class TestSearchErrorFormatting:
 
         assert "# Search Failed - Semantic Search Unavailable" in result
         assert "startup log" in result
-        assert 'search_type="text"' in result
+        assert 'mode="text"' in result
 
     def test_format_search_error_semantic_dependencies_missing(self):
         """Test formatting for missing semantic dependencies."""
@@ -595,7 +595,7 @@ class TestSearchErrorFormatting:
         # Names the actual resolved cache dir so the user knows what to delete.
         assert expected_cache_dir in result
         # Offers full-text search as an immediate workaround.
-        assert 'search_type="text"' in result
+        assert 'mode="text"' in result
 
     def test_format_search_error_load_model_phrase_does_not_overmatch(self):
         """A generic error mentioning 'load model' (no 'from') must not hit the embedding branch.

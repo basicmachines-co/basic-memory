@@ -251,7 +251,7 @@ async def build_context(
         bool,
         "Omit note bodies and entity observation lists for graph discovery; the server "
         "skips loading observations. Preserve identifiers, relation targets and "
-        "pagination; use read_note for selected content. Not a guaranteed token budget.",
+        "pagination; use bm_read for selected content. Not a guaranteed token budget.",
     ] = False,
 ) -> dict[str, Any] | str:
     """Get context needed to continue a discussion within a specific project.
@@ -319,7 +319,7 @@ async def build_context(
     if page_size > MAX_CONTEXT_PAGE_SIZE:
         raise ValueError(
             f"page_size must be <= {MAX_CONTEXT_PAGE_SIZE}, got {page_size}. "
-            "build_context is a bounded traversal starting point; request another "
+            "bm_context is a bounded traversal starting point; request another "
             "page or follow the returned memory:// links."
         )
     if max_related < 0:
@@ -327,7 +327,7 @@ async def build_context(
     if max_related > MAX_CONTEXT_RELATED_RESULTS:
         raise ValueError(
             f"max_related must be <= {MAX_CONTEXT_RELATED_RESULTS}, got {max_related}. "
-            "build_context is a bounded traversal starting point; follow the returned "
+            "bm_context is a bounded traversal starting point; follow the returned "
             "memory:// links for more context."
         )
 

@@ -313,7 +313,7 @@ def _format_search_error_response(
 
             ## Alternative now
             - Run FTS search instead:
-              `search_notes(query="{query}", project="{project}", search_type="text")`
+              `bm_search(query="{query}", project="{project}", mode="text")`
             """).strip()
 
     if "pip install" in error_message.lower() and "semantic" in error_message.lower():
@@ -326,7 +326,7 @@ def _format_search_error_response(
             1. Install/update Basic Memory: `pip install -U basic-memory`
             2. Restart Basic Memory
             3. Retry your query:
-               `search_notes(query="{query}", project="{project}", search_type="{search_type}")`
+               `bm_search(query="{query}", project="{project}", mode="{search_type}")`
             """).strip()
 
     # Corrupt/missing FastEmbed model cache (interrupted download leaves a partial
@@ -363,11 +363,11 @@ def _format_search_error_response(
             1. Delete the FastEmbed model cache so it re-downloads on the next search:
                `{cache_dir}`
             2. Run your search again (the model downloads automatically on first use):
-               `search_notes(query="{query}", project="{project}", search_type="{search_type}")`
+               `bm_search(query="{query}", project="{project}", mode="{search_type}")`
 
             ## Workaround right now
             - Use full-text search, which needs no embedding model:
-              `search_notes(query="{query}", project="{project}", search_type="text")`
+              `bm_search(query="{query}", project="{project}", mode="text")`
             """).strip()
 
     # FTS5 syntax errors
@@ -405,13 +405,13 @@ def _format_search_error_response(
 
             ## Try again with:
             ```
-            search_notes(query="{clean_query}", project="{project}")
+            bm_search(query="{clean_query}", project="{project}")
             ```
 
             ## Alternative search strategies:
-            - Break into simpler terms: `search_notes(query="{" ".join(clean_query.split()[:2])}", project="{project}")`
-            - Try different search types: `search_notes(query="{clean_query}", project="{project}", search_type="title")`
-            - Use filtering: `search_notes(query="{clean_query}", project="{project}", note_types=["note"])`
+            - Break into simpler terms: `bm_search(query="{" ".join(clean_query.split()[:2])}", project="{project}")`
+            - Try different search types: `bm_search(query="{clean_query}", project="{project}", mode="title")`
+            - Use filtering: `bm_search(query="{clean_query}", project="{project}", note_types=["note"])`
             """).strip()
 
     # Project not found errors (check before general "not found")
@@ -422,11 +422,11 @@ def _format_search_error_response(
             The current project is not accessible or doesn't exist: {error_message}
 
             ## How to resolve:
-            1. **Check available projects**: `list_memory_projects()`
+            1. **Check available projects**: `bm_list(path="/")`
             3. **Verify project setup**: Ensure your project is properly configured
 
             ## Current session info:
-            - See available projects: `list_memory_projects()`
+            - See available projects: `bm_list(path="/")`
             """).strip()
 
     # No results found
@@ -453,28 +453,28 @@ def _format_search_error_response(
                - Try synonyms or related terms
 
             3. **Use different search approaches**:
-               - **Text search**: `search_notes(query="{query}", project="{project}", search_type="text")` (searches full content)
-               - **Title search**: `search_notes(query="{query}", project="{project}", search_type="title")` (searches only titles)
-               - **Permalink search**: `search_notes(query="{query}", project="{project}", search_type="permalink")` (searches file paths)
+               - **Text search**: `bm_search(query="{query}", project="{project}", mode="text")` (searches full content)
+               - **Title search**: `bm_search(query="{query}", project="{project}", mode="title")` (searches only titles)
+               - **Permalink search**: `bm_search(query="{query}", project="{project}", mode="permalink")` (searches file paths)
 
             4. **Try boolean operators for broader results**:
-               - OR search: `search_notes(query="{" OR ".join(query.split()[:3])}", project="{project}")`
+               - OR search: `bm_search(query="{" OR ".join(query.split()[:3])}", project="{project}")`
                - Remove restrictive terms: Focus on the most important keywords
 
             5. **Use filtering to narrow scope**:
-               - By note type in frontmatter: `search_notes(query="{query}", project="{project}", note_types=["note"])`
-               - By recent content: `search_notes(query="{query}", project="{project}", after_date="1 week")`
-               - By entity type: `search_notes(query="{query}", project="{project}", entity_types=["observation"])`
+               - By note type in frontmatter: `bm_search(query="{query}", project="{project}", note_types=["note"])`
+               - By recent content: `bm_search(query="{query}", project="{project}", since="1 week")`
+               - By entity type: `bm_search(query="{query}", project="{project}", items=["observation"])`
 
             6. **Try advanced search patterns**:
-               - Tag search: `search_notes(query="tag:your-tag", project="{project}")`
-               - Observation category: `search_notes(query="{query}", project="{project}", entity_types=["observation"], categories=["requirement"])`
-               - Pattern matching: `search_notes(query="*{query}*", project="{project}", search_type="permalink")`
+               - Tag search: `bm_search(query="tag:your-tag", project="{project}")`
+               - Observation category: `bm_search(query="{query}", project="{project}", items=["observation"], categories=["requirement"])`
+               - Pattern matching: `bm_search(query="*{query}*", project="{project}", mode="permalink")`
 
             ## Explore what content exists:
-            - **Recent activity**: `recent_activity(timeframe="7d")` - See what's been updated recently
-            - **List directories**: `list_directory(dir_name="/", project="{project}")` - Browse all content
-            - **Browse by folder**: `list_directory(dir_name="/notes", project="{project}")` or `list_directory("/docs")`
+            - **Recent activity**: `bm_search(since="7d", project="{project}")` - See what's been updated recently
+            - **List directories**: `bm_list(path="/", project="{project}")` - Browse all content
+            - **Browse by folder**: `bm_list(path="/notes", project="{project}")` or `bm_list("/docs")`
             """).strip()
 
     # Server/API errors
@@ -490,9 +490,9 @@ def _format_search_error_response(
             3. **Check project status**: Ensure your project is properly synced
 
             ## Alternative approaches:
-            - Browse files directly: `list_directory(dir_name="/", project="{project}")`
-            - Check recent activity: `recent_activity(timeframe="7d")`
-            - Try a different search type: `search_notes(query="{query}", project="{project}", search_type="title")`
+            - Browse files directly: `bm_list(path="/", project="{project}")`
+            - Check recent activity: `bm_search(since="7d", project="{project}")`
+            - Try a different search type: `bm_search(query="{query}", project="{project}", mode="title")`
 
             ## If the problem persists:
             The search index might need to be rebuilt. Send a message to support@basicmachines.co or check the project sync status.
@@ -514,7 +514,7 @@ You don't have permission to search in the current project: {error_message}
 3. **Check authentication**: You might need to re-authenticate
 
 ## Alternative actions:
-- List available projects: `list_memory_projects()`"""
+- List available projects: `bm_list(path="/")`"""
 
     # Generic fallback
     return f"""# Search Failed
@@ -525,20 +525,20 @@ Error searching for '{query}': {error_message}
 1. **Simplify your query**: Try basic words without special characters
 2. **Check search syntax**: Ensure boolean operators are correctly formatted
 3. **Verify project access**: Make sure you can access the current project
-4. **Test with simple search**: Try `search_notes("test")` to verify search is working
+4. **Test with simple search**: Try `bm_search("test")` to verify search is working
 
 ## Alternative search approaches:
 - **Different search types**: 
-  - Title only: `search_notes(query="{query}", project="{project}", search_type="title")`
-  - Permalink patterns: `search_notes(query="{query}*", project="{project}", search_type="permalink")`
-- **With filters**: `search_notes(query="{query}", project="{project}", note_types=["note"])`
-- **Recent content**: `search_notes(query="{query}", project="{project}", after_date="1 week")`
-- **Boolean variations**: `search_notes(query="{" OR ".join(query.split()[:2])}", project="{project}")`
+  - Title only: `bm_search(query="{query}", project="{project}", mode="title")`
+  - Permalink patterns: `bm_search(query="{query}*", project="{project}", mode="permalink")`
+- **With filters**: `bm_search(query="{query}", project="{project}", note_types=["note"])`
+- **Recent content**: `bm_search(query="{query}", project="{project}", since="1 week")`
+- **Boolean variations**: `bm_search(query="{" OR ".join(query.split()[:2])}", project="{project}")`
 
 ## Explore your content:
-- **Browse files**: `list_directory(dir_name="/", project="{project}")` - See all available content
-- **Recent activity**: `recent_activity(timeframe="7d")` - Check what's been updated
-- **All projects**: `list_memory_projects()` 
+- **Browse files**: `bm_list(path="/", project="{project}")` - See all available content
+- **Recent activity**: `bm_search(since="7d", project="{project}")` - Check what's been updated
+- **All projects**: `bm_list(path="/")`
 
 ## Search syntax reference:
 - **Basic**: `keyword` or `multiple words`
@@ -546,7 +546,7 @@ Error searching for '{query}': {error_message}
 - **Phrases**: `"exact phrase"`
 - **Grouping**: `(term1 OR term2) AND term3`
 - **Tags**: `tag:example`
-- **Observation categories**: `entity_types=["observation"], categories=["requirement"]`"""
+- **Observation categories**: `items=["observation"], categories=["requirement"]`"""
 
 
 def _format_search_markdown(
@@ -572,18 +572,12 @@ def _format_search_markdown(
             # project it resolves to that one project. So for an all-projects miss, point at the
             # enumerator instead — suggesting recent_activity() could silently narrow to the
             # default project and miss activity elsewhere.
-            suggestion = "call list_memory_projects() to see what exists across your projects"
+            suggestion = 'call bm_list(path="/") to see what exists across your projects'
         elif project_id:
             # Names collide across cloud workspaces; route the orientation call by external id.
-            suggestion = (
-                f'call recent_activity(project_id="{project_id}") to orient — if the project is '
-                "empty it will guide creating a first note"
-            )
+            suggestion = f'call bm_list(path="/", project="{project_id}") to browse the project'
         else:
-            suggestion = (
-                f'call recent_activity(project="{project}") to orient — if the project is empty '
-                "it will guide creating a first note"
-            )
+            suggestion = f'call bm_list(path="/", project="{project}") to browse the project'
         return (
             f"No results found for '{query or ''}' in project '{project}'. "
             f"Try broader or different terms, or {suggestion}."
@@ -1112,7 +1106,7 @@ async def _search_all_projects(
         "`after_date` filters by when content was last updated. `valid_at` / "
         "`valid_overlaps` / `time_kind` filter by dates written inside notes (e.g. "
         "`@effective[2026-06-10,2026-07-27)`) and exclude undated content. Returns ranked, "
-        "paginated results; read full content with read_note or cat. Syntax reference: "
+        "paginated results; read full content with bm_read or cat. Syntax reference: "
         "memory://man/search-notes(3)."
     ),
     tags={"search"},

@@ -286,8 +286,8 @@ async def test_edit_note_nonexistent_note_find_replace(client, test_project):
 
     result = str(exc_info.value)
     assert "# Edit Failed" in result
-    assert "search_notes" in result  # Should suggest searching
-    assert "append" in result  # Should suggest using append/prepend instead
+    assert "bm_search" in result  # Should suggest searching
+    assert "bm_write" in result  # Public bm_edit does not create missing notes
 
 
 @pytest.mark.asyncio
@@ -305,7 +305,7 @@ async def test_edit_note_nonexistent_note_replace_section(client, test_project):
 
     result = str(exc_info.value)
     assert "# Edit Failed" in result
-    assert "search_notes" in result  # Should suggest searching
+    assert "bm_search" in result  # Should suggest searching
 
 
 @pytest.mark.asyncio
@@ -519,7 +519,7 @@ async def test_edit_note_cross_project_resolution_stops_before_patch(
         result = str(refusal.value)
         assert "# Edit Failed - Note Not Found In This Project" in result
         assert f"selected project `{test_project.name}`" in result
-        assert f'project_id="{target_project_id}"' in result
+        assert f'project="{target_project_id}"' in result
         assert target_entity_id not in result
 
 
@@ -728,7 +728,7 @@ async def test_edit_note_find_replace_no_matches(client, test_project):
 
     result = str(exc_info.value)
     assert "# Edit Failed - Text Not Found" in result
-    assert "read_note" in result  # Should suggest reading the note first
+    assert "bm_read" in result  # Should suggest reading the note first
     assert "Alternative approaches" in result  # Should suggest alternatives
 
 
@@ -809,7 +809,7 @@ async def test_edit_note_replace_section_multiple_sections(client, test_project)
     result = str(exc_info.value)
     assert "# Edit Failed - Duplicate Section Headers" in result
     assert "Multiple sections found" in result
-    assert "read_note" in result  # Should suggest reading the note first
+    assert "bm_read" in result  # Should suggest reading the note first
     assert "Make headers unique" in result  # Should suggest making headers unique
 
 
@@ -2021,7 +2021,7 @@ async def test_edit_note_reports_unknown_outcome_when_no_response_arrives(
     assert payload["error"] == "EDIT_OUTCOME_UNKNOWN"
     assert "connection dropped" in payload["detail"]
     # The suggested check names the routed project by id, not a reusable name.
-    assert f'project_id="{test_project.external_id}"' in payload["message"]
+    assert f'project="{test_project.external_id}"' in payload["message"]
 
 
 @pytest.mark.asyncio

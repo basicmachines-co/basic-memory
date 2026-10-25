@@ -113,24 +113,24 @@ def _format_cross_project_error_response(
         ### Recommended approach:
         ```
         # 1. Read the note content from current project
-        read_note("{identifier}")
+        bm_read("{identifier}")
         
         # 2. Create the note in the target project
-        write_note(title="Note Title", content="content from step 1", directory="target-folder", project="{target_project}")
+        bm_write(identifier="target-folder/note.md", content="content from step 1", project="{target_project}")
 
         # 3. Delete the original note if desired
-        delete_note("{identifier}", project="{current_project}")
+        bm_delete("{identifier}", project="{current_project}")
         
         ```
 
         ### Alternative: Stay in current project
         If you want to move the note within the **{current_project}** project only:
         ```
-        move_note(identifier="{identifier}", destination_path="new-folder/new-name.md")
+        bm_move(identifier="{identifier}", destination="new-folder/new-name.md")
         ```
 
         ## Available projects:
-        Use `list_memory_projects()` to see all available projects.
+        Use `bm_list(path="/")` to see all available projects.
         """).strip()
 
 
@@ -160,22 +160,22 @@ def _format_move_error_response(error_message: str, identifier: str, destination
             The note '{identifier}' could not be found for moving. Move operations require an exact match (no fuzzy matching).
 
             ## Suggestions to try:
-            1. **Search for the note first**: Use `search_notes("{search_term}")` to find it with exact identifiers
+            1. **Search for the note first**: Use `bm_search("{search_term}")` to find it with exact identifiers
             2. **Try different exact identifier formats**:
                - If you used a permalink like "folder/note-title", try the exact title: "{title_format}"
                - If you used a title, try the exact permalink format: "{permalink_format}"
-               - Use `read_note()` first to verify the note exists and get the exact identifier
+               - Use `bm_read()` first to verify the note exists and get the exact identifier
 
-            3. **List available notes**: Use `list_directory("/")` to see what notes exist in the current project
-            4. **List available notes**: Use `list_directory("/")` to see what notes exist
+            3. **List available notes**: Use `bm_list("/")` to see what notes exist in the current project
+            4. **List available notes**: Use `bm_list("/")` to see what notes exist
 
             ## Before trying again:
             ```
             # First, verify the note exists:
-            search_notes("{identifier}")
+            bm_search("{identifier}")
 
             # Then use the exact identifier from search results:
-            move_note(identifier="correct-identifier-here", destination_path="{destination_path}")
+            bm_move(identifier="correct-identifier-here", destination="{destination_path}")
             ```
             """).strip()
 
@@ -190,19 +190,19 @@ Cannot move '{identifier}' to '{destination_path}' because a file already exists
    - Add timestamp: `{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md`
    - Use different folder: `archive/{destination_path}` or `backup/{destination_path}`
 
-2. **Check the existing file**: Use `read_note("{destination_path}")` to see what's already there
+2. **Check the existing file**: Use `bm_read("{destination_path}")` to see what's already there
 3. **Remove or rename existing**: If safe to do so, move the existing file first
 
 ## Try these alternatives:
 ```
 # Option 1: Add timestamp to make unique
-move_note(identifier="{identifier}", destination_path="{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
+bm_move(identifier="{identifier}", destination="{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
 
 # Option 2: Use archive folder  
-move_note(identifier="{identifier}", destination_path="archive/{destination_path}")
+bm_move(identifier="{identifier}", destination="archive/{destination_path}")
 
 # Option 3: Check what's at destination first
-read_note("{destination_path}")
+bm_read("{destination_path}")
 ```"""
 
     # Invalid path errors
@@ -224,7 +224,7 @@ The destination path '{destination_path}' is not valid: {error_message}
 
 ## Try again with:
 ```
-move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+bm_move(identifier="{identifier}", destination="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
     # Permission/access errors
@@ -243,8 +243,8 @@ You don't have permission to move '{identifier}': {error_message}
 3. **Check file locks**: The file might be open in another application
 
 ## Alternative actions:
-- List available projects: `list_memory_projects()`
-- Try copying content instead: `read_note("{identifier}", project="project-name")` then `write_note()` to new location"""
+- List available projects: `bm_list(path="/")`
+- Try copying content instead: `bm_read("{identifier}", project="project-name")` then `bm_write()` to new location"""
 
     # Source file not found errors
     if "source" in error_message.lower() and (
@@ -257,18 +257,18 @@ The source file for '{identifier}' was not found on disk: {error_message}
 This usually means the database and filesystem are out of sync.
 
 ## How to resolve:
-1. **Check if note exists in database**: `read_note("{identifier}")`
+1. **Check if note exists in database**: `bm_read("{identifier}")`
 2. **Run sync operation**: The file might need to be re-synced
 3. **Recreate the file**: If data exists in database, recreate the physical file
 
 ## Troubleshooting steps:
 ```
 # Check if note exists in Basic Memory
-read_note("{identifier}")
+bm_read("{identifier}")
 
 # If it exists, the file is missing on disk - send a message to support@basicmachines.co
 # If it doesn't exist, use search to find the correct identifier
-search_notes("{identifier}")
+bm_search("{identifier}")
 ```"""
 
     # Server/filesystem errors
@@ -287,20 +287,20 @@ A system error occurred while moving '{identifier}': {error_message}
 3. **Verify filesystem permissions**: Check if the destination directory is writable
 
 ## Alternative approaches:
-- Copy content to new location: Use `read_note("{identifier}")` then `write_note()` 
+- Copy content to new location: Use `bm_read("{identifier}")` then `bm_write()`
 - Use a different destination folder that you know works
 - Send a message to support@basicmachines.co if the problem persists
 
 ## Backup approach:
 ```
 # Read current content
-content = read_note("{identifier}")
+content = bm_read("{identifier}")
 
 # Create new note at desired location  
-write_note(title="New Note Title", content=content, directory="{destination_path.split("/")[0] if "/" in destination_path else "notes"}")
+bm_write(identifier="{destination_path}", content=content)
 
 # Then delete original if successful
-delete_note("{identifier}")
+bm_delete("{identifier}")
 ```"""
 
     # Generic fallback
@@ -310,7 +310,7 @@ delete_note("{identifier}")
 Error moving '{identifier}' to '{destination_path}': {error_message}
 
 ## General troubleshooting:
-1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
+1. **Verify the note exists**: `bm_read("{identifier}")` or `bm_search("{identifier}")`
 2. **Check destination path**: Ensure it's a valid relative path with `.md` extension
 3. **Verify permissions**: Make sure you can edit files in this project
 4. **Try a simpler path**: Use a basic folder structure like `notes/filename.md`
@@ -318,10 +318,10 @@ Error moving '{identifier}' to '{destination_path}': {error_message}
 ## Step-by-step approach:
 ```
 # 1. Confirm note exists
-read_note("{identifier}")
+bm_read("{identifier}")
 
 # 2. Try a simple destination first
-move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+bm_move(identifier="{identifier}", destination="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 
 # 3. If that works, then try your original destination
 ```
@@ -330,13 +330,13 @@ move_note(identifier="{identifier}", destination_path="notes/{destination_path.s
 If moving continues to fail, you can copy the content manually:
 ```
 # Read current content
-content = read_note("{identifier}")
+content = bm_read("{identifier}")
 
 # Create new note
-write_note(title="Title", content=content, directory="target-folder") 
+bm_write(identifier="target-folder/title.md", content=content)
 
 # Delete original once confirmed
-delete_note("{identifier}")
+bm_delete("{identifier}")
 ```"""
     )
 
@@ -554,7 +554,7 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 
 ## Try again with a safe path:
 ```
-move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+bm_move(identifier="{identifier}", destination="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
         # Resolve every source before branching so file and directory mutations share
@@ -654,17 +654,17 @@ move_note(identifier="{identifier}", destination_path="notes/{destination_path.s
 Error moving directory '{identifier}' to '{destination_path}': {str(e)}
 
 ## Troubleshooting:
-1. **Verify the directory exists**: Use `list_directory("{identifier}")` to check
+1. **Verify the directory exists**: Use `bm_list("{identifier}")` to check
 2. **Check for conflicts**: The destination may already contain files
 3. **Try individual moves**: Move files one at a time if bulk move fails
 
 ## Alternative approach:
 ```
 # List directory contents first
-list_directory("{identifier}")
+bm_list("{identifier}")
 
 # Then move individual files
-move_note(identifier="path/to/file.md", destination_path="{destination_path}/file.md")
+bm_move(identifier="path/to/file.md", destination="{destination_path}/file.md")
 ```""",
                 )
 
@@ -842,7 +842,7 @@ The destination folder '{destination_folder}' is not allowed - paths must stay w
 
 ## Try again with a safe folder:
 ```
-move_note("{identifier}", destination_folder="notes")
+bm_move("{identifier}", destination="notes/")
 ```"""
 
         # Trigger: caller asks to move a note to its current normalized file path.
@@ -902,7 +902,7 @@ move_note("{identifier}", destination_folder="notes")
 
                 ## Try again with extension:
                 ```
-                move_note(identifier="{identifier}", destination_path="{destination_path}.{source_ext}")
+                bm_move(identifier="{identifier}", destination="{destination_path}.{source_ext}")
                 ```
 
                 All examples in Basic Memory expect file extensions to be explicitly provided.
@@ -961,7 +961,7 @@ move_note("{identifier}", destination_folder="notes")
 
                     ## Try again with matching extension:
                     ```
-                    move_note(identifier="{identifier}", destination_path="{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                    bm_move(identifier="{identifier}", destination="{destination_path.rsplit(".", 1)[0]}.{source_ext}")
                     ```
                     """).strip()
 
@@ -1019,13 +1019,13 @@ move_note("{identifier}", destination_folder="notes")
                     **Actual:** `{result.file_path}`
 
                     This usually means the destination referenced a different
-                    workspace/project, which move_note cannot do — notes can only be
+                    workspace/project, which bm_move cannot do — notes can only be
                     moved within the same project. To move content between projects:
 
                     ```
-                    read_note("{result.file_path}")
-                    write_note(title="Title", content="content", directory="folder", project="target-project")
-                    delete_note("{result.file_path}", project="{active_project.name}")
+                    bm_read("{result.file_path}")
+                    bm_write(identifier="folder/title.md", content="content", project="target-project")
+                    bm_delete("{result.file_path}", project="{active_project.name}")
                     ```
                     """).strip()
 

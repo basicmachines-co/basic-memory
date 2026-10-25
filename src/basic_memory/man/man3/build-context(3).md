@@ -67,7 +67,7 @@ Compact output is not a fixed token limit.
 - **page_size** (integer, optional, default: 10) — Number of primary results to return per page (default: 10, maximum: 50)
 - **max_related** (integer, optional, default: 10) — Maximum total related results to return (default: 10, maximum: 100)
 - **output_format** (string, optional, default: "json") — Response format - "json" for structured JSON dict, "text" for compact markdown text
-- **compact** (boolean, optional, default: False) — Omit note bodies and entity observation lists for graph discovery; the server skips loading observations. Preserve identifiers, relation targets and pagination; use read_note for selected content. Not a guaranteed token budget.
+- **compact** (boolean, optional, default: False) — Omit note bodies and entity observation lists for graph discovery; the server skips loading observations. Preserve identifiers, relation targets and pagination; use bm_read for selected content. Not a guaranteed token budget.
 
 ## MCP USAGE
 

@@ -2,7 +2,7 @@
 
 This is a memory retrieval session.
 
-The notes below came from Basic Memory. Open a note with `read_note` or its linked notes with `build_context` when a snippet is not enough to respond.
+The notes below came from Basic Memory. Open a note with `bm_read` or its linked notes with `bm_context` when a snippet is not enough to respond.
 
 Here's what I found from previous conversations:
 
@@ -31,7 +31,7 @@ Here's what I found from previous conversations:
 {{/each}}
 {{/if}}
 
-You can read this document with: `read_note("{{ primary_result.permalink }}")`
+You can read this document with: `bm_read("{{ primary_result.permalink }}")`
 
 {{#if related_results}}
 ## Related Context
@@ -42,9 +42,9 @@ You can read this document with: `read_note("{{ primary_result.permalink }}")`
 - title: {{ title }}
 
 {{#if permalink}}
-You can view this document with: `read_note("{{ permalink }}")`
+You can view this document with: `bm_read("{{ permalink }}")`
 {{else}}
-You can view this file with: `read_content("{{ file_path }}")`
+You can view this file with: `bm_read("{{ file_path }}")`
 {{/if}}
 </related>
 {{/each}}
@@ -55,13 +55,13 @@ You can view this file with: `read_content("{{ file_path }}")`
 {{else}}
 The supplied query did not return any information specifically on this topic.
 
-Try a different search term or check `recent_activity`. If the user wants this topic tracked, offer to start a note with `write_note`.
+Try a different search term or check `bm_search(since="7d")`. If the user wants this topic tracked, offer to start a note with `bm_write`.
 {{/if}}
 ## Next Steps
 <instructions>
 You can:
-- Explore more with: `search_notes("{{ topic }}")`
-- See what's changed: `recent_activity(timeframe="{{default timeframe "7d"}}")`
+- Explore more with: `bm_search("{{ topic }}")`
+- See what's changed: `bm_search(since="{{default timeframe "7d"}}")`
 
-If this conversation produces a decision or insight worth keeping, offer to save it with `write_note`.
+If this conversation produces a decision or insight worth keeping, offer to save it with `bm_write`.
 </instructions>

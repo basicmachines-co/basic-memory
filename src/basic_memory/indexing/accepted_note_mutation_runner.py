@@ -471,7 +471,7 @@ def accepted_note_integrity_rejection(error: IntegrityError) -> AcceptedNoteMuta
     if conflict_kind is RuntimeAcceptedNoteWriteConflictKind.file_path:
         return AcceptedNoteMutationRejection(
             kind=AcceptedNoteMutationRejectKind.conflict,
-            detail="Note already exists. Use edit_note to modify it, or delete it first.",
+            detail="Note already exists. Use bm_edit to modify it, or delete it first.",
         )
 
     if conflict_kind is RuntimeAcceptedNoteWriteConflictKind.external_id:
@@ -1641,7 +1641,7 @@ def reject_accepted_note_file_path_conflict(
     ):
         reject_accepted_note_mutation(
             AcceptedNoteMutationRejectKind.conflict,
-            "Note already exists. Use edit_note to modify it, or delete it first.",
+            "Note already exists. Use bm_edit to modify it, or delete it first.",
         )
 
 

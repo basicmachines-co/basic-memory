@@ -159,7 +159,7 @@ PROFILES: dict[Harness, HarnessProfile] = {
         default_recall_prompt=(
             "You have Basic Memory available for this project. Before answering recall "
             'questions ("what did we decide", "where did we leave off"), search the graph '
-            "first — prefer structured filters (search_notes with type/status). When the "
+            "first — prefer structured filters (bm_search with type/status). When the "
             "user makes a material decision, capture it as a note with type: decision. "
             "Cite permalinks when referencing prior work."
         ),
