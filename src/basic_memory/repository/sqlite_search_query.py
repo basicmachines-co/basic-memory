@@ -244,6 +244,19 @@ def is_fts5_syntax_error(exc: Exception) -> bool:
 # --- Filter compilation ---
 
 
+# bm25() takes one weight per ``search_index`` column, in the order the FTS5
+# table declares them (models/search.py CREATE_SEARCH_INDEX: id, title,
+# content_stems, content_snippet, script_ngrams, permalink, file_path, type,
+# project_id, from_id, to_id, relation_type, entity_id, category, metadata,
+# created_at, updated_at). The title is weighted above the body so a note whose
+# title is the query does not rank below notes that merely mention the words.
+SEARCH_INDEX_BM25_WEIGHTS: tuple[float, ...] = (1.0, 5.0) + (1.0,) * 15
+
+BM25_SCORE_EXPRESSION = (
+    f"bm25(search_index, {', '.join(str(weight) for weight in SEARCH_INDEX_BM25_WEIGHTS)})"
+)
+
+
 def compile_fts_filter(
     scope: ProjectScope,
     query: PreparedSearchQuery,
@@ -262,7 +275,7 @@ def compile_fts_filter(
     )
     match_conditions: list[str] = []
     from_clause = "search_index"
-    score_expression = "bm25(search_index)"
+    score_expression = BM25_SCORE_EXPRESSION
     preserve_match_score = False
     search_text = query.search_text
 
