@@ -102,6 +102,7 @@ def test_postgres_upgrade_and_downgrade_manage_both_script_indexes(monkeypatch) 
     assert "to_tsvector('simple', script_ngrams)" in sql
     assert "DROP COLUMN IF EXISTS script_ngrams" in sql
 
+
 def test_sqlite_upgrade_survives_leftover_search_index_rebuilt(tmp_path, monkeypatch) -> None:
     """Issue #1853: interrupted upgrade left search_index_rebuilt; retry must succeed."""
     database_path = tmp_path / "leftover-rebuilt.db"
@@ -122,9 +123,7 @@ def test_sqlite_upgrade_survives_leftover_search_index_rebuilt(tmp_path, monkeyp
             VALUES (1, 'Probe', 'words', 1)
         """)
         # Simulate the leftover empty FTS5 table from a killed CREATE.
-        connection.exec_driver_sql(
-            "CREATE VIRTUAL TABLE search_index_rebuilt USING fts5(x)"
-        )
+        connection.exec_driver_sql("CREATE VIRTUAL TABLE search_index_rebuilt USING fts5(x)")
         monkeypatch.setattr(
             migration,
             "op",
@@ -142,4 +141,3 @@ def test_sqlite_upgrade_survives_leftover_search_index_rebuilt(tmp_path, monkeyp
         assert connection.execute(
             "SELECT id, title, script_ngrams FROM search_index"
         ).fetchall() == [(1, "Probe", "")]
-

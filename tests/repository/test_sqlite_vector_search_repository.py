@@ -1149,10 +1149,7 @@ async def test_sqlite_vec_delete_batches_above_expression_depth_limit(search_rep
             {"project_id": project_id},
         )
         remaining_embeddings = await session.scalar(
-            text(
-                "SELECT COUNT(*) FROM search_vector_embeddings "
-                "WHERE rowid BETWEEN :lo AND :hi"
-            ),
+            text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid BETWEEN :lo AND :hi"),
             {"lo": 1850000, "hi": 1850000 + count - 1},
         )
     assert remaining_chunks == 0
