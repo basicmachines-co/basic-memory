@@ -125,6 +125,43 @@ jobs:
           name: cli-smoke
           path: cli-smoke.xml
 
+  test-windows-platform:
+    needs: changes
+    # The full Windows suites run only on main. Keep these path, checksum and
+    # CLI lifecycle regressions covered before merge without that suite's cost.
+    if: needs.changes.outputs.code == 'true' && github.ref_name != 'main'
+    name: Windows path and checksum regressions (Python 3.12)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv
+          uv pip install -e ".[dev,pdf]"
+      - name: Run platform regressions
+        run: >-
+          uv run pytest
+          tests/cli/test_wiki_command.py
+          tests/indexing/test_note_content_promotion_guard.py
+          tests/mcp/test_tool_bm_delete.py
+          tests/mcp/test_tool_project_management.py
+          test-int/mcp/test_project_management_integration.py
+          -q --no-cov --junitxml=windows-platform.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-platform
+          path: windows-platform.xml
+
   test-sqlite-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'

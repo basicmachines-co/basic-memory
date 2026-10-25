@@ -96,6 +96,10 @@ async def bm_delete(
 
     source = identifier if identifier is not None else path
     assert source is not None
+    # Directory deletes strip whitespace at the API boundary. Do it before routing too:
+    # Windows resolves ' / ' outside the project before the root-delete guard can run.
+    if identifier is None:
+        source = source.strip()
     # A note is resolved by identifier; a directory is a path that must stay inside.
     kind = "identifier" if identifier is not None else "path"
     async with open_project_target(
