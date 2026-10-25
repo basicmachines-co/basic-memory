@@ -3,8 +3,8 @@
 ``memory://man`` is the index (apropos); ``memory://man/<page>`` is one page. Every
 bundled page is also registered as a concrete resource so clients that browse
 ``resources/list`` see each page with its summary, while the template underneath
-accepts any spelling of a page reference — ``search-notes(3)``, ``3/search-notes``,
-``search_notes`` — so an agent's first guess resolves.
+accepts any spelling of a page reference — ``bm-search(3)``, ``3/bm-search``,
+``bm_search`` — so an agent's first guess resolves.
 """
 
 from fastmcp.exceptions import ResourceError
@@ -35,9 +35,9 @@ async def manual_index() -> str:
     uri=MANUAL_PAGE_TEMPLATE,
     name="manual page",
     description=(
-        "One manual page, e.g. memory://man/search-notes(3). Section-3 pages document "
+        "One manual page, e.g. memory://man/bm-search(3). Section-3 pages document "
         "each MCP tool with parameters, verified examples, and gotchas. Any common "
-        "spelling of the page name resolves: search-notes(3), 3/search-notes, search_notes."
+        "spelling of the page name resolves: bm-search(3), 3/bm-search, bm_search."
     ),
     mime_type="text/markdown",
 )

@@ -42,7 +42,7 @@ from basic_memory.utils import validate_project_path
         'knowledge-graph processing. Text and JSON come back as {"type": "text"}; '
         "images are re-encoded as JPEG and downscaled to about 350 KB; other binaries come "
         'back base64 as {"type": "document"} and are refused above 350 KB. Use '
-        "read_note for markdown notes when you want note resolution and fallback search."
+        "bm_read for markdown notes when you want note resolution and fallback search."
     ),
     tags={"notes"},
     annotations={

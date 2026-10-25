@@ -183,19 +183,18 @@ def _format_ambiguous_workspace_identifier_response(
     """Format the safe-stop response for ambiguous plain write identifiers."""
     cleaned_identifier = identifier.strip()
     normalized_identifier = normalize_project_reference(cleaned_identifier).strip("/")
-    workspace_hint, project_hint, note_identifier = normalized_identifier.split("/", 2)
+    _, _, note_identifier = normalized_identifier.split("/", 2)
 
     return f"""# Edit Failed - Ambiguous Identifier
 
 `{cleaned_identifier}` could refer to a local note path in the active project, or to a note in `{detected_project}`.
 
-Because edit_note changes content, Basic Memory will not infer a workspace route from a plain path.
+Because bm_edit changes content, Basic Memory will not infer a workspace route from a plain path.
 
 Retry with one of these explicit routes:
-- `edit_note(identifier="{note_identifier}", project="{detected_project}", operation=..., content=...)`
-- `edit_note(identifier="{note_identifier}", workspace="{workspace_hint}", project="{project_hint}", operation=..., content=...)`
-- `edit_note(identifier="memory://{normalized_identifier}", operation=..., content=...)`
-- `edit_note(identifier="{note_identifier}", project_id="<project external_id>", operation=..., content=...)`"""
+- `bm_edit(identifier="{note_identifier}", project="{detected_project}", command=..., content=...)`
+- `bm_edit(identifier="memory://{normalized_identifier}", command=..., content=...)`
+- `bm_edit(identifier="{note_identifier}", project="<project external_id>", command=..., content=...)`"""
 
 
 def _format_unresolved_project_route_response(
@@ -211,8 +210,8 @@ The memory URL `{error.identifier}` starts with the project route `{error.projec
 No note was edited or created. Basic Memory did not fall back to the active project `{active_project}`.
 
 ## How to retry
-1. Use `list_memory_projects()` to confirm the workspace, project, and project ID.
-2. Correct the `memory://` URL so its project route exists, or pass the note path with an explicit `project` or `project_id`.
+1. Use `bm_list(path="/")` to confirm the workspace, project, and project ID.
+2. Correct the `memory://` URL so its project route exists, or pass the note path with an explicit `project` (name, workspace/project, or external id).
 3. If `{error.project_prefix}` is a directory in `{active_project}`, remove the `memory://` prefix and retry with `project="{active_project}"`."""
 
 
@@ -227,7 +226,7 @@ def _format_cross_project_entity_response(
 
 The identifier `{identifier}` resolved to a note outside the selected project `{active_project}`, so no changes were made.
 
-Retry with `project_id="{target_project_id}"`, or use `list_memory_projects()` to confirm the intended project before editing."""
+Retry with `project="{target_project_id}"`, or use `bm_list(path="/")` to confirm the intended project before editing."""
 
 
 class EditRefused(ToolError):
@@ -265,7 +264,7 @@ def _unknown_outcome_guidance(identifier: str, project_external_id: str) -> str:
     return (
         "The edit may have been applied. Read the note before retrying; repeating an "
         "append or prepend that already landed adds the content twice: "
-        f'read_note(identifier="{identifier}", project_id="{project_external_id}")'
+        f'bm_read(identifier="{identifier}", project="{project_external_id}")'
     )
 
 
@@ -305,14 +304,14 @@ def _format_revision_conflict_response(
         return f"""# Edit Failed - Note Revision Conflict
 
 The note '{identifier}' no longer exists, so nothing was edited. Look the note up again
-before retrying, or drop expected_checksum to create it with append or prepend."""
+with bm_search before retrying; use bm_write to create a missing note."""
     return f"""# Edit Failed - Note Revision Conflict
 
 The note '{identifier}' changed since you read it, so nothing was edited.
 Current checksum: `{current_checksum}`
 
 Re-read the note to see what changed (or fetch just its checksum with
-`read_note(identifier="{identifier}", project_id="{project_external_id}", include_content=False)`),
+`bm_read(identifier="{identifier}", project="{project_external_id}", include_content=False)`),
 then retry with expected_checksum="{current_checksum}". Drop expected_checksum to edit
 the current revision unconditionally."""
 
@@ -334,19 +333,19 @@ def _format_error_response(
 
 The note with identifier '{identifier}' could not be found. The `find_replace` and `replace_section` operations require an existing note with content to modify.
 
-**Tip:** `append` and `prepend` operations automatically create the note if it doesn't exist.
+**Tip:** Use bm_write to create a missing note before editing it.
 
 ## Suggestions to try:
-1. **Use append/prepend instead**: These operations will create the note automatically if it doesn't exist
-2. **Search for the note first**: Use `search_notes(query="{identifier.split("/")[-1]}", project="{project or "project-name"}")` to find similar notes with exact identifiers
-3. **File exists on disk but is not indexed yet?**: edit_note indexes the file automatically when the identifier matches its path (e.g. 'folder/note' for 'folder/note.md'). If your identifier is a title or differs from the file path, run `basic-memory db reindex --search` or wait for the file watcher, then retry
+1. **Create a missing note**: Use bm_write before calling bm_edit
+2. **Search for the note first**: Use `bm_search(query="{identifier.split("/")[-1]}", project="{project or "project-name"}")` to find similar notes with exact identifiers
+3. **File exists on disk but is not indexed yet?**: Run `basic-memory db reindex --search` or wait for the file watcher, then retry
 4. **Try different exact identifier formats**:
    - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
    - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"
-   - Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` first to verify the note exists and get the exact identifier
+   - Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` first to verify the note exists and get the exact identifier
 
 ## Alternative approach:
-Use `write_note(title="title", content="content", directory="folder", project="{project or "project-name"}")` to create the note first, then edit it."""
+Use `bm_write(identifier="folder/title.md", content="content", project="{project or "project-name"}")` to create the note first, then edit it."""
 
     # Find/replace specific errors
     if operation == "find_replace":
@@ -356,7 +355,7 @@ Use `write_note(title="title", content="content", directory="folder", project="{
 The text '{find_text}' was not found in the note '{identifier}'.
 
 ## Suggestions to try:
-1. **Read the note first**: Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` to see the current content
+1. **Read the note first**: Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to see the current content
 2. **Check for exact matches**: The search is case-sensitive and must match exactly
 3. **Try a broader search**: Search for just part of the text you want to replace
 4. **Use expected_replacements=0**: If you want to verify the text doesn't exist
@@ -377,13 +376,13 @@ The text '{find_text}' was not found in the note '{identifier}'.
 Expected {expected_replacements} occurrences of '{find_text}' but found {actual_count}.
 
 ## How to fix:
-1. **Read the note first**: Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` to see how many times '{find_text}' appears
-2. **Update expected_replacements**: Set expected_replacements={actual_count} in your edit_note call
+1. **Read the note first**: Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to see how many times '{find_text}' appears
+2. **Update expected_replacements**: Set expected_replacements={actual_count} in your bm_edit call
 3. **Be more specific**: If you only want to replace some occurrences, make your find_text more specific
 
 ## Example:
 ```
-edit_note(identifier="{identifier}", operation="find_replace", content="new_text", project="{project or "project-name"}", find_text="{find_text}", expected_replacements={actual_count})
+bm_edit(identifier="{identifier}", command="find_replace", content="new_text", project="{project or "project-name"}", find_text="{find_text}", expected_replacements={actual_count})
 ```"""
 
     # Section replacement errors
@@ -393,7 +392,7 @@ edit_note(identifier="{identifier}", operation="find_replace", content="new_text
 Multiple sections found with the same header in note '{identifier}'.
 
 ## How to fix:
-1. **Read the note first**: Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` to see the document structure
+1. **Read the note first**: Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to see the document structure
 2. **Make headers unique**: Add more specific text to distinguish sections
 3. **Use append instead**: Add content at the end rather than replacing a specific section
 
@@ -409,14 +408,14 @@ Use `find_replace` to update specific text within the duplicate sections."""
 There was a problem with the edit request to note '{identifier}': {error_message}.
 
 ## Common causes and fixes:
-1. **Note doesn't exist**: Use `search_notes(query="query", project="{project or "project-name"}")` or `read_note(identifier="{identifier}", project="{project or "project-name"}")` to verify the note exists
+1. **Note doesn't exist**: Use `bm_search(query="query", project="{project or "project-name"}")` or `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to verify the note exists
 2. **Invalid identifier format**: Try different identifier formats (title vs permalink)
 3. **Empty or invalid content**: Check that your content is properly formatted
-4. **Server error**: Try the operation again, or use `read_note()` first to verify the note state
+4. **Server error**: Try the operation again, or use `bm_read()` first to verify the note state
 
 ## Troubleshooting steps:
-1. Verify the note exists: `read_note(identifier="{identifier}", project="{project or "project-name"}")`
-2. If not found, search for it: `search_notes(query="{identifier.split("/")[-1]}", project="{project or "project-name"}")`
+1. Verify the note exists: `bm_read(identifier="{identifier}", project="{project or "project-name"}")`
+2. If not found, search for it: `bm_search(query="{identifier.split("/")[-1]}", project="{project or "project-name"}")`
 3. Try again with the correct identifier from the search results"""
 
     # Fallback for other errors
@@ -425,14 +424,14 @@ There was a problem with the edit request to note '{identifier}': {error_message
 Error editing note '{identifier}': {error_message}
 
 ## General troubleshooting:
-1. **Verify the note exists**: Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` to check
+1. **Verify the note exists**: Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to check
 2. **Check your parameters**: Ensure all required parameters are provided correctly
-3. **Read the note content first**: Use `read_note(identifier="{identifier}", project="{project or "project-name"}")` to understand the current structure
+3. **Read the note content first**: Use `bm_read(identifier="{identifier}", project="{project or "project-name"}")` to understand the current structure
 4. **Try a simpler operation**: Start with `append` if other operations fail
 
 ## Need help?
-- Use `search_notes(query="query", project="{project or "project-name"}")` to find notes
-- Use `read_note(identifier="identifier", project="{project or "project-name"}")` to examine content before editing
+- Use `bm_search(query="query", project="{project or "project-name"}")` to find notes
+- Use `bm_read(identifier="identifier", project="{project or "project-name"}")` to examine content before editing
 - Check that identifiers, section headers, and find_text match exactly"""
 
 
@@ -511,7 +510,7 @@ async def edit_note(
     Args:
         identifier: The exact title, permalink, or memory:// URL of the note to edit.
                    Must be an exact match - fuzzy matching is not supported for edit operations.
-                   Use search_notes() or read_note() first to find the correct identifier if uncertain.
+                   Use bm_search() or bm_read() first to find the correct identifier if uncertain.
                    From the CLI this is a positional argument, not a flag.
         operation: The editing operation to perform:
                   - "append": Add content to the end of the note (creates the note if it doesn't exist)
@@ -550,12 +549,12 @@ async def edit_note(
             ignored since those have their own dedicated handling; `type` is applied like
             any other frontmatter field. Key deletion is not supported.
         expected_checksum: Optional revision precondition: the full `checksum` that
-            read_note, write_note, or edit_note returned in JSON mode (the accepted
+            bm_read, bm_write, or bm_edit returned in JSON mode (the accepted
             revision's checksum; text output shows only its first 8 characters). When the
             note has changed since, the edit is refused with a revision conflict that
             names the current checksum, and nothing is written. A refused precondition
             never auto-creates the note. To refresh a stale checksum without reading the
-            whole note, call read_note(identifier=..., include_content=False).
+            whole note, call bm_read(identifier=..., include_content=False).
         output_format: "text" returns a markdown summary of the edit and the note's
             resulting observations and relations. "json" returns machine-readable edit
             metadata.
@@ -1137,6 +1136,9 @@ async def edit_note(
                             "fileCreated": False,
                             "error": "NOTE_REVISION_CONFLICT",
                             "currentChecksum": current_checksum,
+                            "message": _format_revision_conflict_response(
+                                identifier, current_checksum, active_project.external_id
+                            ),
                         },
                         _format_revision_conflict_response(
                             identifier, current_checksum, active_project.external_id

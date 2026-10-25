@@ -182,7 +182,7 @@ async def entity_already_exists_error_handler(request: Request, exc: EntityAlrea
         request,
         HTTPException(
             status_code=409,
-            detail="Note already exists. Use edit_note to modify it, or delete it first.",
+            detail="Note already exists. Use bm_edit to modify it, or delete it first.",
         ),
     )
 

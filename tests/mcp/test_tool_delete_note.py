@@ -32,8 +32,8 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed - Note Not Found" in result
         assert "The note 'test-note' could not be found" in result
-        assert 'search_notes(query="test-note", project="test-project")' in result
-        assert 'delete_note(identifier="...", project="test-project")' in result
+        assert 'bm_search(query="test-note", project="test-project")' in result
+        assert 'bm_delete(identifier="...", project="test-project")' in result
         assert "already be deleted" in result
 
     def test_format_delete_error_permission_denied(self, test_project):
@@ -43,7 +43,7 @@ class TestDeleteNoteErrorFormatting:
         assert "# Delete Failed - Permission Error" in result
         assert "No write access to delete 'test-note'" in result
         assert "locked by another application" in result
-        assert "list_memory_projects()" in result
+        assert 'bm_list(path="/")' in result
 
     def test_format_delete_error_access_forbidden(self, test_project):
         """Test formatting for access forbidden errors."""
@@ -60,7 +60,7 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed - System Error" in result
         assert "A system error occurred while deleting 'test-note'" in result
-        assert 'read_note(identifier="test-note", project="test-project")' in result
+        assert 'bm_read(identifier="test-note", project="test-project")' in result
         assert "support@basicmemory.com" in result
 
     def test_format_delete_error_filesystem_error(self, test_project):
@@ -99,7 +99,7 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed" in result
         assert "Error deleting note 'test-note' in test-project: unknown error" in result
-        assert 'search_notes(query="test-note", project="test-project")' in result
+        assert 'bm_search(query="test-note", project="test-project")' in result
 
     def test_format_delete_error_with_complex_identifier(self, test_project):
         """Test formatting with complex identifiers (permalinks)."""
@@ -107,7 +107,7 @@ class TestDeleteNoteErrorFormatting:
             test_project.name, "entity not found", "folder/note-title"
         )
 
-        assert 'search_notes(query="note-title", project="test-project")' in result
+        assert 'bm_search(query="note-title", project="test-project")' in result
         assert "Note Title" in result  # Title format
         assert "folder/note-title" in result  # Permalink format
 

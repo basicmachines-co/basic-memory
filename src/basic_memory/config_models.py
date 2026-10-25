@@ -410,7 +410,7 @@ class BasicMemoryConfig(BaseSettings):
     )
     default_search_type: Literal["text", "vector", "hybrid"] | None = Field(
         default=None,
-        description="Default search type for search_notes when not specified per-query. "
+        description="Default search mode for bm_search when not specified per-query. "
         "Valid values: text, vector, hybrid. "
         "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
     )
@@ -591,8 +591,8 @@ class BasicMemoryConfig(BaseSettings):
     write_note_overwrite_default: bool = Field(
         default=False,
         description=(
-            "Default value for write_note's overwrite parameter. "
-            "When False (default), write_note errors if note already exists. "
+            "Default value for bm_write's overwrite parameter. "
+            "When False (default), bm_write errors if note already exists. "
             "Set to True to restore pre-v0.20 upsert behavior. "
             "Env: BASIC_MEMORY_WRITE_NOTE_OVERWRITE_DEFAULT"
         ),

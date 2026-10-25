@@ -93,7 +93,7 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
             except ToolError as error:
                 if "not found" in str(error).lower():
                     raise NoteNotFoundError(
-                        f"No note {identifier!r}; search_notes can find the identifier"
+                        f"No note {identifier!r}; bm_search can find the identifier"
                     ) from error
                 raise
             entity_id = resolved.json()["external_id"]

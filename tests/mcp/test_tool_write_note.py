@@ -1442,7 +1442,7 @@ class TestWriteNoteOverwriteGuard:
         result2 = str(exc_info.value)
         assert "# Error: Note already exists" in result2
         assert "Guard Test" in result2
-        assert "edit_note" in result2
+        assert "bm_edit" in result2
 
         # Original content should be untouched
         content = await read_note("guard/guard-test", project=test_project.name)
@@ -1598,7 +1598,7 @@ class TestWriteNoteOverwriteGuard:
             await write_note(
                 project=test_project.name, title="Mover", directory="dirA", content="refused"
             )
-        assert f'edit_note("{replacement["permalink"]}"' in str(text_refusal.value)
+        assert f'bm_edit("{replacement["permalink"]}"' in str(text_refusal.value)
 
     @pytest.mark.asyncio
     async def test_write_note_conflict_qualifies_the_permalink_in_a_workspace(
@@ -1900,8 +1900,8 @@ async def test_write_note_surfaces_similar_existing_notes(app, test_project, stu
     assert f"- Reference BU Product Mapping (`{reference_permalink}`)" in section
     assert "- Product Catalog (`" in section
     assert "- BU Mapping Analysis (`" not in section
-    assert f'read_note("{reference_permalink}")' in section
-    assert f'delete_note("{new_permalink}")' in section
+    assert f'bm_read("{reference_permalink}")' in section
+    assert f'bm_delete("{new_permalink}")' in section
     assert "relates_to [[Reference BU Product Mapping]]" in section
     assert "score" not in section.lower()
 

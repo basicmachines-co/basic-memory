@@ -42,13 +42,13 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
             It may already be deleted, the identifier may not match exactly, or the note
             may live in a different project.
 
-            delete_note needs an exact title or permalink. Alternate forms of this
+            bm_delete needs an exact title or permalink. Alternate forms of this
             identifier: title "{title_format}", permalink "{permalink_format}".
 
             Find the exact identifier with
-            `search_notes(query="{search_term}", project="{project}")` or
-            `list_directory(dir_name="/", project="{project}")`, then retry
-            `delete_note(identifier="...", project="{project}")`.
+            `bm_search(query="{search_term}", project="{project}")` or
+            `bm_list(path="/", project="{project}")`, then retry
+            `bm_delete(identifier="...", project="{project}")`.
             """).strip()
 
     # Permission/access errors
@@ -59,7 +59,7 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
             No write access to delete '{identifier}' in {project}: {error_message}
 
             The note may be open or locked by another application, or this account may
-            have read-only access to the project. `list_memory_projects()` shows the
+            have read-only access to the project. `bm_list(path="/")` shows the
             projects this account can reach.
             """).strip()
 
@@ -71,7 +71,7 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
             A system error occurred while deleting '{identifier}' in {project}: {error_message}
 
             The error may be transient (a locked file or low disk space). Check whether the
-            note still exists with `read_note(identifier="{identifier}", project="{project}")`
+            note still exists with `bm_read(identifier="{identifier}", project="{project}")`
             before retrying. If it persists, contact support@basicmemory.com.
             """).strip()
 
@@ -84,7 +84,7 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
 
             The file and the index may be out of sync, or another operation may hold a
             database lock. Check the note's current state with
-            `read_note(identifier="{identifier}", project="{project}")` before retrying. If
+            `bm_read(identifier="{identifier}", project="{project}")` before retrying. If
             the file is gone but the index still lists it, contact support@basicmemory.com.
             """).strip()
 
@@ -95,7 +95,7 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
         Error deleting note '{identifier}' in {project}: {error_message}
 
         Confirm the exact identifier with
-        `search_notes(query="{identifier}", project="{project}")` before retrying. If the
+        `bm_search(query="{identifier}", project="{project}")` before retrying. If the
         operation keeps failing, contact support@basicmemory.com.
         """).strip()
 
@@ -302,17 +302,17 @@ async def delete_note(
 Error deleting directory '{identifier}': {str(e)}
 
 ## Troubleshooting:
-1. **Verify the directory exists**: Use `list_directory("{identifier}")` to check
+1. **Verify the directory exists**: Use `bm_list("{identifier}")` to check
 2. **Check for permission issues**: Ensure you have delete access to the project
 3. **Try individual deletes**: Delete files one at a time if bulk delete fails
 
 ## Alternative approach:
 ```
 # List directory contents first
-list_directory("{identifier}")
+bm_list("{identifier}")
 
 # Then delete individual files
-delete_note("path/to/file.md")
+bm_delete("path/to/file.md")
 ```""",
                 )
 

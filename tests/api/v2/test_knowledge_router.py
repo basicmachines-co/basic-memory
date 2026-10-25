@@ -567,7 +567,7 @@ async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_projec
         params={"fast": False},
     )
     assert response.status_code == 409
-    expected_detail = "Note already exists. Use edit_note to modify it, or delete it first."
+    expected_detail = "Note already exists. Use bm_edit to modify it, or delete it first."
     assert response.json()["detail"] == expected_detail
 
 

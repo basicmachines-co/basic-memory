@@ -22,10 +22,10 @@ Here are the most relevant results:
             {{/if}}
 
             {{#if permalink}}
-            You can view this content with: `read_note("{{ permalink }}")`
-            Or explore its context with: `build_context("memory://{{ permalink }}")`
+            You can view this content with: `bm_read("{{ permalink }}")`
+            Or explore its context with: `bm_context("memory://{{ permalink }}")`
             {{else}}
-            You can view this file with: `read_content("{{ file_path }}")`
+            You can view this file with: `bm_read("{{ file_path }}")`
             {{/if}}
         {{/dedent}}
         {{/if_cond}}
@@ -34,19 +34,19 @@ Here are the most relevant results:
 ## Next Steps
 
 You can:
-- Refine your search: `search_notes("{{ query }} AND additional_term")`
-- Exclude terms: `search_notes("{{ query }} NOT exclude_term")`
-- View more results: `search_notes("{{ query }}", after_date=None)`
-- Check recent activity: `recent_activity()`
+- Refine your search: `bm_search("{{ query }} AND additional_term")`
+- Exclude terms: `bm_search("{{ query }} NOT exclude_term")`
+- View more results: `bm_search("{{ query }}", since=None)`
+- Check recent activity: `bm_search(since="7d")`
 
-If these results add up to something worth keeping, offer to save a synthesis with `write_note`.
+If these results add up to something worth keeping, offer to save a synthesis with `bm_write`.
 {{else}}
 I couldn't find any results for this query.
 
 ## Other Suggestions
 - Try a different search term
 - Broaden your search criteria
-- Check recent activity with `recent_activity(timeframe="1w")`
+- Check recent activity with `bm_search(since="1w")`
 
-If the user wants this topic tracked, offer to start a note with `write_note`.
+If the user wants this topic tracked, offer to start a note with `bm_write`.
 {{/if}}
