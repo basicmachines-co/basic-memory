@@ -38,6 +38,10 @@ bm_project(command, name=None, path=None, set_default=False, workspace=None,
 bm_project never deletes; bm_project_delete does, and only when the server
 enables it.
 
+While the local server is running, its watcher picks up a new project's folder
+at the next project reload. Once the watch is attached, a one-time index pass
+includes files copied in before attachment; later changes use normal file events.
+
 The shell counterpart for `recent` is tail(1).
 
 ## PARAMETERS
