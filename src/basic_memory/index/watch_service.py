@@ -20,6 +20,11 @@ from watchfiles.main import Change, FileChange
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns
+from basic_memory.index.local_project import (
+    LocalProjectIndexRuntimeFactory,
+    LocalProjectIndexRuntimeProvider,
+    run_local_project_index_for_project,
+)
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.index.local_watch import (
     LocalWatchEventIndexRequest,
@@ -104,6 +109,8 @@ class WatchService:
         quiet: bool = False,
         event_index_runtime_factory: WatchEventIndexRuntimeFactory | None = None,
         constrained_project: str | None = None,
+        project_index_runtime_factory: LocalProjectIndexRuntimeProvider | None = None,
+        initial_projects: Sequence[Project] = (),
     ) -> None:
         self.app_config = app_config
         self.project_repository = project_repository
@@ -116,13 +123,36 @@ class WatchService:
         self._event_index_runtime_factory = (
             event_index_runtime_factory or LocalWatchEventIndexRuntimeFactory()
         )
+        self._project_index_runtime_factory = (
+            project_index_runtime_factory or LocalProjectIndexRuntimeFactory()
+        )
+        # Startup already schedules these projects' initial scans. Only projects
+        # added later need a catch-up pass after their filesystem watch is attached.
+        # Track by project identity, not root: a path change rewrites config before
+        # the files move, so rescanning the new root would index every old path as
+        # deleted (`bm project move`).
+        self._indexed_project_ids = {project.external_id for project in initial_projects}
+        self._catch_up_in_progress = False
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
 
     async def _schedule_restart(self, stop_event: asyncio.Event) -> None:
         """Schedule a watch cycle restart so project config changes are observed."""
-        await asyncio.sleep(self.app_config.watch_project_reload_interval)
-        stop_event.set()
+        waited_for_catch_up = False
+        while True:
+            await asyncio.sleep(self.app_config.watch_project_reload_interval)
+            # Trigger: a newly watched project is still being indexed or draining
+            #   the batches collected while it was scanned.
+            # Why: watchfiles discards its pending batches when stop is set, and
+            #      the catch-up scan is the only consumer step long enough to
+            #      collect a meaningful backlog.
+            # Outcome: give the catch-up one full interval to drain. Then reload
+            #          anyway, so a project with continuous writes cannot defer
+            #          config reloads forever.
+            if not self._catch_up_in_progress or waited_for_catch_up:
+                stop_event.set()
+                return
+            waited_for_catch_up = True
 
     def _get_ignore_patterns(self, project_path: Path) -> set[str]:
         """Return cached ignore patterns for one project root."""
@@ -137,17 +167,81 @@ class WatchService:
     ) -> None:
         """Run one watchfiles cycle and route batches into project-local indexing."""
         project_paths = [project.path for project in projects]
+        projects_by_id = {project.external_id: project for project in projects}
+        self._indexed_project_ids.intersection_update(projects_by_id)
+        new_projects = {
+            external_id: project
+            for external_id, project in projects_by_id.items()
+            if external_id not in self._indexed_project_ids
+        }
+        catch_up_needs_drain = bool(new_projects)
+        watch_unfiltered = bool(new_projects)
+        self._catch_up_in_progress = catch_up_needs_drain
         previous_filter_roots = self._sorted_watch_filter_roots
         self._sorted_watch_filter_roots = local_watch_filter_roots(projects)
 
+        watcher = awatch(
+            *project_paths,
+            debounce=self.app_config.index_delay,
+            # Ignored activity can keep awatch from yielding either changes or a
+            # timeout forever. Observe raw batches until this cycle ends so the
+            # post-attach scan can start even while hidden files keep changing.
+            watch_filter=None if watch_unfiltered else self.filter_changes,
+            recursive=True,
+            stop_event=stop_event,
+            yield_on_timeout=bool(new_projects),
+            rust_timeout=(
+                min(1000, max(1, self.app_config.watch_project_reload_interval * 500))
+                if new_projects
+                else None
+            ),
+        )
         try:
-            async for changes in awatch(
-                *project_paths,
-                debounce=self.app_config.index_delay,
-                watch_filter=self.filter_changes,
-                recursive=True,
-                stop_event=stop_event,
-            ):
+            async for changes in watcher:
+                quiet_batch = not changes
+                if watch_unfiltered:
+                    changes = {
+                        (change, path)
+                        for change, path in changes
+                        if self.filter_changes(change, path)
+                    }
+                # awatch installs its watches before yielding changes or a timeout.
+                # Scanning earlier leaves the same gap between a scan and attach.
+                # Stay in this consumer so catch-up cannot overlap a watch batch.
+                caught_up_now = bool(new_projects)
+                for external_id, project in new_projects.items():
+                    if not ConfigManager().config.is_locally_syncable(project.name, project.path):
+                        continue
+                    try:
+                        result = await run_local_project_index_for_project(
+                            project, runtime_factory=self._project_index_runtime_factory
+                        )
+                        if not stop_event.is_set():
+                            self._indexed_project_ids.add(external_id)
+                        self.state.last_scan = datetime.now()
+                        logger.info(
+                            "Indexed a newly watched project",
+                            project=project.name,
+                            enqueued_files=result.enqueued_files,
+                        )
+                    except Exception as exc:
+                        logger.exception(f"New project index failed for {project.name}: {exc}")
+                        self.state.record_error(str(exc))
+                    await self.write_status()
+                new_projects.clear()
+                if not changes:
+                    # Trigger: the timeout that released the catch-up arrived before
+                    #   the scan started, so it proves nothing about files queued
+                    #   during the scan.
+                    # Why: the reload must not stop the watcher until those batches
+                    #      have been handed to indexing.
+                    # Outcome: clear the catch-up guard only after a later quiet batch.
+                    if caught_up_now:
+                        continue
+                    if catch_up_needs_drain and quiet_batch:
+                        catch_up_needs_drain = False
+                        self._catch_up_in_progress = False
+                    continue
                 ignore_patterns_by_project_root = {
                     local_project_root(project): self._get_ignore_patterns(
                         local_project_root(project)
@@ -165,7 +259,11 @@ class WatchService:
                 ]
                 await asyncio.gather(*change_handlers)
         finally:
-            self._sorted_watch_filter_roots = previous_filter_roots
+            self._catch_up_in_progress = False
+            try:
+                await watcher.aclose()
+            finally:
+                self._sorted_watch_filter_roots = previous_filter_roots
 
     async def _select_projects_to_watch(self) -> list[Project]:
         """Return locally syncable projects that this watcher instance owns."""
@@ -178,10 +276,11 @@ class WatchService:
                 project for project in projects if project.permalink == constrained_permalink
             ]
 
+        current_config = ConfigManager().config
         skipped = [
             project.name
             for project in projects
-            if not self.app_config.is_locally_syncable(project.name, project.path)
+            if not current_config.is_locally_syncable(project.name, project.path)
         ]
         if skipped:
             projects = [project for project in projects if project.name not in skipped]

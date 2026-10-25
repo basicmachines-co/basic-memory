@@ -14,8 +14,10 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
+    _initial_index_tasks,
     ensure_initialization,
     initialize_database,
     initialize_file_indexing,
@@ -315,6 +317,15 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
 
         await initialize_file_indexing(updated, quiet=True)
 
+        watch_kwargs = _FakeWatchService.last_kwargs
+        assert isinstance(
+            watch_kwargs["project_index_runtime_factory"], RecordingProjectIndexRuntimeFactory
+        )
+        initial_projects = watch_kwargs["initial_projects"]
+        assert isinstance(initial_projects, list)
+        assert len(initial_projects) == 1
+        assert isinstance(initial_projects[0], Project)
+        assert initial_projects[0].name == "event-startup"
         assert len(created_coroutines) == 1
         await created_coroutines[0]
 
@@ -333,6 +344,7 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
     recognized as cloud, yet Path("") resolves to the process cwd. Indexing it
     would inject frontmatter into unrelated files, so it must be skipped.
     """
+    initial_index_tasks = _initial_index_tasks.copy()
     await db.shutdown_db()
     try:
         from basic_memory.config import ProjectEntry
@@ -371,6 +383,9 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
         assert "empty-path" in skip_logs[0]
         assert "good" not in skip_logs[0]
     finally:
+        # The fake watcher returns immediately; let this test's startup index
+        # finish before closing its database and event loop.
+        await asyncio.gather(*(_initial_index_tasks - initial_index_tasks))
         await db.shutdown_db()
 
 

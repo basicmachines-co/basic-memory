@@ -270,16 +270,6 @@ async def initialize_file_indexing(
         read_cache=read_cache,
     )
 
-    # Initialize watch service
-    watch_service = WatchService(
-        app_config=app_config,
-        project_repository=project_repository,
-        session_maker=session_maker,
-        quiet=quiet,
-        event_index_runtime_factory=event_index_runtime_factory,
-        constrained_project=constrained_project,
-    )
-
     # Get active projects
     async with db.scoped_session(session_maker) as session:
         active_projects = await project_repository.get_active_projects(session)
@@ -297,6 +287,17 @@ async def initialize_file_indexing(
     if skip:
         active_projects = [p for p in active_projects if p.name not in skip]
         logger.info(f"Skipping projects that are not locally indexable: {skip}")
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        quiet=quiet,
+        event_index_runtime_factory=event_index_runtime_factory,
+        constrained_project=constrained_project,
+        project_index_runtime_factory=project_index_runtime_factory,
+        initial_projects=active_projects,
+    )
 
     # Recover materializations left stuck (writing/pending/failed) and source
     # cleanup whose in-process enqueue was lost. Runs synchronously so the files
