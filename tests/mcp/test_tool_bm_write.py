@@ -229,7 +229,9 @@ async def test_frontmatter_without_title_and_unresolved_relations(client, test_p
     )
 
     assert "title: linked" in text
-    assert "relations: 1 (1 not yet resolved)" in text
+    assert "relations:" not in text
+    note = await bm_read("notes/linked.md", project=test_project.name)
+    assert isinstance(note, str) and "relates_to [[No Such Note]]" in note
 
 
 @pytest.mark.asyncio

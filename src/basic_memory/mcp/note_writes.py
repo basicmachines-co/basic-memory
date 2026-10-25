@@ -28,9 +28,6 @@ class NoteChange:
     # The accepted revision's checksum, which bm_write and bm_edit take back as
     # expected_checksum. file_checksum lags behind materialization.
     checksum: str | None
-    observations: int
-    relations: int
-    unresolved_relations: int
     # The path the caller asked for, when the note landed in an existing folder's
     # spelling instead.
     requested_file_path: str | None = None
@@ -56,9 +53,6 @@ class NoteChange:
             permalink=note.permalink,
             file_path=paths.path(note.file_path),
             checksum=note.db_checksum,
-            observations=len(note.observations),
-            relations=len(note.relations),
-            unresolved_relations=sum(1 for relation in note.relations if not relation.to_id),
             requested_file_path=None if requested is None else paths.path(requested),
             previous_file_path=(
                 None if previous_file_path is None else paths.path(previous_file_path)
@@ -75,7 +69,7 @@ class NoteChange:
         }
 
     def text_lines(self, *, detail: str | None = None) -> list[str]:
-        """The text result: what changed and where, then identity and graph counts."""
+        """Report the accepted revision, whose derived graph may not be indexed yet."""
         match self.action:
             case "moved":
                 headline = f"Moved {self.previous_file_path} to {self.file_path}"
@@ -86,13 +80,9 @@ class NoteChange:
         lines = [headline]
         if self.requested_file_path is not None:
             lines.append(f"requested: {self.requested_file_path}")
-        relations = f"relations: {self.relations}"
-        if self.unresolved_relations:
-            relations += f" ({self.unresolved_relations} not yet resolved)"
         lines += [
             f"title: {self.title}",
             f"permalink: {self.permalink}",
             f"checksum: {self.checksum}",
-            f"observations: {self.observations}, {relations}",
         ]
         return lines
