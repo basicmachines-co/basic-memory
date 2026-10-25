@@ -2,6 +2,7 @@
 
 import asyncio
 import builtins
+import math
 import sys
 from types import SimpleNamespace
 
@@ -72,6 +73,34 @@ class _MalformedEmbeddingsApi:
         return SimpleNamespace(data=[SimpleNamespace(index=0, embedding=[1.0, 2.0, 3.0])])
 
 
+class _FixedVectorEmbeddingsApi:
+    def __init__(self, embedding: list[float]):
+        self._embedding = embedding
+
+    async def create(self, *, model: str, input: list[str]):
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(index=index, embedding=list(self._embedding))
+                for index, _text in enumerate(input)
+            ]
+        )
+
+
+def _install_fixed_openai(monkeypatch: pytest.MonkeyPatch, embedding: list[float]) -> None:
+    class _FixedAsyncOpenAI:
+        def __init__(self, *, api_key: str, base_url=None, timeout=30.0):
+            self.embeddings = _FixedVectorEmbeddingsApi(embedding)
+
+    module = type(sys)("openai")
+    setattr(module, "AsyncOpenAI", _FixedAsyncOpenAI)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+
+def _l2_norm(vector: list[float]) -> float:
+    return math.sqrt(sum(value * value for value in vector))
+
+
 @pytest.fixture(autouse=True)
 def _reset_embedding_provider_cache_fixture():
     reset_embedding_provider_cache()
@@ -114,6 +143,41 @@ async def test_openai_provider_dimension_mismatch_raises_error(monkeypatch):
     provider = OpenAIEmbeddingProvider(dimensions=2)
     with pytest.raises(RuntimeError, match="3-dimensional vectors"):
         await provider.embed_documents(["semantic note"])
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_l2_normalizes_vectors_for_sqlite_similarity(monkeypatch):
+    """OpenAI-compatible endpoints may return non-unit vectors.
+
+    sqlite maps L2 distance to cosine similarity with ``1 - L2^2/2``, which
+    holds only for unit vectors. The provider must return a unit vector in the
+    same direction, and leave an already-unit vector on the unit sphere.
+    A zero vector stays zero so normalization does not divide by zero.
+    """
+    _install_fixed_openai(monkeypatch, [3.0, 4.0, 0.0])
+    provider = OpenAIEmbeddingProvider(dimensions=3)
+
+    documents = await provider.embed_documents(["ark note"])
+    query = await provider.embed_query("ark note")
+
+    assert documents[0] == pytest.approx([0.6, 0.8, 0.0])
+    assert query == pytest.approx([0.6, 0.8, 0.0])
+    assert _l2_norm(documents[0]) == pytest.approx(1.0)
+    assert _l2_norm(query) == pytest.approx(1.0)
+
+    _install_fixed_openai(monkeypatch, [1.0, 0.0, 0.0])
+    unit_provider = OpenAIEmbeddingProvider(dimensions=3)
+    unit_documents = await unit_provider.embed_documents(["openai note"])
+    unit_query = await unit_provider.embed_query("openai note")
+
+    assert unit_documents[0] == pytest.approx([1.0, 0.0, 0.0])
+    assert unit_query == pytest.approx([1.0, 0.0, 0.0])
+    assert _l2_norm(unit_documents[0]) == pytest.approx(1.0)
+    assert _l2_norm(unit_query) == pytest.approx(1.0)
+
+    _install_fixed_openai(monkeypatch, [0.0, 0.0, 0.0])
+    zero_provider = OpenAIEmbeddingProvider(dimensions=3)
+    assert await zero_provider.embed_documents(["empty"]) == [[0.0, 0.0, 0.0]]
 
 
 @pytest.mark.asyncio
@@ -565,13 +629,20 @@ async def test_openai_provider_runs_batches_concurrently_and_preserves_output_or
 
     vectors = await provider.embed_documents(["a", "bbbb", "ccc", "dd"])
 
-    assert shared_api.max_in_flight >= 2
-    assert vectors == [
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [3.0, 4.0, 5.0],
-        [2.0, 3.0, 4.0],
+    def _unit(raw: list[float]) -> list[float]:
+        norm = math.sqrt(sum(component * component for component in raw))
+        return [component / norm for component in raw]
+
+    expected = [
+        _unit([1.0, 2.0, 3.0]),
+        _unit([4.0, 5.0, 6.0]),
+        _unit([3.0, 4.0, 5.0]),
+        _unit([2.0, 3.0, 4.0]),
     ]
+    assert shared_api.max_in_flight >= 2
+    assert len(vectors) == len(expected)
+    for actual, wanted in zip(vectors, expected, strict=True):
+        assert actual == pytest.approx(wanted)
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from typing import Any
 
@@ -119,12 +120,24 @@ class OpenAIEmbeddingProvider:
                 raise RuntimeError("OpenAI embedding batch did not produce vectors.")
             all_vectors.extend(vectors)
 
-        if all_vectors and len(all_vectors[0]) != self.dimensions:
+        # sqlite_search_repository maps L2 distance to cosine similarity via
+        # `1 - L²/2`, which is correct only for unit vectors. FastEmbed (#1023)
+        # and LiteLLM already normalize. OpenAI-compatible endpoints such as
+        # Ark/doubao may return unnormalized vectors, so normalize here too.
+        normalized: list[list[float]] = []
+        for vector in all_vectors:
+            norm = math.sqrt(sum(x * x for x in vector))
+            if norm > 0:
+                normalized.append([x / norm for x in vector])
+            else:
+                normalized.append(vector)
+
+        if normalized and len(normalized[0]) != self.dimensions:
             raise RuntimeError(
-                f"Embedding model returned {len(all_vectors[0])}-dimensional vectors "
+                f"Embedding model returned {len(normalized[0])}-dimensional vectors "
                 f"but provider was configured for {self.dimensions} dimensions."
             )
-        return all_vectors
+        return normalized
 
     async def embed_query(self, text: str) -> list[float]:
         vectors = await self.embed_documents([text])
