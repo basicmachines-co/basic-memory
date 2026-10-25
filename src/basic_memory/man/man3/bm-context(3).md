@@ -29,6 +29,10 @@ Returns a note, its observations, and the notes its relations reach, up to
 pattern such as `plans/*`. `since` limits related results to recent changes and
 `max_related` caps them.
 
+A pattern selects notes as the primary results. Their observations and relations
+remain grouped under those notes. A pattern that names no note but addresses
+relation or observation permalinks still selects those rows directly.
+
 `compact` returns the graph without note bodies or observations; read chosen
 notes with bm_read. Output defaults to JSON because the result is a graph; text
 output names each note's path and ends with the next-page call when there is

@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from basic_memory.mcp.note_targets import PathQualifier
 from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.schemas.v2.entity import EntityResponseV2
@@ -59,4 +61,22 @@ def test_text_headline_carries_the_detail():
     change = NoteChange.of(_note(), action="edited", paths=PathQualifier(prefix=None))
 
     assert change.text_lines(detail="append")[0] == "Edited Plans/q4.md (append)"
-    assert change.text_lines()[-1] == "observations: 0, relations: 0"
+    assert change.text_lines()[-1] == "checksum: sum"
+
+
+@pytest.mark.parametrize("action", ["created", "updated", "edited", "moved"])
+def test_accepted_change_does_not_report_unavailable_graph_counts(action):
+    note = _note().model_copy(
+        update={
+            "content": "- [goal] ship\n- relates_to [[Missing]]",
+            "observations": [],
+            "relations": [],
+        }
+    )
+    change = NoteChange.of(
+        note, action=action, paths=PathQualifier(prefix=None), previous_file_path="notes/q4.md"
+    )
+
+    assert {"observations", "relations", "unresolved_relations"}.isdisjoint(change.as_json())
+    assert "observations:" not in "\n".join(change.text_lines())
+    assert "relations:" not in "\n".join(change.text_lines())

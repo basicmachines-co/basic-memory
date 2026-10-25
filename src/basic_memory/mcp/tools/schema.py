@@ -174,7 +174,7 @@ def _nothing_to_report(output_format: OutputFormat, message: str, guidance: str)
     return refusal("NOT_FOUND", text, output_format=output_format)
 
 
-def _no_notes_guidance(note_type: str, tool_name: str) -> str:
+def _no_notes_guidance(note_type: str, command: Literal["validate", "infer", "diff"]) -> str:
     """Build guidance string when no notes of a given type exist.
 
     Used by schema_validate when the project has zero notes of the
@@ -182,38 +182,38 @@ def _no_notes_guidance(note_type: str, tool_name: str) -> str:
     """
     return (
         f"# No Notes Found of Type '{note_type}'\n\n"
-        f"`{tool_name}` found no notes with type '{note_type}' in the project.\n\n"
+        f"`bm_schema(command={command!r}, note_type={note_type!r})` found no notes "
+        f"with type '{note_type}' in the project.\n\n"
         f"## Next Steps\n\n"
-        f"1. **Create notes of this type** — use `write_note` with "
+        f"1. **Create notes of this type** — use `bm_write` with "
         f'`note_type="{note_type}"` to create notes\n'
-        f"2. **Check existing types** — use `search_notes` with `note_types` "
+        f"2. **Check existing types** — use `bm_search` with `note_types` "
         f"filter to see what types exist\n"
-        f"3. **Browse content** — use `list_directory` or `recent_activity` to "
-        f"see what's in the project\n"
+        f"3. **Browse content** — use `bm_list` to see what's in the project\n"
     )
 
 
-def _no_schemas_defined_guidance(tool_name: str) -> str:
+def _no_schemas_defined_guidance() -> str:
     """Build guidance string when validating all types but no schemas exist.
 
     Used by schema_validate when called without arguments in a project that
     has no schema notes — there is nothing to validate yet.
     """
     return (
-        f"# No Schemas Defined\n\n"
-        f"`{tool_name}` was called without `note_type` or `identifier`, which "
-        f"validates every note type that has a schema — but this project has "
-        f"no schema notes yet, so there is nothing to validate.\n\n"
-        f"## Next Steps\n\n"
-        f'1. **Infer a schema** — run `schema_infer("<note_type>")` to analyze '
-        f"existing notes and get a suggested schema\n"
-        f"2. **Create a schema note** — write a note with `type: schema` and an "
-        f"`entity` field naming the note type it validates\n"
-        f"3. **Re-run** — call `{tool_name}()` again once a schema exists\n"
+        "# No Schemas Defined\n\n"
+        "`bm_schema(command='validate')` was called without `note_type` or `identifier`, which "
+        "validates every note type that has a schema — but this project has "
+        "no schema notes yet, so there is nothing to validate.\n\n"
+        "## Next Steps\n\n"
+        "1. **Infer a schema** — run `bm_schema(command='infer', note_type='<note_type>')` to analyze "
+        "existing notes and get a suggested schema\n"
+        "2. **Create a schema note** — write a note with `type: schema` and an "
+        "`entity` field naming the note type it validates\n"
+        "3. **Re-run** — call `bm_schema(command='validate')` again once a schema exists\n"
     )
 
 
-def _no_schema_guidance(note_type: str, tool_name: str) -> str:
+def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) -> str:
     """Build guidance string when no schema exists for a note type.
 
     Used by schema_validate and schema_diff to explain what happened
@@ -221,9 +221,10 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
     """
     return (
         f"# No Schema Found for '{note_type}'\n\n"
-        f"`{tool_name}` requires a schema note to exist for type '{note_type}'.\n\n"
+        f"`bm_schema(command={command!r}, note_type={note_type!r})` requires a schema "
+        f"note to exist for type '{note_type}'.\n\n"
         f"## How to Create a Schema\n\n"
-        f'1. **Infer from existing notes** — run `schema_infer("{note_type}")` to '
+        f"1. **Infer from existing notes** — run `bm_schema(command='infer', note_type={note_type!r})` to "
         f"analyze your notes and get a suggested schema\n"
         f"2. **Create a schema note** — write a markdown file with this frontmatter:\n\n"
         f"```yaml\n"
@@ -243,9 +244,9 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
         f"- `field_name: type, description` — required field\n"
         f"- `field_name?: type, description` — optional field\n"
         f"- Supported types: `string`, `number`, `boolean`, `string[]`\n\n"
-        f"3. **Index** — run `basic-memory db reindex --search` or wait for the "
+        f"3. **Index** — run `bm reindex --search` or wait for the "
         f"file watcher to pick up the new schema note\n"
-        f'4. **Re-run** — call `{tool_name}("{note_type}")` again\n'
+        f"4. **Re-run** — call `bm_schema(command={command!r}, note_type={note_type!r})` again\n"
     )
 
 
@@ -351,7 +352,7 @@ async def schema_validate(
                 raise _nothing_to_report(
                     output_format,
                     "No schemas defined in this project",
-                    _no_schemas_defined_guidance("schema_validate"),
+                    _no_schemas_defined_guidance(),
                 )
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
@@ -366,7 +367,7 @@ async def schema_validate(
             raise _nothing_to_report(
                 output_format,
                 f"No notes found of type '{effective_type}'",
-                _no_notes_guidance(effective_type, "schema_validate"),
+                _no_notes_guidance(effective_type, "validate"),
             )
 
         # --- No schema guard ---
@@ -377,7 +378,7 @@ async def schema_validate(
             raise _nothing_to_report(
                 output_format,
                 f"No schema found for type '{effective_type}'",
-                _no_schema_guidance(effective_type, "schema_validate"),
+                _no_schema_guidance(effective_type, "validate"),
             )
 
         if output_format == "json":
@@ -476,7 +477,7 @@ async def schema_infer(
             raise _nothing_to_report(
                 output_format,
                 f"No notes found of type '{note_type}'",
-                _no_notes_guidance(note_type, "schema_infer"),
+                _no_notes_guidance(note_type, "infer"),
             )
 
         # --- Empty schema guard ---
@@ -494,12 +495,12 @@ async def schema_infer(
                 f"This usually means '{note_type}' is too broad — the notes don't "
                 f"share a consistent structure.\n\n"
                 f"## Suggestions\n"
-                f"1. **Use a more specific type** — try `search_notes` with "
+                f"1. **Use a more specific type** — try `bm_search` with "
                 f"`note_types` filter to see what types exist\n"
                 f"2. **Lower the threshold** — "
-                f'`schema_infer("{note_type}", threshold=0.1)` to include '
+                f"`bm_schema(command='infer', note_type={note_type!r}, threshold=0.1)` to include "
                 f"rarer fields\n"
-                f"3. **Create typed notes** — use `write_note` with a specific "
+                f"3. **Create typed notes** — use `bm_write` with a specific "
                 f'`note_type` (e.g., "person", "meeting") to build consistent '
                 f"structure\n",
             )
@@ -595,7 +596,7 @@ async def schema_diff(
             raise _nothing_to_report(
                 output_format,
                 f"No schema found for type '{note_type}'",
-                _no_schema_guidance(note_type, "schema_diff"),
+                _no_schema_guidance(note_type, "diff"),
             )
 
         # --- No notes guard ---
@@ -606,7 +607,7 @@ async def schema_diff(
             raise _nothing_to_report(
                 output_format,
                 f"No notes found of type '{note_type}'",
-                _no_notes_guidance(note_type, "schema_diff"),
+                _no_notes_guidance(note_type, "diff"),
             )
 
         if output_format == "json":

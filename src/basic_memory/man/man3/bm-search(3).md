@@ -93,7 +93,12 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
   refused.
 - A search across projects reaches at most result 1000 (`page * page_size`).
 - `hybrid` mode also returns notes that are only near in meaning. With `lines`,
-  use `mode="text"` when you want only notes that contain the words.
+  candidates without a matching line are omitted in every mode. Searching one
+  note with `identifier` explicitly says when no lines match.
+- Line matching filters one ranked page at a time. An empty page can still have
+  a next-page call; follow it to check the remaining candidates.
+- Line results report `total_is_exact: false`; `total` counts ranked candidates,
+  so page with `has_more` instead of using it as a result count.
 
 ## SEE ALSO
 

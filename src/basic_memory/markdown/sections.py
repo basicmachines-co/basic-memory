@@ -483,13 +483,16 @@ def _token_budget_line_count(text: str, text_lines: list[str], budget_chars: int
 
     Cut preference: section boundary first, then paragraph (blank-line) boundary,
     then the last full line within budget. Never cuts mid-line, and always keeps
-    at least one line so a continue-loop makes forward progress. A single line
-    over budget is served whole — there is no boundary to cut at.
+    the first nonblank line so a small budget cannot return only whitespace. An
+    over-budget first content line is served whole — there is no boundary to cut at.
     """
     if len(text) <= budget_chars:
         return None
     line_count = len(text_lines)
     if line_count <= 1:
+        return None
+    minimum = next((index + 1 for index, line in enumerate(text_lines) if line.strip()), line_count)
+    if minimum == line_count:
         return None
 
     # prefix_lengths[k] == len("\n".join(text_lines[:k]))
@@ -506,24 +509,24 @@ def _token_budget_line_count(text: str, text_lines: list[str], budget_chars: int
     section_cuts = [
         section.start_line - 1 for section in scan_sections(text) if section.start_line > 1
     ]
-    fitting = [kept for kept in section_cuts if kept >= 1 and fits(kept)]
+    fitting = [kept for kept in section_cuts if kept >= minimum and fits(kept)]
     if fitting:
         return max(fitting)
 
     paragraph_cuts = [
         index for index, line in enumerate(text_lines) if index >= 1 and not line.strip()
     ]
-    fitting = [kept for kept in paragraph_cuts if fits(kept)]
+    fitting = [kept for kept in paragraph_cuts if kept >= minimum and fits(kept)]
     if fitting:
         return max(fitting)
 
     # Line backstop: the largest whole-line prefix within budget; when even the
-    # first line exceeds the budget, keep it anyway — forward progress beats an
-    # empty slice.
-    for kept in range(line_count - 1, 0, -1):
+    # first content line exceeds the budget, keep it and its leading whitespace
+    # anyway, preserving coordinates and serving actual content.
+    for kept in range(line_count - 1, minimum - 1, -1):
         if fits(kept):
             return kept
-    return 1
+    return minimum
 
 
 def slice_note_content(

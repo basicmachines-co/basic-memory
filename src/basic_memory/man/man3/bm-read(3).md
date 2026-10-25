@@ -97,6 +97,9 @@ bm_read(identifier="plans/missing.md", project="demo")
   default project is set. Pass `project`, or qualify the path (`demo/plans/...`).
 - A section read returns numbered lines, like `start_line`/`end_line`; a whole
   note comes back without line numbers.
+- The token budget is approximate. The first nonblank line is returned whole
+  even when it exceeds the budget, so a read does not return only leading blank
+  lines. Follow the returned line coordinates to continue.
 
 ## SEE ALSO
 

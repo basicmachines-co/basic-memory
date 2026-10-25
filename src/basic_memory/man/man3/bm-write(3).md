@@ -40,6 +40,9 @@ relations (`- relation_type [[Other Note]]`). Observations and relations are
 indexed after the write, so they show up in bm_context and bm_search moments
 later.
 
+The result reports the accepted note's path and checksum. Read its indexed
+observations and relations with bm_context.
+
 ## PARAMETERS
 
 - **content** (string, required) — The note's Markdown. Saved as given; it may start with frontmatter.

@@ -180,6 +180,25 @@ async def test_identifier_searches_one_note(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_identifier_no_matches_is_explicit_and_keeps_json_identity(client, test_project):
+    await _seed(test_project.name)
+
+    text = await search_text(
+        query="zebra", identifier="tasks/Deploy Plan.md", project=test_project.name
+    )
+    row = await search_json(
+        query="zebra", identifier="tasks/Deploy Plan.md", project=test_project.name
+    )
+
+    assert "No matching lines" in text
+    assert "tasks/Deploy Plan.md" in text
+    assert "to continue" not in text
+    assert row["file_path"] == "tasks/Deploy Plan.md"
+    assert row["match_count"] == 0
+    assert row["windows"] == []
+
+
+@pytest.mark.asyncio
 async def test_identifier_that_names_a_non_note_file(
     client, test_project, test_files, project_repository, session_maker
 ):

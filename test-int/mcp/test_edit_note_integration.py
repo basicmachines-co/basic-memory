@@ -12,6 +12,7 @@ from fastmcp import Client
 
 from basic_memory import file_utils
 from basic_memory.file_utils import FileWriteError, parse_frontmatter
+from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
@@ -345,13 +346,12 @@ Current endpoints include user management."""
             },
         )
 
-        # Should return edit summary with observation and relation counts
         assert len(edit_result.content) == 1
         edit_text = edit_result.content[0].text
         assert "(append)" in edit_text
-        assert "observations:" in edit_text
-        assert "relations: 5" in edit_text
-        # Should have feature, tech, status, security categories
+        assert "checksum:" in edit_text
+        assert "observations:" not in edit_text
+        assert "relations:" not in edit_text
 
         # Verify the content was added and processed
         read_result = await client.call_tool(
@@ -366,6 +366,21 @@ Current endpoints include user management."""
         content = read_result.content[0].text
         assert "Added payment processing endpoints" in content
         assert "integrates_with [[Payment Gateway]]" in content
+
+        await drain_pending_materializations()
+        graph = await client.call_tool(
+            "bm_context", {"identifier": "API Documentation", "project": test_project.name}
+        )
+        assert isinstance(graph.data, dict)
+        (note,) = graph.data["results"]
+        assert len(note["observations"]) == 6
+        assert {row["category"] for row in note["observations"]} == {
+            "feature",
+            "tech",
+            "status",
+            "security",
+        }
+        assert sum(row["type"] == "relation" for row in note["related_results"]) == 5
 
 
 @pytest.mark.asyncio
@@ -758,7 +773,8 @@ def test_function():
         assert len(edit_result.content) == 1
         edit_text = edit_result.content[0].text
         assert "(append)" in edit_text
-        assert "observations:" in edit_text
+        assert "checksum:" in edit_text
+        assert "observations:" not in edit_text
 
         # Verify the special content was added correctly
         read_result = await client.call_tool(
@@ -776,6 +792,15 @@ def test_function():
         assert "∑∏∂∇∆Ω" in content
         assert "def test_function():" in content
         assert "[[Unicode Standards]]" in content
+
+        await drain_pending_materializations()
+        graph = await client.call_tool(
+            "bm_context", {"identifier": "Special Chars Test", "project": test_project.name}
+        )
+        assert isinstance(graph.data, dict)
+        (note,) = graph.data["results"]
+        assert {row["category"] for row in note["observations"]} == {"unicode", "markdown"}
+        assert sum(row["type"] == "relation" for row in note["related_results"]) == 1
 
 
 @pytest.mark.asyncio
