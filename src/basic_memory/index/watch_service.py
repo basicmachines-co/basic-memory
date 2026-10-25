@@ -175,6 +175,7 @@ class WatchService:
             if external_id not in self._indexed_project_ids
         }
         catch_up_needs_drain = bool(new_projects)
+        watch_unfiltered = bool(new_projects)
         self._catch_up_in_progress = catch_up_needs_drain
         previous_filter_roots = self._sorted_watch_filter_roots
         self._sorted_watch_filter_roots = local_watch_filter_roots(projects)
@@ -182,7 +183,10 @@ class WatchService:
         watcher = awatch(
             *project_paths,
             debounce=self.app_config.index_delay,
-            watch_filter=self.filter_changes,
+            # Ignored activity can keep awatch from yielding either changes or a
+            # timeout forever. Observe raw batches until this cycle ends so the
+            # post-attach scan can start even while hidden files keep changing.
+            watch_filter=None if watch_unfiltered else self.filter_changes,
             recursive=True,
             stop_event=stop_event,
             yield_on_timeout=bool(new_projects),
@@ -194,6 +198,13 @@ class WatchService:
         )
         try:
             async for changes in watcher:
+                quiet_batch = not changes
+                if watch_unfiltered:
+                    changes = {
+                        (change, path)
+                        for change, path in changes
+                        if self.filter_changes(change, path)
+                    }
                 # awatch installs its watches before yielding changes or a timeout.
                 # Scanning earlier leaves the same gap between a scan and attach.
                 # Stay in this consumer so catch-up cannot overlap a watch batch.
@@ -227,7 +238,7 @@ class WatchService:
                     # Outcome: clear the catch-up guard only after a later quiet batch.
                     if caught_up_now:
                         continue
-                    if catch_up_needs_drain:
+                    if catch_up_needs_drain and quiet_batch:
                         catch_up_needs_drain = False
                         self._catch_up_in_progress = False
                     continue
