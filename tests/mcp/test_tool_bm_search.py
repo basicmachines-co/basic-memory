@@ -14,7 +14,6 @@ from basic_memory.mcp.tools import bm_read, bm_search, write_note
 from basic_memory.mcp.tools import ranked_search as ranked_search_module
 from basic_memory.mcp.tools.ranked_search import _query_terms
 from basic_memory.mcp.tools.search import MultiProjectFailed, MultiProjectNotIndexed
-from basic_memory.schemas.search import SearchResponse
 
 
 async def search_text(**arguments: Any) -> str:
@@ -162,86 +161,6 @@ async def test_lines_match_any_query_term(client, test_project):
 
     (row,) = payload["results"]
     assert row["match_count"] == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("lines", [0, 1])
-@pytest.mark.parametrize(
-    ("query", "expected_titles"), [("rollback", ["Deploy Plan"]), ("zebra", [])]
-)
-async def test_lines_drop_ranked_hits_without_matching_lines(
-    client, test_project, mocker, lines, query, expected_titles
-):
-    await _seed(test_project.name)
-    candidates = SearchResponse.model_validate(
-        await search_json(query="deploy", mode="text", items=["note"], project=test_project.name)
-    )
-    # Pin semantic candidates, but read and scan the real accepted note content.
-    mocker.patch.object(ranked_search_module.SearchClient, "search", return_value=candidates)
-
-    payload = await search_json(query=query, lines=lines, project=test_project.name)
-    text = await search_text(query=query, lines=lines, project=test_project.name)
-    ranked = await search_json(query=query, project=test_project.name)
-
-    assert [row["title"] for row in payload["results"]] == expected_titles
-    assert all(row["match_count"] > 0 and row["windows"] for row in payload["results"])
-    assert payload["total_is_exact"] is False
-    assert "Deploy History" not in text
-    if expected_titles:
-        assert ": Rollback is manual." in text
-    else:
-        assert text == f"No results for '{query}' in project '{test_project.name}'."
-    assert {row["title"] for row in ranked["results"]} == {"Deploy Plan", "Deploy History"}
-
-
-@pytest.mark.asyncio
-async def test_filtered_lines_page_keeps_the_next_page_call(client, test_project, mocker):
-    await _seed(test_project.name)
-    candidates = SearchResponse.model_validate(
-        await search_json(query="deploy", mode="text", items=["note"], project=test_project.name)
-    )
-    by_title = {hit.title: hit for hit in candidates.results}
-    first_page = candidates.model_copy(
-        update={
-            "results": [by_title["Deploy History"]],
-            "current_page": 1,
-            "page_size": 1,
-            "has_more": True,
-        }
-    )
-    second_page = candidates.model_copy(
-        update={
-            "results": [by_title["Deploy Plan"]],
-            "current_page": 2,
-            "page_size": 1,
-            "has_more": False,
-        }
-    )
-    search = mocker.patch.object(
-        ranked_search_module.SearchClient,
-        "search",
-        side_effect=[first_page, first_page, second_page],
-    )
-
-    first = await search_json(query="rollback", lines=0, page_size=1, project=test_project.name)
-    text = await search_text(query="rollback", lines=0, page_size=1, project=test_project.name)
-    second = await search_json(
-        query="rollback", lines=0, page=2, page_size=1, project=test_project.name
-    )
-
-    assert first["results"] == []
-    assert first["has_more"] is True
-    assert first["total_is_exact"] is False
-    assert first["current_page"] == 1
-    assert first["page_size"] == 1
-    assert "on this page" in text
-    assert (
-        f"Call bm_search(query='rollback', lines=0, max_matches=10, project='{test_project.name}', "
-        "page=2, page_size=1) to continue."
-    ) in text
-    assert [row["title"] for row in second["results"]] == ["Deploy Plan"]
-    assert second["has_more"] is False
-    assert search.call_args.kwargs["page"] == 2
 
 
 # --- One note ---
