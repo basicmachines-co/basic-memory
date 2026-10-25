@@ -407,16 +407,23 @@ def _clean_child_env(env: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def _bm_binary_path() -> str | None:
-    """Find the bm CLI without making network calls. Used by is_available()."""
-    candidates = [
-        os.path.expanduser("~/.local/bin/bm"),
+    """Find the bm CLI without spawning a process.
+
+    ``which("bm")`` wins so a stale ``~/.local/bin/bm`` from ``uv tool install``
+    does not shadow the binary on PATH.
+    """
+    resolved = which("bm")
+    if resolved:
+        return resolved
+    candidates = (
         "/opt/homebrew/bin/bm",
         "/usr/local/bin/bm",
-    ]
-    for c in candidates:
-        if os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-    return which("bm")
+        os.path.expanduser("~/.local/bin/bm"),
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _uv_binary_path() -> str | None:
@@ -496,8 +503,18 @@ def _config_path(hermes_home: str) -> Path:
 
 
 def _bm_config_path() -> Path:
-    """Location of bm's own project registry."""
-    return Path.home() / ".basic-memory" / "config.json"
+    """bm project registry, same directory order as ``resolve_data_dir()``.
+
+    Copied here because this file loads as a standalone plugin module.
+    A missing file stays missing.
+    """
+    if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+        directory = Path(config_dir)
+    elif xdg_config := os.getenv("XDG_CONFIG_HOME"):
+        directory = Path(xdg_config) / "basic-memory"
+    else:
+        directory = Path.home() / ".basic-memory"
+    return directory / "config.json"
 
 
 def _bm_known_projects() -> dict[str, Any] | None:
@@ -1199,9 +1216,9 @@ class BasicMemoryProvider(MemoryProvider):
         bm = _bm_binary_path()
         if not bm:
             raise RuntimeError("bm CLI not found on PATH")
-        # `bm mcp` works the same in local and cloud modes — bm reads
-        # ~/.basic-memory/config.json to know whether the active project is local
-        # or cloud-routed. We pass --project on each tool call.
+        # `bm mcp` works the same in local and cloud modes. bm reads the
+        # registry at _bm_config_path() to see whether the active project is
+        # local or cloud-routed. We pass --project on each tool call.
         return [bm, "mcp"]
 
     def shutdown(self) -> None:
@@ -1502,7 +1519,7 @@ class BasicMemoryProvider(MemoryProvider):
         return [
             {
                 "key": "mode",
-                "description": "Backend mode: local (writes to ~/.basic-memory/) or cloud",
+                "description": "Backend mode: local (in-process) or cloud (BM Cloud API)",
                 "default": "local",
                 "choices": ["local", "cloud"],
             },
