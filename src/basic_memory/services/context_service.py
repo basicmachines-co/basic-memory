@@ -118,6 +118,46 @@ class ContextService:
             raise ValueError("session_maker is required for ContextService")
         return self.session_maker
 
+    async def _search_pattern_primary(
+        self, permalink_match: str, *, limit: int, offset: int
+    ) -> List[SearchIndexRow]:
+        """Match a pattern to its primary rows, preferring notes.
+
+        A pattern such as ``plans/*`` selects notes, so observation and relation
+        rows it also matches are not primary results (#1843). Patterns also
+        address graph rows directly (``components/*/part_of/*workflow*``), so
+        fall back to the unfiltered match only when the pattern names no note.
+        """
+        notes = await self.search_repository.search(
+            permalink_match=permalink_match,
+            search_item_types=[SearchItemType.ENTITY],
+            limit=limit,
+            offset=offset,
+        )
+        if notes:
+            return notes
+
+        # Trigger: a page after the first has no notes for this pattern.
+        # Why: falling back here would put relation rows on page two of a note
+        #      pattern whose page one returned notes.
+        # Outcome: only a pattern that names no note at all reaches the graph-row
+        #          fallback, and pagination stays within one row kind.
+        if offset:
+            first_page_notes = await self.search_repository.search(
+                permalink_match=permalink_match,
+                search_item_types=[SearchItemType.ENTITY],
+                limit=1,
+                offset=0,
+            )
+            if first_page_notes:
+                return []
+
+        return await self.search_repository.search(
+            permalink_match=permalink_match,
+            limit=limit,
+            offset=offset,
+        )
+
     async def build_context(
         self,
         memory_url: Optional[MemoryUrl] = None,
@@ -163,8 +203,8 @@ class ContextService:
                         ]
                         normalized_path = "*".join(normalized_parts)
                         logger.debug(f"Pattern search for '{normalized_path}'")
-                        primary = await self.search_repository.search(
-                            permalink_match=normalized_path, limit=fetch_limit, offset=offset
+                        primary = await self._search_pattern_primary(
+                            normalized_path, limit=fetch_limit, offset=offset
                         )
 
                         # Trigger: a workspace-qualified pattern matched nothing while a
@@ -184,10 +224,8 @@ class ContextService:
                                     f"Pattern search fallback without workspace prefix: "
                                     f"'{fallback_path}'"
                                 )
-                                primary = await self.search_repository.search(
-                                    permalink_match=fallback_path,
-                                    limit=fetch_limit,
-                                    offset=offset,
+                                primary = await self._search_pattern_primary(
+                                    fallback_path, limit=fetch_limit, offset=offset
                                 )
                     else:
                         normalized_path = generate_permalink(path, split_extension=False)

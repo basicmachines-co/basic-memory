@@ -465,7 +465,7 @@ async def test_schema_validate_all_types_no_schemas_refuses_with_guidance(
     assert isinstance(result, str)
     assert "No Schemas Defined" in result
     assert "unknown" not in result
-    assert "schema_infer" in result
+    assert "bm_schema(command='infer'" in result
 
 
 @pytest.mark.asyncio
@@ -668,8 +668,8 @@ async def test_schema_validate_no_notes_refuses_with_guidance(app, test_project,
     assert isinstance(result, str)
     assert "No Notes Found" in result
     assert "employee" in result
-    assert "write_note" in result
-    assert "search_notes" in result
+    assert "bm_write" in result
+    assert "bm_search" in result
 
 
 @pytest.mark.asyncio
@@ -699,7 +699,7 @@ async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
-    assert "schema_infer" in result
+    assert "bm_schema(command='infer'" in result
     assert "How to Create a Schema" in result
 
 
@@ -729,7 +729,7 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
-    assert "schema_infer" in result
+    assert "bm_schema(command='infer'" in result
     assert "How to Create a Schema" in result
 
 

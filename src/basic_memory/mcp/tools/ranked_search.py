@@ -549,26 +549,31 @@ async def _with_matching_lines(
     """Replace each hit's excerpt with the matching lines of its accepted Markdown.
 
     Line numbers count the whole document, frontmatter included, as bm_read's do.
-    Hits with no accepted Markdown (files that are not notes) have no lines to show.
+    Only notes with accepted Markdown and matching lines are returned.
     """
     note_hits = [hit for hit in response.results if hit.external_id is not None]
     contents = await KnowledgeClient(
         target.client, target.project.external_id
     ).accepted_note_contents([hit.external_id for hit in note_hits if hit.external_id])
     payload = response.model_dump(mode="json", exclude_none=True)
-    payload["results"] = [
-        _line_row(
-            hit,
-            scan_lines(
-                contents[hit.external_id],
-                terms,
-                context_lines=context_lines,
-                max_matches=max_matches,
-            ),
+    rows: list[dict[str, Any]] = []
+    for hit in note_hits:
+        if hit.external_id not in contents:
+            continue
+        scan = scan_lines(
+            contents[hit.external_id],
+            terms,
+            context_lines=context_lines,
+            max_matches=max_matches,
         )
-        for hit in note_hits
-        if hit.external_id in contents
-    ]
+        if scan.match_count > 0:
+            rows.append(_line_row(hit, scan))
+    payload["results"] = rows
+    # Trigger: line matching can drop ranked rows from this page.
+    # Why: `total` counts ranked candidates, not rows with a matching line, so it
+    #      cannot be used as an exact result count once rows are filtered.
+    # Outcome: JSON callers page with `has_more` instead of treating `total` as exact.
+    payload["total_is_exact"] = False
     return payload
 
 
@@ -633,9 +638,17 @@ def _format_results(
     """
     results = payload["results"]
     heading = f"Results for '{query}'" if query else "Results"
+    continuation = (
+        f"\n\nMore results available. Call {next_call} to continue."
+        if next_call is not None
+        else ""
+    )
     if not results:
-        return f"No results for '{query or ''}' in {scope}." + (
-            f"\n\n{payload['query_hint']}" if payload.get("query_hint") else ""
+        page_hint = " on this page" if next_call is not None else ""
+        return (
+            f"No results for '{query or ''}'{page_hint} in {scope}."
+            + (f"\n\n{payload['query_hint']}" if payload.get("query_hint") else "")
+            + continuation
         )
 
     lines = [f"{heading} in {scope}:", ""]
@@ -645,6 +658,8 @@ def _format_results(
             header += f" | score {row['score']:.3f}"
         lines.append(header)
         if "windows" in row:
+            if row["match_count"] == 0:
+                lines.append("    No matching lines.")
             for window in row["windows"]:
                 for number, text in enumerate(
                     window["content"].split("\n"), start=window["start_line"]
@@ -654,6 +669,4 @@ def _format_results(
                 lines.append(f"    (more matches from line {row['next_match_line']})")
         elif row.get("matched_chunk"):
             lines.append(f"    {row['matched_chunk'][:200]}")
-    if next_call is not None:
-        lines.extend(["", f"More results available. Call {next_call} to continue."])
-    return "\n".join(lines)
+    return "\n".join(lines) + continuation
