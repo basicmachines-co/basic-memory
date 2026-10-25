@@ -15,6 +15,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
+from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.schemas.project_info import ProjectItem
 
 
@@ -349,12 +350,8 @@ async def test_write_note_complex_content_with_observations_relations(
         assert "knowledge/Complex Knowledge Note.md" in response_text
         assert f"permalink: {test_project.name}/knowledge/complex-knowledge-note" in response_text
 
-        # Should show observation and relation counts
-        assert "observations: 3" in response_text
-
-        assert "relations: 3" in response_text
-        # Should show outgoing relations
-
+        assert "observations:" not in response_text
+        assert "relations:" not in response_text
         assert "checksum:" in response_text
         read = await client.call_tool(
             "bm_read",
@@ -365,6 +362,17 @@ async def test_write_note_complex_content_with_observations_relations(
             },
         )
         assert _json_content(read)["frontmatter"]["tags"] == ["complex", "knowledge", "relations"]
+
+        # Graph counts belong to the indexed projection, after materialization.
+        await drain_pending_materializations()
+        graph = _json_content(
+            await client.call_tool(
+                "bm_context", {"identifier": "Complex Knowledge Note", "project": test_project.name}
+            )
+        )
+        (note,) = graph["results"]
+        assert len(note["observations"]) == 3
+        assert sum(row["type"] == "relation" for row in note["related_results"]) == 3
 
 
 @pytest.mark.asyncio
