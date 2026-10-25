@@ -469,7 +469,7 @@ def compile_fts_filter(
         if preserve_match_score:
             from_clause = (
                 "(SELECT search_index.rowid AS rowid, search_index.*, "
-                "bm25(search_index) AS fts_score "
+                f"{BM25_SCORE_EXPRESSION} AS fts_score "
                 f"FROM search_index WHERE {match_where}) AS search_index "
                 "JOIN entity ON search_index.entity_id = entity.id"
             )
