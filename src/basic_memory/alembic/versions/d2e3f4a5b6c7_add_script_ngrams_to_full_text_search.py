@@ -38,6 +38,10 @@ def rebuild_sqlite_search_index(*, include_script_ngrams: bool) -> None:
         return
 
     script_definition = "script_ngrams," if include_script_ngrams else ""
+    # A killed mid-migration run can leave an empty search_index_rebuilt while
+    # alembic_version stays behind (issue #1853). Drop the leftover so a retry
+    # can CREATE again instead of failing with "table already exists".
+    op.execute("DROP TABLE IF EXISTS search_index_rebuilt")
     op.execute(f"""
         CREATE VIRTUAL TABLE search_index_rebuilt USING fts5(
             id UNINDEXED,

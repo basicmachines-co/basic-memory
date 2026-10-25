@@ -101,3 +101,43 @@ def test_postgres_upgrade_and_downgrade_manage_both_script_indexes(monkeypatch) 
     assert "idx_search_index_fts_chunks_script_ngrams_fts" in sql
     assert "to_tsvector('simple', script_ngrams)" in sql
     assert "DROP COLUMN IF EXISTS script_ngrams" in sql
+
+
+def test_sqlite_upgrade_survives_leftover_search_index_rebuilt(tmp_path, monkeypatch) -> None:
+    """Issue #1853: interrupted upgrade left search_index_rebuilt; retry must succeed."""
+    database_path = tmp_path / "leftover-rebuilt.db"
+    engine = create_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("""
+            CREATE VIRTUAL TABLE search_index USING fts5(
+                id UNINDEXED, title, content_stems, content_snippet, permalink,
+                file_path UNINDEXED, type UNINDEXED, project_id UNINDEXED,
+                from_id UNINDEXED, to_id UNINDEXED, relation_type UNINDEXED,
+                entity_id UNINDEXED, category UNINDEXED, metadata UNINDEXED,
+                created_at UNINDEXED, updated_at UNINDEXED,
+                tokenize='unicode61 tokenchars 0x2F', prefix='1,2,3,4'
+            )
+        """)
+        connection.exec_driver_sql("""
+            INSERT INTO search_index (id, title, content_stems, project_id)
+            VALUES (1, 'Probe', 'words', 1)
+        """)
+        # Simulate the leftover empty FTS5 table from a killed CREATE.
+        connection.exec_driver_sql("CREATE VIRTUAL TABLE search_index_rebuilt USING fts5(x)")
+        monkeypatch.setattr(
+            migration,
+            "op",
+            Operations(MigrationContext.configure(connection)),
+        )
+        migration.upgrade()
+
+    with sqlite3.connect(database_path) as connection:
+        leftover = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'search_index_rebuilt'"
+        ).fetchone()
+        assert leftover is None
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(search_index)")]
+        assert "script_ngrams" in columns
+        assert connection.execute(
+            "SELECT id, title, script_ngrams FROM search_index"
+        ).fetchall() == [(1, "Probe", "")]

@@ -1087,6 +1087,75 @@ async def test_sqlite_vec_delete_requires_pending_source_generation(search_repos
 
 
 @pytest.mark.asyncio
+async def test_sqlite_vec_delete_batches_above_expression_depth_limit(search_repository):
+    """Deleting more than ~995 pending chunks must not hit SQLITE_MAX_EXPR_DEPTH (#1850)."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec deletion behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project_id = search_repository.project_id
+    count = 1200
+    deletions: list[VectorDeletion] = []
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        for i in range(count):
+            chunk_key = f"entity:1850:{i}"
+            row_id = 1850000 + i
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_chunks ("
+                    "id, entity_id, project_id, chunk_key, source_type, source_row_id, "
+                    "chunk_index, chunk_text, source_hash, entity_fingerprint, "
+                    "embedding_model, vector_index, embedding_status"
+                    ") VALUES ("
+                    ":id, 1850, :project_id, :chunk_key, 'entity', 1850, :chunk_index, "
+                    "'text', 'hash-1850', 'fingerprint', :embedding_model, "
+                    "'sqlite-vec', 'pending')"
+                ),
+                {
+                    "id": row_id,
+                    "project_id": project_id,
+                    "chunk_key": chunk_key,
+                    "chunk_index": i,
+                    "embedding_model": search_repository._embedding_model_key(),
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
+                    "VALUES (:rowid, :embedding, 'hash-1850')"
+                ),
+                {"rowid": row_id, "embedding": "[1.0, 0.0, 0.0, 0.0]"},
+            )
+            deletions.append(
+                VectorDeletion(
+                    key=VectorKey(entity_id=1850, chunk_key=chunk_key),
+                    source_hash="hash-1850",
+                )
+            )
+        await session.commit()
+
+    await index.delete(project_id, deletions)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        remaining_chunks = await session.scalar(
+            text(
+                "SELECT COUNT(*) FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = 1850"
+            ),
+            {"project_id": project_id},
+        )
+        remaining_embeddings = await session.scalar(
+            text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid BETWEEN :lo AND :hi"),
+            {"lo": 1850000, "hi": 1850000 + count - 1},
+        )
+    assert remaining_chunks == 0
+    assert remaining_embeddings == 0
+
+
 async def test_sqlite_chunk_upsert_and_delete_lifecycle(search_repository):
     """sync_entity_vectors updates changed chunks and clears vectors when source rows disappear."""
     if not isinstance(search_repository, SQLiteSearchRepository):
