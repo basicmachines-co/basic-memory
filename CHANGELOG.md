@@ -1,5 +1,90 @@
 # CHANGELOG
 
+## Unreleased
+
+Work on `main` toward 1.0, not yet in a published release. `docs/1.0.md` is the
+working migration guide; this entry gets its version heading when the release is cut.
+
+### Breaking Changes
+
+- **SPEC-35.2**: The MCP server exposes the 1.0 `bm_*` tools: `bm_read`, `bm_write`,
+  `bm_edit`, `bm_delete`, `bm_move`, `bm_search`, `bm_context`, `bm_list`, `bm_find`,
+  `bm_project`, `bm_schema` and `bm_man`, plus the separate, opt-in
+  `bm_project_delete`. They replace the earlier tools one for one or by command:
+  `read_note`/`read_content`/`view_note`/`cat` become `bm_read`, `search_notes`/`grep`
+  become `bm_search`, `recent_activity` and the project tools become `bm_project`, and
+  the schema tools become `bm_schema`. Arguments change too: `project` takes a name,
+  a workspace-qualified name or an external ID; search takes `mode`, `filters`,
+  `items`, `since` and `all_projects`; edits take `command`; context takes
+  `identifier` and `since`. Refusals are MCP tool errors with a typed `error`
+  (`NOT_FOUND`, `ALREADY_EXISTS`, `REVISION_CONFLICT`, `LOCKED`, `OUTSIDE_PROJECT`,
+  ...). Update MCP allowlists, agent instructions, hooks and recorded fixtures, then
+  restart clients so they reload the tool schemas. The CLI's `bm tool` commands keep
+  their names. `docs/1.0.md` has the full mapping (#1838, #1839, #1849).
+
+- With several projects available, note and search tools require an explicit
+  `project` or a project-qualified target, even when a default project is set. A
+  relative path no longer selects a project because it contains a slash.
+
+### Features
+
+- **`bm_man` and 1.0 manual pages**: every `bm_*` tool has a section 3 manual page,
+  served over MCP and by `bm man` (`aa8bf2644`).
+
+- **`bm doctor` reports problems in your real projects, with the command that fixes
+  each one.** It checks the project path, index readiness, search index integrity
+  (duplicate, orphaned and missing rows) and note materialization, and only reads: it
+  never changes a project, the config or the database. `--json` prints the full report.
+  The write/index/search self-test runs in a sandbox with its own home, config and
+  database. Cloud projects are listed as skipped (`e607f817d`, `60845266d`,
+  `d52dbc986`).
+
+- **`memory-doctor` skill** teaches an agent to run `bm doctor` and walk you through
+  its suggested fixes (`573c3dfab`).
+
+### Bug Fixes
+
+- **#1817**: Files copied into a newly created project's folder before the watcher
+  reloaded were never indexed, and the watcher ignored projects added after startup.
+  The watcher now reloads project config, and after it attaches to a new project it
+  runs a catch-up index pass, including while hidden-file activity continues. Thanks
+  @TPSJASPER (#1861, #1866).
+
+- **#1850, #1853**: On SQLite, deleting a large set of vector chunks failed with
+  "Expression tree is too large", and an interrupted search-index migration left a
+  scratch table that blocked the next startup. Deletes now run in batches of 200, and
+  the migration drops a leftover scratch table before rebuilding. Thanks @MbappeWU
+  (#1857, #1859, #1865).
+
+- A stale read from object storage could save an older version of a note as a new
+  accepted version, silently rolling the note back. A version that a newer accepted
+  change replaced is now promoted only after an authoritative re-read confirms it
+  (`a5b557acd`). A move that was superseded by a later one now cleans up its old file
+  (`2e2c1be8e`).
+
+- **#1798**: `bm doctor` offers a recovery for note saves left in flight by a process
+  that exited. While file indexing still has work owed, duplicate, missing and orphaned
+  search rows are warnings that the index pass may clear; they become errors once
+  indexing settles.
+
+- FastAPI is upgraded to 0.162.0, with the read cache keeping request identities
+  stable on the new version. This replaces the 0.139.0 pin from v0.24.1
+  (`2f66021c1`).
+
+- **#1811**: Creating a local project with the name of an existing one but a different
+  path is refused with `ALREADY_EXISTS`, naming both paths, instead of reporting
+  success. The same path stays an idempotent re-index. Cloud creates skip the check,
+  since hosted paths come from the project name (`efd157061`, `e03c2f28f`).
+
+- Search normalizes recognized project prefixes in queries (`9a0211f96`).
+
+- OpenClaw keeps explicit search filters and ignores empty tag shortcuts
+  (`20cbcb538`, `bef49f458`). Tau prefers its native tool registrations
+  (`2506147f9`).
+
+- Recovery guidance in tool errors and the manuals now name the `bm_*` tools
+  (#1864, #1868).
+
 ## v0.24.1 (2026-10-22)
 
 ### Bug Fixes
