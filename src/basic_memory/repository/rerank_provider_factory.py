@@ -89,7 +89,10 @@ def create_rerank_provider(app_config: BasicMemoryConfig) -> RerankProvider | No
         )
     elif provider_name == "litellm":
         from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvider
+        from basic_memory.repository import litellm_provider
 
+    # Fail early when the optional LiteLLM dependency is missing.
+        litellm_provider._import_litellm()
         provider = LiteLLMRerankProvider(
             model_name=app_config.reranker_model,
             api_key=app_config.reranker_api_key,

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+### Changed
+
+- **#1763**: Made LiteLLM an optional dependency (`basic-memory[litellm]`) instead of installing it with every Basic Memory installation. Users of LiteLLM embedding or rerank providers must install the extra. The default FastEmbed provider does not require LiteLLM.
+
 ## v0.24.1 (2026-10-22)
 
 ### Bug Fixes

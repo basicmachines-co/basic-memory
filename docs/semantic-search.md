@@ -278,6 +278,18 @@ otherwise provide it explicitly.
 
 > **Experimental — advanced users only.** The LiteLLM provider is experimental and aimed at users comfortable operating remote embedding backends: paid API calls, per-model dimension and input-role configuration, and slower reindexing of large corpora. For most users, FastEmbed (local, default) is recommended. See [LiteLLM Provider](litellm-provider.md) for the caveats and tuning.
 
+LiteLLM is an optional dependency and is not installed by default.
+Install it before selecting the LiteLLM embedding provider:
+
+```bash
+pip install "basic-memory[litellm]"
+
+For `uv tool` installations, use
+`uv tool install "basic-memory[litellm]"`.
+
+Existing LiteLLM users must install this extra when upgrading.
+See [LiteLLM Provider](litellm-provider.md) for details.
+
 Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Cohere, Azure, Bedrock, NVIDIA NIM, and other LiteLLM-supported backends. Requires the provider's API credentials.
 For the full option reference, provider setup examples, and live validation harness, see [LiteLLM Provider](litellm-provider.md).
 

@@ -249,3 +249,31 @@ def test_concurrent_race_returns_winning_provider(monkeypatch):
     monkeypatch.setattr(factory, "_RERANK_PROVIDER_CACHE", _RacyCache())
     result = create_rerank_provider(_config(reranker_enabled=True, reranker_provider="fastembed"))
     assert result is winner
+def test_litellm_rerank_factory_checks_missing_dependency(monkeypatch):
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.repository.rerank_provider_factory import (
+        create_rerank_provider,
+        reset_rerank_provider_cache,
+    )
+    import basic_memory.repository.litellm_provider as litellm_module
+    import pytest
+
+    config = BasicMemoryConfig(
+        reranker_enabled=True,
+        reranker_provider="litellm",
+        reranker_model="cohere/rerank-v3.5",
+    )
+
+    def fake_import():
+        raise litellm_module.SemanticDependenciesMissingError(
+            'Install with: pip install "basic-memory[litellm]"'
+        )
+
+    monkeypatch.setattr(litellm_module, "_import_litellm", fake_import)
+    reset_rerank_provider_cache()
+
+    with pytest.raises(
+        litellm_module.SemanticDependenciesMissingError,
+        match=r"basic-memory\[litellm\]",
+    ):
+        create_rerank_provider(config)

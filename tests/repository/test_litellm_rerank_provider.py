@@ -1,6 +1,8 @@
 """Tests for LiteLLMRerankProvider."""
 
 import types
+import builtins
+import sys
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -9,6 +11,7 @@ from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvide
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
+    SemanticDependenciesMissingError,
 )
 from typing import Any
 
@@ -262,3 +265,23 @@ def test_runtime_log_attrs():
         "model_name": "cohere/rerank-v3.5",
         "api_base_set": True,
     }
+
+@pytest.mark.asyncio
+async def test_rerank_missing_litellm_shows_install_hint(monkeypatch):
+    monkeypatch.delitem(sys.modules, "litellm", raising=False)
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "litellm":
+            raise ImportError("litellm not installed")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(
+        SemanticDependenciesMissingError,
+        match=r"basic-memory\[litellm\]",
+    ):
+        await provider.rerank("q", ["a"])

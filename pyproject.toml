@@ -46,9 +46,6 @@ dependencies = [
     "fastembed>=0.7.4",
     "sqlite-vec>=0.1.6",
     "openai>=1.100.2",
-    # LiteLLM 1.92 added a Rust bridge whose PyO3 version rejects Python 3.14.
-    # Keep the last universal wheel while Basic Memory supports Python 3.14.
-    "litellm>=1.91.5,<1.92.0",
     "logfire>=4.19.0",
     "psutil>=5.9.0",
     # uvloop's C event loop has no self._ready.popleft() codepath, so the
@@ -64,6 +61,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# LiteLLM 1.92 added a Rust bridge whose PyO3 version rejects Python 3.14.
+# Keep the last universal wheel while Basic Memory supports Python 3.14.
+litellm=["litellm>=1.91.5,<1.92.0",]
+
 milvus = [
     "pymilvus>=3.0.0,<4; sys_platform == 'win32'",
     "pymilvus[milvus-lite]>=3.0.0,<4; sys_platform != 'win32'",

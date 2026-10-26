@@ -76,6 +76,28 @@ async def test_fastembed_provider_lazy_loads_and_reuses_model(monkeypatch):
     assert len(second) == 1
     assert len(second[0]) == 4
 
+@pytest.mark.asyncio
+async def test_fastembed_works_without_litellm(monkeypatch):
+    """FastEmbed should work without importing LiteLLM."""
+
+    module = type(sys)("fastembed")
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+
+    original_import = builtins.__import__
+
+    def block_litellm(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "litellm" or name.startswith("litellm."):
+            raise AssertionError("FastEmbed must not import LiteLLM")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", block_litellm)
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
+    result = await provider.embed_query("hello")
+
+    assert len(result) == 4
+
 
 @pytest.mark.asyncio
 async def test_fastembed_provider_dimension_mismatch_raises_error(monkeypatch):

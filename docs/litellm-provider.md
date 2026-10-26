@@ -18,6 +18,24 @@ or tune LiteLLM-specific settings.
 
 ## Quick Start
 
+## Installation
+
+LiteLLM is an optional dependency and is not installed by default.
+
+To use LiteLLM for embeddings or reranking, install the optional extra:
+
+```bash
+pip install "basic-memory[litellm]"
+```
+
+If you installed Basic Memory using `uv tool`, use:
+
+```bash
+uv tool install "basic-memory[litellm]"
+```
+
+Existing users who use LiteLLM must install this extra when upgrading Basic Memory. The default FastEmbed provider does not require LiteLLM.
+
 The default LiteLLM model is OpenAI `text-embedding-3-small` through the LiteLLM
 model string `openai/text-embedding-3-small`.
 

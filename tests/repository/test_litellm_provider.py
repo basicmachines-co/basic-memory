@@ -15,6 +15,7 @@ from basic_memory.repository.embedding_provider_factory import (
     reset_embedding_provider_cache,
 )
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from typing import Any
 
@@ -279,7 +280,10 @@ async def test_litellm_provider_missing_dependency_raises_actionable_error(monke
     monkeypatch.setattr(builtins, "__import__", _raising_import)
 
     provider = LiteLLMEmbeddingProvider(model_name="openai/text-embedding-3-small")
-    with pytest.raises(SemanticDependenciesMissingError):
+    with pytest.raises(
+        SemanticDependenciesMissingError,
+        match=r"basic-memory\[litellm\]",
+):
         await provider.embed_query("test")
 
 
@@ -543,6 +547,31 @@ def test_factory_requires_litellm_dimensions_for_custom_models():
     with pytest.raises(ValueError, match="semantic_embedding_dimensions"):
         create_embedding_provider(config)
 
+def test_factory_missing_litellm_shows_install_hint(monkeypatch):
+    """Selecting LiteLLM should fail early when the optional dependency is missing."""
+    import basic_memory.repository.litellm_provider as litellm_module
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="openai/text-embedding-3-small",
+    )
+
+    def fake_import():
+        raise SemanticDependenciesMissingError(
+            'Install with: pip install "basic-memory[litellm]"'
+        )
+
+    monkeypatch.setattr(litellm_module, "_import_litellm", fake_import)
+    reset_embedding_provider_cache()
+
+    with pytest.raises(
+        SemanticDependenciesMissingError,
+        match=r"basic-memory\[litellm\]",
+    ):
+        create_embedding_provider(config)
 
 def test_runtime_log_attrs():
     """runtime_log_attrs should return batch_size and concurrency."""
@@ -638,3 +667,18 @@ async def test_litellm_provider_duplicate_index_raises_error(monkeypatch):
     provider = LiteLLMEmbeddingProvider(dimensions=3)
     with pytest.raises(RuntimeError, match="duplicate vector indexes"):
         await provider.embed_documents(["a", "b"])
+
+@pytest.mark.asyncio
+async def test_rerank_missing_litellm_shows_install_hint(monkeypatch):
+    def fake_import():
+        raise ImportError("litellm not installed")
+
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        fake_import,
+    )
+
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(ImportError, match="litellm not installed"):
+        await provider.rerank("q", ["a"])

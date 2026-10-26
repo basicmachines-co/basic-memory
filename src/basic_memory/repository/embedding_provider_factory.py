@@ -273,7 +273,11 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             **extra_kwargs,
         )
     elif provider_name == "litellm":
+        from basic_memory.repository import litellm_provider
         from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+
+        # Check the optional dependency when LiteLLM is selected.
+        litellm_provider._import_litellm()
 
         model_name = app_config.semantic_embedding_model or "openai/text-embedding-3-small"
         if model_name == "bge-small-en-v1.5":
