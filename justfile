@@ -394,7 +394,7 @@ test-semantic-report:
 
 # Run opt-in live LiteLLM provider checks against configured external APIs
 test-litellm-live *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run python -m semantic.litellm_live_harness {{args}}
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run --extra litellm python -m semantic.litellm_live_harness {{args}}
 
 # Run semantic benchmarks (Postgres combos only)
 test-semantic-postgres:

@@ -23,7 +23,7 @@ the direct OpenAI embedding provider work without it. To opt into LiteLLM
 embeddings or reranking, install the extra in the environment running Basic Memory:
 
 ```bash
-uv tool install "basic-memory[litellm]"
+uv tool install --force "basic-memory[litellm]" --prerelease=allow
 # Or, in a pip-managed environment:
 pip install "basic-memory[litellm]"
 ```
