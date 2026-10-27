@@ -142,7 +142,8 @@ def _asyncpg_url(container) -> str:
 
 
 def _result_payload(result: CallToolResult) -> dict:
-    structured = result.structured_content
+    # MCP 1 and 2 share wire aliases but expose different Python attribute names.
+    structured = result.model_dump(by_alias=True)["structuredContent"]
     if isinstance(structured, dict):
         wrapped = structured.get("result")
         return wrapped if isinstance(wrapped, dict) else structured
@@ -190,7 +191,7 @@ async def write_burst(
                         "output_format": "json",
                     },
                 )
-                failed = bool(result.is_error)
+                failed = bool(result.model_dump(by_alias=True)["isError"])
             except Exception:
                 failed = True
             elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -311,7 +312,7 @@ async def run(args: argparse.Namespace) -> int:
                 "bm_project",
                 {"command": "create", "name": project, "path": str(project_dir)},
             )
-            if create.is_error:
+            if create.model_dump(by_alias=True)["isError"]:
                 print("ERROR: could not create project", file=sys.stderr)
                 return 1
 
