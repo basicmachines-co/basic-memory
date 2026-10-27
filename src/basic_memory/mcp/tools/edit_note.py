@@ -548,12 +548,11 @@ async def edit_note(
             combined with any operation in the same call. `title` and `permalink` are
             ignored since those have their own dedicated handling; `type` is applied like
             any other frontmatter field. Key deletion is not supported.
-        expected_checksum: Optional revision precondition: the full `checksum` that
-            bm_read, bm_write, or bm_edit returned in JSON mode (the accepted
-            revision's checksum; text output shows only its first 8 characters). When the
-            note has changed since, the edit is refused with a revision conflict that
-            names the current checksum, and nothing is written. A refused precondition
-            never auto-creates the note. To refresh a stale checksum without reading the
+        expected_checksum: Optional revision precondition: the full `checksum` from
+            a JSON read result or a previous write/edit result (the accepted revision's
+            checksum). When the note has changed since, the edit is refused with a revision
+            conflict that names the current checksum, and nothing is written. A refused
+            precondition never auto-creates the note. To refresh a stale checksum without reading the
             whole note, call bm_read(identifier=..., include_content=False).
         output_format: "text" returns a markdown summary of the edit and the note's
             resulting observations and relations. "json" returns machine-readable edit
@@ -605,7 +604,7 @@ async def edit_note(
 
         # Edit only if nobody changed the note since you read it
         edit_note(identifier="docs/plan", operation="append", content="\\n- Next step", project="work",
-                  expected_checksum="<checksum from read_note or a previous JSON result>")
+                  expected_checksum="<checksum from the previous result>")
 
         # Update frontmatter fields without touching the body (any operation works;
         # append with empty content is a no-op on the body itself)
@@ -997,7 +996,7 @@ async def edit_note(
                         f"project: {active_project.name}",
                         f"file_path: {result.file_path}",
                         f"permalink: {result.permalink}",
-                        f"checksum: {checksum[:8] if checksum else 'unknown'}",
+                        f"checksum: {checksum if checksum else 'unknown'}",
                         "fileCreated: true",
                     ]
                     lines_added = len(content.split("\n"))
@@ -1008,7 +1007,7 @@ async def edit_note(
                         f"project: {active_project.name}",
                         f"file_path: {result.file_path}",
                         f"permalink: {result.permalink}",
-                        f"checksum: {checksum[:8] if checksum else 'unknown'}",
+                        f"checksum: {checksum if checksum else 'unknown'}",
                     ]
 
                     # Add operation-specific details

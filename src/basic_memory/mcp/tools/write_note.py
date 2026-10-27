@@ -202,8 +202,8 @@ async def write_note(
                    parsed is discarded rather than merged. To remove a key, rewrite it
                    with bm_edit or edit the file.
         expected_checksum: Optional revision precondition for overwrite=True: the checksum
-                   of the note you read (from a JSON bm_read, bm_write or bm_edit
-                   result). The
+                   of the note you read (from a JSON read result or a previous
+                   write/edit result). The
                    note is replaced only while it is still that revision; otherwise the
                    tool reports a revision conflict with the current checksum and changes
                    nothing. Omit it to replace the note unconditionally.
@@ -260,7 +260,7 @@ async def write_note(
             directory="meetings",
             content="# Weekly Standup\\n\\n- [decision] Keep PostgreSQL #tech",
             overwrite=True,
-            expected_checksum="<checksum from the previous JSON result>",
+            expected_checksum="<checksum from the previous result>",
         )
 
         # Create a schema note with custom frontmatter via metadata
@@ -535,7 +535,7 @@ async def write_note(
                 f"project: {active_project.name}",
                 f"file_path: {result.file_path}",
                 f"permalink: {response_permalink}",
-                f"checksum: {checksum[:8] if checksum else 'unknown'}",
+                f"checksum: {checksum if checksum else 'unknown'}",
             ]
 
             # Count observations by category
