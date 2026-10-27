@@ -8,6 +8,8 @@ import json
 import logging
 from contextlib import nullcontext
 
+import logfire
+
 from fastapi import APIRouter, Form, HTTPException, Path, UploadFile, status
 
 from basic_memory.deps import (
@@ -26,6 +28,8 @@ from basic_memory.schemas.importer import (
     ImportResult,
     ProjectImportResult,
 )
+
+from basic_memory.schemas.memory_json import MemoryJsonInputError
 
 logger = logging.getLogger(__name__)
 
@@ -169,44 +173,55 @@ async def import_memory_json(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing memory.json for project {project_id}")
-    try:
-        file_data = []
-        file_bytes = await read_import_upload(file, config.import_upload_max_bytes)
-        file_str = file_bytes.decode("utf-8")
-        for line in file_str.splitlines():
-            json_data = json.loads(line)
-            file_data.append(json_data)
+    with logfire.span("import.memory_json") as span:
+        try:
+            file_data = []
+            file_bytes = await read_import_upload(file, config.import_upload_max_bytes)
+            file_str = file_bytes.decode("utf-8")
+            for line in file_str.splitlines():
+                json_data = json.loads(line)
+                file_data.append(json_data)
 
-        result = await run_import_with_invalidation(
-            importer,
-            file_data,
-            directory,
-            read_cache=read_cache,
-            project_external_id=project_id,
-        )
-        if not result.success:  # pragma: no cover
+            result = await run_import_with_invalidation(
+                importer,
+                file_data,
+                directory,
+                read_cache=read_cache,
+                project_external_id=project_id,
+            )
+            if not result.success:  # pragma: no cover
+                span.set_attribute("outcome", "failed")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=result.error_message or "Import failed",
+                )
+        except MemoryJsonInputError as error:
+            span.set_attributes({"outcome": "input_rejected", "reason": "invalid_record"})
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+            ) from error
+        except HTTPException as error:
+            span.set_attribute("outcome", "input_rejected" if error.status_code < 500 else "failed")
+            raise
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            span.set_attributes({"outcome": "input_rejected", "reason": "invalid_json"})
+            # Trigger: a line in the upload is not valid JSON, or the bytes are not
+            #   UTF-8 (truncated archive, wrong file, binary upload).
+            # Why: this is a client-input problem, not a server fault (#1276).
+            # Outcome: a 400 with the parse position instead of an opaque 500.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Import file is not valid JSON: {e}",
+            )
+        except Exception as e:
+            span.set_attribute("outcome", "failed")
+            logger.exception("V2 Import failed")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.error_message or "Import failed",
+                detail=f"Import failed: {str(e)}",
             )
-    except HTTPException:
-        raise
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        # Trigger: a line in the upload is not valid JSON, or the bytes are not
-        #   UTF-8 (truncated archive, wrong file, binary upload).
-        # Why: this is a client-input problem, not a server fault (#1276).
-        # Outcome: a 400 with the parse position instead of an opaque 500.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Import file is not valid JSON: {e}",
-        )
-    except Exception as e:
-        logger.exception("V2 Import failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Import failed: {str(e)}",
-        )
-    return result
+        span.set_attribute("outcome", "imported")
+        return result
 
 
 async def import_file[ImportResultT: ImportResult](
