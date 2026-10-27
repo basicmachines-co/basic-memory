@@ -238,10 +238,11 @@ class WikiProjectionResult:
     warnings: tuple[str, ...]
     pending_materialization: tuple[int, ...]
     scope_collisions: tuple[WikiScopeCollision, ...] = ()
+    identity_collisions: tuple[WikiProjectionConflict, ...] = ()
 
     @property
     def state(self) -> WikiProjectionState:
-        if self.conflicts:
+        if self.conflicts or self.identity_collisions:
             return WikiProjectionState.conflicted
         if self.pending_materialization:
             return WikiProjectionState.partial
@@ -398,26 +399,30 @@ def _plan_wiki_projection(
     all_projection_paths.extend(
         change.previous_path for change in changes if change.previous_path is not None
     )
-    reserved_permalink_keys = {
-        portable_path_key(_reserved_path(scope, filename).removesuffix(".md"))
+    reserved_paths_by_permalink = {
+        portable_path_key(_reserved_path(scope, filename).removesuffix(".md")): _reserved_path(
+            scope, filename
+        )
         for scope in affected_wiki_scopes(*all_projection_paths)
         for filename in RESERVED_WIKI_FILENAMES
     }
-    for note in notes:
-        if portable_path_key(note.permalink) in reserved_permalink_keys:
-            raise ValueError(
-                "Wiki source note permalink collides with a generated document identity: "
-                f"{note.permalink}"
-            )
-    for change in changes:
-        if (
-            change.operation is not WikiChangeOperation.deleted
-            and portable_path_key(change.permalink) in reserved_permalink_keys
-        ):
-            raise ValueError(
-                "Wiki source change permalink collides with a generated document identity: "
-                f"{change.permalink}"
-            )
+    # Source identities belong to users, including identities recorded in the
+    # journal before a move or delete. Never claim those identities for generated
+    # pages; skip just those outputs so unrelated scopes can still converge.
+    source_permalink_keys = {portable_path_key(note.permalink) for note in notes}
+    source_permalink_keys.update(
+        portable_path_key(change.permalink)
+        for change in changes
+        if change.operation is not WikiChangeOperation.deleted
+    )
+    identity_collisions = tuple(
+        WikiProjectionConflict(
+            path=reserved_paths_by_permalink[key],
+            reason="generated document identity belongs to a source note or accepted change",
+        )
+        for key in sorted(source_permalink_keys & reserved_paths_by_permalink.keys())
+    )
+    skipped_identity_paths = {portable_path_key(conflict.path) for conflict in identity_collisions}
     for scope in (*scopes, *retained_scope_ancestors):
         if existing_note := note_by_path.get(portable_path_key(scope)):
             raise ValueError(
@@ -441,7 +446,14 @@ def _plan_wiki_projection(
     existing_by_path = {
         portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
-    collision_warnings = tuple(collision.message for collision in scope_collisions)
+    collision_warnings = tuple(collision.message for collision in scope_collisions) + tuple(
+        f"Wiki skipped {conflict.path}: {conflict.reason}" for conflict in identity_collisions
+    )
+    projected_scopes = tuple(
+        scope
+        for scope in projected_scopes
+        if portable_path_key(_reserved_path(scope, "index.md")) not in skipped_identity_paths
+    )
     rendered: dict[str, bytes] = {}
     for scope in scopes:
         rendered[_reserved_path(scope, "index.md")] = _render_index(
@@ -458,6 +470,11 @@ def _plan_wiki_projection(
             source_watermark=request.through_partition_position,
         )
 
+    rendered = {
+        path: content
+        for path, content in rendered.items()
+        if portable_path_key(path) not in skipped_identity_paths
+    }
     conflicts = tuple(
         WikiProjectionConflict(
             path=path,
@@ -485,6 +502,7 @@ def _plan_wiki_projection(
                 warnings=collision_warnings,
                 pending_materialization=(),
                 scope_collisions=scope_collisions,
+                identity_collisions=identity_collisions,
             ),
         )
 
@@ -531,6 +549,7 @@ def _plan_wiki_projection(
             warnings=collision_warnings,
             pending_materialization=(),
             scope_collisions=scope_collisions,
+            identity_collisions=identity_collisions,
         ),
     )
 

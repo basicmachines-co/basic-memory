@@ -1460,7 +1460,7 @@ def test_projection_logs_preserve_each_changes_historical_permalink() -> None:
     assert "[[new-note|Old note]]" not in log
 
 
-def test_projection_rejects_source_permalink_reserved_for_generated_index() -> None:
+def test_projection_skips_source_permalink_reserved_for_generated_index() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
@@ -1479,11 +1479,14 @@ def test_projection_rejects_source_permalink_reserved_for_generated_index() -> N
         changes=(),
     )
 
-    with pytest.raises(ValueError, match="generated document identity"):
-        plan_wiki_projection(_request(position=0, scopes=()), snapshot)
+    plan = plan_wiki_projection(_request(position=0, scopes=()), snapshot)
+    assert {write.path for write in plan.writes} == {"index.md", "log.md"}
+    assert plan.result.identity_collisions[0].path == "guides/index.md"
+    assert plan.result.state is WikiProjectionState.conflicted
+    assert "[[guides/index|Guides]]" not in plan.writes[0].content.decode()
 
 
-def test_projection_rejects_historical_permalink_reserved_for_generated_index() -> None:
+def test_projection_skips_historical_permalink_reserved_for_generated_index() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
@@ -1515,8 +1518,11 @@ def test_projection_rejects_historical_permalink_reserved_for_generated_index() 
         ),
     )
 
-    with pytest.raises(ValueError, match="generated document identity"):
-        plan_wiki_projection(_request(position=2, scopes=()), snapshot)
+    plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
+    assert {write.path for write in plan.writes} == {"index.md", "log.md"}
+    assert plan.result.identity_collisions[0].path == "guides/index.md"
+    assert plan.result.output_watermark == 2
+    assert plan.result.state is WikiProjectionState.conflicted
 
 
 def test_projection_escapes_dynamic_markdown_structure() -> None:
@@ -1688,3 +1694,61 @@ def test_case_only_folder_collision_does_not_fail_an_incremental_run() -> None:
         "marketing/index.md",
         "marketing/log.md",
     }
+
+
+@pytest.mark.parametrize("permalink", ["log", "LOG", "guides/index"])
+@pytest.mark.parametrize(
+    "reason", [WikiProjectionReason.accepted_note, WikiProjectionReason.manual_rebuild]
+)
+def test_reserved_source_identity_does_not_freeze_other_wiki_outputs(
+    permalink: str, reason: WikiProjectionReason
+) -> None:
+    """Production's historical reserved identity must settle without rewriting source bytes."""
+    source = WikiSourceNote(
+        path="guides/topic.md",
+        permalink=permalink,
+        title="Topic",
+        note_type="Note",
+        checksum="source",
+    )
+    change = WikiSourceChange(
+        partition_position=3,
+        operation=WikiChangeOperation.updated,
+        path=source.path,
+        permalink=source.permalink,
+        title=source.title,
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    snapshot = replace(_snapshot(), notes=(*_snapshot().notes, source), changes=(change,))
+    request = _request(reason=reason)
+
+    plan = plan_wiki_projection(request, snapshot)
+
+    blocked_path = f"{permalink.lower()}.md"
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+    assert blocked_path not in rendered
+    assert "guides/log.md" in rendered
+    assert "index.md" in rendered
+    assert plan.result.output_watermark == 3
+    assert plan.result.state is WikiProjectionState.conflicted
+    assert plan.result.identity_collisions[0].path == blocked_path
+    assert plan.result.conflicts == ()
+    assert any(blocked_path in warning for warning in plan.result.warnings)
+    assert snapshot.notes[-1] == source
+    if blocked_path == "guides/index.md":
+        assert "[[guides/index|Guides]]" not in rendered["index.md"]
+    else:
+        assert "[[guides/index|Guides]]" in rendered["index.md"]
+
+    replay = plan_wiki_projection(
+        request,
+        replace(
+            snapshot,
+            current_output_watermark=3,
+            reserved_documents=tuple(_reserved(write.path, write.content) for write in plan.writes),
+        ),
+    )
+    assert replay.writes == ()
+    assert replay.result.identity_collisions == plan.result.identity_collisions
