@@ -428,7 +428,8 @@ export BASIC_MEMORY_RERANKER_ENABLED=true
 ```
 
 The default model is `jinaai/jina-reranker-v1-tiny-en`. To use a hosted
-reranker through LiteLLM instead:
+reranker through LiteLLM instead, first [install the optional LiteLLM
+SDK](docs/litellm-provider.md#install-the-optional-sdk), then configure it:
 
 ```bash
 export BASIC_MEMORY_RERANKER_ENABLED=true
