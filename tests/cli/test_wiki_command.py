@@ -235,3 +235,40 @@ def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):
     assert status_report["projects"][0]["state"] == "current"
     assert status_report["projects"][0]["writes"] == []
     assert (config_home / "index.md").read_bytes() == initial_index
+
+
+@pytest.mark.usefixtures("engine_factory")
+def test_wiki_rebuild_preserves_identity_conflict_in_cli_status(config_home, config_manager):
+    """Safe outputs apply, but rebuild/status/validate must never claim full currency."""
+    run_with_cleanup(db.shutdown_db())
+    source = config_home / "topic.md"
+    source_bytes = b"---\ntitle: Topic\npermalink: log\n---\n\n# Source bytes\n"
+    source.write_bytes(source_bytes)
+    runner_args = ["--project", "test-project", "--json"]
+
+    rebuilt = runner.invoke(
+        cli_app, ["wiki", "rebuild", *runner_args], env={"BASIC_MEMORY_NO_PROMOS": "1"}
+    )
+
+    assert rebuilt.exit_code == 1, rebuilt.stdout
+    report = json.loads(rebuilt.stdout)
+    assert report["success"] is False
+    assert report["projects"][0]["state"] == "conflicted"
+    assert "log.md" in report["projects"][0]["conflicts"][0]
+    assert (config_home / "index.md").is_file()
+    assert not (config_home / "log.md").exists()
+    assert source.read_bytes() == source_bytes
+    index_bytes = (config_home / "index.md").read_bytes()
+
+    status = runner.invoke(
+        cli_app, ["wiki", "status", *runner_args], env={"BASIC_MEMORY_NO_PROMOS": "1"}
+    )
+    assert status.exit_code == 0, status.stdout
+    assert json.loads(status.stdout)["projects"][0]["state"] == "conflicted"
+    validated = runner.invoke(
+        cli_app, ["wiki", "validate", *runner_args], env={"BASIC_MEMORY_NO_PROMOS": "1"}
+    )
+    assert validated.exit_code == 1, validated.stdout
+    assert json.loads(validated.stdout)["projects"][0]["state"] == "conflicted"
+    assert (config_home / "index.md").read_bytes() == index_bytes
+    assert source.read_bytes() == source_bytes
