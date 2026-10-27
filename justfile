@@ -566,7 +566,7 @@ telemetry-smoke:
     TMP_PROJECT=$(mktemp -d)
     export HOME="$TMP_HOME"
     export BASIC_MEMORY_ENV="${BASIC_MEMORY_ENV:-dev}"
-    export BASIC_MEMORY_HOME="$TMP_PROJECT/home-root"
+    export BASIC_MEMORY_HOME="$TMP_HOME/basic-memory"
     export BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG"
     export BASIC_MEMORY_NO_PROMOS=1
     export BASIC_MEMORY_LOG_LEVEL="${BASIC_MEMORY_LOG_LEVEL:-INFO}"
@@ -587,11 +587,11 @@ telemetry-smoke:
     echo "  logfire_environment=$BASIC_MEMORY_LOGFIRE_ENVIRONMENT"
     echo "  project_path=$TMP_PROJECT"
     ./.venv/bin/python -m basic_memory.cli.main project add telemetry-smoke "$TMP_PROJECT" --default --local
-    ./.venv/bin/python -m basic_memory.cli.main tool write-note --title "Telemetry Smoke" --folder notes --content "hello from smoke" --project telemetry-smoke --local
-    ./.venv/bin/python -m basic_memory.cli.main tool read-note notes/telemetry-smoke --project telemetry-smoke --local
-    ./.venv/bin/python -m basic_memory.cli.main tool edit-note notes/telemetry-smoke --operation append --content $'\n\nsmoke edit line' --project telemetry-smoke --local
-    ./.venv/bin/python -m basic_memory.cli.main tool build-context notes/telemetry-smoke --project telemetry-smoke --local --page-size 5 --max-related 5
-    ./.venv/bin/python -m basic_memory.cli.main tool search-notes telemetry --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool write --title "Telemetry Smoke" --folder notes --content "hello from smoke" --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool read notes/telemetry-smoke --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool edit notes/telemetry-smoke --operation append --content $'\n\nsmoke edit line' --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool context notes/telemetry-smoke --project telemetry-smoke --local --page-size 5 --max-related 5
+    ./.venv/bin/python -m basic_memory.cli.main tool search telemetry --project telemetry-smoke --local
     ./.venv/bin/python -m basic_memory.cli.main doctor --local
     echo ""
     echo "Telemetry smoke complete."

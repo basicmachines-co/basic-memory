@@ -4,12 +4,14 @@ type: manpage
 section: 3
 name: chatgpt-fetch
 summary: OpenAI-actions-compatible document fetch adapter
-generated: registry
+generated: hand
 tool: fetch
 verified: 0.21.6 mcp
 ---
 
 # chatgpt-fetch(3)
+
+> Cloud-only connector adapter. The local Core server does not register this tool.
 
 ## NAME
 

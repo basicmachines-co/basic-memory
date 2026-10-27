@@ -1,7 +1,7 @@
 """Tool-call examples in model-facing text must be callable as written (#1633).
 
 Agents copy these snippets verbatim. A positional example in the wrong order
-(`read_note("qa", "notes/x")` reads a note named "qa" from project "notes/x")
+(`bm_read("qa", "notes/x")` passes a project as the section argument)
 or a call to a tool that no longer exists sends them the wrong way. The #1603
 audit fixed a round of these by hand; this test keeps them fixed.
 
@@ -134,14 +134,14 @@ def test_scanner_finds_examples():
     """Guard the guard: the scan must actually see the tool modules' examples."""
     examples = list(_call_examples())
     assert len(examples) > 50
-    assert {name for _, name, _ in examples} >= {"read_note", "search_notes", "edit_note"}
+    assert {name for _, name, _ in examples} >= {"bm_read", "bm_search", "bm_edit"}
 
 
 @pytest.mark.parametrize(
     ("snippet", "expected"),
     [
-        ('read_note("qa", "notes/x")', "positional"),
-        ('read_note(identifier="x", folder="y")', "folder= is not a parameter"),
+        ('bm_read("qa", "notes/x")', "positional"),
+        ('bm_read(identifier="x", folder="y")', "folder= is not a parameter"),
         ("list_projects()", "retired"),
     ],
 )

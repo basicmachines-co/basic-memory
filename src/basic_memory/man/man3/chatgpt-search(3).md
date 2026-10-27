@@ -4,12 +4,14 @@ type: manpage
 section: 3
 name: chatgpt-search
 summary: OpenAI-actions-compatible search adapter
-generated: registry
+generated: hand
 tool: search
 verified: 0.21.6 mcp
 ---
 
 # chatgpt-search(3)
+
+> Cloud-only connector adapter. The local Core server does not register this tool.
 
 ## NAME
 

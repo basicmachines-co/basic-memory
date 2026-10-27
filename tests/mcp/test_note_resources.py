@@ -320,7 +320,7 @@ async def test_info_uri_that_is_neither_project_nor_note_reports_the_route(
 
 
 @pytest.mark.asyncio
-async def test_binary_content_is_steered_to_read_content(
+async def test_binary_content_is_steered_to_bm_read(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await write_note(
@@ -335,7 +335,7 @@ async def test_binary_content_is_steered_to_read_content(
 
     monkeypatch.setattr(notes_module, "call_get", fake_call_get)
 
-    with pytest.raises(ResourceError, match="use the read_content tool"):
+    with pytest.raises(ResourceError, match="use the bm_read tool"):
         await note_resource(project=test_project.name, path="specs/binary-decoy")
 
 
