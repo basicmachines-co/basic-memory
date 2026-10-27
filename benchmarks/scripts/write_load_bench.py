@@ -142,7 +142,7 @@ def _asyncpg_url(container) -> str:
 
 
 def _result_payload(result: CallToolResult) -> dict:
-    structured = result.structuredContent
+    structured = result.structured_content
     if isinstance(structured, dict):
         wrapped = structured.get("result")
         return wrapped if isinstance(wrapped, dict) else structured
@@ -190,7 +190,7 @@ async def write_burst(
                         "output_format": "json",
                     },
                 )
-                failed = bool(result.isError)
+                failed = bool(result.is_error)
             except Exception:
                 failed = True
             elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -311,7 +311,7 @@ async def run(args: argparse.Namespace) -> int:
                 "bm_project",
                 {"command": "create", "name": project, "path": str(project_dir)},
             )
-            if create.isError:
+            if create.is_error:
                 print("ERROR: could not create project", file=sys.stderr)
                 return 1
 
