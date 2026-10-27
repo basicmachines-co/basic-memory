@@ -29,7 +29,7 @@ list_memory_projects(output_format="text")
 CLI:
 
 ```
-bm tool list-projects
+bm tool projects
 bm project list        # richer table, includes routing and sync columns
 ```
 
@@ -63,7 +63,7 @@ list_memory_projects(output_format="json")
 ## CLI EQUIVALENT
 
 ```
-bm tool list-projects   # same JSON payload
+bm tool projects   # same JSON payload
 ```
 
 ## GOTCHAS

@@ -8,7 +8,6 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.directory_listing import format_listing_text
 from basic_memory.mcp.project_context import get_project_client
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import Pagination
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -17,17 +16,6 @@ from basic_memory.schemas.directory import (
 )
 
 
-@mcp.tool(
-    title="List Directory",
-    description="List directory contents with filtering and depth control.",
-    tags={"navigation", "notes"},
-    annotations={
-        "title": "List Directory",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def list_directory(
     # `dir_name` is unusual; models reach for directory/folder/path/dir.
     dir_name: Annotated[

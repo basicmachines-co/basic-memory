@@ -35,7 +35,7 @@ def test_cli_read_lines(mode: str) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["tool", "read-note", "runbook", "--start-line", "4", "--end-line", "5"]
+            ["tool", "read", "runbook", "--start-line", "4", "--end-line", "5"]
             + ([] if mode == "rich" else [mode]),
         )
     assert result.exit_code == 0, result.output
@@ -54,7 +54,7 @@ def test_cli_read_lines_past_end_reports_error() -> None:
     tool = AsyncMock(side_effect=ToolError(message))
     with patch("basic_memory.mcp.tools.read_note", tool):
         result = CliRunner().invoke(
-            app, ["tool", "read-note", "runbook", "--start-line", "500", "--plain"]
+            app, ["tool", "read", "runbook", "--start-line", "500", "--plain"]
         )
     assert result.exit_code == 1
     assert message in result.output

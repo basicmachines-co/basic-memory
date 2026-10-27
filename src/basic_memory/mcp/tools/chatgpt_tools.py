@@ -12,7 +12,6 @@ from fastmcp import Context
 from loguru import logger
 
 from basic_memory.mcp.client_info import is_openai_mcp_client
-from basic_memory.mcp.server import mcp
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
     detect_project_from_identifier_prefix,
@@ -136,21 +135,6 @@ def _format_document_for_chatgpt(
     }
 
 
-@mcp.tool(
-    title="Search Knowledge Base",
-    description=(
-        "OpenAI/ChatGPT connector search adapter. Returns one text item holding JSON "
-        "{results, total_count, query} for the top 10 bm_search matches. Other MCP "
-        "clients receive an unsupported-client error; use bm_search instead."
-    ),
-    tags={"search"},
-    annotations={
-        "title": "Search Knowledge Base",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def search(
     query: str,
     context: Context | None = None,
@@ -220,22 +204,6 @@ async def search(
         return _text_content(error_results)
 
 
-@mcp.tool(
-    title="Fetch Document",
-    description=(
-        "OpenAI/ChatGPT connector fetch adapter. Takes an id from search results "
-        "(permalink, title, or memory:// URL) and returns one text item holding JSON "
-        "{id, title, text, url, metadata}. Other MCP clients receive an "
-        "unsupported-client error; use bm_read instead."
-    ),
-    tags={"search", "notes"},
-    annotations={
-        "title": "Fetch Document",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def fetch(
     id: str,
     context: Context | None = None,

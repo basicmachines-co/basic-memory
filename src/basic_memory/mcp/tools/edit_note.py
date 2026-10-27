@@ -31,7 +31,6 @@ from basic_memory.mcp.project_context import (
     resolve_project_and_path,
     routes_to_default_project,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
@@ -435,32 +434,6 @@ Error editing note '{identifier}': {error_message}
 - Check that identifiers, section headers, and find_text match exactly"""
 
 
-@mcp.tool(
-    title="Edit Note",
-    description=(
-        "Edit a note in place. `operation` picks the edit: append or prepend `content` "
-        "(prepend lands after frontmatter; both create the note if it does not exist); "
-        "find_replace (replaces every exact, case-sensitive occurrence of `find_text`, and "
-        "writes nothing unless the count equals `expected_replacements`, default 1); "
-        "replace_section (replaces the content under the `section` heading, including its "
-        "subsections unless replace_subsections=false); insert_before_section / "
-        "insert_after_section (adds content beside the `section` heading). The heading must "
-        "match exactly and appear once; a heading without leading `#` is treated as `##`. A "
-        "missing or duplicate heading, or missing find_text, fails without writing. "
-        "`identifier` must resolve exactly; there is no fuzzy matching. Pass `metadata` to "
-        "merge frontmatter fields in the same call. Pass `expected_checksum` to edit only "
-        "if the note is still the revision you read."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "Edit Note",
-        "readOnlyHint": False,
-        # find_replace and replace_section overwrite existing content, so the tool
-        # as a whole is not purely additive even though append/prepend are.
-        "destructiveHint": True,
-        "openWorldHint": False,
-    },
-)
 async def edit_note(
     identifier: str,
     operation: Annotated[str, Field(json_schema_extra={"enum": list(EDIT_OPERATIONS)})],

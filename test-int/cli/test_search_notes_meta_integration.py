@@ -10,7 +10,7 @@ runner = CliRunner()
 
 
 def test_search_notes_query_plus_meta_filter(app, app_config, test_project, config_manager):
-    """`bm tool search-notes` should support query + metadata filter together."""
+    """`bm tool search` should support query + metadata filter together."""
     active_content = "---\nstatus: active\n---\n# Active Meta Note\n\nMetaFilterToken"
     inactive_content = "---\nstatus: inactive\n---\n# Inactive Meta Note\n\nMetaFilterToken"
 
@@ -18,7 +18,7 @@ def test_search_notes_query_plus_meta_filter(app, app_config, test_project, conf
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Active Meta Note",
             "--folder",
@@ -34,7 +34,7 @@ def test_search_notes_query_plus_meta_filter(app, app_config, test_project, conf
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Inactive Meta Note",
             "--folder",
@@ -50,7 +50,7 @@ def test_search_notes_query_plus_meta_filter(app, app_config, test_project, conf
         cli_app,
         [
             "tool",
-            "search-notes",
+            "search",
             "MetaFilterToken",
             "--meta",
             "status=active",

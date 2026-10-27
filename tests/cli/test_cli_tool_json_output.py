@@ -111,7 +111,7 @@ def test_write_note_json_output(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -147,7 +147,7 @@ def test_write_note_project_id_passthrough(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -175,7 +175,7 @@ def test_write_note_expected_checksum_passthrough(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -213,7 +213,7 @@ def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -244,7 +244,7 @@ def test_write_note_with_tags(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -273,7 +273,7 @@ def test_write_note_type_passthrough(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -300,7 +300,7 @@ def test_write_note_type_defaults_to_note(mock_mcp_write):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Test Note",
             "--folder",
@@ -326,7 +326,7 @@ def test_read_note_json_output(mock_mcp_read):
     """read-note outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", "test-note"],
+        ["tool", "read", "test-note"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -348,7 +348,7 @@ def test_read_note_include_frontmatter(mock_mcp_read):
     """read-note --include-frontmatter passes flag through to MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", "test-note", "--include-frontmatter"],
+        ["tool", "read", "test-note", "--include-frontmatter"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -367,7 +367,7 @@ def test_delete_note_json_output(mock_mcp_delete: AsyncMock) -> None:
     """delete-note outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "test-note"],
+        ["tool", "delete", "test-note"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -388,7 +388,7 @@ def test_delete_note_directory_flag(mock_mcp_delete: AsyncMock) -> None:
     """delete-note --is-directory passes directory mode to MCP."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "notes/archive", "--is-directory"],
+        ["tool", "delete", "notes/archive", "--is-directory"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -411,7 +411,7 @@ def test_delete_note_not_found_outputs_json(mock_mcp_delete: AsyncMock) -> None:
     """delete-note treats not-found JSON without an error as a successful command."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "missing-note"],
+        ["tool", "delete", "missing-note"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -435,7 +435,7 @@ def test_delete_note_error_response(mock_mcp_delete: AsyncMock) -> None:
     """delete-note exits with code 1 when MCP tool returns an error field."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "test-note"],
+        ["tool", "delete", "test-note"],
     )
 
     assert result.exit_code == 1
@@ -462,7 +462,7 @@ def test_delete_note_directory_partial_failure_exits_nonzero(
     """delete-note --is-directory exits 1 when any directory file remains undeleted."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "notes/archive", "--is-directory"],
+        ["tool", "delete", "notes/archive", "--is-directory"],
     )
 
     assert result.exit_code == 1
@@ -493,7 +493,7 @@ def test_delete_note_reports_a_tool_error_payload_and_exits_nonzero(
     """A failed delete raised as a tool error prints its error field, not raw JSON."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "notes/archive", "--is-directory"],
+        ["tool", "delete", "notes/archive", "--is-directory"],
     )
 
     assert result.exit_code == 1
@@ -511,7 +511,7 @@ def test_delete_note_project_id_passthrough(mock_mcp_delete: AsyncMock) -> None:
     uuid = "11111111-1111-1111-1111-111111111111"
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "test-note", "--project-id", uuid],
+        ["tool", "delete", "test-note", "--project-id", uuid],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -532,7 +532,7 @@ def test_edit_note_json_output(mock_mcp_edit):
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             "test-note",
             "--operation",
             "append",
@@ -561,7 +561,7 @@ def test_edit_note_no_replace_subsections_passthrough(mock_mcp_edit):
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             "test-note",
             "--operation",
             "replace_section",
@@ -588,7 +588,7 @@ def test_edit_note_error_response(mock_mcp_edit):
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             "test-note",
             "--operation",
             "append",
@@ -623,7 +623,7 @@ def test_edit_note_reports_a_tool_error_payload_and_exits_nonzero(
     """A failed edit: error on stderr, the structured result on stdout, as write-note does."""
     result = runner.invoke(
         cli_app,
-        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+        ["tool", "edit", "test-note", "--operation", "append", "--content", "content"],
     )
 
     assert result.exit_code == 1
@@ -652,7 +652,7 @@ def test_edit_note_unknown_outcome_keeps_the_read_before_retry_warning(
     """A lost response must not reach the user as a bare error code (or a script retries)."""
     result = runner.invoke(
         cli_app,
-        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+        ["tool", "edit", "test-note", "--operation", "append", "--content", "content"],
     )
 
     assert result.exit_code == 1
@@ -673,7 +673,7 @@ def test_build_context_json_output(mock_build_ctx):
     """build-context outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "build-context", "memory://test/topic"],
+        ["tool", "context", "memory://test/topic"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -694,7 +694,7 @@ def test_build_context_with_options(mock_build_ctx):
         cli_app,
         [
             "tool",
-            "build-context",
+            "context",
             "memory://test/topic",
             "--depth",
             "2",
@@ -727,7 +727,7 @@ def test_recent_activity_json_output(mock_mcp_recent):
     """recent-activity outputs valid JSON list from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity"],
+        ["tool", "recent"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -749,7 +749,7 @@ def test_recent_activity_pagination(mock_mcp_recent):
     """recent-activity passes --page and --page-size through."""
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity", "--page", "2", "--page-size", "10"],
+        ["tool", "recent", "--page", "2", "--page-size", "10"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -767,7 +767,7 @@ def test_recent_activity_empty(mock_mcp_recent):
     """recent-activity handles empty results."""
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity"],
+        ["tool", "recent"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -787,7 +787,7 @@ def test_search_notes_json_output(mock_mcp_search):
     """search-notes outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "search-notes", "test query"],
+        ["tool", "search", "test query"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -807,7 +807,7 @@ def test_search_notes_with_meta_filter(mock_mcp_search):
     """search-notes --meta key=value builds metadata filters."""
     result = runner.invoke(
         cli_app,
-        ["tool", "search-notes", "query", "--meta", "status=draft"],
+        ["tool", "search", "query", "--meta", "status=draft"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -823,7 +823,7 @@ def test_search_notes_permalink_mode(mock_mcp_search):
     """search-notes --permalink sets search_type."""
     result = runner.invoke(
         cli_app,
-        ["tool", "search-notes", "specs/*", "--permalink"],
+        ["tool", "search", "specs/*", "--permalink"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -839,7 +839,7 @@ def test_search_notes_string_error(mock_mcp_search):
     """search-notes exits with code 1 when MCP returns string error."""
     result = runner.invoke(
         cli_app,
-        ["tool", "search-notes", "query"],
+        ["tool", "search", "query"],
     )
 
     assert result.exit_code == 1
@@ -854,7 +854,7 @@ def test_routing_both_flags_error():
         cli_app,
         [
             "tool",
-            "recent-activity",
+            "recent",
             "--local",
             "--cloud",
         ],
@@ -900,7 +900,7 @@ def test_schema_validate_json_output(mock_mcp):
     """schema-validate outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-validate", "person"],
+        ["tool", "validate", "person"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -911,13 +911,13 @@ def test_schema_validate_json_output(mock_mcp):
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
 
 
-@pytest.mark.parametrize("command", ["schema-validate", "schema-infer", "schema-diff"])
+@pytest.mark.parametrize("command", ["validate", "infer", "diff"])
 def test_schema_commands_print_nothing_to_report_and_exit_zero(command):
     """A NOT_FOUND refusal is "nothing to report" for the CLI, not a failure."""
     tool = {
-        "schema-validate": "schema_validate",
-        "schema-infer": "schema_infer",
-        "schema-diff": "schema_diff",
+        "validate": "schema_validate",
+        "infer": "schema_infer",
+        "diff": "schema_diff",
     }[command]
     nothing = refusal("NOT_FOUND", "No schemas defined in this project", output_format="json")
     with patch(f"basic_memory.mcp.tools.{tool}", new_callable=AsyncMock, side_effect=nothing):
@@ -936,7 +936,7 @@ def test_schema_validate_identifier_heuristic(mock_mcp):
     """schema-validate treats target with / as identifier, not note_type."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-validate", "people/alice.md"],
+        ["tool", "validate", "people/alice.md"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -953,7 +953,7 @@ def test_schema_validate_error_response(mock_mcp):
     """schema-validate outputs error JSON when MCP returns error dict."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-validate", "person"],
+        ["tool", "validate", "person"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -986,7 +986,7 @@ def test_schema_infer_json_output(mock_mcp):
     """schema-infer outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-infer", "person"],
+        ["tool", "infer", "person"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -1006,7 +1006,7 @@ def test_schema_infer_threshold_passthrough(mock_mcp):
     """schema-infer passes --threshold through to MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-infer", "person", "--threshold", "0.5"],
+        ["tool", "infer", "person", "--threshold", "0.5"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -1035,7 +1035,7 @@ def test_schema_diff_json_output(mock_mcp):
     """schema-diff outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "schema-diff", "person"],
+        ["tool", "diff", "person"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -1077,7 +1077,7 @@ def test_list_projects_json_output(mock_mcp):
     """list-projects outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "list-projects"],
+        ["tool", "projects"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -1115,7 +1115,7 @@ def test_list_workspaces_json_output(mock_mcp):
     """list-workspaces outputs valid JSON from MCP tool."""
     result = runner.invoke(
         cli_app,
-        ["tool", "list-workspaces"],
+        ["tool", "workspaces"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
@@ -1136,7 +1136,7 @@ def test_list_workspaces_empty(mock_mcp):
     """list-workspaces handles empty workspace list."""
     result = runner.invoke(
         cli_app,
-        ["tool", "list-workspaces"],
+        ["tool", "workspaces"],
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"

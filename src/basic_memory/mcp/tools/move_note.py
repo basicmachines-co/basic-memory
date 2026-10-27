@@ -13,7 +13,6 @@ from pydantic import AliasChoices, Field
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.move_destinations import project_named_by_destination
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.schemas.project_info import ProjectItem
@@ -341,26 +340,6 @@ bm_delete("{identifier}")
     )
 
 
-@mcp.tool(
-    title="Move Note",
-    description=(
-        "Move a note, or a whole directory with is_directory=true, to a new path within the "
-        "same project; cross-project moves are refused. For a file, give either "
-        "`destination_path` (project-relative, with the same file extension as the source, "
-        'e.g. "archive/note.md"; `.markdown` may become `.md`) or `destination_folder` '
-        "(keeps the filename). The file "
-        "moves on disk and its index entry, observations, and relations move with it. The "
-        "permalink stays the same unless the server's update_permalinks_on_move setting is "
-        "on, so links that use it keep resolving; other notes' text is not rewritten."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "Move Note",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def move_note(
     identifier: str,
     # Move/rename APIs across the ecosystem use `to`/`destination`/`new_path`.

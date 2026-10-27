@@ -17,7 +17,7 @@ def test_find_chapter_type_round_trip(app_config, test_project, config_manager):
         app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Chapter One",
             "--folder",
@@ -46,7 +46,7 @@ def test_find_multiword_type_round_trip(app_config, test_project, config_manager
         app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Metaphor",
             "--folder",
@@ -77,7 +77,7 @@ def test_find_type_membership_preserves_scope_and_other_predicates(
         app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Chapter One",
             "--folder",
@@ -91,7 +91,7 @@ def test_find_type_membership_preserves_scope_and_other_predicates(
         app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Metaphor",
             "--folder",
@@ -105,7 +105,7 @@ def test_find_type_membership_preserves_scope_and_other_predicates(
         app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Other Chapter",
             "--folder",

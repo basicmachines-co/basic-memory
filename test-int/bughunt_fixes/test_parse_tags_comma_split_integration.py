@@ -25,7 +25,7 @@ def test_cli_write_note_comma_tags_split_matches_mcp(app, app_config, test_proje
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "CLI Comma Split",
             "--folder",
@@ -41,7 +41,7 @@ def test_cli_write_note_comma_tags_split_matches_mcp(app, app_config, test_proje
 
     read = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink, "--include-frontmatter", "--local"],
+        ["tool", "read", permalink, "--include-frontmatter", "--local"],
     )
     assert read.exit_code == 0, read.output
     content = json.loads(read.stdout)["content"]

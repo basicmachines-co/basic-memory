@@ -15,7 +15,7 @@ def test_write_note_json_output(app, app_config, test_project, config_manager):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Integration Test Note",
             "--folder",
@@ -44,7 +44,7 @@ def test_read_note_json_output(app, app_config, test_project, config_manager):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Read Test Note",
             "--folder",
@@ -60,7 +60,7 @@ def test_read_note_json_output(app, app_config, test_project, config_manager):
     # Now read it back
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink],
+        ["tool", "read", permalink],
     )
 
     if result.exit_code != 0:
@@ -81,7 +81,7 @@ def test_read_note_include_frontmatter(app, app_config, test_project, config_man
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Read Frontmatter Note",
             "--folder",
@@ -97,7 +97,7 @@ def test_read_note_include_frontmatter(app, app_config, test_project, config_man
         cli_app,
         [
             "tool",
-            "read-note",
+            "read",
             write_data["permalink"],
             "--include-frontmatter",
         ],
@@ -119,7 +119,7 @@ def test_recent_activity_json_output(app, app_config, test_project, config_manag
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Activity Test Note",
             "--folder",
@@ -133,7 +133,7 @@ def test_recent_activity_json_output(app, app_config, test_project, config_manag
     # Get recent activity
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity"],
+        ["tool", "recent"],
     )
 
     if result.exit_code != 0:

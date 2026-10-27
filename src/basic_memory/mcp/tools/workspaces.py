@@ -5,7 +5,6 @@ from typing import Any, Literal
 from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_available_workspaces
-from basic_memory.mcp.server import mcp
 from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
 
 
@@ -44,17 +43,6 @@ def _workspace_list_response(workspaces: list[WorkspaceInfo]) -> WorkspaceListRe
     )
 
 
-@mcp.tool(
-    title="List Workspaces",
-    description="List available cloud workspaces (tenant_id, type, role, and name).",
-    tags={"cloud", "projects"},
-    annotations={
-        "title": "List Workspaces",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def list_workspaces(
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,

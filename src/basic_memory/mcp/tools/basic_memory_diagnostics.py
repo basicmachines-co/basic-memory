@@ -12,25 +12,10 @@ from basic_memory.config import (
     env_override_sources,
     resolve_data_dir,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.redaction import redact_config as _redact_config
 from basic_memory.redaction import redact_url as _redact_url  # noqa: F401 (re-exported for tests)
 
 
-@mcp.tool(
-    "basic_memory_diagnostics",
-    title="Basic Memory Diagnostics",
-    tags={"diagnostics"},
-    annotations={
-        "title": "Basic Memory Diagnostics",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-    # The report is a markdown string; suppress FastMCP's wrap_result so the
-    # payload isn't duplicated into structuredContent.
-    output_schema=None,
-)
 def basic_memory_diagnostics() -> str:
     """Return version, system, and configuration diagnostics for Basic Memory.
 

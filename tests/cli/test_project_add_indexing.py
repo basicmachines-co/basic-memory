@@ -118,7 +118,7 @@ def test_project_add_indexes_files_already_on_disk(tmp_path, fastembed_cache):
     assert "Rebuilding full-text search index" in add.stdout
 
     # No reindex is run here. That is the entire point of the test.
-    search = _bm(["tool", "search-notes", "Alpha Note", "--project", "adopted", "--json"], env)
+    search = _bm(["tool", "search", "Alpha Note", "--project", "adopted", "--json"], env)
 
     assert search.returncode == 0, search.stderr
     assert "Alpha Note" in search.stdout

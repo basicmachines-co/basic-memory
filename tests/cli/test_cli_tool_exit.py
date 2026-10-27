@@ -36,10 +36,10 @@ class TestCLIToolExit:
         "command",
         [
             ["tool", "--help"],
-            ["tool", "write-note", "--help"],
-            ["tool", "read-note", "--help"],
-            ["tool", "search-notes", "--help"],
-            ["tool", "build-context", "--help"],
+            ["tool", "write", "--help"],
+            ["tool", "read", "--help"],
+            ["tool", "search", "--help"],
+            ["tool", "context", "--help"],
         ],
     )
     def test_cli_command_exits_cleanly(self, command: list[str]):

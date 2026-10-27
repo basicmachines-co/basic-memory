@@ -8,19 +8,19 @@ from typer.testing import CliRunner
 from basic_memory.cli.main import app as cli_app
 
 
-@pytest.mark.parametrize("command", ["search-notes", "build-context"])
+@pytest.mark.parametrize("command", ["search", "context"])
 @pytest.mark.parametrize("mode", ["--json", "--plain"])
 def test_compact_cli_discovery(app, app_config, test_project, config_manager, command, mode):
     runner = CliRunner()
     body = "Source prose that should be omitted. " * 100
     written = runner.invoke(
         cli_app,
-        ["tool", "write-note", "--title", "CompactCli", "--folder", "notes"],
+        ["tool", "write", "--title", "CompactCli", "--folder", "notes"],
         input=body,
     )
     assert written.exit_code == 0, written.output
     note = json.loads(written.stdout)
-    query = "CompactCli" if command == "search-notes" else note["permalink"]
+    query = "CompactCli" if command == "search" else note["permalink"]
     result = runner.invoke(cli_app, ["tool", command, query, "--compact", mode])
     assert result.exit_code == 0, result.output
     assert "CompactCli" in result.stdout

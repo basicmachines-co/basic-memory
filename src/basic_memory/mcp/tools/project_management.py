@@ -29,7 +29,6 @@ from basic_memory.mcp.project_context import (
     resolve_workspace_parameter,
 )
 from basic_memory.mcp.refusals import api_refusals, refusal
-from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp
 from basic_memory.schemas.project_info import ProjectInfoRequest, ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
@@ -355,17 +354,6 @@ def _format_project_list_json(
     }
 
 
-@mcp.tool(
-    "list_memory_projects",
-    title="List Memory Projects",
-    tags={"projects"},
-    annotations={
-        "title": "List Memory Projects",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def list_memory_projects(
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
@@ -545,17 +533,6 @@ def _format_indexing_details(indexing: dict[str, object]) -> str:
     return result
 
 
-@mcp.tool(
-    "create_memory_project",
-    title="Create Memory Project",
-    tags={"projects"},
-    annotations={
-        "title": "Create Memory Project",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def create_memory_project(
     project_name: str,
     project_path: str,
@@ -799,17 +776,6 @@ def _format_note_file_delete_result(
     )
 
 
-@mcp.tool(
-    title="Delete Project",
-    # Hidden unless enable_project_delete is on, like bm_project_delete.
-    tags={"projects", PROJECT_DELETE_TAG},
-    annotations={
-        "title": "Delete Project",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": False,
-    },
-)
 async def delete_project(
     project_name: str,
     delete_notes: bool = False,

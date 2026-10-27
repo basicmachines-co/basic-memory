@@ -133,7 +133,7 @@ def _write_cli(title, folder="pgcli"):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             title,
             "--folder",
@@ -145,7 +145,7 @@ def _write_cli(title, folder="pgcli"):
 
 
 def test_cli_search_notes_page_size_zero(app, app_config, test_project, config_manager):
-    """`bm tool search-notes ... --page-size 0` must fail fast instead of returning a
+    """`bm tool search ... --page-size 0` must fail fast instead of returning a
     misleading has_more=true with zero rows."""
     for i in range(5):
         w = _write_cli(f"CliPg Note {i:02d}")
@@ -153,7 +153,7 @@ def test_cli_search_notes_page_size_zero(app, app_config, test_project, config_m
 
     res = runner.invoke(
         cli_app,
-        ["tool", "search-notes", "clipagination", "--local", "--page-size", "0"],
+        ["tool", "search", "clipagination", "--local", "--page-size", "0"],
     )
     # The fix raises ValueError, which the CLI maps to a non-zero exit with a clear
     # message — the faithful "no misleading pagination signal" outcome at the CLI.

@@ -29,29 +29,11 @@ from basic_memory.mcp.file_content import (
     UnsupportedImage,
     classify_file_response,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
 
-@mcp.tool(
-    title="Read Content",
-    description=(
-        "Read a file's raw bytes by path, permalink, or memory:// URL, without "
-        'knowledge-graph processing. Text and JSON come back as {"type": "text"}; '
-        "images are re-encoded as JPEG and downscaled to about 350 KB; other binaries come "
-        'back base64 as {"type": "document"} and are refused above 350 KB. Use '
-        "bm_read for markdown notes when you want note resolution and fallback search."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "Read Content",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def read_content(
     path: Annotated[
         str,

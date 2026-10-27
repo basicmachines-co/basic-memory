@@ -31,7 +31,7 @@ read_note(identifier, project=None, project_id=None, page=1, page_size=10,
 CLI:
 
 ```
-bm tool read-note IDENTIFIER [--project NAME | --project-id UUID]
+bm tool read IDENTIFIER [--project NAME | --project-id UUID]
                   [--start-line N] [--end-line N] [--frontmatter]
                   [--local | --cloud]
 ```
@@ -81,7 +81,7 @@ read_note("memory://playground/demo-cli-stdin", project="manual")
 ## CLI EQUIVALENT
 
 ```
-bm tool read-note "playground/demo-cli-stdin" --project manual
+bm tool read "playground/demo-cli-stdin" --project manual
 # → JSON: {"title": ..., "content": "<body without frontmatter>",
 #          "frontmatter": {...}}
 ```
@@ -104,7 +104,7 @@ newline does not create an extra line. Lines may move after an intervening edit.
 
 ```
 read_note("runbook", start_line=120, end_line=180)
-bm tool read-note runbook --start-line 120 --end-line 180 --plain
+bm tool read runbook --start-line 120 --end-line 180 --plain
 ```
 
 ## EXAMPLES

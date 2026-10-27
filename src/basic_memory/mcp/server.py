@@ -26,30 +26,16 @@ from basic_memory.read_cache.lifecycle import open_redis_read_cache
 from basic_memory.services.initialization import initialize_app
 import logfire
 
-# Tools carrying this tag register at import time like every other tool but stay
-# hidden until the composition root enables them from config (#1399).
-POSIX_TOOLS_TAG = "posix"
-
-
 PROJECT_DELETE_TAG = "project-delete"
 
 
 def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
-    """Show or hide the project-delete tools (bm_project_delete, delete_project).
+    """Show or hide bm_project_delete.
 
-    Like set_posix_tools_visibility, the last mark appended wins, so this is safe
+    The last visibility mark appended wins, so this is safe
     to call at import, at each lifespan start, and in tests.
     """
     server.add_transform(Visibility(enabled, tags={PROJECT_DELETE_TAG}))
-
-
-def set_posix_tools_visibility(server: FastMCP, enabled: bool) -> None:
-    """Mark the POSIX tool group visible or hidden.
-
-    Visibility transforms stack; the mark appended last wins, so this is safe to
-    call repeatedly (each lifespan start, and both directions in tests).
-    """
-    server.add_transform(Visibility(enabled, tags={POSIX_TOOLS_TAG}))
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -118,11 +104,6 @@ async def lifespan(app: FastMCP):
     container = McpContainer.create()
     config = container.config
 
-    # Trigger: the enable_posix_tools config flag.
-    # Why: tools register at import time; the composition root is the one place
-    #      config decides what clients see (no if-checks inside tool bodies).
-    # Outcome: enabled by default; an explicit opt-out hides the POSIX group.
-    set_posix_tools_visibility(app, config.enable_posix_tools)
     # Trigger: the enable_project_delete config flag (off by default).
     # Why: deleting a project removes it for every client; only the user turns it on.
     # Outcome: bm_project_delete is listed only then.

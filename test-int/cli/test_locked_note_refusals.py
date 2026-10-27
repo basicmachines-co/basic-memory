@@ -14,7 +14,7 @@ def test_overwrite_reports_lock_and_exits_nonzero(app: FastAPI, test_project: Pr
     runner = CliRunner()
     arguments = [
         "tool",
-        "write-note",
+        "write",
         "--project",
         test_project.name,
         "--title",

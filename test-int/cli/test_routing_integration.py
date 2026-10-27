@@ -51,21 +51,19 @@ class TestRoutingFlagsValidation:
 
     def test_tool_search_both_flags_error(self):
         """Using both --local and --cloud should produce an error."""
-        result = runner.invoke(cli_app, ["tool", "search-notes", "test", "--local", "--cloud"])
+        result = runner.invoke(cli_app, ["tool", "search", "test", "--local", "--cloud"])
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
     def test_tool_read_note_both_flags_error(self):
         """Using both --local and --cloud should produce an error."""
-        result = runner.invoke(cli_app, ["tool", "read-note", "test", "--local", "--cloud"])
+        result = runner.invoke(cli_app, ["tool", "read", "test", "--local", "--cloud"])
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
     def test_tool_build_context_both_flags_error(self):
         """Using both --local and --cloud should produce an error."""
-        result = runner.invoke(
-            cli_app, ["tool", "build-context", "memory://test", "--local", "--cloud"]
-        )
+        result = runner.invoke(cli_app, ["tool", "context", "memory://test", "--local", "--cloud"])
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
@@ -75,7 +73,7 @@ class TestRoutingFlagsValidation:
             cli_app,
             [
                 "tool",
-                "edit-note",
+                "edit",
                 "test",
                 "--operation",
                 "append",
@@ -211,36 +209,36 @@ class TestToolCommandsAcceptFlags:
     @pytest.mark.parametrize(
         "command,args",
         [
-            ("search-notes", ["test query"]),
-            ("recent-activity", []),
-            ("read-note", ["test"]),
-            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
-            ("build-context", ["memory://test"]),
+            ("search", ["test query"]),
+            ("recent", []),
+            ("read", ["test"]),
+            ("edit", ["test", "--operation", "append", "--content", "test"]),
+            ("context", ["memory://test"]),
         ],
     )
     def test_tool_commands_accept_local_flag(self, command, args, app_config):
         """Tool commands should accept --local flag without parsing error."""
         full_args = ["tool", command] + args + ["--local"]
         result = runner.invoke(cli_app, full_args)
-        # Should not fail due to flag parsing (No such option error)
-        assert "No such option: --local" not in result.output
+        # Usage errors exit 2; runtime auth failures may log this test's source.
+        assert result.exit_code != 2, result.output
 
     @pytest.mark.parametrize(
         "command,args",
         [
-            ("search-notes", ["test query"]),
-            ("recent-activity", []),
-            ("read-note", ["test"]),
-            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
-            ("build-context", ["memory://test"]),
+            ("search", ["test query"]),
+            ("recent", []),
+            ("read", ["test"]),
+            ("edit", ["test", "--operation", "append", "--content", "test"]),
+            ("context", ["memory://test"]),
         ],
     )
     def test_tool_commands_accept_cloud_flag(self, command, args, app_config):
         """Tool commands should accept --cloud flag without parsing error."""
         full_args = ["tool", command] + args + ["--cloud"]
         result = runner.invoke(cli_app, full_args)
-        # Should not fail due to flag parsing (No such option error)
-        assert "No such option: --cloud" not in result.output
+        # Usage errors exit 2; runtime auth failures may log this test's source.
+        assert result.exit_code != 2, result.output
 
 
 class TestProjectCommandsAcceptFlags:

@@ -29,7 +29,7 @@ list_workspaces(output_format="text")
 CLI:
 
 ```
-bm tool list-workspaces
+bm tool workspaces
 ```
 
 ## PARAMETERS

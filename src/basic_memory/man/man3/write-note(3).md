@@ -31,7 +31,7 @@ write_note(title, content, directory, project=None, workspace=None,
 CLI:
 
 ```
-bm tool write-note --title TITLE --folder FOLDER [--content TEXT | < stdin]
+bm tool write --title TITLE --folder FOLDER [--content TEXT | < stdin]
                    [--tags TAG] [--type TYPE] [--project NAME | --project-id UUID]
                    [--overwrite [--expected-checksum CHECKSUM]] [--local | --cloud]
 ```
@@ -94,7 +94,7 @@ write_note(
 ## CLI EQUIVALENT
 
 ```
-echo "# CLI Demo Note ..." | bm tool write-note \
+echo "# CLI Demo Note ..." | bm tool write \
     --title "Demo - CLI stdin" --folder playground --project manual
 # → {"action": "created", "permalink": "manual/playground/demo-cli-stdin", ...}
 ```

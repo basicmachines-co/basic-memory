@@ -6,25 +6,9 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read import bm_read
 
 
-@mcp.tool(
-    title="View Note",
-    description=(
-        "Read a note (same resolution as bm_read) and return it wrapped in an instruction "
-        "to display it to the user as a markdown artifact. Use when the user wants to see the "
-        "note rendered; use bm_read when you need the content yourself. Missing notes raise tool errors."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "View Note",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def view_note(
     identifier: str,
     project: Optional[str] = None,

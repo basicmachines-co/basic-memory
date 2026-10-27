@@ -30,7 +30,7 @@ schema_validate(note_type=None, identifier=None, project=None,
 CLI:
 
 ```
-bm tool schema-validate [TARGET] [--project NAME]
+bm tool validate [TARGET] [--project NAME]
 # TARGET: a note type ("manpage"), a note path, or omitted for everything
 ```
 
@@ -70,7 +70,7 @@ schema_validate(note_type="manpage", project="manual",
 ## CLI EQUIVALENT
 
 ```
-bm tool schema-validate manpage --project manual
+bm tool validate manpage --project manual
 # → same JSON report; TARGET dispatches on type vs path automatically
 ```
 

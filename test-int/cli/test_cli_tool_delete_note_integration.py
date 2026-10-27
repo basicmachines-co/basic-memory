@@ -20,7 +20,7 @@ def _write_note(
 ) -> dict[str, Any]:
     args = [
         "tool",
-        "write-note",
+        "write",
         "--title",
         title,
         "--folder",
@@ -39,7 +39,7 @@ def _write_note(
 def _read_note(
     identifier: str, *, project: str | None = None, missing: bool = False
 ) -> dict[str, Any]:
-    args = ["tool", "read-note", identifier]
+    args = ["tool", "read", identifier]
     if project is not None:
         args.extend(["--project", project])
 
@@ -59,7 +59,7 @@ def _delete_note(
     project_id: str | None = None,
     local: bool = False,
 ) -> tuple[int, dict[str, Any], str]:
-    args = ["tool", "delete-note", identifier]
+    args = ["tool", "delete", identifier]
     if is_directory:
         args.append("--is-directory")
     if project is not None:
@@ -80,7 +80,7 @@ def _search_notes(
     mode_flag: str | None = None,
     page_size: int = 20,
 ) -> dict[str, Any]:
-    args = ["tool", "search-notes", query, "--page-size", str(page_size)]
+    args = ["tool", "search", query, "--page-size", str(page_size)]
     if mode_flag is not None:
         args.append(mode_flag)
 
@@ -275,7 +275,7 @@ def test_delete_note_rejects_conflicting_routing_flags(
     """delete-note validates the same --local/--cloud conflict as other tool commands."""
     result = runner.invoke(
         cli_app,
-        ["tool", "delete-note", "delete-cli/missing-note", "--local", "--cloud"],
+        ["tool", "delete", "delete-cli/missing-note", "--local", "--cloud"],
     )
 
     assert result.exit_code != 0
