@@ -1,10 +1,9 @@
 """Tests for LiteLLMEmbeddingProvider and factory litellm branch."""
 
-import builtins
 import math
 import os
 import sys
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -268,15 +267,7 @@ async def test_litellm_provider_dimension_mismatch_raises_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_litellm_provider_missing_dependency_raises_actionable_error(monkeypatch):
     """Missing litellm package should raise SemanticDependenciesMissingError."""
-    monkeypatch.delitem(sys.modules, "litellm", raising=False)
-    original_import = builtins.__import__
-
-    def _raising_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "litellm":
-            raise ImportError("litellm not installed")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", _raising_import)
+    monkeypatch.setitem(sys.modules, "litellm", None)
 
     provider = LiteLLMEmbeddingProvider(model_name="openai/text-embedding-3-small")
     with pytest.raises(SemanticDependenciesMissingError):
@@ -289,21 +280,18 @@ async def test_litellm_provider_sets_production_mode_before_import(monkeypatch):
     monkeypatch.delitem(sys.modules, "litellm", raising=False)
     monkeypatch.delenv("LITELLM_MODE", raising=False)
     observed_modes: list[str | None] = []
-    original_import = builtins.__import__
 
     async def _aembedding(**kwargs):
         return _make_embedding_response(kwargs["input"])
 
-    def _observing_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "litellm":
-            observed_modes.append(os.environ.get("LITELLM_MODE"))
-            module = type(sys)("litellm")
-            setattr(module, "aembedding", _aembedding)
-            monkeypatch.setitem(sys.modules, "litellm", module)
-            return module
-        return original_import(name, globals, locals, fromlist, level)
+    def _observing_import(name: str) -> ModuleType:
+        assert name == "litellm"
+        observed_modes.append(os.environ.get("LITELLM_MODE"))
+        module = ModuleType("litellm")
+        setattr(module, "aembedding", _aembedding)
+        return module
 
-    monkeypatch.setattr(builtins, "__import__", _observing_import)
+    monkeypatch.setattr("basic_memory.repository.litellm_provider.import_module", _observing_import)
 
     provider = LiteLLMEmbeddingProvider(dimensions=3)
     await provider.embed_query("test")

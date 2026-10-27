@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+from importlib import import_module
 from typing import Any
 
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -94,7 +95,7 @@ def _import_litellm() -> Any:
     os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
 
     try:
-        import litellm
+        litellm = import_module("litellm")
     except ImportError as exc:
         raise SemanticDependenciesMissingError(
             "LiteLLM embeddings and reranking need the optional SDK. "
