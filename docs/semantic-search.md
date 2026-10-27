@@ -278,6 +278,9 @@ otherwise provide it explicitly.
 
 > **Experimental — advanced users only.** The LiteLLM provider is experimental and aimed at users comfortable operating remote embedding backends: paid API calls, per-model dimension and input-role configuration, and slower reindexing of large corpora. For most users, FastEmbed (local, default) is recommended. See [LiteLLM Provider](litellm-provider.md) for the caveats and tuning.
 
+First [install the optional LiteLLM SDK](litellm-provider.md#install-the-optional-sdk)
+in the environment running Basic Memory.
+
 Uses the LiteLLM SDK to call embedding models from providers such as OpenAI, Cohere, Azure, Bedrock, NVIDIA NIM, and other LiteLLM-supported backends. Requires the provider's API credentials.
 For the full option reference, provider setup examples, and live validation harness, see [LiteLLM Provider](litellm-provider.md).
 
@@ -476,7 +479,7 @@ The first reranked search downloads the model when it is not already cached,
 then loads `jinaai/jina-reranker-v1-tiny-en`. Later searches reuse the
 process-wide model instance and cache.
 
-To use a hosted reranker through LiteLLM:
+To use a hosted reranker through LiteLLM, first [install the optional SDK](litellm-provider.md#install-the-optional-sdk), then configure it:
 
 ```bash
 export BASIC_MEMORY_RERANKER_ENABLED=true
