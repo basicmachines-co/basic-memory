@@ -16,6 +16,23 @@ or tune LiteLLM-specific settings.
 > users, the default local **FastEmbed** provider is the recommended choice. Use LiteLLM
 > only if you know what you're doing.
 
+## Install the optional SDK
+
+LiteLLM is excluded from the default Basic Memory installation. FastEmbed and
+the direct OpenAI embedding provider work without it. To opt into LiteLLM
+embeddings or reranking, install the extra in the environment running Basic Memory:
+
+```bash
+uv tool install "basic-memory[litellm]"
+# Or, in a pip-managed environment:
+pip install "basic-memory[litellm]"
+```
+
+When upgrading an existing LiteLLM configuration, keep requesting this extra.
+Selecting `litellm` in config does not install packages automatically; without
+the SDK, the first embedding or rerank operation reports the install command.
+The existing LiteLLM version constraint remains in place for Python compatibility.
+
 ## Quick Start
 
 The default LiteLLM model is OpenAI `text-embedding-3-small` through the LiteLLM

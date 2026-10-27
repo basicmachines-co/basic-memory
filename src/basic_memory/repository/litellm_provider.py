@@ -97,7 +97,10 @@ def _import_litellm() -> Any:
         import litellm
     except ImportError as exc:
         raise SemanticDependenciesMissingError(
-            "litellm dependency is missing. Install with: pip install litellm"
+            "LiteLLM embeddings and reranking need the optional SDK. "
+            "Install basic-memory[litellm], for example with "
+            '`uv tool install "basic-memory[litellm]"` or '
+            '`pip install "basic-memory[litellm]"`.'
         ) from exc
 
     return litellm
