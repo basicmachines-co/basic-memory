@@ -462,7 +462,10 @@ def compile_fts_filter(
     # OFFSET 0 prevents SQLite from flattening this query back into the join,
     # where per-column OR MATCH predicates cannot retain a valid FTS context.
     if query.metadata_filters and match_conditions:
-        match_where = " AND ".join(match_conditions)
+        # Scope before materialization so unrelated projects do not pay the cost
+        # of ranking and projecting every matching note into the derived table.
+        scope_where = scope.predicate("search_index.project_id", params)
+        match_where = " AND ".join([*match_conditions, scope_where])
         from_clause = (
             "(SELECT search_index.rowid AS rowid, search_index.*, "
             f"{BM25_SCORE_EXPRESSION} AS fts_score "

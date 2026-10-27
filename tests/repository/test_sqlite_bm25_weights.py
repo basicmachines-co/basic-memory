@@ -64,15 +64,22 @@ def test_the_score_expression_passes_the_weights() -> None:
     assert compiled.score_expression == sqlite_search_query.BM25_SCORE_EXPRESSION
 
 
-def test_the_filtered_derived_table_uses_the_weighted_score() -> None:
-    """The metadata-filtered script path ranks through a derived table."""
+@pytest.mark.parametrize("query", [TITLE, f"API {SCRIPT}"])
+@pytest.mark.parametrize("scope", [ProjectScope.of([1, 3]), ProjectScope.of([])])
+def test_the_filtered_derived_table_ranks_only_scoped_matches(
+    query: str, scope: ProjectScope
+) -> None:
+    """Scope belongs inside the ranking boundary, metadata stays outside it."""
     compiled = sqlite_search_query.compile_fts_filter(
-        ProjectScope.single(1),
-        PreparedSearchQuery(search_text=f"API {SCRIPT}", metadata_filters={"status": "active"}),
+        scope,
+        PreparedSearchQuery(search_text=query, metadata_filters={"status": "active"}),
         entity_columns=set(),
     )
 
     assert sqlite_search_query.BM25_SCORE_EXPRESSION in compiled.from_clause
+    assert scope.predicate("search_index.project_id", {}) in compiled.from_clause
+    assert "json_extract" not in compiled.from_clause
+    assert "json_extract" in compiled.where_clause
 
 
 async def _index_note(
