@@ -100,9 +100,12 @@ def _import_litellm() -> Any:
         raise SemanticDependenciesMissingError(
             "LiteLLM embeddings and reranking need the optional SDK. "
             "Install basic-memory[litellm], for example with "
-            '`uv tool install --force "basic-memory[litellm]" --prerelease=allow` or '
+            '`uv tool install --force "basic-memory[litellm]" --prerelease=allow --python 3.14` or '
             '`pip install "basic-memory[litellm]"`. '
-            "Include any other extras you use in the same specification."
+            "Include any other extras you use in the same specification. "
+            "For Homebrew-managed installations, launch an isolated process with "
+            '`uvx --python 3.14 --prerelease=allow --from "basic-memory[litellm]" bm` '
+            "instead of the Cellar executable."
         ) from exc
 
     return litellm

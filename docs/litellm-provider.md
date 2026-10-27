@@ -23,19 +23,45 @@ the direct OpenAI embedding provider work without it. To opt into LiteLLM
 embeddings or reranking, install the extra in the environment running Basic Memory:
 
 ```bash
-uv tool install --force "basic-memory[litellm]" --prerelease=allow
+uv tool install --force "basic-memory[litellm]" --prerelease=allow --python 3.14
 # Or, in a pip-managed environment:
 pip install "basic-memory[litellm]"
 ```
 
+The uv examples select Python 3.14 because the default ONNX Runtime dependency
+does not yet provide Python 3.15 wheels.
+
 When reinstalling with uv, include every extra you still use in the same
 specification. For example, users who also use Milvus need
-`uv tool install --force "basic-memory[litellm,milvus]" --prerelease=allow`.
+`uv tool install --force "basic-memory[litellm,milvus]" --prerelease=allow --python 3.14`.
 
 When upgrading an existing LiteLLM configuration, keep requesting this extra.
 Selecting `litellm` in config does not install packages automatically; without
 the SDK, the first embedding or rerank operation reports the install command.
 The existing LiteLLM version constraint remains in place for Python compatibility.
+
+### Homebrew installations
+
+Homebrew owns the Python environment in its Cellar. Installing an extra with
+pip or `uv tool install` does not modify that environment. Use an isolated uv
+process when opting into LiteLLM, rather than changing Homebrew-managed files:
+
+```bash
+uvx --python 3.14 --prerelease=allow --from "basic-memory[litellm]" bm --help
+```
+
+Pass the desired `bm` subcommand after `bm`. For an MCP client, use this launch
+configuration so it starts the process that has the SDK:
+
+```json
+{
+  "command": "uvx",
+  "args": ["--python", "3.14", "--prerelease=allow", "--from", "basic-memory[litellm]", "bm", "mcp"]
+}
+```
+
+The Homebrew `bm` command remains available for standard providers. Request any
+other extras you need in the uv specification as well.
 
 ## Quick Start
 
