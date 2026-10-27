@@ -134,7 +134,7 @@ async def inspect_local_wiki_projection(
         document.path.casefold() == "index.md" and document.projector_owned
         for document in snapshot.reserved_documents
     )
-    if plan.result.conflicts:
+    if plan.result.conflicts or plan.result.identity_collisions:
         state = LocalWikiState.conflicted
     elif plan.result.pending_materialization:
         state = LocalWikiState.partial

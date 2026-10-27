@@ -275,11 +275,8 @@ async def _execute_wiki_command(
         if (
             command == "rebuild"
             and not dry_run
-            and state
-            not in {
-                LocalWikiState.partial,
-                LocalWikiState.conflicted,
-            }
+            and not inspection.plan.result.conflicts
+            and not inspection.plan.result.pending_materialization
         ):
             await apply_local_wiki_projection(
                 inspection,
@@ -293,7 +290,13 @@ async def _execute_wiki_command(
                 force_full=False,
             )
             _require_successful_index(index_result)
-            state = LocalWikiState.current
+            # Identity collisions omit only unsafe destinations; safe writes
+            # still apply, but validation must keep reporting the skipped output.
+            state = (
+                LocalWikiState.conflicted
+                if inspection.plan.result.identity_collisions
+                else LocalWikiState.current
+            )
         reports.append(_project_report(inspection, state=state.value))
 
     success = _command_succeeded(command, reports=reports, dry_run=dry_run)
@@ -384,7 +387,10 @@ def _project_report(
         updated=plan.result.updated,
         unchanged=plan.result.unchanged,
         writes=[write.path for write in plan.writes],
-        conflicts=[f"{conflict.path}: {conflict.reason}" for conflict in plan.result.conflicts],
+        conflicts=[
+            f"{conflict.path}: {conflict.reason}"
+            for conflict in (*plan.result.conflicts, *plan.result.identity_collisions)
+        ],
         warnings=list(plan.result.warnings),
         pending_materialization=list(plan.result.pending_materialization),
     )
