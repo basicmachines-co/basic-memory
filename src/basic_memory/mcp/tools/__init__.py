@@ -5,7 +5,7 @@ Basic Memory through the MCP protocol. Importing this module registers
 all tools with the MCP server.
 """
 
-# Import tools to register them with MCP
+# Shared implementations used by the CLI and the bm_* tools; these do not register MCP tools.
 from basic_memory.mcp.tools.basic_memory_diagnostics import basic_memory_diagnostics
 from basic_memory.mcp.tools.delete_note import delete_note
 from basic_memory.mcp.tools.read_content import read_content
@@ -26,16 +26,16 @@ from basic_memory.mcp.tools.project_management import (
     delete_project,
 )
 
-# ChatGPT-compatible tools
+# ChatGPT adapter implementations; Cloud owns their registration.
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
-# POSIX-style read-side tools (enabled by default at server startup, #1476)
+# Shared POSIX implementations used by the shell commands.
 from basic_memory.mcp.tools.posix_tools import cat, find, grep, ls, man, tail
 
 # Schema tools
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 
-# 1.0 tool surface (SPEC-35.2, #1827). Registered next to the tools they replace until #1833.
+# 1.0 tool surface (SPEC-35.2, #1827).
 from basic_memory.mcp.tools.context import bm_context
 from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit import bm_edit

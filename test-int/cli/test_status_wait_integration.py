@@ -16,7 +16,7 @@ def test_status_wait_returns_once_indexed(app, app_config, test_project, config_
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Wait Test Note",
             "--folder",

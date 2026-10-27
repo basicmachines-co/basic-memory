@@ -16,7 +16,7 @@ def _write_note(
 ) -> dict[str, Any]:
     args = [
         "tool",
-        "write-note",
+        "write",
         "--title",
         title,
         "--folder",
@@ -33,7 +33,7 @@ def _write_note(
 
 
 def _read_note(identifier: str, project: str | None = None) -> dict[str, Any]:
-    args = ["tool", "read-note", identifier]
+    args = ["tool", "read", identifier]
     if project:
         args.extend(["--project", project])
 
@@ -54,7 +54,7 @@ def test_edit_note_append_success(app, app_config, test_project, config_manager)
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "append",
@@ -82,7 +82,7 @@ def test_edit_note_prepend_success(app, app_config, test_project, config_manager
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "prepend",
@@ -112,7 +112,7 @@ def test_edit_note_find_replace_success_with_expected_count(
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "find_replace",
@@ -145,7 +145,7 @@ def test_edit_note_find_replace_fails_without_find_text(
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "find_replace",
@@ -170,7 +170,7 @@ def test_edit_note_replace_section_success(app, app_config, test_project, config
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "replace_section",
@@ -202,7 +202,7 @@ def test_edit_note_replace_section_fails_without_section(
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "replace_section",
@@ -223,7 +223,7 @@ def test_edit_note_append_creates_nonexistent_note_cli(
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             "cli-tests/auto-created-note",
             "--operation",
             "append",
@@ -255,7 +255,7 @@ def test_edit_note_json_format_contract(app, app_config, test_project, config_ma
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "append",
@@ -291,7 +291,7 @@ def test_edit_note_backend_failure_returns_nonzero(app, app_config, test_project
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "find_replace",
@@ -320,7 +320,7 @@ def test_edit_note_project_and_routing_flag_parity(app, app_config, test_project
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "append",
@@ -341,7 +341,7 @@ def test_edit_note_project_and_routing_flag_parity(app, app_config, test_project
         cli_app,
         [
             "tool",
-            "edit-note",
+            "edit",
             note["permalink"],
             "--operation",
             "append",
@@ -369,7 +369,7 @@ def test_replace_section_tagged_heading_requires_exact_match(
     original = path.read_bytes()
     args = [
         "tool",
-        "edit-note",
+        "edit",
         note["permalink"],
         "--operation",
         "replace_section",

@@ -1,4 +1,4 @@
-"""Integration coverage for `bm tool write-note --type` (Issue #875)."""
+"""Integration coverage for `bm tool write --type` (Issue #875)."""
 
 import json
 
@@ -15,7 +15,7 @@ def test_write_note_type_flag_round_trip(app, app_config, test_project, config_m
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "CLI Typed Note",
             "--folder",
@@ -33,7 +33,7 @@ def test_write_note_type_flag_round_trip(app, app_config, test_project, config_m
     # Read back the frontmatter to confirm the persisted type.
     read_result = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink, "--include-frontmatter"],
+        ["tool", "read", permalink, "--include-frontmatter"],
     )
     assert read_result.exit_code == 0, read_result.output
     read_data = json.loads(read_result.stdout)
@@ -44,7 +44,7 @@ def test_write_note_type_flag_round_trip(app, app_config, test_project, config_m
         cli_app,
         [
             "tool",
-            "search-notes",
+            "search",
             "CliTypeToken",
             "--type",
             "guide",
@@ -69,7 +69,7 @@ def test_write_note_content_frontmatter_type_wins_over_flag(
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Frontmatter Wins",
             "--folder",
@@ -86,7 +86,7 @@ def test_write_note_content_frontmatter_type_wins_over_flag(
 
     read_result = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink, "--include-frontmatter"],
+        ["tool", "read", permalink, "--include-frontmatter"],
     )
     assert read_result.exit_code == 0, read_result.output
     read_data = json.loads(read_result.stdout)

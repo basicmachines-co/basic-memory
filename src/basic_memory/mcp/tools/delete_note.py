@@ -13,7 +13,6 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_and_path,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_reference
 from basic_memory.workspace_context import current_workspace_permalink_context
@@ -135,21 +134,6 @@ def _directory_path_for_delete(
     return directory
 
 
-@mcp.tool(
-    title="Delete Note",
-    description=(
-        "Delete a note or directory by title, permalink, or path. Deletion is permanent "
-        "and removes the file. With is_directory=True every file under the path is "
-        "deleted. A missing note returns false rather than an error."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "Delete Note",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": False,
-    },
-)
 async def delete_note(
     identifier: str,
     is_directory: Annotated[

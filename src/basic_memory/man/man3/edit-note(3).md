@@ -32,7 +32,7 @@ edit_note(identifier, operation, content, project=None, workspace=None,
 CLI:
 
 ```
-bm tool edit-note IDENTIFIER --operation OP --content TEXT
+bm tool edit IDENTIFIER --operation OP --content TEXT
                   [--find-text TEXT] [--section "## Heading"]
                   [--expected-replacements N] [--project NAME]
 ```
@@ -95,7 +95,7 @@ edit_note("playground/demo-pour-over-method", "find_replace", "96°C",
 ## CLI EQUIVALENT
 
 ```
-bm tool edit-note playground/demo-cli-stdin \
+bm tool edit playground/demo-cli-stdin \
     --operation append --content "more" --project manual
 ```
 

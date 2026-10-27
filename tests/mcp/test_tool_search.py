@@ -20,6 +20,10 @@ from basic_memory.mcp.tools.search import (
 )
 from basic_memory.schemas.search import SearchResponse
 
+import implementation_mcp
+
+implementation_server = implementation_mcp.implementation_server
+
 
 @pytest.mark.asyncio
 async def test_search_text(client, test_project):
@@ -1544,11 +1548,13 @@ def test_search_notes_tags_annotation_splits_comma_strings():
 
 
 @pytest.mark.asyncio
-async def test_search_notes_tags_comma_string_filters_via_mcp(mcp, client, test_project):
+async def test_search_notes_tags_comma_string_filters_via_mcp(
+    implementation_server, client, test_project
+):
     """tags="alpha,beta" through the real MCP layer must match like a real list (#910)."""
     from fastmcp import Client
 
-    async with Client(mcp) as mcp_client:
+    async with Client(implementation_server) as mcp_client:
         await mcp_client.call_tool(
             "write_note",
             {
@@ -1628,12 +1634,14 @@ def test_search_notes_tags_annotation_rejects_non_string_types():
 
 
 @pytest.mark.asyncio
-async def test_search_notes_tags_invalid_type_rejected_via_mcp(mcp, client, test_project):
+async def test_search_notes_tags_invalid_type_rejected_via_mcp(
+    implementation_server, client, test_project
+):
     """tags=42 through the real MCP layer must raise a validation error (#932 follow-up)."""
     from fastmcp import Client
     from fastmcp.exceptions import ToolError
 
-    async with Client(mcp) as mcp_client:
+    async with Client(implementation_server) as mcp_client:
         with pytest.raises(ToolError):
             await mcp_client.call_tool(
                 "search_notes",

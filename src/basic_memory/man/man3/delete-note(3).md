@@ -30,7 +30,7 @@ delete_note(identifier, is_directory=False, project=None, project_id=None,
 CLI:
 
 ```
-bm tool delete-note IDENTIFIER [--is-directory] [--project NAME]
+bm tool delete IDENTIFIER [--is-directory] [--project NAME]
 ```
 
 ## PARAMETERS

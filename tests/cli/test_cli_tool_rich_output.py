@@ -205,7 +205,7 @@ def _tty_runner_with_style(args, style, **kwargs):
 )
 def test_search_notes_rich_output_default(mock_mcp):
     """search-notes produces Rich table output when stdout is a TTY."""
-    result = _tty_runner(["tool", "search-notes", "test"])
+    result = _tty_runner(["tool", "search", "test"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Rich output should NOT be valid JSON
@@ -225,7 +225,7 @@ def test_search_notes_rich_output_default(mock_mcp):
 )
 def test_search_notes_rich_empty(mock_mcp):
     """search-notes Rich output handles empty results gracefully."""
-    result = _tty_runner(["tool", "search-notes", "nothing"])
+    result = _tty_runner(["tool", "search", "nothing"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No results found" in result.output
@@ -238,7 +238,7 @@ def test_search_notes_rich_empty(mock_mcp):
 )
 def test_search_notes_json_flag_overrides_tty(mock_mcp):
     """search-notes --json outputs raw JSON even when stdout is a TTY."""
-    result = _tty_runner(["tool", "search-notes", "test", "--json"])
+    result = _tty_runner(["tool", "search", "test", "--json"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -255,7 +255,7 @@ def test_search_notes_json_flag_overrides_tty(mock_mcp):
 def test_search_notes_non_tty_gives_json(mock_mcp):
     """search-notes outputs JSON when stdout is not a TTY (default runner behaviour)."""
     # CliRunner does not set isatty(); _use_rich() returns False → JSON path.
-    result = runner.invoke(cli_app, ["tool", "search-notes", "test"])
+    result = runner.invoke(cli_app, ["tool", "search", "test"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -274,7 +274,7 @@ def test_search_notes_non_tty_gives_json(mock_mcp):
 )
 def test_read_note_rich_output_default(mock_mcp):
     """read-note produces Rich formatted output when stdout is a TTY."""
-    result = _tty_runner(["tool", "read-note", "test-note"])
+    result = _tty_runner(["tool", "read", "test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Rich output contains the note title
@@ -293,7 +293,7 @@ def test_read_note_rich_output_default(mock_mcp):
 )
 def test_read_note_json_flag_overrides_tty(mock_mcp):
     """read-note --json outputs raw JSON even when stdout is a TTY."""
-    result = _tty_runner(["tool", "read-note", "test-note", "--json"])
+    result = _tty_runner(["tool", "read", "test-note", "--json"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -310,7 +310,7 @@ def test_read_note_json_flag_overrides_tty(mock_mcp):
 )
 def test_read_note_rich_empty_content(mock_mcp):
     """read-note Rich output handles empty content without crashing."""
-    result = _tty_runner(["tool", "read-note", "empty-note"])
+    result = _tty_runner(["tool", "read", "empty-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "no content" in result.output.lower()
@@ -323,7 +323,7 @@ def test_read_note_rich_empty_content(mock_mcp):
 )
 def test_read_note_rich_not_found_renders_related_results(mock_mcp):
     """A normal miss renders suggestions instead of failing on nullable fields."""
-    result = _tty_runner(["tool", "read-note", "missing-note"])
+    result = _tty_runner(["tool", "read", "missing-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Note not found" in result.output
@@ -344,7 +344,7 @@ def test_read_note_rich_not_found_renders_related_results(mock_mcp):
 )
 def test_read_note_rich_not_found_without_suggestions(mock_mcp):
     """A miss without fallback matches still returns a clear, successful result."""
-    result = _tty_runner(["tool", "read-note", "missing-note"])
+    result = _tty_runner(["tool", "read", "missing-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Note not found" in result.output
@@ -358,7 +358,7 @@ def test_read_note_rich_not_found_without_suggestions(mock_mcp):
 )
 def test_read_note_non_tty_gives_json(mock_mcp):
     """read-note outputs JSON when stdout is not a TTY."""
-    result = runner.invoke(cli_app, ["tool", "read-note", "test-note"])
+    result = runner.invoke(cli_app, ["tool", "read", "test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -377,7 +377,7 @@ def test_read_note_non_tty_gives_json(mock_mcp):
 )
 def test_build_context_rich_output_default(mock_mcp):
     """build-context produces Rich tree output when stdout is a TTY."""
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "notes/test-note" in result.output
@@ -395,7 +395,7 @@ def test_build_context_rich_output_default(mock_mcp):
 )
 def test_build_context_rich_empty(mock_mcp):
     """build-context Rich output handles empty results gracefully."""
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No related content found" in result.output
@@ -408,7 +408,7 @@ def test_build_context_rich_empty(mock_mcp):
 )
 def test_build_context_json_flag_overrides_tty(mock_mcp):
     """build-context --json outputs raw JSON even when stdout is a TTY."""
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note", "--json"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note", "--json"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -425,7 +425,7 @@ def test_build_context_json_flag_overrides_tty(mock_mcp):
 )
 def test_build_context_non_tty_gives_json(mock_mcp):
     """build-context outputs JSON when stdout is not a TTY."""
-    result = runner.invoke(cli_app, ["tool", "build-context", "memory://notes/test-note"])
+    result = runner.invoke(cli_app, ["tool", "context", "memory://notes/test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -444,7 +444,7 @@ def test_build_context_non_tty_gives_json(mock_mcp):
 )
 def test_recent_activity_rich_output_default(mock_mcp):
     """recent-activity produces Rich table output when stdout is a TTY."""
-    result = _tty_runner(["tool", "recent-activity"])
+    result = _tty_runner(["tool", "recent"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Note A" in result.output
@@ -462,7 +462,7 @@ def test_recent_activity_rich_output_default(mock_mcp):
 )
 def test_recent_activity_rich_includes_project_when_present(mock_mcp):
     """Cross-project activity remains attributable in the Rich table."""
-    result = _tty_runner(["tool", "recent-activity"])
+    result = _tty_runner(["tool", "recent"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Project" in result.output
@@ -477,7 +477,7 @@ def test_recent_activity_rich_includes_project_when_present(mock_mcp):
 )
 def test_recent_activity_rich_empty(mock_mcp):
     """recent-activity Rich output handles empty results gracefully."""
-    result = _tty_runner(["tool", "recent-activity"])
+    result = _tty_runner(["tool", "recent"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No recent activity" in result.output
@@ -490,7 +490,7 @@ def test_recent_activity_rich_empty(mock_mcp):
 )
 def test_recent_activity_json_flag_overrides_tty(mock_mcp):
     """recent-activity --json outputs raw JSON even when stdout is a TTY."""
-    result = _tty_runner(["tool", "recent-activity", "--json"])
+    result = _tty_runner(["tool", "recent", "--json"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -505,7 +505,7 @@ def test_recent_activity_json_flag_overrides_tty(mock_mcp):
 )
 def test_recent_activity_non_tty_gives_json(mock_mcp):
     """recent-activity outputs JSON when stdout is not a TTY."""
-    result = runner.invoke(cli_app, ["tool", "recent-activity"])
+    result = runner.invoke(cli_app, ["tool", "recent"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -531,7 +531,7 @@ def test_read_note_rich_include_frontmatter(mock_mcp):
     frontmatter block must be stripped from the Markdown body or it renders
     again under the panel.
     """
-    result = _tty_runner(["tool", "read-note", "test-note", "--frontmatter"])
+    result = _tty_runner(["tool", "read", "test-note", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Frontmatter panel appears with key/value data
@@ -558,7 +558,7 @@ def test_read_note_rich_no_frontmatter_without_flag(mock_mcp):
     key, so the previous `if frontmatter:` guard rendered it even without the flag.
     The flag must be threaded into _display_read_note to gate the panel.
     """
-    result = _tty_runner(["tool", "read-note", "test-note"])
+    result = _tty_runner(["tool", "read", "test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # The note title and content must still appear
@@ -584,7 +584,7 @@ def test_build_context_rich_renders_observations(mock_mcp):
     Regression: ContextResult.observations was exposed in JSON output but never
     rendered in the Rich path, so interactive users lost core entity facts.
     """
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # The observation category should appear in the tree
@@ -665,7 +665,7 @@ def test_search_notes_rich_title_with_brackets_survives(mock_mcp):
     markup strings, so "[draft]" was treated as an unknown style tag and stripped.
     After escaping, the literal text "[draft]" must be present in the output.
     """
-    result = _tty_runner(["tool", "search-notes", "spec"])
+    result = _tty_runner(["tool", "search", "spec"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # The full title including the bracket expression must survive
@@ -687,7 +687,7 @@ def test_build_context_rich_observation_category_bracket_survives(mock_mcp):
     rendering "Joanna lives in Austin" without the category prefix.
     After escaping the category, "[fact]" must be present in the tree output.
     """
-    result = _tty_runner(["tool", "build-context", "memory://people/joanna"])
+    result = _tty_runner(["tool", "context", "memory://people/joanna"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # The observation category prefix must appear literally
@@ -758,7 +758,7 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
     "0 result(s)" under a table showing rows.  The fix detects a falsy total with
     non-empty results and falls back to len(results).
     """
-    result = _tty_runner(["tool", "search-notes", "found"])
+    result = _tty_runner(["tool", "search", "found"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Both result rows must appear
@@ -776,7 +776,7 @@ def test_search_notes_rich_zero_total_falls_back_to_result_count(mock_mcp):
 )
 def test_search_notes_rich_unknown_total_preserves_has_more(mock_mcp):
     """An explicit unknown flag overrides a positive aggregate estimate."""
-    result = _tty_runner(["tool", "search-notes", "found"])
+    result = _tty_runner(["tool", "search", "found"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "page 1 of 1" not in result.output
@@ -795,7 +795,7 @@ def test_search_notes_rich_unknown_total_preserves_has_more(mock_mcp):
 )
 def test_search_notes_plain_output(mock_mcp):
     """search-notes --plain emits undecorated numbered text, not JSON or Rich boxes."""
-    result = _tty_runner(["tool", "search-notes", "test", "--plain"])
+    result = _tty_runner(["tool", "search", "test", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # Not JSON
@@ -820,7 +820,7 @@ def test_search_notes_plain_output(mock_mcp):
 )
 def test_search_notes_plain_brackets_survive(mock_mcp):
     """Literal brackets must survive verbatim in plain output (no markup escaping)."""
-    result = _tty_runner(["tool", "search-notes", "spec", "--plain"])
+    result = _tty_runner(["tool", "search", "spec", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # The literal title and snippet brackets must be present unmangled
@@ -835,7 +835,7 @@ def test_search_notes_plain_brackets_survive(mock_mcp):
 )
 def test_search_notes_plain_zero_total_fallback(mock_mcp):
     """Plain search output shows the corrected count when the API returns total=0."""
-    result = _tty_runner(["tool", "search-notes", "found", "--plain"])
+    result = _tty_runner(["tool", "search", "found", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "2 result(s)" in result.output
@@ -849,7 +849,7 @@ def test_search_notes_plain_zero_total_fallback(mock_mcp):
 )
 def test_search_notes_plain_unknown_total_preserves_has_more(mock_mcp):
     """Plain output also reports that another page exists when totals are unknown."""
-    result = _tty_runner(["tool", "search-notes", "found", "--plain"])
+    result = _tty_runner(["tool", "search", "found", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "page 1 of 1" not in result.output
@@ -863,7 +863,7 @@ def test_search_notes_plain_unknown_total_preserves_has_more(mock_mcp):
 )
 def test_search_notes_plain_empty(mock_mcp):
     """Plain search output handles empty results."""
-    result = _tty_runner(["tool", "search-notes", "nothing", "--plain"])
+    result = _tty_runner(["tool", "search", "nothing", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No results found." in result.output
@@ -876,7 +876,7 @@ def test_search_notes_plain_empty(mock_mcp):
 )
 def test_read_note_plain_output(mock_mcp):
     """read-note --plain emits the note body faithfully, with no decoration."""
-    result = _tty_runner(["tool", "read-note", "test-note", "--plain"])
+    result = _tty_runner(["tool", "read", "test-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     # No synthesized header line -- plain mode is the payload, faithfully.
@@ -896,7 +896,7 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
     With the flag, content IS the file (frontmatter block included); plain mode
     must not add decoration or alter leading/trailing newlines.
     """
-    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--frontmatter"])
+    result = _tty_runner(["tool", "read", "test-note", "--plain", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output == READ_NOTE_RESULT_WITH_FRONTMATTER["content"]
@@ -909,7 +909,7 @@ def test_read_note_plain_include_frontmatter(mock_mcp):
 )
 def test_read_note_plain_include_frontmatter_not_found_is_empty(mock_mcp):
     """Byte-faithful frontmatter mode emits no bytes when no note exists."""
-    result = _tty_runner(["tool", "read-note", "missing-note", "--plain", "--frontmatter"])
+    result = _tty_runner(["tool", "read", "missing-note", "--plain", "--frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output == ""
@@ -922,7 +922,7 @@ def test_read_note_plain_include_frontmatter_not_found_is_empty(mock_mcp):
 )
 def test_read_note_plain_not_found_renders_related_results(mock_mcp):
     """A plain-mode miss stays distinct from an empty note and preserves suggestions."""
-    result = _tty_runner(["tool", "read-note", "missing-note", "--plain"])
+    result = _tty_runner(["tool", "read", "missing-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Note not found." in result.output
@@ -943,7 +943,7 @@ def test_read_note_plain_not_found_renders_related_results(mock_mcp):
 )
 def test_read_note_plain_not_found_without_suggestions(mock_mcp):
     """A plain-mode miss without suggestions still reports a clear empty fallback."""
-    result = _tty_runner(["tool", "read-note", "missing-note", "--plain"])
+    result = _tty_runner(["tool", "read", "missing-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output == "Note not found.\nNo note or related content found.\n"
@@ -956,7 +956,7 @@ def test_read_note_plain_not_found_without_suggestions(mock_mcp):
 )
 def test_read_note_include_frontmatter_alias(mock_mcp):
     """--include-frontmatter still works as a deprecated alias for --frontmatter."""
-    result = _tty_runner(["tool", "read-note", "test-note", "--plain", "--include-frontmatter"])
+    result = _tty_runner(["tool", "read", "test-note", "--plain", "--include-frontmatter"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output.startswith("---\ntitle: Test Note")
@@ -969,7 +969,7 @@ def test_read_note_include_frontmatter_alias(mock_mcp):
 )
 def test_read_note_plain_empty_content(mock_mcp):
     """read-note --plain prints nothing for an empty note (no placeholder)."""
-    result = _tty_runner(["tool", "read-note", "empty-note", "--plain"])
+    result = _tty_runner(["tool", "read", "empty-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert result.output == ""
@@ -982,7 +982,7 @@ def test_read_note_plain_empty_content(mock_mcp):
 )
 def test_build_context_plain_output(mock_mcp):
     """build-context --plain emits an ASCII-indented outline with observations."""
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note", "--plain"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "Context: notes/test-note" in result.output
@@ -1005,7 +1005,7 @@ def test_build_context_plain_output(mock_mcp):
 )
 def test_build_context_plain_bracket_survives(mock_mcp):
     """Observation category [fact] must appear literally in plain build-context output."""
-    result = _tty_runner(["tool", "build-context", "memory://people/joanna", "--plain"])
+    result = _tty_runner(["tool", "context", "memory://people/joanna", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "[fact]" in result.output
@@ -1019,7 +1019,7 @@ def test_build_context_plain_bracket_survives(mock_mcp):
 )
 def test_build_context_plain_empty(mock_mcp):
     """build-context --plain handles empty results."""
-    result = _tty_runner(["tool", "build-context", "memory://notes/test-note", "--plain"])
+    result = _tty_runner(["tool", "context", "memory://notes/test-note", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No related content found." in result.output
@@ -1032,7 +1032,7 @@ def test_build_context_plain_empty(mock_mcp):
 )
 def test_recent_activity_plain_output(mock_mcp):
     """recent-activity --plain emits "- title (type) permalink updated" lines."""
-    result = _tty_runner(["tool", "recent-activity", "--plain"])
+    result = _tty_runner(["tool", "recent", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "- Note A (entity) notes/note-a" in result.output
@@ -1049,7 +1049,7 @@ def test_recent_activity_plain_output(mock_mcp):
 )
 def test_recent_activity_plain_includes_project_when_present(mock_mcp):
     """Cross-project activity remains attributable in plain output."""
-    result = _tty_runner(["tool", "recent-activity", "--plain"])
+    result = _tty_runner(["tool", "recent", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "[project: research]" in result.output
@@ -1063,7 +1063,7 @@ def test_recent_activity_plain_includes_project_when_present(mock_mcp):
 )
 def test_recent_activity_plain_empty(mock_mcp):
     """recent-activity --plain handles empty results."""
-    result = _tty_runner(["tool", "recent-activity", "--plain"])
+    result = _tty_runner(["tool", "recent", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     assert "No recent activity." in result.output
@@ -1085,7 +1085,7 @@ def test_json_beats_plain(mock_mcp):
     The contradictory combination is tested separately (must error); here we
     confirm --json on its own produces JSON even in a TTY.
     """
-    result = _tty_runner(["tool", "search-notes", "test", "--json"])
+    result = _tty_runner(["tool", "search", "test", "--json"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
@@ -1099,7 +1099,7 @@ def test_json_beats_plain(mock_mcp):
 )
 def test_json_and_plain_together_errors(mock_mcp):
     """Passing both --json and --plain is a clear, non-zero error."""
-    result = _tty_runner(["tool", "search-notes", "test", "--json", "--plain"])
+    result = _tty_runner(["tool", "search", "test", "--json", "--plain"])
 
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output
@@ -1112,7 +1112,7 @@ def test_json_and_plain_together_errors(mock_mcp):
 )
 def test_read_note_json_and_plain_together_errors(mock_mcp):
     """read-note also rejects --json --plain together."""
-    result = _tty_runner(["tool", "read-note", "test-note", "--json", "--plain"])
+    result = _tty_runner(["tool", "read", "test-note", "--json", "--plain"])
 
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output
@@ -1127,7 +1127,7 @@ def test_plain_forces_plain_when_piped(mock_mcp):
     """--plain forces plain output even when stdout is NOT a TTY (piped)."""
     # No _use_rich patch: the default CliRunner stdout is not a TTY, so absent
     # --plain this would be JSON.  --plain must override that into plain text.
-    result = runner.invoke(cli_app, ["tool", "search-notes", "test", "--plain"])
+    result = runner.invoke(cli_app, ["tool", "search", "test", "--plain"])
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     with pytest.raises((json.JSONDecodeError, ValueError)):
@@ -1142,7 +1142,7 @@ def test_plain_forces_plain_when_piped(mock_mcp):
 )
 def test_tty_config_rich_renders_rich(mock_mcp):
     """TTY + cli_output_style=rich → Rich output (box-drawing present)."""
-    result = _tty_runner_with_style(["tool", "search-notes", "test"], style="rich")
+    result = _tty_runner_with_style(["tool", "search", "test"], style="rich")
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     with pytest.raises((json.JSONDecodeError, ValueError)):
@@ -1158,7 +1158,7 @@ def test_tty_config_rich_renders_rich(mock_mcp):
 )
 def test_tty_config_plain_renders_plain(mock_mcp):
     """TTY + cli_output_style=plain → plain output (no box-drawing)."""
-    result = _tty_runner_with_style(["tool", "search-notes", "test"], style="plain")
+    result = _tty_runner_with_style(["tool", "search", "test"], style="plain")
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     with pytest.raises((json.JSONDecodeError, ValueError)):

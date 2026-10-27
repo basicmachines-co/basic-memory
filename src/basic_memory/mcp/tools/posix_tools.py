@@ -1,11 +1,6 @@
-"""POSIX-style read-only tools for Basic Memory MCP server.
+"""Shared POSIX read implementations for the shell CLI and bm_* MCP tools.
 
-Six familiar Unix verbs — cat, grep, ls, find, tail, man — each a thin
-translation over the same typed API clients the canonical tools use. They are
-tagged ``POSIX_TOOLS_TAG`` and hidden until startup: the composition root in
-``basic_memory.mcp.server`` sets their visibility from the default-enabled
-``enable_posix_tools`` config flag at lifespan startup, so no tool body ever
-checks config itself.
+These functions do not register MCP tools.
 
 Projects are mount points (#1415): when no ``project``/``project_id`` param is
 given, a path or identifier whose first segment names an addressable project
@@ -55,12 +50,12 @@ from basic_memory.mcp.note_targets import (
     ProjectTarget,
     PathQualifier,
 )
+from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
     get_project_client,
     resolve_project_path_route,
 )
-from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
 from basic_memory.repository.metadata_filters import MetadataPath, parse_metadata_path
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -77,17 +72,6 @@ _MAX_FIND_DEPTH = 10
 _MAX_TAIL_LINES = 100
 
 
-@mcp.tool(
-    title="Cat",
-    description="Print a note's content. Accepts '<project>/path' identifiers.",
-    tags={POSIX_TOOLS_TAG, "notes"},
-    annotations={
-        "title": "Cat",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def cat(
     identifier: str,
     start_line: Optional[int] = None,
@@ -222,24 +206,6 @@ def _grep_retrieval_mode(semantic: bool) -> SearchRetrievalMode:
     return SearchRetrievalMode.HYBRID if semantic else SearchRetrievalMode.FTS
 
 
-@mcp.tool(
-    title="Grep",
-    description=(
-        "Search note content in one project and return matching notes. Not a regex: "
-        "`pattern` is matched as full-text keywords by default, and a pattern found in no "
-        "note returns no results. `semantic=True` ranks by meaning instead (hybrid "
-        "semantic plus full-text, when semantic search is enabled). Add `context_lines` "
-        "to get case-insensitive matching lines with surrounding context and line "
-        "numbers. Requires 'project' when several projects are addressable."
-    ),
-    tags={POSIX_TOOLS_TAG, "search"},
-    annotations={
-        "title": "Grep",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def grep(
     pattern: str,
     semantic: bool = False,
@@ -350,17 +316,6 @@ async def grep(
         return payload
 
 
-@mcp.tool(
-    title="Ls",
-    description="List one directory level. '/' lists projects; paths accept '<project>/path'.",
-    tags={POSIX_TOOLS_TAG, "navigation"},
-    annotations={
-        "title": "Ls",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def ls(
     path: str = "/",
     page: int = 1,
@@ -714,20 +669,6 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
     return filters
 
 
-@mcp.tool(
-    title="Find",
-    description=(
-        'Recursively list files by name glob or metadata predicates (e.g. "status=active"). '
-        "Paths accept '<project>/path'."
-    ),
-    tags={POSIX_TOOLS_TAG, "navigation"},
-    annotations={
-        "title": "Find",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def find(
     path: str = "/",
     name: Optional[str] = None,
@@ -898,17 +839,6 @@ async def find(
     return listing
 
 
-@mcp.tool(
-    title="Tail",
-    description="Show recently changed notes. Requires 'project' when several are addressable.",
-    tags={POSIX_TOOLS_TAG, "navigation", "notes"},
-    annotations={
-        "title": "Tail",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def tail(
     timeframe: str = "7d",
     lines: int = 10,
@@ -976,17 +906,6 @@ async def tail(
     return rows
 
 
-@mcp.tool(
-    title="Man",
-    description="Look up a manual page or search the manual.",
-    tags={POSIX_TOOLS_TAG, "notes"},
-    annotations={
-        "title": "Man",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def man(
     page: Optional[str] = None,
     query: Optional[str] = None,
@@ -1041,8 +960,3 @@ async def man(
         ],
         "total": len(matches),
     }
-
-
-# Hidden until the composition root reads config, so importing tools never
-# bypasses an explicit opt-out before startup.
-set_posix_tools_visibility(mcp, False)

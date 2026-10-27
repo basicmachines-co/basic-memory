@@ -1,4 +1,4 @@
-"""Bug hunt regression test (#4): `bm tool search-notes` --category filter.
+"""Bug hunt regression test (#4): `bm tool search` --category filter.
 
 The MCP search_notes tool exposes a `categories` parameter for exact-match
 observation-category filtering. The CLI wrapper had no equivalent flag. This
@@ -21,7 +21,7 @@ def _write_note(title: str, folder: str, content: str) -> dict[str, Any]:
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             title,
             "--folder",
@@ -49,7 +49,7 @@ def test_search_notes_exposes_category_filter(app, app_config, test_project, con
         cli_app,
         [
             "tool",
-            "search-notes",
+            "search",
             "CATTOKEN",
             "--project",
             test_project.name,

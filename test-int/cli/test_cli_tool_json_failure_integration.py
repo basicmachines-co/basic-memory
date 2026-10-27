@@ -23,7 +23,7 @@ def test_read_note_not_found(
     """A missing note remains machine-readable but must not report success."""
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", identifier],
+        ["tool", "read", identifier],
     )
 
     assert result.exit_code == 1
@@ -46,17 +46,17 @@ def test_read_after_delete_fails_in_every_mode(
     title = "Missingneedle"
     created = runner.invoke(
         cli_app,
-        ["tool", "write-note", "--title", title, "--folder", "test", "--content", "original"],
+        ["tool", "write", "--title", title, "--folder", "test", "--content", "original"],
     )
     assert created.exit_code == 0, created.output
-    deleted = runner.invoke(cli_app, ["tool", "delete-note", title])
+    deleted = runner.invoke(cli_app, ["tool", "delete", title])
     assert deleted.exit_code == 0, deleted.output
     if related:
         alternative = runner.invoke(
             cli_app,
             [
                 "tool",
-                "write-note",
+                "write",
                 "--title",
                 "Alternative",
                 "--folder",
@@ -68,7 +68,7 @@ def test_read_after_delete_fails_in_every_mode(
         assert alternative.exit_code == 0, alternative.output
 
     flags = [f"--{mode}"] if mode in {"json", "plain"} else []
-    result = runner.invoke(cli_app, ["tool", "read-note", title, "--frontmatter", *flags])
+    result = runner.invoke(cli_app, ["tool", "read", title, "--frontmatter", *flags])
     assert result.exit_code == 1, result.output
     assert f"Note not found: {title}" in result.stderr
     if mode in {"piped", "json"}:
@@ -89,7 +89,7 @@ def test_write_note_missing_content(app, app_config, test_project, config_manage
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "No Content Note",
             "--folder",
@@ -109,7 +109,7 @@ def test_write_note_then_read_note_roundtrip(app, app_config, test_project, conf
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Roundtrip Test",
             "--folder",
@@ -125,7 +125,7 @@ def test_write_note_then_read_note_roundtrip(app, app_config, test_project, conf
     # Read it back using the permalink from the write response
     read_result = runner.invoke(
         cli_app,
-        ["tool", "read-note", write_data["permalink"]],
+        ["tool", "read", write_data["permalink"]],
     )
     assert read_result.exit_code == 0
     read_data = json.loads(read_result.stdout)
@@ -141,7 +141,7 @@ def test_recent_activity_empty_project(
 
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity"],
+        ["tool", "recent"],
     )
 
     # Should succeed even if empty

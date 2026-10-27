@@ -25,7 +25,6 @@ from basic_memory.mcp.note_reads import (
     read_note_json_by_external_id,
 )
 from basic_memory.mcp.async_client import local_project_path
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.schemas.memory import memory_url_path
@@ -67,25 +66,6 @@ def _exact_external_id(identifier: str) -> str | None:
         return None
 
 
-@mcp.tool(
-    title="Read Note",
-    description=(
-        "Read a markdown note by title or permalink, optionally a numbered line range. "
-        "If the identifier doesn't resolve directly, a note whose title matches it "
-        "exactly (case-insensitive) is returned with full content; otherwise it returns "
-        "related-note suggestions from text search instead of content. Pass "
-        "include_content=false to get only the note's metadata and checksum."
-    ),
-    tags={"notes"},
-    # TODO: re-enable once MCP client rendering is working
-    # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
-    annotations={
-        "title": "Read Note",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def read_note(
     identifier: str,
     project: Optional[str] = None,

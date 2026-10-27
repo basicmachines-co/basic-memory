@@ -30,7 +30,6 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_and_path,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.search import (
@@ -1091,34 +1090,6 @@ async def _search_all_projects(
     )
 
 
-@mcp.tool(
-    title="Search Notes",
-    description=(
-        "Search notes, observations, and relations in one project, or in several with "
-        "`projects` / `search_all_projects`. The query supports quoted phrases, AND/OR/NOT "
-        "with parentheses, and `tag:name` (converted to a tags filter). A plain multi-term "
-        "query first requires every term and may fall back to any-term matching when that "
-        "returns nothing. `search_type` selects text, title, permalink (a `*` glob matched "
-        "against the full permalink path), vector/semantic, or hybrid; the default is hybrid "
-        "when semantic search is enabled, otherwise text. Omit `query` to search by filters "
-        "alone (metadata_filters, tags, status, note_types). Results are whole notes by "
-        "default; a `categories` or valid-time filter switches the default to observations. "
-        "`after_date` filters by when content was last updated. `valid_at` / "
-        "`valid_overlaps` / `time_kind` filter by dates written inside notes (e.g. "
-        "`@effective[2026-06-10,2026-07-27)`) and exclude undated content. Returns ranked, "
-        "paginated results; read full content with bm_read or cat. Syntax reference: "
-        "memory://man/search-notes(3)."
-    ),
-    tags={"search"},
-    # TODO: re-enable once MCP client rendering is working
-    # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
-    annotations={
-        "title": "Search Notes",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def search_notes(
     # Accept common search-query aliases models reach for from training data.
     # `q` is the universal HTTP convention; `search`/`text` are common in NL APIs.

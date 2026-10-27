@@ -1,4 +1,4 @@
-"""Bug hunt regression test (#3): `bm tool recent-activity` page_size default.
+"""Bug hunt regression test (#3): `bm tool recent` page_size default.
 
 The MCP recent_activity tool defaults page_size=10; the CLI wrapper used to
 default to 50. Because page_size becomes the SQL LIMIT for the query, identical
@@ -22,7 +22,7 @@ def _write_note(title: str, folder: str, content: str) -> None:
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             title,
             "--folder",
@@ -51,7 +51,7 @@ def test_recent_activity_default_page_size_matches_mcp(
         cli_app,
         [
             "tool",
-            "recent-activity",
+            "recent",
             "--project",
             test_project.name,
             "--page-size",
@@ -64,7 +64,7 @@ def test_recent_activity_default_page_size_matches_mcp(
 
     cli_default_result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity", "--project", test_project.name],
+        ["tool", "recent", "--project", test_project.name],
     )
     assert cli_default_result.exit_code == 0, cli_default_result.output
     cli_default_rows = json.loads(cli_default_result.stdout)

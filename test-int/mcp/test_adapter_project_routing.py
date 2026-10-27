@@ -9,6 +9,10 @@ from mcp import types as mt
 
 from basic_memory.config import ConfigManager
 
+import implementation_mcp
+
+implementation_server = implementation_mcp.implementation_server
+
 
 async def seed_projects(
     client: Client[FastMCPTransport], default_project: str, other_path: str
@@ -30,9 +34,9 @@ async def seed_projects(
 @pytest.mark.parametrize("prompt_name", ["search_knowledge_base", "continue_conversation"])
 @pytest.mark.parametrize("explicit_project", [False, True])
 async def test_prompts_select_project_with_multiple_projects(
-    mcp_server, app, test_project, tmp_path, prompt_name, explicit_project
+    implementation_server, app, test_project, tmp_path, prompt_name, explicit_project
 ):
-    async with Client(mcp_server) as client:
+    async with Client(implementation_server) as client:
         await seed_projects(
             client, test_project.name, str(tmp_path.parent / (tmp_path.name + "-other"))
         )
@@ -56,12 +60,12 @@ async def test_prompts_select_project_with_multiple_projects(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("id_form", ["search_hit", "relative_url", "qualified", "qualified_url"])
 async def test_connector_fetch_routes_relative_and_qualified_ids(
-    mcp_server, app, test_project, app_config, tmp_path, id_form
+    implementation_server, app, test_project, app_config, tmp_path, id_form
 ):
     app_config.permalinks_include_project = False
     ConfigManager().save_config(app_config)
     async with Client(
-        mcp_server, client_info=mt.Implementation(name="openai-mcp", version="1.0.0")
+        implementation_server, client_info=mt.Implementation(name="openai-mcp", version="1.0.0")
     ) as client:
         await seed_projects(
             client, test_project.name, str(tmp_path.parent / (tmp_path.name + "-other"))

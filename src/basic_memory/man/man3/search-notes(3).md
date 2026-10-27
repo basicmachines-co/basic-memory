@@ -35,7 +35,7 @@ search_notes(query=None, project=None, project_id=None,
 CLI:
 
 ```
-bm tool search-notes [QUERY] [--project NAME]
+bm tool search [QUERY] [--project NAME]
                      [--title | --permalink | --vector | --hybrid]
                      [--page N] [--page-size N] [--local | --cloud] ...
 ```
@@ -138,7 +138,7 @@ search_notes(project="manual",
 ## CLI EQUIVALENT
 
 ```
-bm tool search-notes "conflict error" --project manual --page-size 2
+bm tool search "conflict error" --project manual --page-size 2
 # → hybrid results as JSON (QUERY is positional)
 ```
 

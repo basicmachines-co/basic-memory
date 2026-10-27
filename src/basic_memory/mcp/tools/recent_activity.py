@@ -15,7 +15,6 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_parameter,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
@@ -29,29 +28,6 @@ from basic_memory.schemas.project_info import ProjectList, ProjectItem
 from basic_memory.schemas.search import SearchItemType
 
 
-@mcp.tool(
-    title="Recent Activity",
-    description="""Get recent activity for one project.
-
-    With no project, this uses the configured default project. It lists activity
-    across all projects only when there is no default.
-
-    Timeframe supports natural language formats like:
-    - "2 days ago"
-    - "last week"
-    - "yesterday"
-    - "today"
-    - "3 weeks ago"
-    Or standard formats like "7d"
-    """,
-    tags={"navigation", "notes"},
-    annotations={
-        "title": "Recent Activity",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def recent_activity(
     type: Annotated[
         Union[str, List[str]],

@@ -13,7 +13,6 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_and_path,
 )
-from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     ContextResult,
@@ -178,38 +177,6 @@ def _format_context_markdown(
     return "\n".join(parts)
 
 
-@mcp.tool(
-    title="Build Context",
-    description="""Build context from a memory:// URI to continue conversations naturally.
-
-    Use this to follow up on previous discussions or explore related topics.
-
-    Memory URL Format:
-    - Use paths like "folder/note" or "memory://folder/note"
-    - Pattern matching: "folder/*" matches all notes in folder
-    - Valid characters: letters, numbers, hyphens, underscores, forward slashes
-    - Avoid: double slashes (//), angle brackets (<>), quotes, pipes (|)
-    - Examples: "specs/search", "projects/basic-memory", "notes/*"
-
-    Timeframes support natural language like:
-    - "2 days ago", "last week", "today", "3 months ago"
-    - Or standard formats like "7d", "24h"
-
-    Format options:
-    - "json" (default): Structured JSON with internal fields excluded
-    - "text": Compact markdown text for LLM consumption
-
-    Queries the Basic Memory knowledge base API — see
-    https://docs.basicmemory.com/concepts/memory-urls
-    """,
-    tags={"navigation", "notes"},
-    annotations={
-        "title": "Build Context",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def build_context(
     url: Annotated[
         MemoryUrl,

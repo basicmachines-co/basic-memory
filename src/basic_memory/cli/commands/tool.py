@@ -587,7 +587,7 @@ def _tool_error_payload(error: Exception) -> dict[str, Any]:
 # --- Commands ---
 
 
-@tool_app.command()
+@tool_app.command("write")
 def write_note(
     title: Annotated[str, typer.Option(help="The title of the note")],
     folder: Annotated[str, typer.Option(help="The folder to create the note in")],
@@ -647,12 +647,12 @@ def write_note(
 
     Examples:
 
-    bm tool write-note --title "My Note" --folder "notes" --content "Note content"
-    bm tool write-note --title "My Guide" --folder "notes" --content "..." --type guide
-    echo "content" | bm tool write-note --title "My Note" --folder "notes"
-    bm tool write-note --title "My Note" --folder "notes" --overwrite
-    bm tool write-note --title "My Note" --folder "notes" --overwrite --expected-checksum <checksum>
-    bm tool write-note --title "My Note" --folder "notes" --local
+    bm tool write --title "My Note" --folder "notes" --content "Note content"
+    bm tool write --title "My Guide" --folder "notes" --content "..." --type guide
+    echo "content" | bm tool write --title "My Note" --folder "notes"
+    bm tool write --title "My Note" --folder "notes" --overwrite
+    bm tool write --title "My Note" --folder "notes" --overwrite --expected-checksum <checksum>
+    bm tool write --title "My Note" --folder "notes" --local
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from fastmcp.exceptions import ToolError
@@ -716,7 +716,7 @@ def write_note(
         raise
 
 
-@tool_app.command()
+@tool_app.command("read")
 def read_note(
     identifier: str,
     start_line: Annotated[
@@ -764,11 +764,11 @@ def read_note(
 
     Examples:
 
-    bm tool read-note my-note
-    bm tool read-note my-note --frontmatter
-    bm tool read-note my-note --plain
-    bm tool read-note my-note --json
-    bm tool read-note my-note --start-line 120 --end-line 180 --plain
+    bm tool read my-note
+    bm tool read my-note --frontmatter
+    bm tool read my-note --plain
+    bm tool read my-note --json
+    bm tool read my-note --start-line 120 --end-line 180 --plain
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import read_note as mcp_read_note
@@ -834,7 +834,7 @@ def read_note(
         raise
 
 
-@tool_app.command("delete-note")
+@tool_app.command("delete")
 def delete_note(
     identifier: str,
     is_directory: bool = typer.Option(
@@ -860,8 +860,8 @@ def delete_note(
 
     Examples:
 
-    bm tool delete-note notes/old-draft
-    bm tool delete-note docs/archive --is-directory
+    bm tool delete notes/old-draft
+    bm tool delete docs/archive --is-directory
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from fastmcp.exceptions import ToolError
@@ -904,7 +904,7 @@ def delete_note(
         raise
 
 
-@tool_app.command()
+@tool_app.command("edit")
 def edit_note(
     identifier: str,
     operation: Annotated[str, typer.Option("--operation", help="Edit operation to apply")],
@@ -960,11 +960,11 @@ def edit_note(
 
     Examples:
 
-    bm tool edit-note my-note --operation append --content "new content"
-    bm tool edit-note my-note --operation find_replace --find-text "old" --content "new"
-    bm tool edit-note my-note --operation insert_after_section --section "## Notes" --content "new line"
-    bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated"
-    bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
+    bm tool edit my-note --operation append --content "new content"
+    bm tool edit my-note --operation find_replace --find-text "old" --content "new"
+    bm tool edit my-note --operation insert_after_section --section "## Notes" --content "new line"
+    bm tool edit my-note --operation replace_section --section "## Notes" --content "updated"
+    bm tool edit my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from fastmcp.exceptions import ToolError
@@ -1018,7 +1018,7 @@ def edit_note(
         raise
 
 
-@tool_app.command()
+@tool_app.command("context")
 def build_context(
     url: str,
     compact: Annotated[
@@ -1062,10 +1062,10 @@ def build_context(
 
     Examples:
 
-    bm tool build-context memory://specs/search
-    bm tool build-context specs/search --depth 2 --timeframe 30d
-    bm tool build-context memory://specs/search --plain
-    bm tool build-context memory://specs/search --json
+    bm tool context memory://specs/search
+    bm tool context specs/search --depth 2 --timeframe 30d
+    bm tool context memory://specs/search --plain
+    bm tool context memory://specs/search --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import build_context as mcp_build_context
@@ -1108,7 +1108,7 @@ def build_context(
         raise
 
 
-@tool_app.command()
+@tool_app.command("recent")
 def recent_activity(
     type: Annotated[Optional[List[str]], typer.Option(help="Filter by item type")] = None,
     depth: Optional[int] = typer.Option(1, "--depth", help="Depth of context to build"),
@@ -1150,11 +1150,11 @@ def recent_activity(
 
     Examples:
 
-    bm tool recent-activity
-    bm tool recent-activity --timeframe 30d --page-size 20
-    bm tool recent-activity --type entity --type observation
-    bm tool recent-activity --plain
-    bm tool recent-activity --json
+    bm tool recent
+    bm tool recent --timeframe 30d --page-size 20
+    bm tool recent --type entity --type observation
+    bm tool recent --plain
+    bm tool recent --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
@@ -1195,7 +1195,7 @@ def recent_activity(
         raise
 
 
-@tool_app.command("search-notes")
+@tool_app.command("search")
 def search_notes(
     query: Annotated[
         Optional[str],
@@ -1282,13 +1282,13 @@ def search_notes(
 
     Examples:
 
-    bm tool search-notes "my query"
-    bm tool search-notes --permalink "specs/*"
-    bm tool search-notes --tag python --tag async
-    bm tool search-notes --meta status=draft
-    bm tool search-notes "auth" --entity-type observation --category requirement
-    bm tool search-notes "my query" --plain
-    bm tool search-notes "my query" --json
+    bm tool search "my query"
+    bm tool search --permalink "specs/*"
+    bm tool search --tag python --tag async
+    bm tool search --meta status=draft
+    bm tool search "auth" --entity-type observation --category requirement
+    bm tool search "my query" --plain
+    bm tool search "my query" --json
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import search_notes as mcp_search
@@ -1392,7 +1392,7 @@ def search_notes(
 # --- list-projects ---
 
 
-@tool_app.command("list-projects")
+@tool_app.command("projects")
 def list_projects(
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -1403,8 +1403,8 @@ def list_projects(
 
     Examples:
 
-    bm tool list-projects
-    bm tool list-projects --local
+    bm tool projects
+    bm tool projects --local
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
@@ -1428,7 +1428,7 @@ def list_projects(
 # --- list-workspaces ---
 
 
-@tool_app.command("list-workspaces")
+@tool_app.command("workspaces")
 def list_workspaces(
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -1439,8 +1439,8 @@ def list_workspaces(
 
     Examples:
 
-    bm tool list-workspaces
-    bm tool list-workspaces --cloud
+    bm tool workspaces
+    bm tool workspaces --cloud
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
@@ -1464,7 +1464,7 @@ def list_workspaces(
 # --- schema-validate ---
 
 
-@tool_app.command("schema-validate")
+@tool_app.command("validate")
 def schema_validate(
     target: Annotated[
         Optional[str],
@@ -1493,9 +1493,9 @@ def schema_validate(
 
     Examples:
 
-    bm tool schema-validate person
-    bm tool schema-validate people/ada-lovelace.md
-    bm tool schema-validate --project research
+    bm tool validate person
+    bm tool validate people/ada-lovelace.md
+    bm tool validate --project research
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
@@ -1535,7 +1535,7 @@ def schema_validate(
 # --- schema-infer ---
 
 
-@tool_app.command("schema-infer")
+@tool_app.command("infer")
 def schema_infer(
     note_type: Annotated[
         str,
@@ -1564,9 +1564,9 @@ def schema_infer(
 
     Examples:
 
-    bm tool schema-infer person
-    bm tool schema-infer meeting --threshold 0.5
-    bm tool schema-infer person --project research
+    bm tool infer person
+    bm tool infer meeting --threshold 0.5
+    bm tool infer person --project research
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
@@ -1598,7 +1598,7 @@ def schema_infer(
 # --- schema-diff ---
 
 
-@tool_app.command("schema-diff")
+@tool_app.command("diff")
 def schema_diff(
     note_type: Annotated[
         str,
@@ -1624,8 +1624,8 @@ def schema_diff(
 
     Examples:
 
-    bm tool schema-diff person
-    bm tool schema-diff person --project research
+    bm tool diff person
+    bm tool diff person --project research
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import schema_diff as mcp_schema_diff

@@ -30,7 +30,7 @@ recent_activity(type="", depth=1, timeframe="7d", page=1, page_size=10,
 CLI:
 
 ```
-bm tool recent-activity [--project NAME] [--timeframe SPEC]
+bm tool recent [--project NAME] [--timeframe SPEC]
                         [--type TYPE] [--depth N] [--page N] [--page-size N]
 ```
 
@@ -71,7 +71,7 @@ recent_activity(project="manual", timeframe="today", page_size=5)
 ## CLI EQUIVALENT
 
 ```
-bm tool recent-activity --project manual --timeframe 1d
+bm tool recent --project manual --timeframe 1d
 # → JSON: flat list of items, entity type, newest first
 ```
 

@@ -1,4 +1,4 @@
-"""Bug hunt regression test (#6): `bm tool read-note` exit code on a
+"""Bug hunt regression test (#6): `bm tool read` exit code on a
 path-traversal SECURITY_VALIDATION_ERROR.
 
 The MCP read_note tool detects path-traversal identifiers and returns
@@ -37,7 +37,7 @@ def test_read_note_security_error_cli_exit_code_matches_other_tools(
     """CLI read-note must not exit 0 when the MCP payload carries an error."""
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", TRAVERSAL_IDENTIFIER, "--project", test_project.name],
+        ["tool", "read", TRAVERSAL_IDENTIFIER, "--project", test_project.name],
     )
 
     combined = result.stdout

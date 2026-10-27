@@ -17,6 +17,10 @@ from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
 from typing import override
 
+import implementation_mcp
+
+implementation_server = implementation_mcp.implementation_server
+
 
 def lookup_miss() -> ToolError:
     request = Request("POST", "http://test/knowledge/resolve")
@@ -1352,11 +1356,13 @@ async def test_missing_uuid_line_scan_returns_not_found_guidance(app, test_proje
 
 
 @pytest.mark.asyncio
-async def test_missing_markdown_path_in_unindexed_project_is_not_found(mcp, app, test_project):
+async def test_missing_markdown_path_in_unindexed_project_is_not_found(
+    implementation_server, app, test_project
+):
     await write_note(
         project=test_project.name, title="Readable", directory="notes", content="Visible body"
     )
-    async with Client(mcp) as mcp_client:
+    async with Client(implementation_server) as mcp_client:
         existing = await mcp_client.call_tool(
             "read_note",
             {

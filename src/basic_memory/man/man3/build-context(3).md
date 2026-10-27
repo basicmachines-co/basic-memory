@@ -31,7 +31,7 @@ build_context(url, project=None, project_id=None, depth=1, timeframe="7d",
 CLI:
 
 ```
-bm tool build-context URL [--project NAME] [--depth N] [--timeframe SPEC]
+bm tool context URL [--project NAME] [--depth N] [--timeframe SPEC]
                       [--max-related N]
 ```
 

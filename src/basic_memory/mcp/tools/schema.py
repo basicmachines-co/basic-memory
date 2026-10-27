@@ -13,7 +13,6 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.refusals import api_refusals, refusal
 from basic_memory.mcp.tool_params import OutputFormat
-from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
 
 
@@ -250,21 +249,6 @@ def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) ->
     )
 
 
-@mcp.tool(
-    title="Validate Schema",
-    description=(
-        "Validate notes against their Picoschema definitions. With neither note_type nor "
-        "identifier it validates every note type that has a schema. "
-        "A schema is a note with type: schema whose entity field names the note type it describes."
-    ),
-    tags={"schema"},
-    annotations={
-        "title": "Validate Schema",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def schema_validate(
     note_type: Optional[str] = None,
     identifier: Optional[str] = None,
@@ -387,20 +371,6 @@ async def schema_validate(
         return _format_validation_report(result)
 
 
-@mcp.tool(
-    title="Infer Schema",
-    description=(
-        "Analyze existing notes of one type and suggest a Picoschema definition. "
-        "A schema is a note with type: schema whose entity field names the note type it describes."
-    ),
-    tags={"schema"},
-    annotations={
-        "title": "Infer Schema",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def schema_infer(
     note_type: str,
     threshold: float = 0.25,
@@ -511,20 +481,6 @@ async def schema_infer(
         return _format_inference_report(result)
 
 
-@mcp.tool(
-    title="Schema Diff",
-    description=(
-        "Detect drift between a schema definition and actual note usage. "
-        "A schema is a note with type: schema whose entity field names the note type it describes."
-    ),
-    tags={"schema"},
-    annotations={
-        "title": "Schema Diff",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "openWorldHint": False,
-    },
-)
 async def schema_diff(
     note_type: str,
     project: Optional[str] = None,

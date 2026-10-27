@@ -25,7 +25,6 @@ from basic_memory.mcp.project_context import (
     routes_to_default_project,
 )
 from basic_memory.mcp.async_client import local_project_path
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import (
     SimilarNote,
     find_similar_notes,
@@ -85,24 +84,6 @@ def _compose_workspace_project_route(
     return f"{cleaned_workspace}/{cleaned_project}"
 
 
-@mcp.tool(
-    title="Write Note",
-    description=(
-        "Create a markdown note. If the note already exists, returns an error by default "
-        "— pass overwrite=True to replace. directory is required. For incremental changes "
-        "to an existing note use bm_edit. A new note's result may list similar existing "
-        "notes; that is advisory and does not block the write. Pass expected_checksum with "
-        "overwrite=True to replace the note only if it is still the revision you read."
-    ),
-    tags={"notes"},
-    annotations={
-        "title": "Write Note",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
-)
 async def write_note(
     title: str,
     content: str,

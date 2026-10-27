@@ -1,4 +1,4 @@
-"""Bug hunt regression tests: `bm tool write-note` CLI/MCP parity.
+"""Bug hunt regression tests: `bm tool write` CLI/MCP parity.
 
 Covers three confirmed bugs found by the integration-test bug hunt:
 
@@ -32,7 +32,7 @@ def _write_conflict(content_token: str):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Conflict Exit Note",
             "--folder",
@@ -74,7 +74,7 @@ def _cli_write(project_name: str):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Conflict Note",
             "--folder",
@@ -145,7 +145,7 @@ def _write_overwrite(args_extra: list[str]):
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Overwrite Parity Note",
             "--folder",
@@ -168,7 +168,7 @@ def test_write_note_cli_can_overwrite_like_mcp(app, app_config, test_project, co
         cli_app,
         [
             "tool",
-            "write-note",
+            "write",
             "--title",
             "Overwrite Parity Note",
             "--folder",
@@ -189,7 +189,7 @@ def test_write_note_cli_can_overwrite_like_mcp(app, app_config, test_project, co
 
     read = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink, "--project", test_project.name],
+        ["tool", "read", permalink, "--project", test_project.name],
     )
     assert read.exit_code == 0, read.output
     read_data = json.loads(read.stdout)

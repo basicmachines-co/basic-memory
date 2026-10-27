@@ -13,16 +13,16 @@ from basic_memory.mcp.tools import recent_activity, search_notes, write_note
 from basic_memory.models import Project
 
 
-@pytest.mark.parametrize("tool", ["search_notes", "recent_activity"])
+@pytest.mark.parametrize("tool", ["bm_search", "bm_project"])
 @pytest.mark.parametrize("output_format", ["text", "json"])
 @pytest.mark.parametrize("page", [1, 2])
 async def test_index_required_through_mcp(mcp, client, test_project, tool, output_format, page):
     """Neither JSON nor a later page may disguise a never-indexed project as empty."""
     params = {"project": test_project.name, "output_format": output_format, "page": page}
-    if tool == "search_notes":
-        params.update(query="missing", search_type="text")
+    if tool == "bm_search":
+        params.update(query="missing", mode="text")
     else:
-        params.update(type="observation")
+        params.update(command="recent", items=["observation"])
     async with Client(mcp) as mcp_client:
         result = await mcp_client.call_tool(tool, params)
     assert "# Project Index Required" in result.content[0].text

@@ -370,6 +370,7 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
     "replace_section",
     "insert_before_section",
     "insert_after_section",
+    "set_metadata",
 ]
 
 
@@ -445,8 +446,8 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
     tool_list = await mcp.list_tools()
     tools_by_name = {tool.name: tool for tool in tool_list}
 
-    required = set(EXPECTED_TOOL_ANNOTATIONS)
-    optional = set(OPTIONAL_TOOL_ANNOTATIONS)
+    required = {name for name in EXPECTED_TOOL_ANNOTATIONS if name.startswith("bm_")}
+    optional = {"bm_project_delete"}
     registered = set(tools_by_name)
     missing = required - registered
     unexpected = registered - required - optional
@@ -462,7 +463,7 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
         # Assert on the protocol-level payload the directory review actually sees.
         annotations = tool.to_mcp_tool().annotations
         assert annotations is not None, f"Tool '{tool_name}' has no annotations"
-        assert annotations.title, f"Tool '{tool_name}' is missing annotations.title"
+        assert annotations.title == tool.title, f"Tool '{tool_name}' has inconsistent titles"
         assert annotations.read_only_hint is expected["readOnlyHint"], (
             f"Tool '{tool_name}' readOnlyHint should be {expected['readOnlyHint']}"
         )
@@ -478,10 +479,10 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
 async def test_edit_note_operation_schema_exposes_supported_operations():
     """The edit operation is a fixed choice set, not a free-form string."""
     tool_list = await mcp.list_tools()
-    edit_note_tool = next(tool for tool in tool_list if tool.name == "edit_note")
+    edit_note_tool = next(tool for tool in tool_list if tool.name == "bm_edit")
 
     input_schema = edit_note_tool.to_mcp_tool().input_schema
-    operation_schema = input_schema["properties"]["operation"]
+    operation_schema = input_schema["properties"]["command"]
 
     assert operation_schema["type"] == "string"
     assert operation_schema["enum"] == EXPECTED_EDIT_NOTE_OPERATIONS
@@ -491,7 +492,7 @@ async def test_edit_note_operation_schema_exposes_supported_operations():
 async def test_list_directory_sort_schema_exposes_supported_orders():
     """Directory sorting is a closed MCP choice set, not a free-form string."""
     tool_list = await mcp.list_tools()
-    list_directory_tool = next(tool for tool in tool_list if tool.name == "list_directory")
+    list_directory_tool = next(tool for tool in tool_list if tool.name == "bm_list")
 
     input_schema = list_directory_tool.to_mcp_tool().input_schema
     sort_schema = input_schema["properties"]["sort"]
