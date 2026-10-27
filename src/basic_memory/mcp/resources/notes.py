@@ -114,8 +114,7 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
     # Only text comes back byte-exact; steer binaries to the tool built for them.
     if not (content_type.startswith("text/") or content_type == "application/json"):
         raise ResourceError(
-            f"{identifier!r} is {content_type or 'binary'}; use the read_content tool "
-            "for non-text files"
+            f"{identifier!r} is {content_type or 'binary'}; use the bm_read tool for non-text files"
         )
     return response.text
 

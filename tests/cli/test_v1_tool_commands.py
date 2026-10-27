@@ -22,7 +22,7 @@ RETIRED_COMMANDS = (
 )
 
 
-def test_tool_commands_use_plain_verbs():
+def test_tool_commands_use_plain_verbs() -> None:
     assert {command.name for command in tool_app.registered_commands} == {
         "write",
         "read",
@@ -40,7 +40,7 @@ def test_tool_commands_use_plain_verbs():
 
 
 @pytest.mark.parametrize("name", RETIRED_COMMANDS)
-def test_retired_tool_commands_are_not_aliases(name):
+def test_retired_tool_commands_are_not_aliases(name: str) -> None:
     result = CliRunner().invoke(app, ["tool", name, "--help"])
     assert result.exit_code == 2
     assert "No such command" in result.output

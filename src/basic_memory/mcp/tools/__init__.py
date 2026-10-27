@@ -6,34 +6,47 @@ all tools with the MCP server.
 """
 
 # Shared implementations used by the CLI and the bm_* tools; these do not register MCP tools.
-from basic_memory.mcp.tools.basic_memory_diagnostics import basic_memory_diagnostics
-from basic_memory.mcp.tools.delete_note import delete_note
-from basic_memory.mcp.tools.read_content import read_content
-from basic_memory.mcp.tools.build_context import build_context
-from basic_memory.mcp.tools.recent_activity import recent_activity
-from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.mcp.tools.basic_memory_diagnostics import (
+    basic_memory_diagnostics as basic_memory_diagnostics,
+)
+from basic_memory.mcp.tools.delete_note import delete_note as delete_note
+from basic_memory.mcp.tools.read_content import read_content as read_content
+from basic_memory.mcp.tools.build_context import build_context as build_context
+from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity
+from basic_memory.mcp.tools.read_note import read_note as read_note
 
-from basic_memory.mcp.tools.view_note import view_note
-from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.mcp.tools.search import search_notes
-from basic_memory.mcp.tools.list_directory import list_directory
-from basic_memory.mcp.tools.edit_note import edit_note
-from basic_memory.mcp.tools.move_note import move_note
-from basic_memory.mcp.tools.workspaces import list_workspaces
+from basic_memory.mcp.tools.view_note import view_note as view_note
+from basic_memory.mcp.tools.write_note import write_note as write_note
+from basic_memory.mcp.tools.search import search_notes as search_notes
+from basic_memory.mcp.tools.list_directory import list_directory as list_directory
+from basic_memory.mcp.tools.edit_note import edit_note as edit_note
+from basic_memory.mcp.tools.move_note import move_note as move_note
+from basic_memory.mcp.tools.workspaces import list_workspaces as list_workspaces
 from basic_memory.mcp.tools.project_management import (
-    list_memory_projects,
-    create_memory_project,
-    delete_project,
+    list_memory_projects as list_memory_projects,
+    create_memory_project as create_memory_project,
+    delete_project as delete_project,
 )
 
 # ChatGPT adapter implementations; Cloud owns their registration.
-from basic_memory.mcp.tools.chatgpt_tools import search, fetch
+from basic_memory.mcp.tools.chatgpt_tools import search as search, fetch as fetch
 
 # Shared POSIX implementations used by the shell commands.
-from basic_memory.mcp.tools.posix_tools import cat, find, grep, ls, man, tail
+from basic_memory.mcp.tools.posix_tools import (
+    cat as cat,
+    find as find,
+    grep as grep,
+    ls as ls,
+    man as man,
+    tail as tail,
+)
 
 # Schema tools
-from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
+from basic_memory.mcp.tools.schema import (
+    schema_validate as schema_validate,
+    schema_infer as schema_infer,
+    schema_diff as schema_diff,
+)
 
 # 1.0 tool surface (SPEC-35.2, #1827).
 from basic_memory.mcp.tools.context import bm_context
@@ -51,7 +64,6 @@ from basic_memory.mcp.tools.read import bm_read
 from basic_memory.mcp.tools.write import bm_write
 
 __all__ = [
-    "basic_memory_diagnostics",
     "bm_context",
     "bm_delete",
     "bm_edit",
@@ -65,30 +77,4 @@ __all__ = [
     "bm_schema",
     "bm_search",
     "bm_write",
-    "build_context",
-    "cat",
-    "create_memory_project",
-    "delete_note",
-    "delete_project",
-    "edit_note",
-    "fetch",
-    "find",
-    "grep",
-    "list_directory",
-    "list_memory_projects",
-    "list_workspaces",
-    "ls",
-    "man",
-    "move_note",
-    "read_content",
-    "read_note",
-    "recent_activity",
-    "schema_diff",
-    "schema_infer",
-    "schema_validate",
-    "search",
-    "search_notes",
-    "tail",
-    "view_note",
-    "write_note",
 ]

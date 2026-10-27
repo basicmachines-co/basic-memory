@@ -6,6 +6,7 @@ import sys
 import pytest
 from fastmcp.exceptions import NotFoundError
 
+from implementation_mcp import IMPLEMENTATION_NAMES
 from basic_memory.mcp import tools
 from basic_memory.mcp.server import mcp, set_project_delete_visibility
 
@@ -23,10 +24,11 @@ V1_TOOLS = {
     "bm_schema",
     "bm_project",
 }
-RETIRED_TOOLS = {name for name in tools.__all__ if not name.startswith("bm_")}
+RETIRED_TOOLS = frozenset(IMPLEMENTATION_NAMES)
 
 
-def test_fresh_process_exposes_only_v1_tools():
+def test_fresh_process_exposes_only_v1_tools() -> None:
+    assert set(tools.__all__) == V1_TOOLS | {"bm_project_delete"}
     result = subprocess.run(
         [
             sys.executable,
@@ -44,7 +46,7 @@ def test_fresh_process_exposes_only_v1_tools():
 
 
 @pytest.mark.asyncio
-async def test_config_cannot_restore_retired_tools():
+async def test_config_cannot_restore_retired_tools() -> None:
     try:
         set_project_delete_visibility(mcp, True)
         registered = {tool.name: tool for tool in await mcp.list_tools()}
@@ -58,6 +60,6 @@ async def test_config_cannot_restore_retired_tools():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(RETIRED_TOOLS))
-async def test_retired_tools_cannot_be_called(name):
+async def test_retired_tools_cannot_be_called(name: str) -> None:
     with pytest.raises(NotFoundError):
         await mcp.call_tool(name, {})

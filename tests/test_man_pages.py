@@ -130,20 +130,33 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
     assert all(page.tool for page in pages if page.section == 3)
 
 
-# The section-3 corpus and the tool registry are meant to match one to one. Both
-# lists change deliberately; this pins the known gaps so a new tool without a page
-# (or a page for a retired tool) shows up here instead of going unnoticed.
-# The POSIX read-side tools (#1399) ship without section-3 pages for now; the
-# manual campaign adds them next. Their wire descriptions stay one-liners.
-TOOLS_WITHOUT_PAGES: set[str] = {
-    "cat",
-    "find",
-    "grep",
-    "ls",
-    "man",
-    "tail",
+# Public tools each have a page. Retired references and Cloud-only adapters stay
+# bundled so old manual links resolve, but are hand-owned rather than generated.
+TOOLS_WITHOUT_PAGES: set[str] = set()
+PAGES_WITHOUT_LOCAL_TOOLS = {
+    "fetch",
+    "schema_diff",
+    "schema_validate",
+    "list_memory_projects",
+    "cloud_info",
+    "create_memory_project",
+    "delete_project",
+    "move_note",
+    "list_workspaces",
+    "list_directory",
+    "view_note",
+    "search",
+    "write_note",
+    "schema_infer",
+    "read_content",
+    "read_note",
+    "basic_memory_diagnostics",
+    "recent_activity",
+    "build_context",
+    "search_notes",
+    "delete_note",
+    "edit_note",
 }
-PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
 
 def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
@@ -413,7 +426,7 @@ def test_pages_carry_no_release_pending_claims(stale: str) -> None:
 def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
     index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
     hosted_only = find_page(PageRef("cloud-info", 3))
-    local = find_page(PageRef("search-notes", 3))
+    local = find_page(PageRef("bm-search", 3))
     assert hosted_only is not None and local is not None
 
     assert f"({hosted_only.uri}) — {hosted_only.summary} *(tool not registered" in index
@@ -752,3 +765,18 @@ def test_scaffold_page_renders_a_well_formed_registry_page() -> None:
     assert "## DESCRIPTION\n\nThen more detail." in text
     assert extract_parameters(text).startswith("- **query** (string, required)")
     assert text.rstrip().endswith("## SEE ALSO")
+
+
+def test_retired_mcp_pages_only_offer_current_replacements() -> None:
+    """Old manual URLs must never prescribe calls to removed MCP endpoints."""
+    from implementation_mcp import IMPLEMENTATION_NAMES
+
+    retired = set(IMPLEMENTATION_NAMES) - {"search", "fetch"}
+    for page in bundled_pages():
+        if page.section != 3 or page.tool not in retired:
+            continue
+        text = page.read()
+        assert "## RETIRED MCP TOOL" in text, page.title
+        assert "remains registered" not in text, page.title
+        assert "MCP:" not in text, page.title
+        assert f"{page.tool}(" not in text, page.title

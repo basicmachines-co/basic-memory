@@ -99,7 +99,7 @@ async def test_export_real_project(tmp_path):
     )
     cli(
         "tool",
-        "write-note",
+        "write",
         "--title",
         "Target",
         "--folder",
