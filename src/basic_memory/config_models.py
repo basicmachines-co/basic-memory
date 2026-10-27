@@ -601,8 +601,8 @@ class BasicMemoryConfig(BaseSettings):
     enable_posix_tools: bool = Field(
         default=True,
         description=(
-            "Register the POSIX-style read-only MCP tools (cat, grep, ls, find, tail, man). "
-            "Enabled by default; set false to hide them. "
+            "Deprecated no-op retained so existing configurations continue to load. "
+            "Legacy POSIX MCP registrations were removed; this cannot restore them. "
             "Env: BASIC_MEMORY_ENABLE_POSIX_TOOLS"
         ),
     )
@@ -620,7 +620,7 @@ class BasicMemoryConfig(BaseSettings):
         default="rich",
         description=(
             "Default human-readable output style for interactive `bm tool` commands "
-            "(search-notes, read-note, build-context, recent-activity) when stdout is a TTY. "
+            "(search, read, context, recent) when stdout is a TTY. "
             "'rich' (default) renders colored Panel/Table/Tree/Markdown output; "
             "'plain' renders undecorated greppable text with no ANSI colors or box-drawing. "
             "Overridden per-invocation by --json (raw JSON) or --plain (forces plain). "

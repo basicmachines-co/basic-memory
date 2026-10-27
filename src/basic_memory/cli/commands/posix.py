@@ -1,21 +1,13 @@
 """POSIX-style read verbs for the Basic Memory CLI (SPEC-47, #1404).
 
 Seven top-level verbs — ``bm cat``, ``bm grep``, ``bm ls``, ``bm find``,
-``bm tail``, ``bm head``, ``bm tree`` — the human/shell half of the POSIX
-surface. Each is a thin frontend over the same translation layer as the MCP
-posix tools: the CLI awaits the tool functions in
-``basic_memory.mcp.tools.posix_tools`` directly (the repo's established
-CLI↔MCP sharing pattern, same as every ``bm tool`` command), so there is one
-request/translation layer with two frontends. ``head`` and ``tree`` have no
-MCP counterpart; they are pure client-side recombinations of ``cat`` and
-``find``.
+``bm tail``, ``bm head``, ``bm tree`` — provide shell access through shared
+Python implementations in ``basic_memory.mcp.tools.posix_tools``. These
+functions no longer register MCP tools. ``head`` and ``tree`` combine ``cat``
+and ``find`` behavior on the client.
 
-These verbs are deliberately not gated on ``enable_posix_tools``: a human
-typing ``bm cat`` is explicit intent. That config flag gates only the
-agent-facing MCP tool listing (``set_posix_tools_visibility`` in
-``basic_memory.mcp.server`` transforms the server's tool list); direct
-function calls bypass the listing entirely, which is what this module relies
-on.
+The retired ``enable_posix_tools`` configuration is a no-op. These shell
+commands remain available independently of MCP registration.
 
 Honesty rules (SPEC-47): these are subcommands of ``bm`` only — nothing
 shadows real cat/grep on PATH, and there is no shell-redirection magic.
