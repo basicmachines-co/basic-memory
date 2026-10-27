@@ -28,6 +28,10 @@ uv tool install --force "basic-memory[litellm]" --prerelease=allow
 pip install "basic-memory[litellm]"
 ```
 
+When reinstalling with uv, include every extra you still use in the same
+specification. For example, users who also use Milvus need
+`uv tool install --force "basic-memory[litellm,milvus]" --prerelease=allow`.
+
 When upgrading an existing LiteLLM configuration, keep requesting this extra.
 Selecting `litellm` in config does not install packages automatically; without
 the SDK, the first embedding or rerank operation reports the install command.
