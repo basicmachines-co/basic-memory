@@ -41,7 +41,7 @@ class BasicMemoryCloudProvider(BenchmarkProvider):
             [
                 "bm",
                 "tool",
-                "search-notes",
+                "search",
                 query,
                 "--project",
                 project_name,

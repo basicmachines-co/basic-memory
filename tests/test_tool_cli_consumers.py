@@ -10,6 +10,8 @@ SHIPPED_REFERENCES = (
     "docs/COMPACT_DISCOVERY.md",
     "docs/metadata-search.md",
     "docs/manual-pages.md",
+    "docs/1.0.md",
+    "benchmarks/src/basic_memory_benchmarks/providers/bm_cloud.py",
     "src/basic_memory/man/bm.1",
     "skills/memory-literary-analysis/SKILL.md",
     "plugins/claude-code/skills/bm-setup/SKILL.md",
