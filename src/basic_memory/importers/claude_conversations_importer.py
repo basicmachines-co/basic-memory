@@ -52,6 +52,7 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             # Process each conversation
             messages_imported = 0
             chats_imported = 0
+            file_paths: list[str] = []
 
             for chat in conversations:
                 # Get name, providing default for unnamed conversations
@@ -78,6 +79,7 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)
+                file_paths.append(file_path)
 
                 chats_imported += 1
                 messages_imported += len(chat["chat_messages"])
@@ -87,6 +89,7 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
                 success=True,
                 conversations=chats_imported,
                 messages=messages_imported,
+                file_paths=file_paths,
             )
 
         except Exception as e:  # pragma: no cover

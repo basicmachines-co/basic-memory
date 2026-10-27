@@ -56,6 +56,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             # Process each conversation
             messages_imported = 0
             chats_imported = 0
+            file_paths: list[str] = []
 
             for chat in conversations:
                 created_at, modified_at = self._resolve_timestamps(chat)
@@ -74,6 +75,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)
+                file_paths.append(file_path)
 
                 # Count messages
                 msg_count = sum(
@@ -93,6 +95,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 success=True,
                 conversations=chats_imported,
                 messages=messages_imported,
+                file_paths=file_paths,
             )
 
         except Exception as e:  # pragma: no cover
