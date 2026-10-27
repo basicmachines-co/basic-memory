@@ -1,11 +1,16 @@
 """Memory JSON import service for Basic Memory."""
 
 import logging
-from typing import override, Any, Dict, List, Optional
+from typing import override, Any, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown, Observation, Relation
 from basic_memory.importers.base import Importer
 from basic_memory.schemas.importer import EntityImportResult
+from basic_memory.schemas.memory_json import (
+    MemoryJsonEntity,
+    MemoryJsonRelation,
+    parse_memory_json_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +35,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
 
     @override
     async def import_data(
-        self, source_data, destination_folder: str = "", **kwargs: Any
+        self, source_data: object, destination_folder: str = "", **kwargs: Any
     ) -> EntityImportResult:
         """Import entities and relations from a memory.json file.
 
@@ -42,44 +47,31 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
         Returns:
             EntityImportResult containing statistics and status of the import.
         """
+        # Input rejection stays outside the operational-failure handler so the
+        # HTTP/CLI boundary can distinguish malformed uploads from storage faults.
+        records = parse_memory_json_records(source_data)
         try:
-            # First pass - collect all relations by source entity
-            entity_relations: Dict[str, List[Relation]] = {}
-            entities: Dict[str, Dict[str, Any]] = {}
-            skipped_entities: int = 0
+            entity_relations: dict[str, list[Relation]] = {}
+            entities: dict[str, MemoryJsonEntity] = {}
 
             # Ensure the destination folder exists if provided
             if destination_folder:  # pragma: no cover
                 await self.ensure_folder_exists(destination_folder)
 
-            # First pass - collect entities and relations
-            for line in source_data:
-                data = line
-                if data["type"] == "entity":
-                    # Handle different possible name keys
-                    entity_name = data.get("name") or data.get("entityName") or data.get("id")
-                    if not entity_name:
-                        logger.warning(f"Entity missing name field: {data}")  # pragma: no cover
-                        skipped_entities += 1  # pragma: no cover
-                        continue  # pragma: no cover
-                    entities[entity_name] = data
-                elif data["type"] == "relation":
-                    # Store relation with its source entity
-                    source = data.get("from") or data.get("from_id")
-                    if source not in entity_relations:
-                        entity_relations[source] = []
-                    entity_relations[source].append(
-                        Relation(
-                            type=data.get("relationType") or data.get("relation_type"),
-                            target=data.get("to") or data.get("to_id"),
+            for record in records:
+                match record:
+                    case MemoryJsonEntity():
+                        entities[record.name] = record
+                    case MemoryJsonRelation():
+                        entity_relations.setdefault(record.source, []).append(
+                            Relation(type=record.relation_type, target=record.target)
                         )
-                    )
 
             # Second pass - create and write entities
             entities_created = 0
             for name, entity_data in entities.items():
                 # Get entity type with fallback
-                entity_type = entity_data.get("entityType") or entity_data.get("type") or "entity"
+                entity_type = entity_data.entity_type
 
                 # Build permalink with optional destination folder prefix
                 relative_path = (
@@ -96,7 +88,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 await self.file_service.ensure_directory(entity_type_dir)
 
                 # Get observations with fallback to empty list
-                observations = entity_data.get("observations", [])
+                observations = entity_data.observations
 
                 entity = EntityMarkdown(
                     frontmatter=EntityFrontmatter(
@@ -122,7 +114,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 success=True,
                 entities=entities_created,
                 relations=relations_count,
-                skipped_entities=skipped_entities,
+                skipped_entities=0,
             )
 
         except Exception as e:  # pragma: no cover
