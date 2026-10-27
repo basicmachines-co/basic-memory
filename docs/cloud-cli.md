@@ -726,7 +726,7 @@ See [Resolving conflicts](#resolving-conflicts).
 
 **Explanation:** `push` and `pull` never delete on the destination, so deletions are not propagated.
 
-**Solution:** Delete the note on the other side as well, for example through the web app or the MCP `delete_note` tool.
+**Solution:** Delete the note on the other side as well, for example through the web app or the MCP `bm_delete` tool.
 
 ### Project Name Is Ambiguous
 
