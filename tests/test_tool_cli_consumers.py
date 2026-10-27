@@ -1,5 +1,6 @@
 """Shipped guides and Pi's direct CLI transport must use supported tool verbs."""
 
+import ast
 import re
 from pathlib import Path
 
@@ -31,4 +32,40 @@ def test_shipped_consumers_do_not_invoke_retired_tool_commands() -> None:
         for relative in SHIPPED_REFERENCES
         for match in RETIRED_CALL.finditer((ROOT / relative).read_text(encoding="utf-8"))
     ]
+    assert failures == []
+
+
+def test_benchmark_mcp_calls_use_registered_surface() -> None:
+    # Audit executable calls, including multiline calls, rather than historical prose.
+    supported = {
+        "bm_read",
+        "bm_write",
+        "bm_edit",
+        "bm_delete",
+        "bm_move",
+        "bm_search",
+        "bm_context",
+        "bm_list",
+        "bm_find",
+        "bm_project",
+        "bm_project_delete",
+        "bm_schema",
+        "bm_man",
+    }
+    failures: list[str] = []
+    for directory in (ROOT / "benchmarks/scripts", ROOT / "benchmarks/src"):
+        for source in directory.rglob("*.py"):
+            for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "call_tool"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                    and node.args[0].value not in supported
+                ):
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{node.lineno}: {node.args[0].value}"
+                    )
     assert failures == []

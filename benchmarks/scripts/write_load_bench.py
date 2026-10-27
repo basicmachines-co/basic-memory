@@ -308,8 +308,8 @@ async def run(args: argparse.Namespace) -> int:
             await session.initialize()
 
             create = await session.call_tool(
-                "create_memory_project",
-                {"project_name": project, "project_path": str(project_dir)},
+                "bm_project",
+                {"command": "create", "name": project, "path": str(project_dir)},
             )
             if create.isError:
                 print("ERROR: could not create project", file=sys.stderr)
