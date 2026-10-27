@@ -12,6 +12,7 @@ SHIPPED_REFERENCES = (
     "docs/metadata-search.md",
     "docs/manual-pages.md",
     "docs/1.0.md",
+    "docs/cloud-cli.md",
     "benchmarks/src/basic_memory_benchmarks/providers/bm_cloud.py",
     "src/basic_memory/man/bm.1",
     "skills/memory-literary-analysis/SKILL.md",
@@ -68,4 +69,21 @@ def test_benchmark_mcp_calls_use_registered_surface() -> None:
                     failures.append(
                         f"{source.relative_to(ROOT)}:{node.lineno}: {node.args[0].value}"
                     )
+    assert failures == []
+
+
+def test_current_guides_do_not_recommend_retired_mcp_names() -> None:
+    retired = re.compile(
+        r"`(?:write_note|read_note|edit_note|delete_note|search_notes|build_context|"
+        r"read_content|create_memory_project|delete_project|list_memory_projects|"
+        r"list_workspaces|recent_activity|schema_validate|schema_infer|schema_diff|"
+        r"view_note|list_directory|move_note)`"
+    )
+    # The migration table intentionally names the old tools alongside replacements.
+    guides = [name for name in SHIPPED_REFERENCES if name.endswith(".md") and name != "docs/1.0.md"]
+    failures = [
+        f"{relative}: {match.group(0)}"
+        for relative in guides
+        for match in retired.finditer((ROOT / relative).read_text(encoding="utf-8"))
+    ]
     assert failures == []
