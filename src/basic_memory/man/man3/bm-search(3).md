@@ -100,6 +100,19 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
 - Line results report `total_is_exact: false`; `total` counts ranked candidates,
   so page with `has_more` instead of using it as a result count.
 
+## AUTHORED VALID TIME
+
+- A valid-time filter excludes every source without a temporal qualifier — an undated note makes no claim about when it holds, so drop the filter to search dated and undated content together
+- valid_at and valid_overlaps never mix calendar dates with instants: a date query matches only date ranges and an instant query only instant ranges, so `2026-07-27` and `2026-07-27T00:00:00Z` are different questions
+- A timestamp written without an offset is read as UTC, in an authored qualifier and in a filter alike — same convention as every other naive datetime in Basic Memory
+- An authored token that does not read as a date is left as ordinary observation content with no warning; only a qualifier the author plainly meant is reported — an unknown kind (`@asserted:2026-06-10`), an unterminated quote, or a date the one-token rule truncated
+- An unquoted authored point is one whitespace-delimited token: `@occurred:2026-06-10` and `@occurred:03/04/2026` work, but a multi-word date like `@occurred:June 10, 2026` is left as content because nothing can tell where it ends
+- Double quotes lift the one-token rule and end the point at the closing quote, so `@occurred:"June 10, 2026"` and `@"June 2026"` both file — inside quotes even a month-only or year-only date is taken, since the author delimited it
+- A relative date is never filed as a qualifier, quoted or not: `@occurred:yesterday`, `@occurred:"2 days ago"` and a bare month name like `@occurred:March` each name a different span depending on when the note is indexed, so they stay ordinary content — quoting settles where a token ends, not what a date means
+- Relative wording still works for `since` in bm_project(command="recent") and bm_context, which ask about edit time rather than authored time — only the valid-time qualifier requires a date that means the same thing on every pass
+- Only `"` opens a quoted point, never `'`, and an unterminated quote is reported rather than swallowing the rest of the line
+- `@occurred:03/04/2026` resolves by the `date_order` setting (YMD/DMY read it as 3 April, MDY as 4 March); ISO dates are never re-guessed
+
 ## SEE ALSO
 
 - see_also [[grep(1)]]

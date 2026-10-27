@@ -646,7 +646,7 @@ bm orphans          # entities with no relations in the graph
 ```
 
 `orphans` finds notes with no relations. It does not find a `[[target]]` that resolves to
-nothing — a misspelled or renamed entity name. Check a chapter's links with `bm tool build-context memory://chapters/<slug> --depth 1
+nothing — a misspelled or renamed entity name. Check a chapter's links with `bm tool context memory://chapters/<slug> --depth 1
 --project <work> --json` and look for relations whose `to_entity_id` is `null`; fix the
 spelling or add the alias, then re-run the chapter.
 
@@ -665,11 +665,11 @@ bm grep "doubloon" --page-size 100 --project <work>                # every menti
 
 "Which characters share the most chapters" is the first line plus a local parse of each
 row's `content` for `features [[...]]` — one call instead of a read per chapter. Do not
-reach for `bm tool build-context 'memory://characters/major/*'` here: a
+reach for `bm tool context 'memory://characters/major/*'` here: a
 wildcard context is capped at 100 related rows across all primaries and returns one primary
 row per indexed observation, so it neither enumerates the cast nor walks the web.
-`build-context` on a *single* note is the right tool for a different question, below.
-`build-context` takes its URL as a positional argument — there is no `--url` option.
+`context` on a *single* note is the right tool for a different question, below.
+`context` takes its URL as a positional argument — there is no `--url` option.
 
 `grep` matches keywords and returns a page of 10, which quietly truncates "where does this
 appear?" — a symbol in 40 chapters comes back as 10. For symbol tracing, raise

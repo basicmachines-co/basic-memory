@@ -3,9 +3,9 @@
 Use compact results to choose notes before reading their bodies:
 
 ```sh
-bm tool search-notes "deployment" --compact --json
-bm tool build-context "notes/deployment" --compact --json
-bm tool read-note "notes/deployment" --start-line 20 --end-line 60 --plain
+bm tool search "deployment" --compact --json
+bm tool context "notes/deployment" --compact --json
+bm tool read "notes/deployment" --start-line 20 --end-line 60 --plain
 ```
 
 `--compact` also works with `--plain` and the interactive Rich display. Output

@@ -26,8 +26,8 @@ local API or to Basic Memory Cloud.
 Knowledge operations:
 .TP
 .B bm tool
-CLI access to the MCP tools (write-note, read-note, search-notes,
-build-context, ...). These emit JSON and are the scriptable surface.
+CLI access to the knowledge operations (write, read, search,
+context, ...). These emit JSON and are the scriptable surface.
 .TP
 .B bm cat
 Print a note, optionally sliced by lines, section, or token budget.
@@ -114,9 +114,9 @@ Write and find a note from the shell:
 .PP
 .nf
 .RS
-echo "# Standup notes" | bm tool write-note \\
+echo "# Standup notes" | bm tool write \\
     \-\-title "Standup" \-\-folder notes
-bm tool search-notes "standup"
+bm tool search "standup"
 .RE
 .fi
 .PP
@@ -149,10 +149,9 @@ Basic Memory project \(em see docs/manual-pages.md in the repository.
 Documentation: https://docs.basicmemory.com
 .PP
 For AI agents: the complete tool reference lives in the manual project as
-section\-3 pages (write-note(3), search-notes(3), ...), queryable via
-.B search_notes
-with
-.BR "metadata_filters={\(dqtype\(dq: \(dqmanpage\(dq}" .
+section\-3 pages (bm-write(3), bm-search(3), ...), readable via
+.B bm_man
+or the memory://man resource.
 .SH BUGS
 https://github.com/basicmachines-co/basic-memory/issues
 .SH AUTHORS

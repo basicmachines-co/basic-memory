@@ -563,7 +563,8 @@ agents can pick the right one without trial-and-error:
   `bm_project_delete` is separate and requires server opt-in.
 - **Schema:** `bm_schema(command="validate" | "infer" | "diff")`
 - **Manual:** `bm_man`
-- **Compatibility & diagnostics:** `search`, `fetch`, `basic_memory_diagnostics`
+- **Cloud connector adapters:** `search` and `fetch` are registered by Cloud only.
+  Local diagnostics use `bm doctor`.
 
 Most tools default to text; `bm_context` defaults to JSON. Pass
 `output_format="json"` for structured responses. Project-scoped tools accept a
@@ -588,7 +589,7 @@ basic-memory config unset cli_output_style      # revert to default
 # Health & maintenance
 basic-memory status
 basic-memory doctor              # report project problems and the commands that fix them
-basic-memory tool edit-note ...  # CLI access to MCP tools
+basic-memory tool edit ...  # CLI access to MCP tools
 basic-memory update              # check for and install updates
 
 # Imports

@@ -110,7 +110,7 @@ Maintainers refresh the bundled references with `npm run fetch-skills`; package 
 | Component | Minimum tested version | Notes |
 | --- | --- | --- |
 | Pi | 0.85.1 | Required extension, package, RPC, and runtime event APIs were verified on this version. |
-| Basic Memory CLI | package-matched release | Requires `bm hook --harness pi` for default lifecycle automation; set `useHookFlow: false` to use direct `bm tool write-note/read-note/search-notes` JSON/plain modes. |
+| Basic Memory CLI | package-matched release | Requires `bm hook --harness pi` for default lifecycle automation; set `useHookFlow: false` to use direct `bm tool write`, `bm tool read`, and `bm tool search` JSON/plain modes. |
 | pi-mcp-adapter | 2.32.1 | Required only for `transport: "mcp"`; runtime registration API verified. |
 | Node.js | 22.19.0 | Matches the installed Pi package engine floor used by maintainer checks. |
 

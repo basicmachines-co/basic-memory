@@ -51,18 +51,18 @@ async def test_index_resource_links_every_page() -> None:
 @pytest.mark.parametrize(
     "uri",
     [
-        "memory://man/search-notes(3)",
-        "memory://man/search-notes%283%29",
-        "memory://man/search-notes.3",
-        "memory://man/3/search-notes",
-        "memory://man/man3/search-notes",
-        "memory://man/search_notes",
+        "memory://man/bm-search(3)",
+        "memory://man/bm-search%283%29",
+        "memory://man/bm-search.3",
+        "memory://man/3/bm-search",
+        "memory://man/man3/bm-search",
+        "memory://man/bm_search",
     ],
 )
 async def test_any_spelling_of_a_page_reads_the_same_page(uri: str) -> None:
     page = await _read(uri)
 
-    assert page.startswith("---\ntitle: search-notes(3)\n")
+    assert page.startswith("---\ntitle: bm-search(3)\n")
     assert "## GOTCHAS" in page
 
 
