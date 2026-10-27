@@ -14,8 +14,11 @@ verified: 0.21.6 mcp+cli
 ## RETIRED MCP TOOL
 
 `list_workspaces` was removed from the MCP surface in 1.0. It is not registered
-and has no compatibility alias. Use `bm_project(command="list")` instead;
-[[bm-project(3)]] documents its current parameters and examples.
+and has no compatibility alias. Use `bm_project(command="list")` to discover
+projects and their workspace metadata; [[bm-project(3)]] documents its parameters.
+This omits accessible workspaces with no projects. Use `bm tool workspaces`
+when the CLI is available to discover those workspaces and their slugs before
+creating a project.
 
 ## CLI
 
