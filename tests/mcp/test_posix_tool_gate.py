@@ -4,6 +4,7 @@ import pytest
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.server import lifespan, mcp
+import basic_memory.mcp.tools  # noqa: F401 — register the production surface for standalone runs
 
 
 @pytest.mark.asyncio
