@@ -65,5 +65,5 @@ async def test_missing_sdk_has_actionable_extra_instructions(
             assert reranker is not None
             await reranker.rerank("test", ["document"])
 
-    assert 'uv tool install "basic-memory[litellm]"' in str(error.value)
+    assert 'uv tool install --force "basic-memory[litellm]" --prerelease=allow' in str(error.value)
     assert 'pip install "basic-memory[litellm]"' in str(error.value)

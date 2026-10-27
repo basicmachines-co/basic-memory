@@ -100,7 +100,7 @@ def _import_litellm() -> Any:
         raise SemanticDependenciesMissingError(
             "LiteLLM embeddings and reranking need the optional SDK. "
             "Install basic-memory[litellm], for example with "
-            '`uv tool install "basic-memory[litellm]"` or '
+            '`uv tool install --force "basic-memory[litellm]" --prerelease=allow` or '
             '`pip install "basic-memory[litellm]"`.'
         ) from exc
 
