@@ -453,7 +453,7 @@ def test_the_man_page_does_not_advertise_relative_qualifiers():
     """The same promise, in the page a human reads."""
     from basic_memory.man import MAN_DIR
 
-    page = (MAN_DIR / "man3" / "search-notes(3).md").read_text(encoding="utf-8")
+    page = (MAN_DIR / "man3" / "bm-search(3).md").read_text(encoding="utf-8")
 
     assert "A relative date is never filed as a qualifier" in page
     # The quoted-form example list must not offer one as a spelling that files.

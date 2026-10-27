@@ -103,10 +103,10 @@ Man-style reads (any MCP client or the CLI):
 
 ```bash
 # read a page
-bm tool read-note "man3/bm-write-3" --project manual
+bm tool read "man3/bm-write-3" --project manual
 
 # apropos — find pages by section, tool, or text
-bm tool search-notes --project manual          # then filter, or via MCP:
+bm tool search --project manual          # then filter, or via MCP:
 #   bm_search(project="manual", filters={"type": "manpage", "section": 3})
 #   bm_search(project="manual", filters={"type": "manpage", "tool": "bm_write"})
 
@@ -159,7 +159,7 @@ Two rules make the manual trustworthy:
 2. **The schema is the linter.** Validate the whole manual any time:
 
    ```bash
-   bm tool schema-validate manpage --project manual
+   bm tool validate manpage --project manual
    # → {"total_notes": 38, "valid_count": 38, "warning_count": 0, ...}
    ```
 
@@ -191,7 +191,7 @@ catching a test that asserted a bug as expected output (#958).
 3. Link related pages in `SEE ALSO` with `see_also [[other-page(3)]]`.
    Forward references to pages that don't exist yet are fine — they resolve
    automatically when the target is written.
-4. Validate: `bm tool schema-validate manpage --project manual`.
+4. Validate: `bm tool validate manpage --project manual`.
 
 For mechanical updates to generated sections, prefer `bm_edit` with
 `command="replace_section"` / `command="insert_after_section"` so curated content (EXAMPLES,

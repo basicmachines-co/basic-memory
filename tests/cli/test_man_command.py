@@ -31,11 +31,11 @@ def _flattened(output: str) -> str:
 @pytest.mark.parametrize(
     "argv",
     [
-        ["man", "search-notes"],
-        ["man", "search-notes(3)"],
-        ["man", "search_notes"],
-        ["man", "3/search-notes"],
-        ["man", "show", "search-notes"],
+        ["man", "bm-search"],
+        ["man", "bm-search(3)"],
+        ["man", "bm_search"],
+        ["man", "3/bm-search"],
+        ["man", "show", "bm-search"],
     ],
 )
 def test_man_topic_prints_the_page_as_markdown(argv):
@@ -43,9 +43,9 @@ def test_man_topic_prints_the_page_as_markdown(argv):
     result = runner.invoke(app, argv)
 
     assert result.exit_code == 0, result.output
-    assert result.output.startswith("# search-notes(3)\n")
+    assert result.output.startswith("# bm-search(3)\n")
     assert "## GOTCHAS" in result.output
-    assert "title: search-notes(3)" not in result.output  # frontmatter is not rendered
+    assert "title: bm-search(3)" not in result.output  # frontmatter is not rendered
 
 
 def test_man_unknown_topic_fails_and_points_at_list():

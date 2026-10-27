@@ -235,7 +235,7 @@ async function buildRecall(
 ): Promise<string> {
   const searchArgs = [
     "tool",
-    "search-notes",
+    "search",
     "--json",
     "--type",
     "pi_session",
@@ -294,7 +294,7 @@ async function captureSession(
 
   const writeArgs = [
     "tool",
-    "write-note",
+    "write",
     "--title",
     draft.title,
     "--folder",

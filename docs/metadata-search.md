@@ -168,7 +168,7 @@ when working across projects.
 
 ## CLI Access
 
-The `bm tool search-notes` command exposes metadata filtering via `--meta` and `--filter` flags.
+The `bm tool search` command exposes metadata filtering via `--meta` and `--filter` flags.
 
 ### `--meta` — simple key=value filters
 
@@ -176,10 +176,10 @@ Repeatable flag for equality filters on frontmatter fields.
 
 ```bash
 # Single filter
-bm tool search-notes "my query" --meta status=draft
+bm tool search "my query" --meta status=draft
 
 # Multiple filters (AND logic)
-bm tool search-notes "" --meta status=active --meta priority=high
+bm tool search "" --meta status=active --meta priority=high
 ```
 
 ### `--filter` — advanced JSON filters
@@ -188,23 +188,23 @@ Pass a full JSON filter dictionary for operator-based queries.
 
 ```bash
 # Range filter
-bm tool search-notes "" --filter '{"score": {"$between": [0.3, 0.8]}}'
+bm tool search "" --filter '{"score": {"$between": [0.3, 0.8]}}'
 
 # $in filter
-bm tool search-notes "" --filter '{"priority": {"$in": ["high", "critical"]}}'
+bm tool search "" --filter '{"priority": {"$in": ["high", "critical"]}}'
 ```
 
 ### `--tag` and `--status` — convenience shortcuts
 
 ```bash
-bm tool search-notes "query" --tag security --tag oauth
-bm tool search-notes "" --status draft
+bm tool search "query" --tag security --tag oauth
+bm tool search "" --status draft
 ```
 
 ### Combined example
 
 ```bash
-bm tool search-notes "authentication" --tag security --meta status=draft --type spec
+bm tool search "authentication" --tag security --meta status=draft --type spec
 ```
 
 ## Practical Examples
@@ -286,8 +286,8 @@ await bm_search("OAuth", filters={"status": "in-progress"})
 ### CLI equivalents
 
 ```bash
-bm tool search-notes "" --meta status=in-progress --type spec
-bm tool search-notes "" --filter '{"confidence": {"$gt": 0.7}}'
-bm tool search-notes "OAuth" --meta status=in-progress
-bm tool search-notes --tag security
+bm tool search "" --meta status=in-progress --type spec
+bm tool search "" --filter '{"confidence": {"$gt": 0.7}}'
+bm tool search "OAuth" --meta status=in-progress
+bm tool search --tag security
 ```

@@ -235,7 +235,7 @@ missing cloud credentials, or a ref that doesn't route, while the user is still 
 to fix it. Run the same structured query the SessionStart hook runs, via the CLI it
 uses (`basic-memory` / `bm` / `uvx --prerelease=allow basic-memory`):
 
-- **Primary:** `… tool search-notes --type schema --page-size 10` against
+- **Primary:** `… tool search --type schema --page-size 10` against
   `primaryProject` — use `--project-id <uuid>` for a UUID, `--project <ref>`
   otherwise. It should return the schemas you just seeded. For a coding setup,
   confirm the `Coding Session` schema is present.
