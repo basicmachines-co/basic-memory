@@ -339,7 +339,6 @@ dependencies = [
     { name = "filelock" },
     { name = "greenlet" },
     { name = "httpx" },
-    { name = "litellm" },
     { name = "logfire" },
     { name = "loguru" },
     { name = "markdown-it-py" },
@@ -374,6 +373,9 @@ dependencies = [
 [package.optional-dependencies]
 documents = [
     { name = "markitdown", extra = ["docx", "pptx"] },
+]
+litellm = [
+    { name = "litellm" },
 ]
 milvus = [
     { name = "pymilvus" },
@@ -427,7 +429,7 @@ requires-dist = [
     { name = "filelock", specifier = ">=3.12" },
     { name = "greenlet", specifier = ">=3.1.1" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "litellm", specifier = ">=1.91.5,<1.92.0" },
+    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.91.5,<1.92.0" },
     { name = "logfire", specifier = ">=4.19.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "markdown-it-py", specifier = ">=3.0.0" },
@@ -463,7 +465,7 @@ requires-dist = [
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
     { name = "watchfiles", specifier = ">=1.0.4" },
 ]
-provides-extras = ["documents", "milvus", "pdf", "redis"]
+provides-extras = ["documents", "litellm", "milvus", "pdf", "redis"]
 
 [package.metadata.requires-dev]
 dev = [
