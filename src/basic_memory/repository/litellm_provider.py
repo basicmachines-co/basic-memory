@@ -101,7 +101,8 @@ def _import_litellm() -> Any:
             "LiteLLM embeddings and reranking need the optional SDK. "
             "Install basic-memory[litellm], for example with "
             '`uv tool install --force "basic-memory[litellm]" --prerelease=allow` or '
-            '`pip install "basic-memory[litellm]"`.'
+            '`pip install "basic-memory[litellm]"`. '
+            "Include any other extras you use in the same specification."
         ) from exc
 
     return litellm
