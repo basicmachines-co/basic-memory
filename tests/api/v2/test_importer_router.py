@@ -170,6 +170,7 @@ async def test_import_chatgpt(
     assert result.success is True
     assert result.conversations == 1
     assert result.messages == 2
+    assert result.file_paths == ["test_chatgpt/20250111-Test_Conversation.md"]
 
     # Verify files were created
     conv_path = Path("test_chatgpt") / "20250111-Test_Conversation.md"
@@ -254,6 +255,7 @@ async def test_import_claude_conversations(
     assert result.success is True
     assert result.conversations == 1
     assert result.messages == 2
+    assert result.file_paths == ["test_claude_conversations/20250105-Test_Conversation.md"]
 
     # Verify files were created
     conv_path = Path("test_claude_conversations") / "20250105-Test_Conversation.md"

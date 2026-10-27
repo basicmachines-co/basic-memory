@@ -18,6 +18,9 @@ class ChatImportResult(ImportResult):
 
     conversations: int = 0
     messages: int = 0
+    # Callers that act on the imported notes (an index note, a follow-up agent run)
+    # need to know which files the import wrote; the counts alone do not say.
+    file_paths: list[str] = []
 
 
 class ProjectImportResult(ImportResult):
