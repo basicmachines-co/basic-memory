@@ -276,7 +276,6 @@ def compile_fts_filter(
     match_conditions: list[str] = []
     from_clause = "search_index"
     score_expression = BM25_SCORE_EXPRESSION
-    preserve_match_score = False
     search_text = query.search_text
 
     # Wildcard-only and blank text add no text condition: every row matches.
@@ -287,7 +286,6 @@ def compile_fts_filter(
         # Outcome: mixed queries rank all terms together; word-only queries retain
         # their established per-column matching and ranking behavior.
         if script_query.gram_phrases:
-            preserve_match_score = True
             params["text"] = ""
             params["script_text"] = ""
             if script_query.word_text:
@@ -458,26 +456,20 @@ def compile_fts_filter(
         )
         match_conditions = [ranked_match]
 
-    # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
-    # "unable to use function MATCH in the requested context".
-    # Why: script queries need MATCH and bm25 together for ranking, while legacy
-    # word-column OR predicates cannot evaluate bm25 in the same derived query.
-    # Outcome: rank script matches before joining metadata; retain the established
-    # rowid-filter path for word-only searches.
+    # MATCH and BM25 must run together before metadata joins. Moving only
+    # MATCH into a rowid subquery leaves the outer BM25 without match context,
+    # yielding zero scores and ordering matching notes by id instead of relevance.
+    # OFFSET 0 prevents SQLite from flattening this query back into the join,
+    # where per-column OR MATCH predicates cannot retain a valid FTS context.
     if query.metadata_filters and match_conditions:
         match_where = " AND ".join(match_conditions)
-        if preserve_match_score:
-            from_clause = (
-                "(SELECT search_index.rowid AS rowid, search_index.*, "
-                f"{BM25_SCORE_EXPRESSION} AS fts_score "
-                f"FROM search_index WHERE {match_where}) AS search_index "
-                "JOIN entity ON search_index.entity_id = entity.id"
-            )
-            score_expression = "search_index.fts_score"
-        else:
-            conditions.append(
-                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
-            )
+        from_clause = (
+            "(SELECT search_index.rowid AS rowid, search_index.*, "
+            f"{BM25_SCORE_EXPRESSION} AS fts_score "
+            f"FROM search_index WHERE {match_where} LIMIT -1 OFFSET 0) AS search_index "
+            "JOIN entity ON search_index.entity_id = entity.id"
+        )
+        score_expression = "search_index.fts_score"
     else:
         conditions.extend(match_conditions)
 

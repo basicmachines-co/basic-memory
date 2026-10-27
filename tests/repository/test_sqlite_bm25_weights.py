@@ -10,14 +10,16 @@ search path.
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.models import Entity
+from basic_memory.models import Entity, Project
 from basic_memory.models.search import CREATE_SEARCH_INDEX
 from basic_memory.repository import sqlite_search_query
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_repository import SearchIndexRow
+from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.schemas.search import SearchItemType
 
@@ -81,7 +83,7 @@ async def _index_note(
     title: str,
     body: str,
     project_id: int,
-    metadata: dict | None,
+    metadata: dict[str, str] | None,
 ) -> None:
     now = datetime.now(timezone.utc)
     permalink = f"note-{number}"
@@ -188,3 +190,39 @@ async def test_a_metadata_filter_does_not_change_the_ranking(
 
     assert [row.title for row in unfiltered]
     assert [row.title for row in filtered] == [row.title for row in unfiltered]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", [TITLE, "API NOT obsolete", f"API {SCRIPT}"])
+async def test_metadata_filters_preserve_scores_when_title_note_is_created_later(
+    session_maker: async_sessionmaker[AsyncSession],
+    search_repository: SearchRepositoryBase,
+    test_project: Project,
+    query: str,
+) -> None:
+    if isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("the title weighting is the SQLite bm25 score")
+
+    # A lower-id body match exposes accidental id ordering when BM25 loses its
+    # MATCH context. Creating the title match first would hide that regression.
+    await _index_note(
+        session_maker,
+        search_repository,
+        number=0,
+        title="Earlier meeting",
+        body=MEETING_BODY,
+        project_id=test_project.id,
+        metadata={"status": "active"},
+    )
+    await _index_title_fixture(session_maker, search_repository, test_project.id)
+    unfiltered = await search_repository.search(search_text=query)
+    filtered = await search_repository.search(
+        search_text=query, metadata_filters={"status": "active"}
+    )
+
+    assert unfiltered
+    if query == TITLE:
+        assert unfiltered[0].title == TITLE
+    assert [row.title for row in filtered] == [row.title for row in unfiltered]
+    assert [row.score for row in filtered] == pytest.approx([row.score for row in unfiltered])
+    assert all(row.score is not None and row.score < 0 for row in filtered)
