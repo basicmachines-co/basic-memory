@@ -43,6 +43,7 @@ from basic_memory_benchmarks.agent_tasks.models import (
     SkillBreakdown,
     SurfaceEcho,
     SurfaceSummary,
+    ToolArgumentSummary,
 )
 from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, spec_needs_project_state
 from basic_memory_benchmarks.agent_tasks.surfaces import (
@@ -532,6 +533,22 @@ def build_surface_summary(
         for group in sorted({row.group for row in results if row.group is not None})
     }
 
+    tool_records = [
+        record for row in results for record in row.turn_records if record.kind == "tool"
+    ]
+    per_tool_arguments: dict[str, ToolArgumentSummary] = {}
+    for tool_name in sorted({record.tool_name for record in tool_records if record.tool_name}):
+        records = [record for record in tool_records if record.tool_name == tool_name]
+        checked = sum(record.arguments_valid is not None for record in records)
+        invalid = sum(record.arguments_valid is False for record in records)
+        per_tool_arguments[tool_name] = ToolArgumentSummary(
+            calls=len(records),
+            schema_checked_calls=checked,
+            invalid_argument_calls=invalid,
+            invalid_argument_rate=invalid / checked if checked else None,
+            tool_errors=sum(record.is_error for record in records),
+        )
+
     return SurfaceSummary(
         surface=surface,
         model=model_spec,
@@ -553,6 +570,7 @@ def build_surface_summary(
         mean_wall_seconds=round(mean(row.wall_seconds for row in graded), 2) if graded else 0.0,
         per_skill=per_skill,
         per_group=per_group,
+        per_tool_arguments=per_tool_arguments,
         judge_input_tokens=sum(row.judge_input_tokens for row in results),
         judge_output_tokens=sum(row.judge_output_tokens for row in results),
         judge_calls=sum(row.judge_calls for row in results),
@@ -611,6 +629,23 @@ def build_agent_summary_markdown(
         lines += ["", "## Surfaces not run (the table above is NOT a complete A/B)", ""]
         for status in skipped:
             lines.append(f"- {status.provider} ({status.state}): {status.reason or 'no reason'}")
+
+    lines += ["", "## Tool arguments", ""]
+    lines += [
+        "| Surface | Tool | Calls | Schema checked | Invalid arguments | Invalid rate | Tool errors |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for summary in summaries:
+        for name, counts in summary.per_tool_arguments.items():
+            rate = (
+                f"{counts.invalid_argument_rate:.1%}"
+                if counts.invalid_argument_rate is not None
+                else "n/a"
+            )
+            lines.append(
+                f"| {summary.surface} | {name} | {counts.calls} | {counts.schema_checked_calls} |"
+                f" {counts.invalid_argument_calls} | {rate} | {counts.tool_errors} |"
+            )
 
     lines += ["", "## Per skill", ""]
     lines += [

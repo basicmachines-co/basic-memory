@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -208,6 +208,7 @@ source = { editable = "." }
 dependencies = [
     { name = "basic-memory" },
     { name = "httpx" },
+    { name = "jsonschema" },
     { name = "mcp" },
     { name = "mem0ai", extra = ["nlp"] },
     { name = "pydantic" },
@@ -228,6 +229,7 @@ dev = [
 requires-dist = [
     { name = "basic-memory", specifier = ">=0.20.2" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "jsonschema", specifier = ">=4.25.0" },
     { name = "mcp", specifier = ">=1.23.1" },
     { name = "mem0ai", extras = ["nlp"], specifier = "==2.0.5" },
     { name = "pydantic", specifier = ">=2.12.0" },

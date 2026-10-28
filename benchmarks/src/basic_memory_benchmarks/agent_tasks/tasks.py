@@ -1,13 +1,15 @@
 """The shipped agent tasks, derived from the Basic Memory skills.
 
 Each task is declarative data (see ``spec.py``); grading is deterministic for
-all twelve (the judge seam exists but no shipped task uses it, so judge tokens
+all tasks (the judge seam exists but no shipped task uses it, so judge tokens
 never touch the headline). Gold values are pinned to the seed corpus in
 ``benchmarks/datasets/agent-tasks/corpus`` and enforced by the fixture
 integrity tests.
 """
 
 from __future__ import annotations
+
+from basic_memory_benchmarks.agent_tasks.release_tasks import RELEASE_TASKS
 
 from basic_memory_benchmarks.agent_tasks.spec import (
     NEW_FILE_SELECTOR,
@@ -230,10 +232,14 @@ TASKS: tuple[AgentTaskSpec, ...] = (
             # Both tool spellings are substantively correct: the man page is
             # bm-edit(3) while the MCP tool itself is bm_edit.
             AnswerMatches(pattern=r"bm[-_]edit"),
-            ToolCalled(name_pattern=r"bm_read|bm_search|bm_man|read_note|search_notes|cat|grep|man"),
+            ToolCalled(
+                name_pattern=r"bm_read|bm_search|bm_man|read_note|search_notes|cat|grep|man"
+            ),
         ),
     ),
 )
+
+TASKS += RELEASE_TASKS
 
 TASKS_BY_ID: dict[str, AgentTaskSpec] = {task.id: task for task in TASKS}
 

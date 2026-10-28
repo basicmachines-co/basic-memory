@@ -18,6 +18,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
+from jsonschema.validators import validator_for
+
 from basic_memory_benchmarks.agent_tasks.models import AgentBudget, StopReason, TurnRecord
 from basic_memory_benchmarks.llm.tool_agent import (
     AssistantTurn,
@@ -102,6 +104,7 @@ def run_agent_loop(
     clock: Callable[[], float] = time.monotonic,
 ) -> AgentLoopResult:
     allowed_names = {tool.name for tool in tools}
+    validators = {tool.name: validator_for(tool.input_schema)(tool.input_schema) for tool in tools}
     transcript: list[TranscriptItem] = [UserMessage(text=prompt)]
     turn_records: list[TurnRecord] = []
     model_turns = 0
@@ -167,6 +170,13 @@ def run_agent_loop(
             if clock() - started >= budget.max_task_seconds:
                 return stop("wall_clock", None)
             tool_call_count += 1
+            # Observe schema mistakes without changing server behavior or the
+            # feedback seen by the model. Domain refusals remain tool errors.
+            arguments_valid = (
+                validators[call.name].is_valid(call.arguments)
+                if call.name in allowed_names
+                else None
+            )
             if call.name not in allowed_names:
                 # Hallucinated or off-surface tool: never reaches BM; the error
                 # is fed back so the model can self-correct within budget.
@@ -190,6 +200,7 @@ def run_agent_loop(
                             tool_name=call.name,
                             arguments_chars=len(str(call.arguments)),
                             is_error=True,
+                            arguments_valid=arguments_valid,
                             arguments_excerpt=_arguments_excerpt(call.arguments),
                             error_excerpt=_excerpt(str(exc)),
                         )
@@ -210,6 +221,7 @@ def run_agent_loop(
                     arguments_chars=len(str(call.arguments)),
                     result_chars=len(fed_back),
                     is_error=outcome.is_error,
+                    arguments_valid=arguments_valid,
                     arguments_excerpt=arguments_excerpt,
                     error_excerpt=error_excerpt,
                 )

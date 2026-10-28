@@ -89,6 +89,9 @@ class TurnRecord(BaseModel):
     arguments_chars: int = 0
     result_chars: int = 0
     is_error: bool = False
+    # Schema conformance is independent of a domain refusal (e.g. NOT_FOUND).
+    # None means no advertised schema existed, or an older artifact lacks it.
+    arguments_valid: bool | None = None
     # Set only on error turns: the arguments that provoked the error and the
     # text the model was told. Success payloads stay out of the artifact (large,
     # and reproducible from the corpus); an error that recurs run after run is
@@ -138,6 +141,14 @@ class SkillBreakdown(BaseModel):
     tokens_per_completed: float | None = None
 
 
+class ToolArgumentSummary(BaseModel):
+    calls: int
+    schema_checked_calls: int
+    invalid_argument_calls: int
+    invalid_argument_rate: float | None
+    tool_errors: int
+
+
 class SurfaceSummary(BaseModel):
     surface: str
     model: str
@@ -162,6 +173,8 @@ class SurfaceSummary(BaseModel):
     judge_input_tokens: int = 0
     judge_output_tokens: int = 0
     judge_calls: int = 0
+
+    per_tool_arguments: dict[str, ToolArgumentSummary] = Field(default_factory=dict)
 
 
 class SurfaceEcho(BaseModel):

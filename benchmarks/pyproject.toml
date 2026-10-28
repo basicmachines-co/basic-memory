@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "basic-memory>=0.20.2",
     "httpx>=0.28.0",
+    "jsonschema>=4.25.0",
     "mcp>=1.23.1",
     "mem0ai[nlp]==2.0.5",
     "pydantic>=2.12.0",
