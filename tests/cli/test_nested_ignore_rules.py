@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from basic_memory.ignore_utils import filter_files
+from basic_memory.ignore_utils import filter_files, load_gitignore_patterns
 
 
 @pytest.mark.parametrize(
@@ -22,6 +22,8 @@ from basic_memory.ignore_utils import filter_files
         ("/private/keys/", "private/keys/nested/token.md", True),
         ("private/*/", "private/file.md", False),
         ("keys/", "keys", False),
+        ("#cache/", "#cache/note.md", True),
+        ("!cache/", "!cache/note.md", True),
     ],
 )
 def test_nested_directory_ignore_rule(tmp_path: Path, pattern: str, path: str, ignored: bool):
@@ -52,6 +54,8 @@ def test_nested_directory_ignore_rule(tmp_path: Path, pattern: str, path: str, i
         ("foo/****/", "foo/note.md", False),
         ("foo/****/", "foo/a/note.md", True),
         ("foo/**a/bar/", "foo/a/b/bar/note.md", False),
+        ("a/[^x]/", "a/x/note.md", False),
+        ("a/[^x]/", "a/y/note.md", True),
     ],
 )
 def test_directory_wildcards_respect_components(
@@ -63,3 +67,33 @@ def test_directory_wildcards_respect_components(
     selected, count = filter_files([source], tmp_path, {pattern})
     assert selected == ([] if ignored else [source])
     assert count == int(ignored)
+
+
+@pytest.mark.parametrize("ignore_file", [".bmignore", ".gitignore"])
+@pytest.mark.parametrize(
+    ("pattern", "directory"),
+    [
+        (r"\#cache/", "#cache"),
+        (r"\!cache/", "!cache"),
+        (r"cache\ space/", "cache space"),
+        (r"notes/\[cache\]/", "notes/[cache]"),
+    ],
+)
+def test_directory_rule_loader_preserves_git_escapes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignore_file: str,
+    pattern: str,
+    directory: str,
+):
+    config = tmp_path / "config"
+    config.mkdir()
+    root = tmp_path / "project"
+    root.mkdir()
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(config))
+    ((config if ignore_file == ".bmignore" else root) / ignore_file).write_text(pattern + "\n")
+    source = root / directory / "note.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("private content")
+    rules = load_gitignore_patterns(root, strict=True)
+    assert filter_files([source], root, rules) == ([], 1)

@@ -58,6 +58,7 @@ dependencies = [
     # an artifact without a sibling flush's just-retired event.
     "filelock>=3.12",
     "fastapi-redis-sdk==0.8.1",
+    "pathspec>=1.1.1,<2",
 ]
 
 [project.optional-dependencies]

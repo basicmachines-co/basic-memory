@@ -2,8 +2,11 @@
 
 import fnmatch
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Set
+
+from pathspec import GitIgnoreSpec
 
 from basic_memory.config import resolve_data_dir
 
@@ -79,6 +82,9 @@ def _parse_ignore_pattern_line(raw_line: str) -> str | None:
     line = raw_line.rstrip("\r\n")
     if not line or line.startswith("#"):
         return None
+    # Directory rules are compiled by pathspec, which needs their original escapes.
+    if line.rstrip(" ").endswith("/"):
+        return line.rstrip(" ")
     # fnmatch has no backslash escapes. Decode literal hashes, spaces, and
     # backslashes together so escaped trailing spaces survive, while unescaped
     # trailing spaces are discarded without changing significant leading ones.
@@ -258,26 +264,21 @@ def load_gitignore_patterns(
     return patterns
 
 
-def _matches_directory_ancestor(parts: tuple[str, ...], pattern: str) -> bool:
-    """Match a rooted directory rule against ancestors, with Git-style globstar."""
-    matched = [True] + [False] * len(parts)
+@lru_cache(maxsize=512)
+def _directory_rule(pattern: str) -> GitIgnoreSpec:
+    """Compile a directory rule once, retaining Git's observed globstar behavior."""
     components = pattern.split("/")
-    for position, component in enumerate(components):
+    for index, component in enumerate(components):
         if len(component) >= 2 and not component.strip("*"):
-            # A trailing directory globstar must name a descendant directory,
-            # while an intermediate globstar may consume zero directories.
-            if position == len(components) - 1:
-                matched = [False] + matched[:-1]
-            # Globstar consumes zero or more whole directories; other wildcards
-            # operate on one component so a single star never crosses a slash.
-            for end in range(1, len(matched)):
-                matched[end] = matched[end] or matched[end - 1]
-        else:
-            matched = [False] + [
-                matched[end - 1] and fnmatch.fnmatch(part, component)
-                for end, part in enumerate(parts, 1)
-            ]
-    return any(matched)
+            # Git accepts longer all-star components. A terminal directory globstar
+            # must consume a directory; pathspec otherwise also matches direct files.
+            components[index] = "*" if index == len(components) - 2 else "**"
+    normalized = "/".join(components)
+    # Rule collections are unordered exclusion sets; adding ordered negation is a
+    # separate compatibility change. Preserve literal leading ! and decoded # names.
+    if normalized.startswith(("!", "#")):
+        normalized = "\\" + normalized
+    return GitIgnoreSpec.from_lines([normalized], backend="simple")
 
 
 def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[str]) -> bool:
@@ -296,26 +297,16 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
         relative_path = file_path.relative_to(base_path)
         relative_str = str(relative_path)
         relative_posix = relative_path.as_posix()  # Use forward slashes for matching
-        directory_parts: tuple[str, ...] | None = None
+        directory_match_path: str | None = None
 
         # Check each pattern
         for pattern in ignore_patterns:
             if pattern.endswith("/"):
-                if directory_parts is None:
-                    # Export/ZIP callers pass files; directory walkers also pass
-                    # directories for pruning. A file's own name is never an ancestor.
-                    directory_parts = (
-                        relative_path.parts if file_path.is_dir() else relative_path.parts[:-1]
-                    )
-                directory_pattern = pattern[:-1]
-                # A slash anchors the rule to the project root. Compare whole
-                # ancestor paths so private/keys/ excludes its descendants without
-                # accidentally matching other/private/keys/ or keys-other/.
-                if "/" in directory_pattern:
-                    directory_pattern = directory_pattern.removeprefix("/")
-                    if _matches_directory_ancestor(directory_parts, directory_pattern):
-                        return True
-                elif any(fnmatch.fnmatch(part, directory_pattern) for part in directory_parts):
+                if directory_match_path is None:
+                    # A trailing slash tells pathspec that walkers are pruning an
+                    # actual directory. Files with the same name remain selectable.
+                    directory_match_path = relative_posix + ("/" if file_path.is_dir() else "")
+                if _directory_rule(pattern).match_file(directory_match_path):
                     return True
                 continue
 
