@@ -42,13 +42,17 @@ def test_nested_directory_ignore_rule(tmp_path: Path, pattern: str, path: str, i
         ("foo/**/bar/", "foo/a/bar/note.md", True),
         ("foo/**/bar/", "foo/a/b/bar/note.md", True),
         ("foo/**/bar/", "foo/a/b/barley/note.md", False),
+        ("foo/**/", "foo/a.md", False),
+        ("foo/**/", "foo/sub/a.md", True),
+        ("/**/", "a.md", False),
+        ("/**/", "sub/a.md", True),
     ],
 )
 def test_directory_wildcards_respect_components(
     tmp_path: Path, pattern: str, path: str, ignored: bool
 ):
     source = tmp_path / path
-    source.parent.mkdir(parents=True)
+    source.parent.mkdir(parents=True, exist_ok=True)
     source.write_text("private data")
     selected, count = filter_files([source], tmp_path, {pattern})
     assert selected == ([] if ignored else [source])

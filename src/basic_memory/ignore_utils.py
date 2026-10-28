@@ -261,8 +261,13 @@ def load_gitignore_patterns(
 def _matches_directory_ancestor(parts: tuple[str, ...], pattern: str) -> bool:
     """Match a rooted directory rule against ancestors, with Git-style globstar."""
     matched = [True] + [False] * len(parts)
-    for component in pattern.split("/"):
+    components = pattern.split("/")
+    for position, component in enumerate(components):
         if component == "**":
+            # A trailing directory globstar must name a descendant directory,
+            # while an intermediate globstar may consume zero directories.
+            if position == len(components) - 1:
+                matched = [False] + matched[:-1]
             # Globstar consumes zero or more whole directories; other wildcards
             # operate on one component so a single star never crosses a slash.
             for end in range(1, len(matched)):
