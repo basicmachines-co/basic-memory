@@ -85,7 +85,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 entity_type_dir = (
                     f"{destination_folder}/{entity_type}" if destination_folder else entity_type
                 )
-                await self.file_service.ensure_directory(entity_type_dir)
+                await self.ensure_folder_exists(entity_type_dir)
 
                 # Get observations with fallback to empty list
                 observations = entity_data.observations
