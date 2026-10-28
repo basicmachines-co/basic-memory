@@ -83,10 +83,13 @@ async def upload_path(
         # Validate the same separator-normalized paths that will reach HTTP.
         # A literal POSIX backslash filename can otherwise become ../ segments
         # and make the HTTP client dispatch outside the selected project route.
-        files_to_upload = [
-            (source, normalize_note_move_destination_path(relative.replace("\\", "/")))
-            for source, relative in files_to_upload
-        ]
+        validated_files: list[tuple[Path, str]] = []
+        for source, relative in files_to_upload:
+            destination = relative.replace("\\", "/")
+            normalize_note_move_destination_path(destination)
+            # Validation must not trim or NFC-normalize distinct legal filenames.
+            validated_files.append((source, destination))
+        files_to_upload = validated_files
 
         print(f"Found {len(files_to_upload)} file(s) to upload")
 

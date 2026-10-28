@@ -42,3 +42,29 @@ async def test_upload_refuses_traversing_backslash_name(tmp_path: Path, single_f
     )
     assert received == []
     assert not success
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX filename spelling")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", [" note.md", "note.md ", "cafe\u0301.md"])
+async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name: str):
+    (tmp_path / "note.md").write_bytes(b"ordinary")
+    (tmp_path / name).write_bytes(b"distinct")
+    received: dict[str, bytes] = {}
+    receiver = FastAPI()
+
+    @receiver.put("/webdav/{project}/{path:path}")
+    async def receive(project: str, path: str, request: Request) -> Response:
+        assert project == "authorized-project"
+        received[path] = await request.body()
+        return Response(status_code=201)
+
+    @asynccontextmanager
+    async def client_factory() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=receiver), base_url="http://upload.test"
+        ) as client:
+            yield client
+
+    assert await upload_path(tmp_path, "authorized-project", client_cm_factory=client_factory)
+    assert received == {"note.md": b"ordinary", name: b"distinct"}
