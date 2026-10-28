@@ -277,27 +277,26 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
 
         # Check each pattern
         for pattern in ignore_patterns:
+            if pattern.endswith("/"):
+                directory_pattern = pattern[:-1]
+                # A slash anchors the rule to the project root. Compare whole
+                # ancestor paths so private/keys/ excludes its descendants without
+                # accidentally matching other/private/keys/ or keys-other/.
+                if "/" in directory_pattern:
+                    directory_pattern = directory_pattern.removeprefix("/")
+                    if any(
+                        fnmatch.fnmatch("/".join(relative_path.parts[:end]), directory_pattern)
+                        for end in range(1, len(relative_path.parts) + 1)
+                    ):
+                        return True
+                elif any(fnmatch.fnmatch(part, directory_pattern) for part in relative_path.parts):
+                    return True
+                continue
+
             # Handle patterns starting with / (root relative)
             if pattern.startswith("/"):
                 root_pattern = pattern[1:]  # Remove leading /
-
-                # For directory patterns ending with /
-                if root_pattern.endswith("/"):
-                    dir_name = root_pattern[:-1]  # Remove trailing /
-                    # Check if the first part of the path matches the directory name
-                    if len(relative_path.parts) > 0 and relative_path.parts[0] == dir_name:
-                        return True
-                else:
-                    # Regular root-relative pattern
-                    if fnmatch.fnmatch(relative_posix, root_pattern):
-                        return True
-                continue
-
-            # Handle directory patterns (ending with /)
-            if pattern.endswith("/"):
-                dir_name = pattern[:-1]  # Remove trailing /
-                # Check if any path part matches the directory name
-                if dir_name in relative_path.parts:
+                if fnmatch.fnmatch(relative_posix, root_pattern):
                     return True
                 continue
 
