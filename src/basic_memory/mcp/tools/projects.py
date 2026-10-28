@@ -21,7 +21,7 @@ from basic_memory.mcp.tool_params import (
     OutputFormat,
     Page,
     PageSize,
-    ProjectParam,
+    OptionalProjectParam,
     Since,
     parse_project,
     routing_arguments,
@@ -47,8 +47,7 @@ Workspace = Annotated[
     description=(
         "Basic Memory projects. `command`: list (projects, grouped by workspace); create "
         "(`name`, `path`, optional `set_default`, `workspace`); recent (what changed "
-        "lately: `since`, `items`, paging; `project` picks the project, else the default "
-        "project, and with no default every project)."
+        "lately in the required `project`: `since`, `items`, paging)."
     ),
     tags={"projects"},
     annotations={
@@ -86,7 +85,7 @@ async def bm_project(
     page: Page = 1,
     page_size: PageSize = 10,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    project: OptionalProjectParam = None,
     context: Context | None = None,
 ) -> str | dict[str, Any] | list[dict[str, Any]]:
     """List or create projects, or show what changed in them."""
@@ -110,6 +109,13 @@ async def bm_project(
                 context=context,
             )
         case "recent":
+            if project is None:
+                raise refusal(
+                    "INVALID_ARGUMENTS",
+                    "recent needs `project`, a project name, workspace/project or external id.",
+                    try_instead="bm_project(command='list') to discover projects",
+                    output_format=output_format,
+                )
             project_name, project_id = routing_arguments(parse_project(project))
             activity = await recent_activity_page(
                 # recent_activity names whole notes "entity", the API's word.

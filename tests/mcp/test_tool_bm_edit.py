@@ -298,12 +298,13 @@ async def test_refusal_guidance_keeps_the_project_prefix(client, test_project):
     await _seed(test_project.name)
     prefix = test_project.permalink
 
-    with pytest.raises(ToolError, match=f"bm_read\\(identifier='{prefix}/notes/plan.md'\\)"):
+    with pytest.raises(ToolError, match=f"bm_read\\(identifier='{prefix}/notes/plan.md', project="):
         await bm_edit(
             identifier=f"{prefix}/notes/plan.md",
             command="append",
             content="x",
             expected_checksum="stale",
+            project=test_project.name,
         )
 
 

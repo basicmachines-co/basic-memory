@@ -18,16 +18,16 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_list(path="/", glob=None, sort=None, page=1, page_size=10,
-        output_format="text", project=None)
+bm_list(project, path="/", glob=None, sort=None, page=1, page_size=10,
+        output_format="text")
 ```
 
 ## DESCRIPTION
 
 Lists one level of a folder: subfolders first, then files with their title,
-date and id. `bm_list(path="/")` with no project lists the projects you can
-address; `<project>/path` lists inside another project, and the paths that come
-back carry the same prefix.
+date and id. `project` is required, including when `path="/"` lists its root.
+Discover available projects with `bm_project(command="list")`. A qualified path
+must agree with `project`; returned paths keep that prefix.
 
 Filter files with `glob` and order them with `sort`. Results are paged; the text
 output ends with the call for the next page. For a recursive search by name or
@@ -37,36 +37,34 @@ The shell counterpart is ls(1).
 
 ## PARAMETERS
 
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **path** (string, optional, default: "/") — A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the project root; '<project>/path' addresses another project.
 - **glob** (string | null, optional, default: None) — File-name glob, e.g. '*.md' or '*meeting*'.
 - **sort** (string | null, optional, default: None) — File order. Folders always come first.
 - **page** (integer, optional, default: 1) — Page number.
 - **page_size** (integer, optional, default: 10) — Results per page (1-100).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 
 ```
-bm_list(path="/")
-# → Projects:
-#   📁 demo                           /demo
-#   📁 main                           /main
+bm_list(path="/", project="demo")
+# → Contents of '/':
+#   📁 plans                          /plans
 
 bm_list(path="plans", project="demo")
 # → Contents of 'plans':
 #   📄 launch-plan.md         plans/launch-plan.md | launch-plan | 2026-10-23 | id: 686e696d…
 #   📄 Release Checklist.md   plans/Release Checklist.md | Release Checklist | 2026-10-23 | id: 7bf40fbe…
 
-bm_list(path="demo/plans", sort="title_asc", output_format="json")
+bm_list(path="demo/plans", sort="title_asc", output_format="json", project="demo")
 # → {"nodes": [{"name": "launch-plan.md", "file_path": "demo/plans/launch-plan.md",
 #    "type": "file", "title": "launch-plan", ...}, ...], "page": 1, "has_more": false}
 ```
 
 ## GOTCHAS
 
-- `glob` and `sort` apply to files in a folder; on the project listing at `/`
-  they are refused.
+- `glob` and `sort` apply to files in a folder, including the project root `/`.
 
 ## SEE ALSO
 

@@ -64,7 +64,7 @@ async def test_project_qualified_identifier(client, test_project):
     await _note(test_project.name)
     prefix = test_project.permalink
 
-    text = await bm_delete(identifier=f"{prefix}/notes/plan.md")
+    text = await bm_delete(identifier=f"{prefix}/notes/plan.md", project=test_project.name)
 
     assert text == f"Deleted {prefix}/notes/plan.md"
 
@@ -169,7 +169,7 @@ async def test_refused_directory_delete(client, test_project, monkeypatch):
     with pytest.raises(ToolError, match="^LOCKED: A note is locked. Nothing was deleted."):
         await bm_delete(path="drafts", recursive=True, project=test_project.name)
     # A directory is looked at with bm_list, not bm_read.
-    with pytest.raises(ToolError, match=r"bm_list\(path='drafts'\)"):
+    with pytest.raises(ToolError, match=r"bm_list\(path='drafts', project="):
         await bm_delete(path="drafts", recursive=True, project=test_project.name)
 
 

@@ -121,7 +121,8 @@ async def bm_edit(
         ),
     ] = None,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Edit one existing note."""
@@ -153,7 +154,10 @@ async def bm_edit(
             target,
             identifier,
             output_format=output_format,
-            try_instead=f"bm_write(identifier='{identifier}', content='...') to create it",
+            try_instead=(
+                f"bm_write(identifier={identifier!r}, content='...', project={project!r}) "
+                "to create it"
+            ),
             expected_checksum=expected_checksum,
             unchanged="Nothing was changed.",
         )
@@ -175,6 +179,7 @@ async def bm_edit(
                 address=target.paths.path(note.file_path),
                 unchanged="Nothing was changed.",
                 output_format=output_format,
+                project=project,
             ) from error
 
     change = NoteChange.of(edited, action="edited", paths=target.paths)

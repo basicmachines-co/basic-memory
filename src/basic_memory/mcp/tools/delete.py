@@ -70,7 +70,8 @@ async def bm_delete(
         ),
     ] = None,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Delete one note or one directory."""
@@ -134,6 +135,7 @@ async def _delete_note(
             address=target.paths.path(note.file_path),
             unchanged="Nothing was deleted.",
             output_format=output_format,
+            project=target.project.external_id,
         ) from error
     file_path = target.paths.path(note.file_path)
     # Trigger: the note resolved, then was gone when the delete arrived.
@@ -188,7 +190,9 @@ async def _delete_directory(
             "INVALID_ARGUMENTS",
             f"'{shown}' is a directory with {listing.total} entries at its top level. "
             "Deleting it removes everything under it.",
-            try_instead=f"bm_delete(path='{shown}', recursive=true)",
+            try_instead=(
+                f"bm_delete(path={shown!r}, recursive=true, project={target.project.external_id!r})"
+            ),
             output_format=output_format,
         )
 
@@ -204,6 +208,7 @@ async def _delete_directory(
             unchanged="Nothing was deleted.",
             output_format=output_format,
             subject="directory",
+            project=target.project.external_id,
         ) from error
     if deleted.total_files == 0:
         raise refusal(
@@ -219,7 +224,9 @@ async def _delete_directory(
             + "; ".join(
                 f"{target.paths.path(failure.path)}: {failure.error}" for failure in deleted.errors
             ),
-            try_instead=f"bm_list(path='{shown}') to see what is left",
+            try_instead=(
+                f"bm_list(path={shown!r}, project={target.project.external_id!r}) to see what is left"
+            ),
             output_format=output_format,
         )
     if output_format == "json":

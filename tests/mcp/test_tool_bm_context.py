@@ -102,7 +102,7 @@ async def test_project_qualified_start_returns_qualified_paths(client, test_proj
     await _seed(test_project.name)
     prefix = test_project.permalink
 
-    graph = await context_json(identifier=f"{prefix}/graph/node-a")
+    graph = await context_json(identifier=f"{prefix}/graph/node-a", project=test_project.name)
 
     (result,) = graph["results"]
     paths = [result["primary_result"]["file_path"]]
@@ -117,7 +117,9 @@ async def test_project_qualified_text_names_qualified_paths(client, test_project
     await _seed(test_project.name)
     prefix = test_project.permalink
 
-    text = await bm_context(identifier=f"{prefix}/graph/node-a", output_format="text")
+    text = await bm_context(
+        identifier=f"{prefix}/graph/node-a", output_format="text", project=test_project.name
+    )
 
     assert isinstance(text, str)
     assert f"path: {prefix}/graph/Node A.md" in text

@@ -45,6 +45,12 @@ are paged; read full notes with bm_read.
 
 The shell counterpart is grep(1).
 
+Every search needs explicit project scope: `project` for one project, `projects`
+for a list, or `all_projects=True` for all accessible projects. A path or
+`memory://` query does not replace that requirement. For a one-project search,
+`identifier`, `path` or a `memory://` query narrows within the selected project.
+Discover projects with `bm_project(command="list")`.
+
 ## PARAMETERS
 
 - **query** (string | null, optional, default: None) — What to search for. Omit to search by filters alone.
@@ -68,7 +74,7 @@ The shell counterpart is grep(1).
 - **page** (integer, optional, default: 1) — Page number.
 - **page_size** (integer, optional, default: 10) — Results per page (1-100).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or external id. Required for one-project operations; search may instead use `projects` or `all_projects=true`. Project discovery needs no scope.
 
 ## EXAMPLES
 
@@ -81,6 +87,9 @@ bm_search(query="freeze", lines=0, mode="text", project="demo")
 bm_search(query="launch", note_types=["plan"], compact=True, project="demo")
 # → Results for 'launch' in project 'demo':
 #   - plans/launch-plan.md | launch-plan | score 1.212
+
+bm_search(query="launch", mode="text", projects=["demo", "team/research"])
+bm_search(query="launch", mode="text", all_projects=True)
 
 bm_search(query="release", mode="text", page_size=1, output_format="json", project="demo")
 # → {"results": [{"title": "release-checklist", "file_path": "plans/release-checklist.md",

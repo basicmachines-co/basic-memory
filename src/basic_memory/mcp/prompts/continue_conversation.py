@@ -48,10 +48,16 @@ async def continue_conversation(
     """
     logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
 
+    # Prompts choose their default at the entrypoint; tool calls always name it.
+    project = await resolve_project_parameter(project=project, context=context)
+    if project is None:
+        return (
+            "Choose a project with bm_project(command='list'), then continue this "
+            "conversation with an explicit project name or external id."
+        )
+
     if topic:
         # Use json format to get structured data for result counting and branching
-        # Choose the prompt's default explicitly before using the stricter search tool.
-        project = await resolve_project_parameter(project=project, context=context)
         result = await bm_search(
             query=topic, since=timeframe, project=project, context=context, output_format="json"
         )
@@ -90,8 +96,7 @@ async def continue_conversation(
         ## Next Steps
     """)
 
-    if project is not None:
-        prompt += f"\nPass `project={project!r}` on follow-up note and search calls.\n"
+    prompt += f"\nPass `project={project!r}` on follow-up note and search calls.\n"
 
     if topic and result_count > 0:
         prompt += dedent(f"""
@@ -108,7 +113,7 @@ async def continue_conversation(
         prompt += dedent(f"""
             No previous context found for '{topic}'.
 
-            Try `bm_search` with related terms or check `bm_project(command="recent")`. If the user wants this
+            Try `bm_search` with related terms or check `bm_project(command="recent", project={project!r})`. If the user wants this
             topic tracked, offer to start a note with `bm_write`.
         """)
     else:

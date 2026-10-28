@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_schema(command, note_type=None, identifier=None, threshold=0.25,
-          output_format="text", project=None)
+bm_schema(command, project, note_type=None, identifier=None, threshold=0.25,
+          output_format="text")
 ```
 
 ## DESCRIPTION
@@ -40,11 +40,11 @@ create one.
 ## PARAMETERS
 
 - **command** (required) — What to do.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **note_type** (string | null, optional, default: None) — The frontmatter `type:` to check. Required for infer and diff.
 - **identifier** (string | null, optional, default: None) — For validate: one note, instead of a whole note type.
 - **threshold** (number, optional, default: 0.25) — For infer: the share of notes a field must appear in to be suggested.
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

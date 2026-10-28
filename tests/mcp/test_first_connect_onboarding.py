@@ -26,7 +26,7 @@ def test_server_sets_first_connect_instructions():
     assert instructions is not None
     # Orients the model to what Basic Memory is and points at the first-note action.
     assert "Basic Memory" in instructions
-    assert 'bm_project(command="recent")' in instructions
+    assert 'bm_project(command="recent", project=' in instructions
     assert "bm_write" in instructions
     assert "https://docs.basicmemory.com/llms.txt" in instructions
     assert "/raw/...md" in instructions

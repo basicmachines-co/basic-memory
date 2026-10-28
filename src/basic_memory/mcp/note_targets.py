@@ -166,7 +166,7 @@ async def resolve_note(
         raise refusal(
             "INVALID_ARGUMENTS",
             f"'{identifier}' names a project, not a note.",
-            try_instead=f"bm_list(path='{identifier.rstrip('/')}/')",
+            try_instead=f"bm_list(path='/', project={target.project.external_id!r})",
             output_format=output_format,
         )
 
@@ -178,13 +178,18 @@ async def resolve_note(
         match answer.status_code if answer is not None else None:
             case 404 if expected_checksum is not None:
                 raise revision_conflict(
-                    identifier, None, unchanged=unchanged, output_format=output_format
+                    identifier,
+                    None,
+                    unchanged=unchanged,
+                    output_format=output_format,
+                    project=target.project.external_id,
                 ) from error
             case 404:
                 raise refusal(
                     "NOT_FOUND",
                     f"No note matches '{identifier}' in project '{target.project.name}'.",
-                    try_instead=try_instead or f"bm_search(query='{identifier}')",
+                    try_instead=try_instead
+                    or f"bm_search(query={identifier!r}, project={target.project.external_id!r})",
                     output_format=output_format,
                 ) from error
             # Several notes match exactly (two notes with one title); the API's

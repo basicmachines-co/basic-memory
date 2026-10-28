@@ -1,8 +1,8 @@
 """Directory listings: the project mount view and the text rendering of a page.
 
-The mount view lists the addressable projects as directories, so `bm_list("/")`
-doubles as project discovery. The text formatter renders any listing page the
-same way, with the next-page call when more pages exist.
+The legacy mount view lists addressable projects as directories. The bm_* surface
+discovers projects with bm_project and requires scope on bm_list. The text
+formatter renders any listing page with the next-page call when more pages exist.
 """
 
 from datetime import datetime

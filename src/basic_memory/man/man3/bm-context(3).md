@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_context(identifier, depth=1, since="7d", max_related=10, compact=False,
-           page=1, page_size=10, output_format="json", project=None)
+bm_context(identifier, project, depth=1, since="7d", max_related=10,
+           compact=False, page=1, page_size=10, output_format="json")
 ```
 
 ## DESCRIPTION
@@ -41,6 +41,7 @@ one.
 ## PARAMETERS
 
 - **identifier** (string, required) — Where to start: a note path, permalink, memory:// URL, or a pattern such as 'specs/*'.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **depth** (integer, optional, default: 1) — Relation hops to follow (1-5).
 - **since** (string, optional, default: "7d") — How far back to look: '7d', '24h', '2 days ago', 'last week', or a date. Windows shorter than one day are widened to one day.
 - **max_related** (integer, optional, default: 10) — Most related results to return (0-100).
@@ -48,7 +49,6 @@ one.
 - **page** (integer, optional, default: 1) — Page number.
 - **page_size** (integer, optional, default: 10) — Primary results per page (1-50).
 - **output_format** (optional, default: "json")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

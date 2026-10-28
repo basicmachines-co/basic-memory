@@ -69,7 +69,8 @@ async def bm_schema(
         ),
     ] = 0.25,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> ValidationReport | str | dict[str, Any]:
     """Validate, infer or diff note schemas."""

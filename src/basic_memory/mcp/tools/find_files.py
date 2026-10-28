@@ -80,7 +80,8 @@ async def bm_find(
     page: Page = 1,
     page_size: PageSize = 10,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Find files by name, or notes by frontmatter."""

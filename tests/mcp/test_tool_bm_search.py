@@ -87,7 +87,12 @@ async def test_path_limits_the_search_to_a_folder(client, test_project):
 async def test_project_qualified_path_returns_qualified_paths(client, test_project):
     await _seed(test_project.name)
 
-    payload = await search_json(query="deploy", mode="text", path=f"{test_project.permalink}/tasks")
+    payload = await search_json(
+        query="deploy",
+        mode="text",
+        path=f"{test_project.permalink}/tasks",
+        project=test_project.name,
+    )
 
     assert payload["results"][0]["file_path"] == f"{test_project.permalink}/tasks/Deploy Plan.md"
 
@@ -359,7 +364,9 @@ async def test_a_project_qualified_memory_url_routes_the_search(client, test_pro
     """'memory://<project>/...' searches the project it names, as a read would."""
     await _seed(test_project.name)
 
-    payload = await search_json(query=f"memory://{test_project.permalink}/tasks/*")
+    payload = await search_json(
+        query=f"memory://{test_project.permalink}/tasks/*", project=test_project.name
+    )
 
     assert [row["title"] for row in payload["results"]] == ["Deploy Plan"]
 
@@ -382,7 +389,7 @@ async def test_results_across_projects_carry_routable_paths(client, test_project
     paths = [row["file_path"] for row in payload["results"]]
     assert f"{test_project.permalink}/tasks/Deploy Plan.md" in paths
     assert text.startswith("Results for 'rollback' in all projects:")
-    note = await bm_read(paths[0])
+    note = await bm_read(paths[0], project=test_project.name)
     assert isinstance(note, str)
 
 

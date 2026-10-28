@@ -11,19 +11,12 @@ from basic_memory.mcp.prompts.recent_activity import recent_activity_prompt
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_prompt_discovery_mode(monkeypatch):
-    """Test prompt in discovery mode (no project specified)."""
-    # The tool returns a formatted string in discovery mode
-    tool_output = """## Recent Activity Summary (7d)
+async def test_recent_activity_prompt_resolves_default_scope(monkeypatch, config_manager):
+    """An omitted prompt scope resolves the default before dispatching the tool."""
+    default_project = config_manager.config.default_project
+    tool_output = f"""## Recent Activity: {default_project} (7d)
 
-**Most Active Project:** project-alpha (5 items)
-- 🔧 **Latest:** API Design Decision (2 hours ago)
-- 📋 **Focus areas:** decisions, specs
-
-**Other Active Projects:**
-- **project-beta** (3 items)
-
-**Summary:** 2 active projects, 8 recent items
+- API Design Decision (2 hours ago)
 """
 
     async def fake_fn(**_kwargs):
@@ -34,20 +27,19 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
     out = await recent_activity_prompt(timeframe="7d", project=None)  # pyright: ignore[reportGeneralTypeIssues]
 
     # Should contain the tool output
-    assert "Recent Activity Summary (7d)" in out
-    assert "Most Active Project" in out
+    assert f"Recent Activity: {default_project} (7d)" in out
+    assert "API Design Decision" in out
 
     # Should contain prompt guidance
     assert "Recent Activity Context" in out
     assert "Next Steps" in out
     assert "Capture Opportunity" in out
-    # Discovery mode has no project; the guidance must not invent a "default" project name.
+    # Guidance carries the resolved route rather than a made-up project named default.
     assert 'project="default"' not in out
-    # A bare call may reach the default project or every project; the header must
-    # not assert either scope, since the tool output states which one applied.
     assert "all projects" not in out
     assert "default project" not in out
-    assert "showing recent activity." in out
+    assert f"showing recent activity from project '{default_project}'." in out
+    assert f"project='{default_project}'" in out
 
 
 @pytest.mark.asyncio
@@ -100,7 +92,7 @@ async def test_recent_activity_prompt_passes_correct_params(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_prompt_defaults_timeframe(monkeypatch):
+async def test_recent_activity_prompt_defaults_timeframe(monkeypatch, config_manager):
     """Prompt should fall back to 7d when timeframe omitted or falsy."""
     captured_kwargs = {}
 
@@ -113,4 +105,4 @@ async def test_recent_activity_prompt_defaults_timeframe(monkeypatch):
     await recent_activity_prompt(timeframe=cast(Any, None), project=None)
 
     assert captured_kwargs["since"] == "7d"
-    assert captured_kwargs["project"] is None
+    assert captured_kwargs["project"] == config_manager.config.default_project

@@ -37,8 +37,8 @@ probe_server = FastMCP("probe")
 @probe_server.tool
 def probe(
     identifier: NoteIdentifier,
+    project: ProjectParam,
     path: DirectoryPath = "/",
-    project: ProjectParam = None,
     since: Since = "7d",
     page: Page = 1,
     page_size: PageSize = 10,
@@ -59,6 +59,8 @@ def probe(
 
 
 async def call_probe(**arguments: Any) -> dict[str, Any]:
+    if "project_id" not in arguments:
+        arguments.setdefault("project", "research")
     async with Client(probe_server) as client:
         result = await client.call_tool("probe", arguments)
         assert result.structured_content is not None
@@ -66,6 +68,7 @@ async def call_probe(**arguments: Any) -> dict[str, Any]:
 
 
 async def probe_error(**arguments: Any) -> str:
+    arguments.setdefault("project", "research")
     async with Client(probe_server) as client:
         result = await client.call_tool("probe", arguments, raise_on_error=False)
         assert result.is_error
@@ -89,7 +92,7 @@ async def test_schema_lists_primary_names_only():
         "filters",
         "items",
     }
-    assert tool.input_schema["required"] == ["identifier"]
+    assert tool.input_schema["required"] == ["identifier", "project"]
 
 
 # --- Hidden aliases ---

@@ -18,7 +18,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_parameter,
 )
 from basic_memory.mcp.tools.read import bm_read
-from basic_memory.mcp.refusals import Refusal
+from basic_memory.mcp.refusals import Refusal, refusal
 from basic_memory.mcp.tools.ranked_search import bm_search
 from basic_memory.schemas.search import SearchResponse, SearchResult
 
@@ -233,6 +233,8 @@ async def fetch(
             if detected is not None
             else await resolve_project_parameter(context=context)
         )
+        if project is None:
+            raise refusal("INVALID_ARGUMENTS", "No project could be resolved for this document.")
         content = str(
             await bm_read(
                 identifier=_identifier_for_bm_read(id),

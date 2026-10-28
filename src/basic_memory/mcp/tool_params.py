@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BeforeValidator, Field
+from pydantic import AliasChoices, BeforeValidator, Field, StringConstraints
 
 from basic_memory.schemas.base import validate_timeframe
 from basic_memory.schemas.search import SearchItemType
@@ -49,15 +49,30 @@ DirectoryPath = Annotated[
 # --- Project ---
 
 ProjectParam = Annotated[
-    str | None,
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
     Field(
         # `project_id` stays accepted for callers written against the old tools; a
         # UUID in either spelling routes by external id (see parse_project).
         validation_alias=AliasChoices("project", "project_id"),
         description=(
-            "Project name, 'workspace/project', or project external id. With multiple "
-            "addressable projects, scope note and search calls explicitly with this "
-            "parameter or a project-qualified target."
+            "Required project name, 'workspace/project', or project external id. "
+            "Discover projects with bm_project(command='list'). Paths are relative "
+            "to this project; a qualified path must agree with it."
+        ),
+    ),
+]
+
+# Discovery has no project yet; search may instead name several projects explicitly.
+OptionalProjectParam = Annotated[
+    str | None,
+    StringConstraints(strip_whitespace=True, min_length=1),
+    Field(
+        validation_alias=AliasChoices("project", "project_id"),
+        description=(
+            "Project name, 'workspace/project', or external id. Required for one-project "
+            "operations; search may instead use `projects` or `all_projects=true`. "
+            "Project discovery needs no scope."
         ),
     ),
 ]

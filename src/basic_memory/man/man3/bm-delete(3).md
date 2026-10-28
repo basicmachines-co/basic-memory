@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_delete(identifier=None, path=None, recursive=False,
-          expected_checksum=None, output_format="text", project=None)
+bm_delete(project, identifier=None, path=None, recursive=False,
+          expected_checksum=None, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -34,12 +34,12 @@ be undone.
 
 ## PARAMETERS
 
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — The note to delete: a path, permalink, memory:// URL or exact title.
 - **path** (string | null, optional, default: None) — The directory to delete, with everything in it.
 - **recursive** (boolean, optional, default: False) — Required true to delete a directory and everything under it.
 - **expected_checksum** (string | null, optional, default: None) — Delete the note only while it is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 
@@ -47,7 +47,7 @@ be undone.
 bm_delete(path="old", project="demo")
 # → error: INVALID_ARGUMENTS: 'old' is a directory with 1 entries at its top level.
 #   Deleting it removes everything under it.
-#   Try instead: bm_delete(path='old', recursive=true)
+#   Try instead: bm_delete(path='old', recursive=true, project='<project external id>')
 
 bm_delete(path="old", recursive=True, project="demo")
 # → Deleted directory old (1 files)

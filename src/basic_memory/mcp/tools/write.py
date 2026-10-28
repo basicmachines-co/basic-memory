@@ -151,7 +151,8 @@ async def bm_write(
         ),
     ] = None,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Create or replace one note."""
@@ -160,14 +161,16 @@ async def bm_write(
         raise refusal(
             "INVALID_ARGUMENTS",
             "Give either `identifier` (a file path) or `title` + `directory`, not both.",
-            try_instead=f"bm_write(identifier='{directory.strip('/')}/<file>.md', ...)",
+            try_instead=(
+                f"bm_write(identifier='{directory.strip('/')}/<file>.md', project={project!r}, ...)"
+            ),
             output_format=output_format,
         )
     if identifier is None and (title is None or directory is None):
         raise refusal(
             "INVALID_ARGUMENTS",
             "Say where the note goes: `identifier` (a file path) or `title` + `directory`.",
-            try_instead="bm_write(identifier='notes/plan.md', content='...')",
+            try_instead=f"bm_write(identifier='notes/plan.md', content='...', project={project!r})",
             output_format=output_format,
         )
     # Trigger: the caller pinned a revision but did not say overwrite.
@@ -238,6 +241,7 @@ async def bm_write(
                 address=target.paths.path(note.file_path),
                 unchanged="Nothing was written.",
                 output_format=output_format,
+                project=project,
             ) from error
 
         # --- Outcomes ---
@@ -252,8 +256,9 @@ async def bm_write(
                     "ALREADY_EXISTS",
                     f"A note already exists at '{shown}'. Nothing was written.",
                     try_instead=(
-                        f"bm_edit(identifier='{shown}', command='append', content='...') to "
-                        "add to it, or bm_write(..., overwrite=true) to replace it"
+                        f"bm_edit(identifier={shown!r}, command='append', content='...', "
+                        f"project={project!r}) to add to it, or "
+                        f"bm_write(..., project={project!r}, overwrite=true) to replace it"
                     ),
                     output_format=output_format,
                 )
@@ -263,7 +268,7 @@ async def bm_write(
                     "ALREADY_EXISTS",
                     f"The note this path names has moved to '{shown}'. Nothing was written.",
                     try_instead=(
-                        f"bm_read(identifier='{shown}') to work on that note, or "
+                        f"bm_read(identifier={shown!r}, project={project!r}) to work on that note, or "
                         "overwrite=false to create a separate note at this path"
                     ),
                     output_format=output_format,
@@ -277,6 +282,7 @@ async def bm_write(
                     unchanged="Nothing was replaced.",
                     if_deleted="bm_write without expected_checksum to create it",
                     output_format=output_format,
+                    project=project,
                 )
             case _:  # pragma: no cover
                 assert_never(outcome)
@@ -306,7 +312,7 @@ async def bm_write(
             **change.as_json(),
             "similar_notes": [dataclasses.asdict(similar) for similar in similar_notes],
         }
-    return _format_text(change, similar_notes)
+    return _format_text(change, similar_notes, project=project)
 
 
 def _place_note(
@@ -342,7 +348,10 @@ def _place_note(
         raise refusal(
             "INVALID_ARGUMENTS",
             f"'{identifier}' names a folder or project, not a note file.",
-            try_instead=f"bm_write(identifier='{identifier.rstrip('/')}/<file>.md', ...)",
+            try_instead=(
+                f"bm_write(identifier='{identifier.rstrip('/')}/<file>.md', "
+                f"project={target.project.external_id!r}, ...)"
+            ),
             output_format=output_format,
         )
     # Trigger: the name has an extension other than '.md' or '.markdown' ('data.json',
@@ -358,7 +367,8 @@ def _place_note(
                 "'.markdown' notes.",
                 try_instead=(
                     "bm_write(identifier="
-                    f"'{target.paths.path(str(path.with_name(path.name + MARKDOWN_SUFFIX)))}')"
+                    f"'{target.paths.path(str(path.with_name(path.name + MARKDOWN_SUFFIX)))}', "
+                    f"project={target.project.external_id!r}, content='...')"
                 ),
                 output_format=output_format,
             )
@@ -428,7 +438,7 @@ async def _similar_notes(
         return []
 
 
-def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
+def _format_text(change: NoteChange, similar_notes: list[SimilarNote], *, project: str) -> str:
     """The text result: what was written, where, and the checksum to pass back."""
     lines = change.text_lines()
     if similar_notes:
@@ -436,8 +446,9 @@ def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
             format_similar_notes_section(
                 similar_notes,
                 same_topic=lambda closest: (
-                    f"`bm_edit(identifier='{closest}', command='append', content='...')`, "
-                    f"then `bm_delete(identifier='{change.file_path}')`"
+                    f"`bm_edit(identifier={closest!r}, command='append', content='...', "
+                    f"project={project!r})`, then "
+                    f"`bm_delete(identifier={change.file_path!r}, project={project!r})`"
                 ),
                 reference=lambda note: note.file_path,
             )
