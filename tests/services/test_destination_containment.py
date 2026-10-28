@@ -89,3 +89,25 @@ async def test_local_guard_preserves_literal_colons(tmp_path: Path, source_name:
     await FileService(tmp_path).move_file(source_name, "notes/a:draft.pdf")
     assert not source.exists()
     assert (tmp_path / "notes/a:draft.pdf").read_bytes() == b"file content"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Requires unprivileged symlink creation")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize("loop_at", ["source", "destination"])
+async def test_symlink_loops_use_the_storage_error_contract(
+    tmp_path: Path, absolute: bool, loop_at: str
+):
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"file content")
+    (tmp_path / "loop").symlink_to("loop", target_is_directory=True)
+    source_path = "loop/source.pdf" if loop_at == "source" else "source.pdf"
+    destination = "loop/destination.pdf" if loop_at == "destination" else "destination.pdf"
+
+    with pytest.raises(FileOperationError):
+        await FileService(tmp_path).move_file(
+            tmp_path / source_path if absolute else source_path,
+            tmp_path / destination if absolute else destination,
+        )
+    assert source.read_bytes() == b"file content"
+    assert not (tmp_path / "destination.pdf").exists()

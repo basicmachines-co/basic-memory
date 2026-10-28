@@ -25,7 +25,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
-from basic_memory.utils import FilePath, validate_project_path
+from basic_memory.utils import FilePath, resolve_path_within_root, validate_project_path
 from loguru import logger
 
 
@@ -111,7 +111,9 @@ class FileService:
         relative = Path(path)
         if self.local_project_path is not None and relative.is_absolute():
             try:
-                relative = relative.resolve().relative_to(self.local_project_path)
+                relative = resolve_path_within_root(relative, self.local_project_path).relative_to(
+                    self.local_project_path
+                )
             except ValueError:
                 raise FileOperationError(f"Path '{path}' is outside the project") from None
         # Native POSIX storage treats colons literally; remote keys keep the
