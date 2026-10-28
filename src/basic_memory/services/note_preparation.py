@@ -794,6 +794,11 @@ def _prepend_after_frontmatter(current_content: str, content: str) -> str:
     return content + separator + current_content
 
 
+# Bound replacement amplification without imposing a size policy on attachments
+# or other note operations. This is the result's UTF-8 size, including frontmatter.
+MAX_FIND_REPLACE_OUTPUT_BYTES = 16 * 1024 * 1024
+
+
 def apply_edit_operation(
     current_content: str,
     operation: str,
@@ -825,6 +830,16 @@ def apply_edit_operation(
             raise ValueError(
                 f"Expected {expected_replacements} occurrences of '{find_text}', "
                 f"but found {actual_count}"
+            )
+        # Count the result before replacing: small inputs can otherwise multiply
+        # into an allocation large enough to exhaust a hosted worker's memory.
+        projected_bytes = len(current_content.encode("utf-8")) + actual_count * (
+            len(content.encode("utf-8")) - len(find_text.encode("utf-8"))
+        )
+        if projected_bytes > MAX_FIND_REPLACE_OUTPUT_BYTES:
+            raise ValueError(
+                f"find_replace output exceeds {MAX_FIND_REPLACE_OUTPUT_BYTES} UTF-8 bytes "
+                f"(projected {projected_bytes}); use a smaller replacement or edit a smaller note"
             )
         return current_content.replace(find_text, content)
     if operation == "replace_section":
