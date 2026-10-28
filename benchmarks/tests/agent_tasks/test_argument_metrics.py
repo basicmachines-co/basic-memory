@@ -6,7 +6,7 @@ import pytest
 
 from basic_memory_benchmarks.agent_tasks.driver import build_surface_summary
 from basic_memory_benchmarks.agent_tasks.loop import AgentLoopError, ToolOutcome, run_agent_loop
-from basic_memory_benchmarks.agent_tasks.models import AgentBudget, AgentTaskResult
+from basic_memory_benchmarks.agent_tasks.models import AgentBudget, AgentTaskResult, SurfaceEcho
 from basic_memory_benchmarks.llm.tool_agent import ScriptedToolAgent, ToolDef
 
 READ = ToolDef(
@@ -19,6 +19,14 @@ READ = ToolDef(
         "additionalProperties": False,
     },
 )
+
+
+def test_surface_manifest_keeps_schema_and_description():
+    echo = SurfaceEcho(
+        name="bm", config_overrides={}, tool_allowlist=[READ.name], tool_definitions=[READ]
+    )
+    restored = SurfaceEcho.model_validate_json(echo.model_dump_json())
+    assert restored.tool_definitions == [READ]
 
 
 @pytest.mark.parametrize(

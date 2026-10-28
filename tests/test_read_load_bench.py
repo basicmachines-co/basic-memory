@@ -10,7 +10,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult
 
 
 def load_read_load_bench() -> ModuleType:
@@ -27,14 +27,18 @@ def load_read_load_bench() -> ModuleType:
 read_load_bench = load_read_load_bench()
 
 
-def test_result_helpers_use_current_mcp_python_fields() -> None:
-    success = CallToolResult(
-        content=[TextContent(type="text", text="plain response")],
-        structured_content={"result": {"permalink": "notes/example"}},
+def test_result_helpers_use_mcp_wire_aliases() -> None:
+    success = CallToolResult.model_validate(
+        {
+            "content": [{"type": "text", "text": "plain response"}],
+            "structuredContent": {"result": {"permalink": "notes/example"}},
+        }
     )
-    failure = CallToolResult(
-        content=[TextContent(type="text", text="failed response")],
-        is_error=True,
+    failure = CallToolResult.model_validate(
+        {
+            "content": [{"type": "text", "text": "failed response"}],
+            "isError": True,
+        }
     )
 
     assert read_load_bench.result_payload(success) == {"permalink": "notes/example"}

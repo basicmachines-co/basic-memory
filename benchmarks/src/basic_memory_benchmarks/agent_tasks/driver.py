@@ -832,6 +832,12 @@ def run_agent_tasks(
                     config_overrides=dict(surface.config_overrides),
                     tool_allowlist=list(surface.tool_allowlist),
                     observed_tools=observed_names,
+                    tool_definitions=[
+                        tool
+                        for name in surface.tool_allowlist
+                        for tool in available
+                        if tool.name == name
+                    ],
                 )
             )
             try:

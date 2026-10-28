@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from basic_memory_benchmarks.models import RuntimeInfo
+from basic_memory_benchmarks.llm.tool_agent import ToolDef
 
 # "error" marks a loop that died mid-task (model or dispatch failure): the
 # partial accounting is kept on the errored row, never counted as a budget stop.
@@ -184,6 +185,9 @@ class SurfaceEcho(BaseModel):
     config_overrides: dict[str, str]
     tool_allowlist: list[str]
     observed_tools: list[str] = Field(default_factory=list)
+    # Exact descriptions and schemas sent to the model, in advertised order.
+    # Names alone cannot reproduce a tool-surface comparison.
+    tool_definitions: list[ToolDef] = Field(default_factory=list)
 
 
 class AgentTasksManifest(BaseModel):

@@ -104,10 +104,9 @@ def _isolated_env(config_dir: Path) -> dict[str, str]:
     background schedulers we are trying to measure). We pop it so an inherited
     value can't sneak the server into test mode.
     """
-    env = dict(os.environ)
-    for key in ("BASIC_MEMORY_ENV", "BASIC_MEMORY_CLOUD_MODE", "BASIC_MEMORY_HOME"):
-        env.pop(key, None)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
+    env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
     return env
 
 
@@ -169,6 +168,7 @@ async def write_burst(
     level: int,
     count: int,
     concurrency: int,
+    surface: str = "bm",
 ) -> tuple[list[float], int]:
     """Fire `count` bm_write calls with at most `concurrency` in flight."""
     sem = asyncio.Semaphore(concurrency)
@@ -182,7 +182,7 @@ async def write_burst(
             start = time.perf_counter()
             try:
                 result = await session.call_tool(
-                    "bm_write",
+                    "write_note" if surface == "legacy" else "bm_write",
                     {
                         "project": project,
                         "title": note["title"],
@@ -216,13 +216,15 @@ async def poll_until(predicate, *, timeout_s: float, interval_s: float = 0.1) ->
         delay = min(delay * 1.5, 1.0)
 
 
-async def searchable_count(session: ClientSession, project: str, level: int) -> int:
+async def searchable_count(
+    session: ClientSession, project: str, level: int, surface: str = "bm"
+) -> int:
     result = await session.call_tool(
-        "bm_search",
+        "search_notes" if surface == "legacy" else "bm_search",
         {
             "project": project,
             "query": f"burst {level}",
-            "mode": "text",
+            ("search_type" if surface == "legacy" else "mode"): "text",
             "page": 1,
             "page_size": 1,
             "output_format": "json",
@@ -303,14 +305,25 @@ async def run(args: argparse.Namespace) -> int:
         output_path.unlink()
 
     levels = [int(c) for c in args.concurrency.split(",") if c.strip()]
+    had_failures = False
 
     async with stdio_client(params) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
 
+            required = (
+                {"create_memory_project", "write_note", "search_notes"}
+                if args.surface == "legacy"
+                else {"bm_project", "bm_write", "bm_search"}
+            )
+            available = {tool.name for tool in (await session.list_tools()).tools}
+            if missing := required - available:
+                raise RuntimeError(f"surface {args.surface} missing tools: {sorted(missing)}")
             create = await session.call_tool(
-                "bm_project",
-                {"command": "create", "name": project, "path": str(project_dir)},
+                "create_memory_project" if args.surface == "legacy" else "bm_project",
+                {"project_name": project, "project_path": str(project_dir)}
+                if args.surface == "legacy"
+                else {"command": "create", "name": project, "path": str(project_dir)},
             )
             if create.model_dump(by_alias=True)["isError"]:
                 print("ERROR: could not create project", file=sys.stderr)
@@ -319,12 +332,22 @@ async def run(args: argparse.Namespace) -> int:
             # Warmup: pay one-time costs (embedding-model download/load, index
             # init, cache warm) OUTSIDE measurement. Wait for the warmup writes
             # to become searchable so the model is fully loaded before level 1.
-            await write_burst(session, project=project, level=0, count=args.warmup, concurrency=1)
+            _, warmup_errors = await write_burst(
+                session,
+                project=project,
+                level=0,
+                count=args.warmup,
+                concurrency=1,
+                surface=args.surface,
+            )
+            if warmup_errors:
+                raise RuntimeError(f"warmup failed: {warmup_errors} writes refused or errored")
 
             async def warmup_ready() -> bool:
-                return await searchable_count(session, project, 0) >= args.warmup
+                return await searchable_count(session, project, 0, args.surface) >= args.warmup
 
-            await poll_until(warmup_ready, timeout_s=args.drain_timeout)
+            if await poll_until(warmup_ready, timeout_s=args.drain_timeout) is None:
+                raise RuntimeError("warmup notes did not become searchable before measurement")
 
             # Wait for the warmup notes to EMBED so the fastembed model is loaded
             # before we measure time_to_embedded. The short timeout doubles as a
@@ -350,9 +373,10 @@ async def run(args: argparse.Namespace) -> int:
                     level=level,
                     count=args.notes,
                     concurrency=level,
+                    surface=args.surface,
                 )
                 wall_s = time.perf_counter() - wall_start
-                throughput = args.notes / wall_s if wall_s > 0 else 0.0
+                throughput = (args.notes - errors) / wall_s if wall_s > 0 else 0.0
 
                 level_dir = project_dir / "load" / f"c{level}"
 
@@ -360,10 +384,15 @@ async def run(args: argparse.Namespace) -> int:
                     return level_dir.exists() and len(list(level_dir.glob("*.md"))) >= args.notes
 
                 async def search_ready() -> bool:
-                    return await searchable_count(session, project, level) >= args.notes
+                    return (
+                        await searchable_count(session, project, level, args.surface) >= args.notes
+                    )
 
                 materialized_ms = await poll_until(files_ready, timeout_s=args.drain_timeout)
                 searchable_ms = await poll_until(search_ready, timeout_s=args.drain_timeout)
+                had_failures = (
+                    had_failures or errors > 0 or materialized_ms is None or searchable_ms is None
+                )
 
                 # Embedding (vector-sync) drain — only when the warmup probe
                 # confirmed embeddings land (semantic on, SQLite backend).
@@ -379,9 +408,11 @@ async def run(args: argparse.Namespace) -> int:
                     "benchmark": f"write-load c={level}",
                     "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                     "label": args.label,
+                    "surface": args.surface,
                     "metrics": {
                         "concurrency": level,
-                        "notes_written": args.notes,
+                        "notes_requested": args.notes,
+                        "notes_written": args.notes - errors,
                         "accept_latency_p50_ms": round(percentile(latencies, 50), 3),
                         "accept_latency_p95_ms": round(percentile(latencies, 95), 3),
                         "accept_latency_p99_ms": round(percentile(latencies, 99), 3),
@@ -405,7 +436,7 @@ async def run(args: argparse.Namespace) -> int:
         # Error paths (e.g. project-create failure) fall back to testcontainers'
         # Ryuk reaper, which removes the container when this process exits.
         pg_container.stop()
-    return 0
+    return 2 if had_failures else 0
 
 
 def main() -> int:
@@ -416,6 +447,7 @@ def main() -> int:
         help="Path to the basic-memory executable in the per-ref venv",
     )
     parser.add_argument("--label", default="ref", help="Ref label recorded in each row")
+    parser.add_argument("--surface", choices=("bm", "legacy"), default="bm")
     parser.add_argument("--notes", type=int, default=200, help="Writes per concurrency level")
     parser.add_argument("--warmup", type=int, default=5, help="Warmup writes (not measured)")
     parser.add_argument(

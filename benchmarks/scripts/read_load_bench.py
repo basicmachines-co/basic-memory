@@ -301,6 +301,7 @@ def write_manifest(
     concurrency_levels: list[int],
     database_version: str,
     redis_version: str | None,
+    surface: str = "bm",
 ) -> None:
     """Write the provenance required to reproduce and interpret one run."""
     command_path = Path(shutil.which(args.bm_command) or "").resolve()
@@ -361,6 +362,7 @@ def write_manifest(
             "redis_read_cache_enabled": redis_version is not None,
         },
         "config": {
+            "surface": surface,
             "reads_per_scenario": args.reads,
             "concurrency_levels": concurrency_levels,
             "seed_concurrency": args.seed_concurrency,
@@ -382,7 +384,7 @@ def write_manifest(
 
 
 def result_payload(result: CallToolResult) -> dict[str, object]:
-    structured = result.structured_content
+    structured = result.model_dump(by_alias=True)["structuredContent"]
     if isinstance(structured, dict):
         wrapped = structured.get("result")
         payload = wrapped if isinstance(wrapped, dict) else structured
@@ -402,7 +404,7 @@ def result_payload(result: CallToolResult) -> dict[str, object]:
 
 def result_text(result: CallToolResult) -> str | None:
     """Return text from a successful text-mode tool response."""
-    if result.is_error:
+    if result.model_dump(by_alias=True)["isError"]:
         return None
     text_parts = [
         text for item in result.content if isinstance((text := getattr(item, "text", None)), str)
@@ -503,11 +505,12 @@ async def write_target(
     project: str,
     size_bytes: int,
     index: int,
+    surface: str = "bm",
 ) -> ReadTarget:
     title, marker, content = synthetic_read_note(size_bytes, index)
     directory = f"read-load/{size_label(size_bytes)}"
     result = await session.call_tool(
-        "bm_write",
+        "write_note" if surface == "legacy" else "bm_write",
         {
             "project": project,
             "title": title,
@@ -516,7 +519,7 @@ async def write_target(
             "output_format": "json",
         },
     )
-    if result.is_error:
+    if result.model_dump(by_alias=True)["isError"]:
         raise RuntimeError(f"bm_write failed while seeding {title}")
     payload = result_payload(result)
     identifier = payload.get("permalink")
@@ -536,6 +539,7 @@ async def seed_corpus(
     sizes: list[int],
     notes_per_size: int,
     concurrency: int,
+    surface: str = "bm",
 ) -> list[ReadTarget]:
     """Create the deterministic corpus with bounded concurrent writes."""
     semaphore = asyncio.Semaphore(concurrency)
@@ -547,6 +551,7 @@ async def seed_corpus(
                 project=project,
                 size_bytes=size_bytes,
                 index=index,
+                surface=surface,
             )
 
     return list(
@@ -560,19 +565,19 @@ async def seed_corpus(
     )
 
 
-async def searchable_count(session: ClientSession, project: str) -> int:
+async def searchable_count(session: ClientSession, project: str, surface: str = "bm") -> int:
     result = await session.call_tool(
-        "bm_search",
+        "search_notes" if surface == "legacy" else "bm_search",
         {
             "project": project,
             "query": _CORPUS_SEARCH_TOKEN,
-            "mode": "text",
+            ("search_type" if surface == "legacy" else "mode"): "text",
             "page": 1,
             "page_size": 1,
             "output_format": "json",
         },
     )
-    if result.is_error:
+    if result.model_dump(by_alias=True)["isError"]:
         return 0
     payload = result_payload(result)
     total = payload.get("total")
@@ -582,11 +587,13 @@ async def searchable_count(session: ClientSession, project: str) -> int:
     return len(results) if isinstance(results, list) else 0
 
 
-async def warm_targets(session: ClientSession, project: str, targets: list[ReadTarget]) -> None:
+async def warm_targets(
+    session: ClientSession, project: str, targets: list[ReadTarget], surface: str = "bm"
+) -> None:
     """Validate each direct permalink once and warm database/filesystem caches."""
     for target in targets:
         result = await session.call_tool(
-            "bm_read",
+            "read_note" if surface == "legacy" else "bm_read",
             {"project": project, "identifier": target.identifier},
         )
         content = result_text(result)
@@ -605,6 +612,7 @@ async def read_burst(
     count: int,
     concurrency: int,
     seed: int,
+    surface: str = "bm",
 ) -> tuple[list[float], int, int, int]:
     """Read deterministic targets with at most ``concurrency`` calls in flight."""
     request_targets = [targets[index % len(targets)] for index in range(count)]
@@ -621,7 +629,7 @@ async def read_burst(
             started = time.perf_counter()
             try:
                 result = await session.call_tool(
-                    "bm_read",
+                    "read_note" if surface == "legacy" else "bm_read",
                     {"project": project, "identifier": target.identifier},
                 )
             # Each request is an observation. Transport/protocol failures count as benchmark
@@ -643,7 +651,7 @@ async def read_burst(
     return latencies, errors, validation_failures, response_bytes
 
 
-async def run(args: argparse.Namespace) -> int:
+async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
     sizes = [int(value) for value in args.sizes.split(",") if value.strip()]
     concurrency_levels = [int(value) for value in args.concurrency.split(",") if value.strip()]
     if not sizes or min(sizes) <= 0:
@@ -728,6 +736,7 @@ async def run(args: argparse.Namespace) -> int:
             concurrency_levels=concurrency_levels,
             database_version=database_version,
             redis_version=redis_version,
+            surface=surface,
         )
         params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
         had_failures = False
@@ -737,11 +746,21 @@ async def run(args: argparse.Namespace) -> int:
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            created = await session.call_tool(
-                "bm_project",
-                {"command": "create", "name": project, "path": str(project_dir)},
+            required = (
+                {"create_memory_project", "write_note", "read_note", "search_notes"}
+                if surface == "legacy"
+                else {"bm_project", "bm_write", "bm_read", "bm_search"}
             )
-            if created.is_error:
+            available = {tool.name for tool in (await session.list_tools()).tools}
+            if missing := required - available:
+                raise RuntimeError(f"surface {surface} missing tools: {sorted(missing)}")
+            created = await session.call_tool(
+                "create_memory_project" if surface == "legacy" else "bm_project",
+                {"project_name": project, "project_path": str(project_dir)}
+                if surface == "legacy"
+                else {"command": "create", "name": project, "path": str(project_dir)},
+            )
+            if created.model_dump(by_alias=True)["isError"]:
                 raise RuntimeError("could not create benchmark project")
 
             targets = await seed_corpus(
@@ -750,6 +769,7 @@ async def run(args: argparse.Namespace) -> int:
                 sizes=sizes,
                 notes_per_size=args.notes_per_size,
                 concurrency=args.seed_concurrency,
+                surface=surface,
             )
             expected_notes = len(targets)
 
@@ -757,7 +777,7 @@ async def run(args: argparse.Namespace) -> int:
                 return len(list(project_dir.rglob("*.md"))) >= expected_notes
 
             async def search_ready() -> bool:
-                return await searchable_count(session, project) >= expected_notes
+                return await searchable_count(session, project, surface) >= expected_notes
 
             materialized_ms = await poll_until(
                 files_ready,
@@ -785,7 +805,7 @@ async def run(args: argparse.Namespace) -> int:
                 for concurrency in concurrency_levels:
                     # Response entries expire after 60 seconds and reads do not extend their TTL.
                     # Rewarming outside the timer keeps every row on the advertised cache state.
-                    await warm_targets(session, project, size_targets)
+                    await warm_targets(session, project, size_targets, surface)
                     wall_started = time.perf_counter()
                     latencies, errors, validation_failures, response_bytes = await read_burst(
                         session,
@@ -794,6 +814,7 @@ async def run(args: argparse.Namespace) -> int:
                         count=args.reads,
                         concurrency=concurrency,
                         seed=args.seed + size_bytes + concurrency,
+                        surface=surface,
                     )
                     wall_seconds = time.perf_counter() - wall_started
                     successful_reads = args.reads - errors
@@ -807,6 +828,7 @@ async def run(args: argparse.Namespace) -> int:
                         "timestamp_utc": datetime.now(UTC).isoformat(),
                         "label": args.label,
                         "metadata": {
+                            "surface": surface,
                             "backend": args.backend,
                             "redis_read_cache_enabled": redis_url is not None,
                             "warm_direct_permalink_reads": True,
@@ -852,6 +874,7 @@ def main() -> int:
         help="Path to the basic-memory executable in the per-ref virtual environment",
     )
     parser.add_argument("--label", default="ref", help="Ref label recorded in each row")
+    parser.add_argument("--surface", choices=("bm", "legacy"), default="bm")
     parser.add_argument(
         "--sizes",
         default="1024,16384,65536",
@@ -915,7 +938,8 @@ def main() -> int:
         default=1.0,
         help="Quiet interval between readiness and unmeasured cache warmup",
     )
-    return asyncio.run(run(parser.parse_args()))
+    args = parser.parse_args()
+    return asyncio.run(run(args, surface=args.surface))
 
 
 if __name__ == "__main__":
