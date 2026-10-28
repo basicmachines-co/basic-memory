@@ -187,49 +187,82 @@ async def get_memory_context(
         action="build_context",
         page=page,
         page_size=page_size,
-    ):
-        logger.debug(
-            f"V2 Getting context for project {project_id}, URI: `{uri}` depth: `{depth}` timeframe: `{timeframe}` page: `{page}` page_size: `{page_size}` max_related: `{max_related}`"
-        )
-        memory_url = normalize_memory_url(uri)
-
-        since = parse_timeframe(timeframe) if timeframe else None
-        limit = page_size
-        offset = (page - 1) * page_size
-
-        with logfire.span(
-            "api.memory.build_context.build_context",
-            domain="memory",
-            action="build_context",
-            phase="build_context",
-            page=page,
-            page_size=page_size,
-        ):
+    ) as span:
+        try:
+            logger.debug(
+                f"V2 Getting context for project {project_id}, URI: `{uri}` depth: `{depth}` timeframe: `{timeframe}` page: `{page}` page_size: `{page_size}` max_related: `{max_related}`"
+            )
             try:
-                context = await context_service.build_context(
-                    memory_url,
-                    depth=depth,
-                    since=since,
-                    limit=limit,
-                    offset=offset,
-                    max_related=max_related,
-                    include_observations=include_observations,
-                )
-            except AmbiguousIdentifierError as exc:
-                # A title URL that names several notes has no single context to build.
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-        with logfire.span(
-            "api.memory.build_context.shape_response",
-            domain="memory",
-            action="build_context",
-            phase="shape_response",
-            result_count=len(context.results),
-        ):
-            async with db.scoped_session(session_maker) as session:
-                return await to_graph_context(
-                    context,
-                    entity_repository=entity_repository,
-                    session=session,
-                    page=page,
-                    page_size=page_size,
-                )
+                memory_url = normalize_memory_url(uri)
+            except ValueError as exc:
+                # Trigger: the path is not a valid memory locator (embedded scheme,
+                #   doubled separator, invalid character, empty/whitespace).
+                # Why: normalize_memory_url raises ValueError for caller input; letting
+                #   it escape reported a client mistake as an internal server error (#1879).
+                # Outcome: a bounded 400 with the normalizer's specific reason before
+                #   any context traversal.
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
+
+            since = parse_timeframe(timeframe) if timeframe else None
+            limit = page_size
+            offset = (page - 1) * page_size
+
+            with logfire.span(
+                "api.memory.build_context.build_context",
+                domain="memory",
+                action="build_context",
+                phase="build_context",
+                page=page,
+                page_size=page_size,
+            ):
+                try:
+                    context = await context_service.build_context(
+                        memory_url,
+                        depth=depth,
+                        since=since,
+                        limit=limit,
+                        offset=offset,
+                        max_related=max_related,
+                        include_observations=include_observations,
+                    )
+                except AmbiguousIdentifierError as exc:
+                    # A title URL that names several notes has no single context to build.
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+                    ) from exc
+            with logfire.span(
+                "api.memory.build_context.shape_response",
+                domain="memory",
+                action="build_context",
+                phase="shape_response",
+                result_count=len(context.results),
+            ):
+                async with db.scoped_session(session_maker) as session:
+                    result = await to_graph_context(
+                        context,
+                        entity_repository=entity_repository,
+                        session=session,
+                        page=page,
+                        page_size=page_size,
+                    )
+        except HTTPException as exc:
+            # Malformed input (400) and ambiguous titles (409) are both caller-visible
+            # outcomes; only a server-side status would be a failure.
+            span.set_attribute(
+                "outcome",
+                "input_rejected" if exc.status_code < 500 else "failed",
+            )
+            raise
+        except Exception:
+            # Trigger: the context service or response shaping raised.
+            # Why: genuine failures must stay visible instead of being flattened into
+            #   a validation response.
+            # Outcome: the 500 path records a failed terminal outcome.
+            span.set_attribute("outcome", "failed")
+            raise
+
+        span.set_attribute("outcome", "success")
+        return result

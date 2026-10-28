@@ -1,10 +1,17 @@
 """Tests for v2 memory router endpoints."""
 
-import pytest
-from httpx import AsyncClient
+import importlib
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from basic_memory import db
+from basic_memory.deps.services import get_context_service_v2_external
 from basic_memory.models import Project
 from basic_memory.schemas.memory import (
     MAX_CONTEXT_DEPTH,
@@ -12,6 +19,71 @@ from basic_memory.schemas.memory import (
     MAX_CONTEXT_RELATED_RESULTS,
     MAX_RECENT_ACTIVITY_PAGE_SIZE,
 )
+from basic_memory.services.exceptions import AmbiguousIdentifierError
+
+memory_router_module = importlib.import_module("basic_memory.api.v2.routers.memory_router")
+
+
+class _RecordingSpan:
+    """Capture the attributes the memory router ships on its root span."""
+
+    def __init__(self, name: str, attributes: dict[str, Any]) -> None:
+        self.name = name
+        self.attributes = attributes
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
+    def set_attributes(self, values: dict[str, Any]) -> None:
+        self.attributes.update(values)
+
+    def __enter__(self) -> "_RecordingSpan":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+
+@contextmanager
+def _record_memory_router_spans(monkeypatch):
+    spans: list[_RecordingSpan] = []
+
+    def span(name: str, **attributes: Any) -> _RecordingSpan:
+        recorded = _RecordingSpan(name, dict(attributes))
+        spans.append(recorded)
+        return recorded
+
+    monkeypatch.setattr(memory_router_module, "logfire", SimpleNamespace(span=span))
+    yield spans
+
+
+def _root_memory_span(spans: list[_RecordingSpan]) -> _RecordingSpan:
+    return next(span for span in spans if span.name == "api.request.memory.build_context")
+
+
+class _TraversalSpy:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def build_context(self, *args: Any, **kwargs: Any) -> None:
+        self.calls += 1
+        raise AssertionError("context traversal must not run for a rejected locator")
+
+
+class _ExplodingContextService:
+    async def build_context(self, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("context backend exploded")
+
+
+class _AmbiguousContextService:
+    async def build_context(self, *args: Any, **kwargs: Any) -> None:
+        raise AmbiguousIdentifierError(
+            "Bean Origins",
+            [
+                ("bean-origins", "Bean Origins.md"),
+                ("archive/bean-origins", "archive/Bean Origins.md"),
+            ],
+        )
 
 
 async def create_test_entity(
@@ -449,3 +521,126 @@ async def test_get_memory_context_skips_observations_when_asked(
         == full_data["results"][0]["primary_result"]["permalink"]
     )
     assert shape_data["results"][0]["related_results"] == full_data["results"][0]["related_results"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("locator", "expected_detail"),
+    [
+        # The production locator shape: an arbitrary HTTPS URL embedded in a path.
+        ("workspace/project/https://example.invalid/notes", "contains protocol scheme"),
+        ("", "cannot be empty"),
+        ("%20%20%20", "cannot be empty or whitespace"),
+        ("notes%3Cbrackets%3E", "contains invalid characters"),
+        ("notes//meeting", "contains double slashes"),
+    ],
+)
+async def test_get_memory_context_rejects_malformed_locators(
+    app: FastAPI,
+    client: AsyncClient,
+    v2_project_url: str,
+    locator: str,
+    expected_detail: str,
+):
+    """Malformed locators are caller input, not an internal server error (#1879)."""
+    traversal = _TraversalSpy()
+    app.dependency_overrides[get_context_service_v2_external] = lambda: traversal
+    try:
+        response = await client.get(f"{v2_project_url}/memory/{locator}")
+    finally:
+        app.dependency_overrides.pop(get_context_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert expected_detail in response.json()["detail"]
+    # The boundary rejects before the context service is touched.
+    assert traversal.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_accepts_relative_and_memory_url_locators(
+    client: AsyncClient,
+    test_graph,
+    v2_project_url: str,
+):
+    """Both accepted locator spellings still resolve to the same context."""
+    relative = await client.get(f"{v2_project_url}/memory/test/root")
+    scheme = await client.get(f"{v2_project_url}/memory/memory://test/root")
+
+    assert relative.status_code == 200
+    assert scheme.status_code == 200
+    assert (
+        relative.json()["results"][0]["primary_result"]["permalink"]
+        == scheme.json()["results"][0]["primary_result"]["permalink"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_records_input_rejected_outcome(
+    client: AsyncClient,
+    v2_project_url: str,
+    monkeypatch,
+):
+    """The root span records a bounded terminal outcome for caller input rejection."""
+    with _record_memory_router_spans(monkeypatch) as spans:
+        response = await client.get(
+            f"{v2_project_url}/memory/workspace/project/https://example.invalid/notes"
+        )
+
+    assert response.status_code == 400
+    root_span = _root_memory_span(spans)
+    assert root_span.attributes["outcome"] == "input_rejected"
+    # The span carries a bounded outcome, not the caller's uploaded locator content.
+    assert "example.invalid" not in repr(root_span.attributes)
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_records_success_outcome(
+    client: AsyncClient,
+    test_graph,
+    v2_project_url: str,
+    monkeypatch,
+):
+    with _record_memory_router_spans(monkeypatch) as spans:
+        response = await client.get(f"{v2_project_url}/memory/test/root")
+
+    assert response.status_code == 200
+    assert _root_memory_span(spans).attributes["outcome"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_keeps_service_failures_as_server_errors(
+    app: FastAPI,
+    v2_project_url: str,
+    monkeypatch,
+):
+    """A genuine context-service failure stays visible as a 500 and a failed outcome."""
+    app.dependency_overrides[get_context_service_v2_external] = lambda: _ExplodingContextService()
+    try:
+        with _record_memory_router_spans(monkeypatch) as spans:
+            async with AsyncClient(
+                transport=ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://test",
+            ) as failing_client:
+                response = await failing_client.get(f"{v2_project_url}/memory/test/root")
+    finally:
+        app.dependency_overrides.pop(get_context_service_v2_external, None)
+
+    assert response.status_code == 500
+    assert _root_memory_span(spans).attributes["outcome"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_preserves_ambiguous_identifier_conflict(
+    app: FastAPI,
+    client: AsyncClient,
+    v2_project_url: str,
+):
+    """Ambiguous identifiers keep their existing 409 conflict response."""
+    app.dependency_overrides[get_context_service_v2_external] = lambda: _AmbiguousContextService()
+    try:
+        response = await client.get(f"{v2_project_url}/memory/Bean%20Origins")
+    finally:
+        app.dependency_overrides.pop(get_context_service_v2_external, None)
+
+    assert response.status_code == 409
+    assert "Ambiguous identifier 'Bean Origins'" in response.json()["detail"]
