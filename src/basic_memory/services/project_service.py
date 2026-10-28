@@ -42,7 +42,7 @@ from basic_memory.config import (
     get_project_config,
     ProjectConfig,
 )
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, resolve_path_within_root
 from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -284,19 +284,18 @@ class ProjectService:
             # This ensures flat structure: /app/data/test-bisync instead of /app/data/documents/test bisync
             sanitized_name = name_permalink
 
-            # Construct path using sanitized project name only
-            resolved_path = (base_path / sanitized_name).resolve().as_posix()
-
             # Existing symlinks can resolve to a sibling with the same text
             # prefix, or to the shared root itself. Only descendants belong to
             # a project; registering the root would let project deletion remove it.
-            resolved_root = base_path.resolve()
-            project_path = Path(resolved_path)
-            if project_path == resolved_root or not project_path.is_relative_to(resolved_root):
+            try:
+                resolved_path = resolve_path_within_root(
+                    sanitized_name, base_path, allow_root=False
+                ).as_posix()
+            except ValueError:
                 raise ValueError(
                     f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
                     f"All projects must be created under this directory. Invalid path: {path}"
-                )
+                ) from None
 
         else:
             resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
@@ -728,13 +727,15 @@ class ProjectService:
         if project_root:
             # Moving must preserve the same strict root boundary as creation,
             # including symlink targets, before config or database state changes.
-            destination = Path(resolved_path).resolve()
-            resolved_root = Path(project_root).resolve()
-            if destination == resolved_root or not destination.is_relative_to(resolved_root):
+            try:
+                destination = resolve_path_within_root(
+                    resolved_path, Path(project_root), allow_root=False
+                )
+            except ValueError:
                 raise ValueError(
                     f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
                     f"All projects must remain under this directory. Invalid path: {new_path}"
-                )
+                ) from None
             resolved_path = destination.as_posix()
 
         # Validate project exists in config
