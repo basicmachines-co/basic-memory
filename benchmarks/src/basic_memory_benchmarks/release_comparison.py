@@ -69,6 +69,7 @@ def main() -> int:
     parser.add_argument("--reads", type=int, default=128)
     parser.add_argument("--notes-per-size", type=int, default=32)
     parser.add_argument("--sizes", default="1024,16384,65536")
+    parser.add_argument("--semantic-search", choices=("enabled", "disabled"), default="disabled")
     parser.add_argument("--write-notes", type=int, default=60)
     args = parser.parse_args()
     if min(args.repeats, args.reads, args.notes_per_size, args.write_notes) < 1:
@@ -95,9 +96,12 @@ def main() -> int:
         "kind": args.kind,
         "created_at_utc": utc_now_iso(),
         "benchmark_git_sha": harness_sha,
+        "harness_python": sys.version,
+        "harness_lock_sha256": sha256_file(benchmark_root / "uv.lock"),
         "products": products,
         "host": {"os": platform.platform(), "cpu_count": os.cpu_count()},
         "protocol": "sequential AB/BA pairs; warm authoritative SQLite; Redis disabled",
+        "semantic_search": args.semantic_search if args.kind == "read" else "product-default",
         "runs": [],
     }
     runs: list[dict[str, object]] = []
@@ -132,6 +136,10 @@ def main() -> int:
                 str(args.notes_per_size),
                 "--reads",
                 str(args.reads),
+                "--semantic-search",
+                args.semantic_search,
+                "--seed-concurrency",
+                "1",
             ]
         else:
             command += ["--notes", str(args.write_notes), "--warmup", "8"]

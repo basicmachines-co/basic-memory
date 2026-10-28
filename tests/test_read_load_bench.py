@@ -219,10 +219,12 @@ def test_isolated_env_removes_all_inherited_basic_memory_settings(
 
     assert env["BENCHMARK_TEST"] == "preserved"
     assert env["BASIC_MEMORY_AUTO_UPDATE"] == "false"
+    assert env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] == "false"
     assert env["BASIC_MEMORY_REDIS_MAX_CONNECTIONS"] == "64"
     assert all(key not in env for key in inherited_keys)
     assert {key for key in env if key.startswith("BASIC_MEMORY_")} == {
         "BASIC_MEMORY_AUTO_UPDATE",
+        "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED",
         "BASIC_MEMORY_CONFIG_DIR",
         "BASIC_MEMORY_LOG_LEVEL",
         "BASIC_MEMORY_REDIS_MAX_CONNECTIONS",

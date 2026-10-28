@@ -137,6 +137,7 @@ class ToolCalled:
 
     name_pattern: str
     required: bool = False
+    successful_only: bool = False
 
 
 @dataclass(frozen=True)

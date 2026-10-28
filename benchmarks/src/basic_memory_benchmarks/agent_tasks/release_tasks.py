@@ -35,7 +35,11 @@ RELEASE_TASKS: tuple[AgentTaskSpec, ...] = (
             ),
             graders=(
                 AnswerContains(needle="Refresh token reuse triggers whole-family revocation"),
-                ToolCalled(name_pattern=r"bm_read|read_note|read_content|cat", required=True),
+                ToolCalled(
+                    name_pattern=r"^(bm_read|read_note|read_content|cat)$",
+                    required=True,
+                    successful_only=True,
+                ),
             ),
         )
         for kind, target in READ_TARGETS
@@ -91,7 +95,9 @@ RELEASE_TASKS: tuple[AgentTaskSpec, ...] = (
                     }
                 ),
             ),
-            ToolCalled(name_pattern=r"bm_list|list_directory|ls", required=True),
+            ToolCalled(
+                name_pattern=r"^(bm_list|list_directory|ls)$", required=True, successful_only=True
+            ),
         ),
     ),
 )

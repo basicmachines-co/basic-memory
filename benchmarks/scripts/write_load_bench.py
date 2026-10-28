@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import shutil
 import sqlite3
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,6 +61,7 @@ def synthetic_note(level: int, index: int) -> dict[str, str]:
         f"# {title}\n\n"
         f"Synthetic write-load note about {topic}. "
         f"It exists to exercise the accepted-note write path under concurrency.\n\n"
+        f"writeloadburst{level}marker\n\n"
         "## Observations\n"
         f"- [fact] {topic} note number {index} in burst {level} #load\n"
         f"- [detail] repeated domain term {topic} {topic} {topic} for indexing #benchmark\n\n"
@@ -67,6 +70,15 @@ def synthetic_note(level: int, index: int) -> dict[str, str]:
     )
     _ = prev
     return {"title": title, "directory": f"load/c{level}", "content": content}
+
+
+def synthetic_corpus_checksum(*, levels: list[int], notes: int, warmup: int) -> str:
+    digest = hashlib.sha256()
+    for level, count in [(0, warmup), *((level, notes) for level in levels)]:
+        for index in range(count):
+            digest.update(json.dumps(synthetic_note(level, index), sort_keys=True).encode())
+            digest.update(b"\n")
+    return digest.hexdigest()
 
 
 # --- Metric helpers --------------------------------------------------------
@@ -203,9 +215,15 @@ async def write_burst(
     return latencies, errors
 
 
-async def poll_until(predicate, *, timeout_s: float, interval_s: float = 0.1) -> float | None:
+async def poll_until(
+    predicate: Callable[[], Awaitable[bool]],
+    *,
+    timeout_s: float,
+    interval_s: float = 0.1,
+    started_at: float | None = None,
+) -> float | None:
     """Return ms elapsed when predicate() is true, or None on timeout."""
-    start = time.perf_counter()
+    start = time.perf_counter() if started_at is None else started_at
     delay = interval_s
     while True:
         if await predicate():
@@ -223,7 +241,7 @@ async def searchable_count(
         "search_notes" if surface == "legacy" else "bm_search",
         {
             "project": project,
-            "query": f"burst {level}",
+            "query": f"writeloadburst{level}marker",
             ("search_type" if surface == "legacy" else "mode"): "text",
             "page": 1,
             "page_size": 1,
@@ -269,6 +287,11 @@ def embedded_count(db_path: Path, level: int) -> int:
 
 
 async def run(args: argparse.Namespace) -> int:
+    levels = [int(c) for c in args.concurrency.split(",") if c.strip()]
+    if min(args.notes, args.warmup) < 1 or not levels or min(levels) < 1:
+        raise ValueError("notes, warmup and concurrency levels must be positive")
+    if len(levels) != len(set(levels)):
+        raise ValueError("concurrency levels must not contain duplicates")
     scratch = Path(args.scratch).resolve()
     config_dir = scratch / "config"
     project_dir = scratch / "project"
@@ -303,8 +326,24 @@ async def run(args: argparse.Namespace) -> int:
     output_path = Path(args.output).resolve() if args.output else None
     if output_path and output_path.exists() and args.truncate:
         output_path.unlink()
+    corpus_path = (output_path.parent if output_path else scratch) / "corpus.json"
+    corpus_path.parent.mkdir(parents=True, exist_ok=True)
+    corpus_path.write_text(
+        json.dumps(
+            {
+                "source": "synthetic:write-load-v2-markers",
+                "checksum_sha256": synthetic_corpus_checksum(
+                    levels=levels, notes=args.notes, warmup=args.warmup
+                ),
+                "levels": levels,
+                "notes_per_level": args.notes,
+                "warmup": args.warmup,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
-    levels = [int(c) for c in args.concurrency.split(",") if c.strip()]
     had_failures = False
 
     async with stdio_client(params) as (read_stream, write_stream):
@@ -376,6 +415,7 @@ async def run(args: argparse.Namespace) -> int:
                     surface=args.surface,
                 )
                 wall_s = time.perf_counter() - wall_start
+                burst_finished = time.perf_counter()
                 throughput = (args.notes - errors) / wall_s if wall_s > 0 else 0.0
 
                 level_dir = project_dir / "load" / f"c{level}"
@@ -388,21 +428,34 @@ async def run(args: argparse.Namespace) -> int:
                         await searchable_count(session, project, level, args.surface) >= args.notes
                     )
 
-                materialized_ms = await poll_until(files_ready, timeout_s=args.drain_timeout)
-                searchable_ms = await poll_until(search_ready, timeout_s=args.drain_timeout)
-                had_failures = (
-                    had_failures or errors > 0 or materialized_ms is None or searchable_ms is None
-                )
-
-                # Embedding (vector-sync) drain — only when the warmup probe
-                # confirmed embeddings land (semantic on, SQLite backend).
-                embedded_ms = None
+                drains = [
+                    poll_until(
+                        files_ready, timeout_s=args.drain_timeout, started_at=burst_finished
+                    ),
+                    poll_until(
+                        search_ready, timeout_s=args.drain_timeout, started_at=burst_finished
+                    ),
+                ]
                 if embedded_enabled:
 
                     async def embedded_ready() -> bool:
                         return embedded_count(db_path, level) >= args.notes
 
-                    embedded_ms = await poll_until(embedded_ready, timeout_s=args.drain_timeout)
+                    drains.append(
+                        poll_until(
+                            embedded_ready, timeout_s=args.drain_timeout, started_at=burst_finished
+                        )
+                    )
+                observed = await asyncio.gather(*drains)
+                materialized_ms, searchable_ms = observed[:2]
+                embedded_ms = observed[2] if embedded_enabled else None
+                had_failures = (
+                    had_failures
+                    or errors > 0
+                    or materialized_ms is None
+                    or searchable_ms is None
+                    or (embedded_enabled and embedded_ms is None)
+                )
 
                 record = {
                     "benchmark": f"write-load c={level}",

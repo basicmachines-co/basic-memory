@@ -74,3 +74,29 @@ async def test_measured_writes_use_selected_contract(surface: str):
     assert session.call_tool.call_args.args[0] == (
         "write_note" if surface == "legacy" else "bm_write"
     )
+
+
+@pytest.mark.asyncio
+async def test_write_readiness_uses_unique_burst_token():
+    session = AsyncMock(spec=ClientSession)
+    session.call_tool.return_value = CallToolResult(content=[], structuredContent={"total": 3})
+    assert await write_load.searchable_count(session, "test", 8) == 3
+    query = session.call_tool.call_args.args[1]["query"]
+    assert query == "writeloadburst8marker"
+    assert query in write_load.synthetic_note(8, 0)["content"]
+    assert query not in write_load.synthetic_note(1, 8)["content"]
+
+
+@pytest.mark.asyncio
+async def test_write_drain_uses_common_origin(monkeypatch):
+    async def ready() -> bool:
+        return True
+
+    monkeypatch.setattr(write_load.time, "perf_counter", lambda: 10.0)
+    assert await write_load.poll_until(ready, timeout_s=20, started_at=3.0) == 7000.0
+
+
+def test_write_corpus_checksum_pins_marker_and_workload():
+    checksum = write_load.synthetic_corpus_checksum(levels=[1, 8], notes=2, warmup=1)
+    assert checksum == write_load.synthetic_corpus_checksum(levels=[1, 8], notes=2, warmup=1)
+    assert checksum != write_load.synthetic_corpus_checksum(levels=[1, 8], notes=3, warmup=1)

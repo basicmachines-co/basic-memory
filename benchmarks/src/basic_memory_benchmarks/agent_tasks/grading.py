@@ -410,9 +410,10 @@ def evaluate_grader(
             return _eval_relation_resolves(grader, ctx)
         case FileLineDiff():
             return _eval_file_line_diff(grader, ctx)
-        case ToolCalled(name_pattern=pattern):
+        case ToolCalled(name_pattern=pattern, successful_only=successful_only):
             called = any(
                 record.kind == "tool"
+                and (not successful_only or not record.is_error)
                 and record.tool_name is not None
                 and re.search(pattern, record.tool_name)
                 for record in ctx.turn_records

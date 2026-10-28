@@ -208,7 +208,11 @@ def status_json_is_ready(payload: dict[str, Any]) -> bool | None:
     and ``None`` when the payload has no supported readiness signal.
     """
     readiness = payload.get("readiness")
-    if isinstance(readiness, dict) and readiness.get("phase") in {"idle", "never_indexed", "pending"}:
+    if isinstance(readiness, dict) and readiness.get("phase") in {
+        "idle",
+        "never_indexed",
+        "pending",
+    }:
         return readiness["phase"] == "idle"
 
     total = payload.get("total")

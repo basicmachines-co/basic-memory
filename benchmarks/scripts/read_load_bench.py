@@ -359,6 +359,7 @@ def write_manifest(
             "os": platform.platform(),
             "harness_python_version": sys.version.split()[0],
             "backend": args.backend,
+            "semantic_search_enabled": env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] == "true",
             "redis_read_cache_enabled": redis_version is not None,
         },
         "config": {
@@ -420,10 +421,12 @@ def isolated_env(
     *,
     redis_url: str | None,
     redis_max_connections: int | None,
+    semantic_search_enabled: bool = False,
 ) -> dict[str, str]:
     """Create a local runtime environment without inherited BM configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
     env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
+    env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = str(semantic_search_enabled).lower()
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
     env["BASIC_MEMORY_LOG_LEVEL"] = "WARNING"
     env["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
@@ -651,7 +654,9 @@ async def read_burst(
     return latencies, errors, validation_failures, response_bytes
 
 
-async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
+async def run(
+    args: argparse.Namespace, *, surface: str = "bm", semantic_search_enabled: bool = False
+) -> int:
     sizes = [int(value) for value in args.sizes.split(",") if value.strip()]
     concurrency_levels = [int(value) for value in args.concurrency.split(",") if value.strip()]
     if not sizes or min(sizes) <= 0:
@@ -714,6 +719,7 @@ async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
             config_dir,
             redis_url=redis_url,
             redis_max_connections=redis_max_connections,
+            semantic_search_enabled=semantic_search_enabled,
         )
         env["BASIC_MEMORY_HOME"] = str(main_home)
         if args.backend == "postgres":
@@ -848,6 +854,7 @@ async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
                         "label": args.label,
                         "metadata": {
                             "surface": surface,
+                            "semantic_search_enabled": semantic_search_enabled,
                             "backend": args.backend,
                             "redis_read_cache_enabled": redis_url is not None,
                             "warm_direct_permalink_reads": True,
@@ -895,6 +902,12 @@ def main() -> int:
     )
     parser.add_argument("--label", default="ref", help="Ref label recorded in each row")
     parser.add_argument("--surface", choices=("bm", "legacy"), default="bm")
+    parser.add_argument(
+        "--semantic-search",
+        choices=("enabled", "disabled"),
+        default="disabled",
+        help="Read-load profile; disabled avoids embedding work during corpus setup",
+    )
     parser.add_argument(
         "--sizes",
         default="1024,16384,65536",
@@ -959,7 +972,9 @@ def main() -> int:
         help="Quiet interval between readiness and unmeasured cache warmup",
     )
     args = parser.parse_args()
-    return asyncio.run(run(args, surface=args.surface))
+    return asyncio.run(
+        run(args, surface=args.surface, semantic_search_enabled=args.semantic_search == "enabled")
+    )
 
 
 if __name__ == "__main__":

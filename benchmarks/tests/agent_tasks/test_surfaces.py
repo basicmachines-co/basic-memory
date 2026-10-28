@@ -3,6 +3,8 @@
 import pytest
 from basic_memory_benchmarks.agent_tasks.surfaces import (
     BM_SURFACE,
+    BM_DEFAULT_SURFACE,
+    LEGACY_DEFAULT_SURFACE,
     RICH_SURFACE,
     POSIX_SURFACE,
     SURFACES,
@@ -16,7 +18,9 @@ from basic_memory_benchmarks.agent_tasks.surfaces import (
 
 
 def test_registry_requires_1_0_tools():
-    assert SURFACES == {"bm": BM_SURFACE, "rich": RICH_SURFACE, "posix": POSIX_SURFACE}
+    assert SURFACES["bm"] == BM_SURFACE
+    assert SURFACES["legacy-default"] == LEGACY_DEFAULT_SURFACE
+    assert SURFACES["bm-default"] == BM_DEFAULT_SURFACE
     assert all(name.startswith("bm_") for name in BM_SURFACE.tool_allowlist)
     verify_surface_tools(BM_SURFACE, BM_SURFACE.tool_allowlist)
     with pytest.raises(SurfaceUnavailableError, match="bm_search"):
@@ -39,6 +43,15 @@ def test_legacy_surface_cannot_run_against_1_0():
         verify_surface_tools(surface, surface.tool_allowlist)
         with pytest.raises(SurfaceUnavailableError, match="v0.24.1"):
             verify_surface_tools(surface, BM_SURFACE.tool_allowlist)
+
+
+def test_full_catalogs_include_discovery_and_grouped_tools():
+    assert len(LEGACY_DEFAULT_SURFACE.tool_allowlist) == 27
+    assert len(BM_DEFAULT_SURFACE.tool_allowlist) == 12
+    assert {"bm_project", "bm_schema"} <= set(BM_DEFAULT_SURFACE.tool_allowlist)
+    for surface in (LEGACY_DEFAULT_SURFACE, BM_DEFAULT_SURFACE):
+        assert list(surface.tool_allowlist) == sorted(surface.tool_allowlist)
+        assert not set(SHARED_WRITE_TOOLS) & set(read_only_view(surface).tool_allowlist)
 
 
 def test_surface_env_preserves_input():

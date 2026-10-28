@@ -76,10 +76,56 @@ POSIX_SURFACE = ToolSurface(
     requires="basic-memory v0.24.1 with the legacy POSIX tools",
 )
 
+# Full installed catalogs measure the 27-to-12 consolidation. Alphabetical
+# order is explicit on both versions; controlled subsets remain available.
+LEGACY_DEFAULT_SURFACE = ToolSurface(
+    name="legacy-default",
+    config_overrides={},
+    tool_allowlist=(
+        "basic_memory_diagnostics",
+        "build_context",
+        "cat",
+        "create_memory_project",
+        "delete_note",
+        "delete_project",
+        "edit_note",
+        "fetch",
+        "find",
+        "grep",
+        "list_directory",
+        "list_memory_projects",
+        "list_workspaces",
+        "ls",
+        "man",
+        "move_note",
+        "read_content",
+        "read_note",
+        "recent_activity",
+        "schema_diff",
+        "schema_infer",
+        "schema_validate",
+        "search",
+        "search_notes",
+        "tail",
+        "view_note",
+        "write_note",
+    ),
+    requires="basic-memory v0.24.1 default catalog",
+)
+
+BM_DEFAULT_SURFACE = ToolSurface(
+    name="bm-default",
+    config_overrides={},
+    tool_allowlist=tuple(sorted((*BM_SURFACE.tool_allowlist, "bm_project", "bm_schema"))),
+    requires="basic-memory 1.0 default catalog",
+)
+
 SURFACES: dict[str, ToolSurface] = {
     "bm": BM_SURFACE,
     "rich": RICH_SURFACE,
     "posix": POSIX_SURFACE,
+    "legacy-default": LEGACY_DEFAULT_SURFACE,
+    "bm-default": BM_DEFAULT_SURFACE,
 }
 
 SHARED_WRITE_TOOLS = (
@@ -91,6 +137,10 @@ SHARED_WRITE_TOOLS = (
     "edit_note",
     "move_note",
     "delete_note",
+    "create_memory_project",
+    "delete_project",
+    "bm_project",
+    "bm_project_delete",
 )
 
 
@@ -99,8 +149,8 @@ def read_only_view(surface: ToolSurface) -> ToolSurface:
 
     Dataset-manifest runs reuse one warm project per (surface, group); a write
     from an earlier question would pollute later questions' haystack. Dropping
-    the same four verbs from each surface preserves the fairness contract and
-    matches xAFS's read-only reference agent.
+    mutation verbs from each surface preserves the fairness contract. Grouped
+    project commands are omitted because create can mutate the shared fixture.
     """
     return ToolSurface(
         name=surface.name,
