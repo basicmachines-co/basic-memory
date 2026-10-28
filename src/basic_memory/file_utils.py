@@ -176,9 +176,14 @@ def _create_atomic_temp_path(target: Path) -> tuple[Path, int | None]:
             continue
         os.close(descriptor)
         try:
-            target_mode = stat.S_IMODE(target.stat().st_mode)
-        except FileNotFoundError:
-            target_mode = None
+            try:
+                target_mode = stat.S_IMODE(target.stat().st_mode)
+            except FileNotFoundError:
+                # New files retain the caller's ordinary umask at publication.
+                target_mode = stat.S_IMODE(staging_path.stat().st_mode)
+            # No content is written until this function returns. Keep the staging
+            # file private even when the final target is intentionally shared.
+            staging_path.chmod(0o600)
         except Exception:
             staging_path.unlink(missing_ok=True)
             raise
