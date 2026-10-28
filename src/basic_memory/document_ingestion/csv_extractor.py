@@ -90,6 +90,7 @@ class CsvExtractor:
             content,
             max_rows=self.limits.max_rows,
             max_field_bytes=self.limits.max_field_bytes,
+            max_output_bytes=self.limits.max_output_bytes,
         )
         if len(preview.markdown.encode("utf-8")) > self.limits.max_output_bytes:
             raise CsvExtractionError("CSV preview exceeds the configured output byte limit")
@@ -121,6 +122,7 @@ def render_csv_preview(
     *,
     max_rows: int,
     max_field_bytes: int = _DEFAULT_LIMITS.max_field_bytes,
+    max_output_bytes: int = _DEFAULT_LIMITS.max_output_bytes,
 ) -> CsvPreview:
     """Render the header, the first ``max_rows`` rows, and the total row count."""
     try:
@@ -140,6 +142,8 @@ def render_csv_preview(
     try:
         header = next((row for row in reader if row), None)
         if header is None:
+            if len("_Empty CSV file._\n") > max_output_bytes:
+                raise CsvExtractionError("CSV preview exceeds the configured output byte limit")
             return CsvPreview(markdown="_Empty CSV file._\n", row_count=0, shown_rows=0)
         require_csv_field_bound(header, max_field_bytes)
         for row in reader:
@@ -151,16 +155,30 @@ def render_csv_preview(
         raise CsvExtractionError(f"CSV source could not be parsed: {error}") from error
 
     width = len(header)
+    summary = (
+        f"_Showing {len(shown)} of {row_count} rows._"
+        if row_count > len(shown)
+        else f"_{row_count} rows._"
+    )
+    # Count separators, padded cells, escaped text, and line endings before
+    # rendering. A wide header can otherwise multiply hundreds of short rows
+    # into a huge table even when the CSV source is tiny.
+    projected_bytes = (3 * width + 2) * (len(shown) + 1) + (6 * width + 2)
+    projected_bytes += len(summary.encode("utf-8")) + 2
+    projected_bytes += sum(
+        len(cell.encode("utf-8")) - cell.count("\r\n") + cell.count("\\") + cell.count("|")
+        for row in (header, *shown)
+        for cell in row[:width]
+    )
+    if projected_bytes > max_output_bytes:
+        raise CsvExtractionError("CSV preview exceeds the configured output byte limit")
     lines = [
         _table_row(header, width),
         "| " + " | ".join("---" for _ in range(width)) + " |",
         *(_table_row(row, width) for row in shown),
         "",
     ]
-    if row_count > len(shown):
-        lines.append(f"_Showing {len(shown)} of {row_count} rows._")
-    else:
-        lines.append(f"_{row_count} rows._")
+    lines.append(summary)
     return CsvPreview(markdown="\n".join(lines) + "\n", row_count=row_count, shown_rows=len(shown))
 
 
