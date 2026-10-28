@@ -50,7 +50,7 @@ async def test_upload_refuses_traversing_backslash_name(
 @pytest.mark.skipif(os.name == "nt", reason="POSIX filename spelling")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "name", [" note.md", "note.md ", "cafe\u0301.md", " ", " /note.md", "backup\\copy.zip"]
+    "name", [" note.md", "note.md ", "cafe\u0301.md", " ", " /note.md", "backup\\copy.zip", "draft~.md"]
 )
 async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name: str):
     (tmp_path / "note.md").write_bytes(b"ordinary")

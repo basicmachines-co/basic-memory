@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 from basic_memory.utils import resolve_path_within_root, valid_project_path_value
+from basic_memory.services.file_service import FileService
+
+
+def test_file_paths_treat_tildes_as_literal_characters(tmp_path: Path):
+    FileService(tmp_path).require_project_path("draft~.md")
+    FileService(tmp_path).require_project_path("~/note.md")
 
 
 @pytest.mark.parametrize("absolute", [False, True])

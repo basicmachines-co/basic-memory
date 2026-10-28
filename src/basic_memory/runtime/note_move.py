@@ -18,7 +18,7 @@ def normalize_note_move_destination_path(destination_path: str) -> RuntimeFilePa
     segments (in either path convention) walk out of the project.
     """
     accepted_path = destination_path.strip()
-    if not accepted_path or not valid_project_path_value(accepted_path):
+    if not accepted_path or not valid_project_path_value(accepted_path, allow_literal_tilde=True):
         raise ValueError(f"Invalid destination path: {destination_path}")
 
     return nfc_path(PurePosixPath(accepted_path).as_posix())
