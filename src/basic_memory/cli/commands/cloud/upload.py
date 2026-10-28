@@ -11,6 +11,7 @@ import httpx
 from basic_memory.cli.commands.cloud.webdav import webdav_path
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_client
+from basic_memory.utils import valid_project_path_value
 
 # Archive file extensions that should be skipped during upload
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
@@ -78,6 +79,30 @@ async def upload_path(
                     "or --no-gitignore to skip .gitignore patterns"
                 )
             return True
+
+        # Validate the same separator-normalized paths that will reach HTTP.
+        # A literal POSIX backslash filename can otherwise become ../ segments
+        # and make the HTTP client dispatch outside the selected project route.
+        validated_files: list[tuple[Path, str]] = []
+        for source, relative in files_to_upload:
+            # Archives never reach dispatch; their names must not abort note uploads.
+            if _is_archive_file(source):
+                validated_files.append((source, relative))
+                continue
+            # A POSIX backslash is a filename character, but the transport treats it
+            # as a separator. Reject it rather than silently changing the remote key.
+            if "\\" in relative:
+                raise ValueError(f"Unsupported backslash in upload destination: {relative}")
+            destination = relative
+            # These names come from the selected native tree, not path references;
+            # a POSIX colon is literal and will be encoded inside the project URL.
+            if not destination or not valid_project_path_value(
+                destination, allow_literal_tilde=True, allow_literal_colon=True
+            ):
+                raise ValueError(f"Invalid upload destination: {destination}")
+            # Validation must not trim or NFC-normalize distinct legal filenames.
+            validated_files.append((source, destination))
+        files_to_upload = validated_files
 
         print(f"Found {len(files_to_upload)} file(s) to upload")
 
@@ -244,7 +269,7 @@ def _get_files_to_upload(
 
             # Calculate relative path for display/remote
             rel_path = file_path.relative_to(directory)
-            remote_path = str(rel_path).replace("\\", "/")
+            remote_path = rel_path.as_posix()
 
             # Directory uploads copy the tree's own files, not symlink targets
             # that may contain private data outside the selected directory.
