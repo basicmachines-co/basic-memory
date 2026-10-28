@@ -6,7 +6,10 @@ These run the real ASGI stack through the shared `client` fixture.
 from typing import Any
 
 import pytest
+from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
+from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import bm_context, write_note
 
 
@@ -133,3 +136,20 @@ async def test_text_output_names_the_next_page(client, test_project):
     assert isinstance(text, str)
     assert "More results available. Call bm_context(identifier='graph/*'" in text
     assert "page=2, page_size=1)" in text
+
+
+@pytest.mark.asyncio
+async def test_malformed_locator_is_actionable_input_feedback(client, test_project):
+    """The production-shaped locator must not surface as an opaque server failure (#1879)."""
+    locator = "workspace/project/https://example.invalid/notes"
+
+    async with Client(mcp) as mcp_client:
+        with pytest.raises(ToolError) as exc_info:
+            await mcp_client.call_tool(
+                "bm_context",
+                {"identifier": locator, "project": test_project.name},
+            )
+
+    message = str(exc_info.value)
+    assert "protocol scheme" in message
+    assert "Internal server error" not in message

@@ -180,19 +180,11 @@ async def get_memory_context(
     Returns:
         GraphContext with the entity and its related context
     """
-    with logfire.span(
-        "api.request.memory.build_context",
-        entrypoint="api",
-        domain="memory",
-        action="build_context",
-        page=page,
-        page_size=page_size,
-    ):
-        logger.debug(
-            f"V2 Getting context for project {project_id}, URI: `{uri}` depth: `{depth}` timeframe: `{timeframe}` page: `{page}` page_size: `{page_size}` max_related: `{max_related}`"
-        )
-        memory_url = normalize_memory_url(uri)
+    deferred_http_error: tuple[int, str, BaseException] | None = None
+    result: GraphContext | None = None
 
+    async def _build_context() -> GraphContext | None:
+        nonlocal deferred_http_error
         since = parse_timeframe(timeframe) if timeframe else None
         limit = page_size
         offset = (page - 1) * page_size
@@ -217,7 +209,11 @@ async def get_memory_context(
                 )
             except AmbiguousIdentifierError as exc:
                 # A title URL that names several notes has no single context to build.
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+                # Defer the caller-visible 409 past this span so Logfire does not
+                # record the locator content as an exception.
+                deferred_http_error = (status.HTTP_409_CONFLICT, str(exc), exc)
+                return None
+
         with logfire.span(
             "api.memory.build_context.shape_response",
             domain="memory",
@@ -233,3 +229,53 @@ async def get_memory_context(
                     page=page,
                     page_size=page_size,
                 )
+
+    with logfire.span(
+        "api.request.memory.build_context",
+        entrypoint="api",
+        domain="memory",
+        action="build_context",
+        page=page,
+        page_size=page_size,
+    ) as span:
+        try:
+            logger.debug(
+                f"V2 Getting context for project {project_id}, URI: `{uri}` depth: `{depth}` timeframe: `{timeframe}` page: `{page}` page_size: `{page_size}` max_related: `{max_related}`"
+            )
+            try:
+                memory_url = normalize_memory_url(uri)
+            except ValueError as exc:
+                # Trigger: the path is not a valid memory locator (embedded scheme,
+                #   doubled separator, invalid character, empty/whitespace).
+                # Why: normalize_memory_url raises ValueError for caller input; letting
+                #   it escape reported a client mistake as an internal server error (#1879).
+                # Outcome: a bounded 400 with the normalizer's specific reason before
+                #   any context traversal or span exception.
+                deferred_http_error = (status.HTTP_400_BAD_REQUEST, str(exc), exc)
+            else:
+                result = await _build_context()
+        except HTTPException as exc:
+            # Unexpected HTTP errors keep the original in-span outcome handling.
+            span.set_attribute(
+                "outcome",
+                "input_rejected" if exc.status_code < 500 else "failed",
+            )
+            raise
+        except Exception:
+            # Trigger: the context service or response shaping raised.
+            # Why: genuine failures must stay visible instead of being flattened into
+            #   a validation response.
+            # Outcome: the 500 path records a failed terminal outcome.
+            span.set_attribute("outcome", "failed")
+            raise
+
+        span.set_attribute(
+            "outcome",
+            "input_rejected" if deferred_http_error is not None else "success",
+        )
+
+    if deferred_http_error is not None:
+        status_code, detail, cause = deferred_http_error
+        raise HTTPException(status_code=status_code, detail=detail) from cause
+    assert result is not None
+    return result
