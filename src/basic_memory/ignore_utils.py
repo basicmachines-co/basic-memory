@@ -263,7 +263,7 @@ def _matches_directory_ancestor(parts: tuple[str, ...], pattern: str) -> bool:
     matched = [True] + [False] * len(parts)
     components = pattern.split("/")
     for position, component in enumerate(components):
-        if component == "**":
+        if len(component) >= 2 and not component.strip("*"):
             # A trailing directory globstar must name a descendant directory,
             # while an intermediate globstar may consume zero directories.
             if position == len(components) - 1:

@@ -46,6 +46,12 @@ def test_nested_directory_ignore_rule(tmp_path: Path, pattern: str, path: str, i
         ("foo/**/", "foo/sub/a.md", True),
         ("/**/", "a.md", False),
         ("/**/", "sub/a.md", True),
+        ("foo/***/bar/", "foo/bar/note.md", True),
+        ("foo/***/bar/", "foo/a/b/bar/note.md", True),
+        ("foo/****/bar/", "foo/bar/note.md", True),
+        ("foo/****/", "foo/note.md", False),
+        ("foo/****/", "foo/a/note.md", True),
+        ("foo/**a/bar/", "foo/a/b/bar/note.md", False),
     ],
 )
 def test_directory_wildcards_respect_components(
