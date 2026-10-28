@@ -560,12 +560,15 @@ class LocalNoteContentStorage:
         return await self.file_service.compute_checksum(full_path)
 
     async def get_file_metadata(self, path: RuntimeFilePath) -> RuntimeFileMetadataSource:
+        self.file_service.require_project_path(path)
         return await self.file_service.get_file_metadata(path)
 
     async def exists(self, path: RuntimeFilePath) -> bool:
+        self.file_service.require_project_path(path)
         return await self.file_service.exists(path)
 
     async def compute_checksum(self, path: RuntimeFilePath) -> RuntimeFileChecksum:
+        self.file_service.require_project_path(path)
         try:
             return await self.file_service.compute_checksum(path)
         except file_utils.FileError as exc:
@@ -576,6 +579,7 @@ class LocalNoteContentStorage:
             raise
 
     async def delete_file(self, path: RuntimeFilePath) -> None:
+        self.file_service.require_project_path(path)
         await self.file_service.delete_file(path)
 
     async def delete_file_if_matches(
@@ -584,6 +588,7 @@ class LocalNoteContentStorage:
         *,
         expected_checksum: RuntimeFileChecksum,
     ) -> RuntimeGuardedFileDeleteOutcome:
+        self.file_service.require_project_path(path)
         # Verify the checksum immediately before deleting so a replacement written before the
         # delete is never removed (basic-memory-cloud#1618). Local has no atomic precondition;
         # the race is negligible on a filesystem.
@@ -610,6 +615,10 @@ class InlineNoteFileDeleteEnqueuer:
     vacate_clearer: MoveVacateClearer | None = None
 
     async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None:
+        # Alias detection also touches storage, so validate both spellings before it.
+        if request.live_file_path is not None:
+            self.storage.file_service.require_project_path(request.file_path)
+            self.storage.file_service.require_project_path(request.live_file_path)
         # Trigger: a move scheduled old-path cleanup whose old and new paths differ
         # only by case (or otherwise alias the same inode) on a case-insensitive
         # filesystem, so the old path now points at the just-written new file.
