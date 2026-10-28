@@ -81,6 +81,7 @@ from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
 )
+from basic_memory.repository.semantic_chunking import compose_row_source_text
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
@@ -1805,6 +1806,9 @@ permalink: concept/entity-c
     assert entity_b is not None
     assert entity_c is not None
 
+    entity_a_search_rows = await search_service.repository.get_entity_search_rows(entity_a.id)
+    entity_a_chunk_manifest = await search_service.repository.get_entity_chunk_manifest(entity_a.id)
+
     a_targets = {relation.to_id for relation in entity_a.outgoing_relations}
     b_targets = {relation.to_id for relation in entity_b.outgoing_relations}
     c_targets = {relation.to_id for relation in entity_c.outgoing_relations}
@@ -1821,6 +1825,63 @@ permalink: concept/entity-c
     assert b_incoming_sources == {entity_a.id}
     assert c_incoming_sources == {entity_a.id, entity_b.id}
     assert {row.to_id for row in relation_search_rows} == {entity_a.id, entity_b.id, entity_c.id}
+
+    # The completion pass refreshed entity_a's relation search rows after the
+    # coordinator embedded the earlier batch. Those changed rows owe new vector
+    # chunks; the stored relation chunks must match the resolved rows again (#1873).
+    expected_relation_chunks = {
+        compose_row_source_text(row)
+        for row in entity_a_search_rows
+        if row.type == SearchItemType.RELATION.value
+    }
+    stored_relation_chunks = {
+        chunk.chunk_text
+        for chunk in entity_a_chunk_manifest
+        if chunk.source_type == SearchItemType.RELATION.value
+    }
+    assert expected_relation_chunks
+    assert stored_relation_chunks == expected_relation_chunks
+
+
+async def test_local_project_index_search_only_reindex_leaves_relation_vectors_unbuilt(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+) -> None:
+    """A search-only project index resolves relations but embeds nothing (#1873)."""
+    del config_manager
+
+    (project_config.home / "source.md").write_text(
+        "---\ntitle: Source Note\ntype: note\n---\n\n# Source Note\n\n- relates_to [[Target Note]]\n",
+        encoding="utf-8",
+    )
+    (project_config.home / "target.md").write_text(
+        "---\ntitle: Target Note\ntype: note\n---\n\n# Target Note\n\nTarget body.\n",
+        encoding="utf-8",
+    )
+
+    result = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=1),
+        force_full=True,
+        embeddings=False,
+    )
+
+    assert result.enqueued_files == 2
+    async with db.scoped_session(session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, "source.md")
+        target = await entity_repository.get_by_file_path(session, "target.md")
+    assert source is not None
+    assert target is not None
+
+    search_rows = await search_service.repository.get_entity_search_rows(source.id)
+    assert {row.to_id for row in search_rows if row.type == SearchItemType.RELATION.value} == {
+        target.id
+    }
+    assert await search_service.repository.get_entity_chunk_manifest(source.id) == []
 
 
 async def test_local_relation_resolution_refreshes_pending_source_without_markdown_file(

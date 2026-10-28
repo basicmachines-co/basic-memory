@@ -15,6 +15,8 @@ from basic_memory.deps import (
     get_read_cache,
     validate_project_external_id,
 )
+from basic_memory.deps.services import get_relation_resolution_scheduler
+from basic_memory.index.local_schedulers import LocalRelationResolutionScheduler
 from basic_memory.models.project import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.mode import resolve_runtime_mode
@@ -115,6 +117,30 @@ async def test_config_and_read_cache_deps_resolve_on_the_event_loop(app_config):
     # Idle workers left by earlier tests may still be winding down, so only
     # growth is a regression.
     assert len(_anyio_worker_threads()) <= workers_before
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_provider_reuses_search_service_for_vectors(
+    test_project: Project,
+    session_maker,
+    entity_repository,
+    relation_repository,
+    search_service,
+    app_config,
+):
+    """The write path's resolution pass re-embeds through the same search service."""
+    scheduler = await get_relation_resolution_scheduler(
+        project_external_id=str(test_project.external_id),
+        session_maker=session_maker,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        app_config=app_config,
+        read_cache=None,
+    )
+
+    assert isinstance(scheduler, LocalRelationResolutionScheduler)
+    assert scheduler.vector_sync is search_service
 
 
 @pytest.mark.asyncio

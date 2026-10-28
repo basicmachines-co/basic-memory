@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.accepted_note_search import accepted_search_content_from_markdown
+from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
 from basic_memory.indexing.models import IndexFileJobStatus, RelationTargetRequest
 from basic_memory.markdown.path_links import is_path_target
 from basic_memory.models import Entity
@@ -504,6 +505,7 @@ async def resolve_project_index_completion_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
+    vector_sync: EmbeddingBatchVectorSync | None = None,
 ) -> ResolveRelationsResult | None:
     """Run the final relation-resolution pass for a completed project index.
 
@@ -511,11 +513,16 @@ async def resolve_project_index_completion_relations(
     from the same completion facts; the inline path resolves directly against
     the already project-scoped runtime. A context without complete project
     identity plans no request, so the resolution pass is skipped.
+    ``vector_sync`` re-embeds sources whose relation rows this pass rewrote.
     """
     request = plan_project_index_completion_relation_resolution(context)
     if request is None:
         return None
-    return await resolve_project_relations(runtime, max_passes=max_passes)
+    return await resolve_project_relations(
+        runtime,
+        max_passes=max_passes,
+        vector_sync=vector_sync,
+    )
 
 
 def plan_index_file_relation_resolution(
@@ -546,6 +553,11 @@ class ResolveRelationsResult:
     # Source notes whose links this run resolved; see
     # services.read_cache_changes.resolved_relations_read_cache_change.
     affected_entity_ids: frozenset[int] = frozenset()
+    # Entities the vector backend could not finish. Failed entities remain marked
+    # for the backend's retry/readiness path; the result exposes both sets instead
+    # of silently reporting the relation refresh as fully synced.
+    vector_sync_failed_entity_ids: frozenset[int] = frozenset()
+    vector_sync_deferred_entity_ids: frozenset[int] = frozenset()
 
     @property
     def resolved(self) -> int:
@@ -557,6 +569,7 @@ async def resolve_project_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
+    vector_sync: EmbeddingBatchVectorSync | None = None,
 ) -> ResolveRelationsResult:
     """Resolve all resolvable forward references for one project runtime.
 
@@ -568,6 +581,12 @@ async def resolve_project_relations(
     resolver from looping forever. Relations left after a stable pass are
     genuine forward references and remain unresolved until their target note
     exists.
+
+    When ``vector_sync`` is set, callers that embed run it after every pass
+    settles and then drain any deferred shards. Resolution rewrites the affected
+    sources' relation search rows, and only changed chunks are re-embedded.
+    Failed entities remain marked by the backend's retry/readiness state and are
+    exposed on the result.
     """
     unresolved_before = await runtime.count_unresolved_relations()
     affected_entities: AffectedEntityIds = set()
@@ -581,12 +600,58 @@ async def resolve_project_relations(
         if not affected:
             break
 
+    remaining = await runtime.count_unresolved_relations()
+    failed_entity_ids: set[EntityId] = set()
+    deferred_entity_ids: set[EntityId] = set()
+
+    # Trigger: the resolution pass rewrote relation search rows for these sources
+    # after their owners had already embedded them.
+    # Why: chunk keys follow the row text, so those changed relation rows have no
+    # current vector until something re-syncs them; nothing else revisits them.
+    # Outcome: re-embed the affected sources after resolution committed. The batch
+    # backend reports failed and deferred entities instead of raising, so drain
+    # every deferred shard here; failed entities stay marked by the backend's
+    # retry/readiness state and both sets are exposed on the result.
+    if vector_sync is not None and affected_entities:
+        pending_entity_ids = sorted(affected_entities)
+        previous_pending_chunks: int | None = None
+        while pending_entity_ids:
+            sync_result = await vector_sync.sync_entity_vectors_batch(pending_entity_ids)
+            failed_entity_ids.update(sync_result.failed_entity_ids)
+            pending_entity_ids = list(sync_result.deferred_entity_ids)
+            if not pending_entity_ids:
+                break
+
+            pending_chunks = sync_result.chunks_total - sync_result.chunks_skipped
+            if previous_pending_chunks is not None and pending_chunks >= previous_pending_chunks:
+                logger.warning(
+                    "Stopped draining deferred relation vectors: no progress",
+                    deferred_entities=len(pending_entity_ids),
+                    pending_chunks=pending_chunks,
+                )
+                break
+            previous_pending_chunks = pending_chunks
+
+        deferred_entity_ids.update(pending_entity_ids)
+        if failed_entity_ids:
+            logger.warning(
+                "Relation vector sync left failed entities",
+                failed_entities=len(failed_entity_ids),
+            )
+        if deferred_entity_ids:
+            logger.warning(
+                "Relation vector sync left deferred entities after drain",
+                deferred_entities=len(deferred_entity_ids),
+            )
+
     result = ResolveRelationsResult(
         unresolved_before=unresolved_before,
-        remaining=await runtime.count_unresolved_relations(),
+        remaining=remaining,
         passes=passes,
         affected_entities=len(affected_entities),
         affected_entity_ids=frozenset(affected_entities),
+        vector_sync_failed_entity_ids=frozenset(failed_entity_ids),
+        vector_sync_deferred_entity_ids=frozenset(deferred_entity_ids),
     )
     logger.info(
         "Resolved project relations",

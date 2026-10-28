@@ -504,6 +504,9 @@ async def get_relation_resolution_scheduler(
         project_external_id=project_external_id,
         read_cache=read_cache,
         test_mode=app_config.is_test_env,
+        # The write path embeds notes; sources whose links this pass resolves
+        # need their changed relation chunks re-embedded too (#1873).
+        vector_sync=search_service,
     )
 
 

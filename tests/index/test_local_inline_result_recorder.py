@@ -14,6 +14,7 @@ from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
 from basic_memory.indexing.project_index_maintenance import ProjectIndexMovedEntitySearchRefresher
 from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
 from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
@@ -58,21 +59,26 @@ class StubSearchService:
 
     async def sync_entity_vectors_batch(self, entity_ids, progress_callback=None):
         self.batches.append(list(entity_ids))
-        return None
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
 
 
 class StubRelationRuntime:
     """Counts project relation resolution passes triggered by the recorder."""
 
-    def __init__(self) -> None:
+    def __init__(self, resolved_sources: set[int] | None = None) -> None:
         self.resolve_calls = 0
+        self._pending_affected = [resolved_sources] if resolved_sources else []
 
     async def count_unresolved_relations(self) -> int:
         return 0
 
     async def resolve_relations(self, entity_id: int | None = None) -> set[int]:
         self.resolve_calls += 1
-        return set()
+        return self._pending_affected.pop(0) if self._pending_affected else set()
 
 
 def _recorder(
@@ -131,6 +137,34 @@ async def test_processed_file_skips_embedding_when_disabled(
     # Relation repair still runs; embedding is gated off.
     assert search.batches == []
     assert relations.resolve_calls == 1
+
+
+async def test_processed_file_embeds_resolved_relation_sources(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Resolving a forward reference refreshes source vectors, then the file's own."""
+    search = StubSearchService()
+    relations = StubRelationRuntime(resolved_sources={7})
+    recorder = _recorder(search, relations, index_embeddings=True, session_maker=session_maker)
+
+    await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.processed, 42))
+
+    # The relation pass re-embedded the affected source before this file was embedded.
+    assert search.batches == [[7], [42]]
+    assert relations.resolve_calls == 2
+
+
+async def test_disabled_embeddings_skip_relation_vector_sync(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    search = StubSearchService()
+    relations = StubRelationRuntime(resolved_sources={7})
+    recorder = _recorder(search, relations, index_embeddings=False, session_maker=session_maker)
+
+    await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.processed, 42))
+
+    assert search.batches == []
+    assert relations.resolve_calls == 2
 
 
 async def test_superseded_file_skips_embedding_when_enabled(

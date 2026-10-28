@@ -967,6 +967,9 @@ async def run_local_project_index(
                     project_path=request.project.project_path,
                 ),
                 runtime.completion_relation_runtime,
+                # A search-only reindex (``bm reindex --search``) must not build
+                # vectors, so it passes no sync backend.
+                vector_sync=runtime.embedding_vector_sync if request.embeddings else None,
             )
     # Stamped last, after relation resolution, so the marker means "this project
     # has a complete index" rather than "a scan started". Anything that raises

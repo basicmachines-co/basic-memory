@@ -204,7 +204,12 @@ class LocalInlineStorageEventResultRecorder:
                 else nullcontext(ReadCacheChangeRecorder())
             )
             async with invalidation_scope as relation_change:
-                relation_result = await resolve_project_relations(self.relation_runtime)
+                relation_result = await resolve_project_relations(
+                    self.relation_runtime,
+                    # Resolution rewrites affected sources' relation rows; re-embed
+                    # them only when this runtime is embedding at all.
+                    vector_sync=self.search_service if self.index_embeddings else None,
+                )
                 relation_change.record(
                     await resolved_relations_read_cache_change(
                         self.session_maker,

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index.project_indexing import ProjectIndexRunner
 from basic_memory.index.schedulers import SearchReindexService
+from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
 from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
@@ -225,8 +226,10 @@ class LocalRelationResolutionScheduler:
     write is both wasteful and a real write-load cost. Instead each write only
     enqueues: the first write of a burst schedules one debounced background pass
     and every other write coalesces onto it (at most one pending pass per
-    project). The accept path stays light; reconciliation runs offline. No-op in
-    test mode, consistent with the other local schedulers.
+    project). The accept path stays light; reconciliation runs offline. A caller
+    that embeds passes ``vector_sync`` so sources whose relation rows the pass
+    rewrote are re-embedded after it settles. No-op in test mode, consistent
+    with the other local schedulers.
     """
 
     relation_runtime: RelationResolutionRuntime
@@ -234,6 +237,7 @@ class LocalRelationResolutionScheduler:
     project_external_id: str
     read_cache: ReadCacheInvalidator | None
     test_mode: bool
+    vector_sync: EmbeddingBatchVectorSync | None = None
     debounce_seconds: float = 0.5
 
     def schedule_relation_resolution(self, *, project_id: int) -> None:
@@ -265,14 +269,20 @@ class LocalRelationResolutionScheduler:
             # A second bump closes the window in which an intermediate entity
             # response could have populated the current generation.
             if self.read_cache is None:
-                await resolve_project_relations(self.relation_runtime)
+                await resolve_project_relations(
+                    self.relation_runtime,
+                    vector_sync=self.vector_sync,
+                )
             else:
                 # The pass retires the notes whose links it resolved; a raise
                 # retires the whole project.
                 async with invalidate_recorded_change(
                     self.read_cache, self.project_external_id
                 ) as change:
-                    result = await resolve_project_relations(self.relation_runtime)
+                    result = await resolve_project_relations(
+                        self.relation_runtime,
+                        vector_sync=self.vector_sync,
+                    )
                     change.record(
                         await resolved_relations_read_cache_change(
                             self.session_maker,

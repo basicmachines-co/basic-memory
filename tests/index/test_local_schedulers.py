@@ -6,6 +6,7 @@ from typing import cast, override
 import pytest
 
 from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
+from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
 from basic_memory.index.local_schedulers import (
     LocalEntityVectorSyncScheduler,
     LocalProjectIndexScheduler,
@@ -14,7 +15,12 @@ from basic_memory.index.local_schedulers import (
     drain_background_tasks,
 )
 from basic_memory.read_cache import ReadCacheChange, ReadCacheInvalidationStatus
+from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.semantic_chunking import compose_row_source_text
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
+from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.schemas.search import SearchItemType
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
 
@@ -298,6 +304,21 @@ class StubRelationResolutionRuntime:
         return self._pending.pop(0) if self._pending else set()
 
 
+class StubVectorSync:
+    """Records entity batches handed to the scheduler's vector-sync step."""
+
+    def __init__(self) -> None:
+        self.batches: list[list[int]] = []
+
+    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> VectorSyncBatchResult:
+        self.batches.append(list(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
+
+
 @pytest.mark.asyncio
 async def test_relation_resolution_scheduler_runs_project_resolution(session_maker):
     """A single write schedules one debounced project resolution pass."""
@@ -323,6 +344,107 @@ async def test_relation_resolution_scheduler_runs_project_resolution(session_mak
     assert read_cache.invalidated_project_ids == []
     # The pending marker is cleared after the pass so later writes can schedule.
     assert 13 not in _pending_relation_resolution
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_syncs_resolved_source_vectors(
+    session_maker,
+) -> None:
+    """A scheduled pass re-embeds the source notes whose links it resolved (#1873)."""
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
+    runtime = StubRelationResolutionRuntime(resolved_sources={22, 11})
+    vector_sync = StubVectorSync()
+
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        session_maker=session_maker,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=None,
+        test_mode=False,
+        debounce_seconds=0.0,
+        vector_sync=vector_sync,
+    )
+    scheduler.schedule_relation_resolution(project_id=13)
+    await drain_background_tasks()
+
+    assert vector_sync.batches == [[11, 22]]
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_scheduler_reembeds_resolved_source_relations(
+    test_project,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    session_maker,
+    search_service,
+    app_config,
+) -> None:
+    """A write-path resolution pass leaves the source's relation vectors current (#1873).
+
+    The source note is embedded while its link is still dangling; writing the target
+    then lets the scheduler resolve that link. Its refreshed search row must be
+    re-embedded, not left carrying the unresolved relation text.
+    """
+    from basic_memory.index.local_schedulers import _pending_relation_resolution
+
+    _pending_relation_resolution.clear()
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Scheduler Source",
+            directory="notes",
+            note_type="note",
+            content="# Scheduler Source\n\n- relates_to [[Scheduler Target]]\n",
+        )
+    )
+    await search_service.index_entity(source)
+    await search_service.sync_entity_vectors_batch([source.id])
+
+    target = await entity_service.create_entity(
+        EntitySchema(
+            title="Scheduler Target",
+            directory="notes",
+            note_type="note",
+            content="# Scheduler Target\n\nTarget body.\n",
+        )
+    )
+
+    runtime = RepositoryRelationResolutionRuntime(
+        session_maker=session_maker,
+        relation_repository=relation_repository,
+        entity_repository=entity_repository,
+        note_content_repository=NoteContentRepository(project_id=test_project.id),
+        target_resolver=BulkLinkResolver(
+            entity_repository=entity_repository,
+            app_config=app_config,
+        ),
+        entity_indexer=search_service,
+    )
+    scheduler = LocalRelationResolutionScheduler(
+        relation_runtime=runtime,
+        session_maker=session_maker,
+        project_external_id=str(test_project.external_id),
+        read_cache=None,
+        test_mode=False,
+        debounce_seconds=0.0,
+        vector_sync=search_service,
+    )
+
+    scheduler.schedule_relation_resolution(project_id=test_project.id)
+    await drain_background_tasks()
+
+    search_rows = await search_service.repository.get_entity_search_rows(source.id)
+    relation_rows = [row for row in search_rows if row.type == SearchItemType.RELATION.value]
+    assert relation_rows
+    assert {row.to_id for row in relation_rows} == {target.id}
+    expected_relation_chunks = {compose_row_source_text(row) for row in relation_rows}
+    manifest = await search_service.repository.get_entity_chunk_manifest(source.id)
+    stored_relation_chunks = {
+        chunk.chunk_text for chunk in manifest if chunk.source_type == SearchItemType.RELATION.value
+    }
+    assert stored_relation_chunks == expected_relation_chunks
 
 
 @pytest.mark.asyncio
