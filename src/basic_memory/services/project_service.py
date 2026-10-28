@@ -287,12 +287,16 @@ class ProjectService:
             # Construct path using sanitized project name only
             resolved_path = (base_path / sanitized_name).resolve().as_posix()
 
-            # Verify the resolved path is actually under project_root
-            if not resolved_path.startswith(base_path.resolve().as_posix()):  # pragma: no cover
+            # Existing symlinks can resolve to a sibling with the same text
+            # prefix, or to the shared root itself. Only descendants belong to
+            # a project; registering the root would let project deletion remove it.
+            resolved_root = base_path.resolve()
+            project_path = Path(resolved_path)
+            if project_path == resolved_root or not project_path.is_relative_to(resolved_root):
                 raise ValueError(
                     f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
                     f"All projects must be created under this directory. Invalid path: {path}"
-                )  # pragma: no cover
+                )
 
         else:
             resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
