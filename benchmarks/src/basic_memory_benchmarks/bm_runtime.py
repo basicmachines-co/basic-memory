@@ -207,6 +207,10 @@ def status_json_is_ready(payload: dict[str, Any]) -> bool | None:
     Returns ``True`` when a known schema is idle, ``False`` when it is busy,
     and ``None`` when the payload has no supported readiness signal.
     """
+    readiness = payload.get("readiness")
+    if isinstance(readiness, dict) and readiness.get("phase") in {"idle", "never_indexed", "pending"}:
+        return readiness["phase"] == "idle"
+
     total = payload.get("total")
     if isinstance(total, int):
         return total == 0
@@ -258,10 +262,13 @@ def isolated_bm_env(home: Path) -> dict[str, str]:
     project indexes an empty directory instead of the operator's personal
     notes (which would add noise to settle timing and DB contents).
     """
-    env = dict(os.environ)
-    env.pop("BASIC_MEMORY_CLOUD_MODE", None)
+    # A shell's cloud routing, database, cache or semantic settings must not
+    # change the measured runtime. Surface/run overrides are applied afterward.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
+    home = home.resolve()
     env["BASIC_MEMORY_CONFIG_DIR"] = str(home / "config")
     env["BASIC_MEMORY_HOME"] = str(home / "default-home")
+    env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
     return env
 
 

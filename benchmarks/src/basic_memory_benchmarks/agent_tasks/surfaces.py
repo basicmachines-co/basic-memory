@@ -1,8 +1,4 @@
-"""The 1.0 tool surface, pinned in each run manifest.
-
-Historical rich/POSIX artifacts retain their original names and allowlists.
-New runs use bm; legacy presets are retired rather than silently relabeled.
-"""
+"""Version-specific tool surfaces for the v0.24.1 versus 1.0 comparison."""
 
 from __future__ import annotations
 
@@ -44,9 +40,58 @@ BM_SURFACE = ToolSurface(
     requires="a basic-memory checkout with the 1.0 bm_* tools",
 )
 
-SURFACES: dict[str, ToolSurface] = {"bm": BM_SURFACE}
+RICH_SURFACE = ToolSurface(
+    name="rich",
+    config_overrides={},
+    tool_allowlist=(
+        "search_notes",
+        "read_note",
+        "read_content",
+        "list_directory",
+        "recent_activity",
+        "build_context",
+        "write_note",
+        "edit_note",
+        "move_note",
+        "delete_note",
+    ),
+    requires="basic-memory v0.24.1 with the legacy rich tools",
+)
 
-SHARED_WRITE_TOOLS = ("bm_write", "bm_edit", "bm_move", "bm_delete")
+POSIX_SURFACE = ToolSurface(
+    name="posix",
+    config_overrides={"enable_posix_tools": "true"},
+    tool_allowlist=(
+        "cat",
+        "grep",
+        "ls",
+        "find",
+        "tail",
+        "man",
+        "write_note",
+        "edit_note",
+        "move_note",
+        "delete_note",
+    ),
+    requires="basic-memory v0.24.1 with the legacy POSIX tools",
+)
+
+SURFACES: dict[str, ToolSurface] = {
+    "bm": BM_SURFACE,
+    "rich": RICH_SURFACE,
+    "posix": POSIX_SURFACE,
+}
+
+SHARED_WRITE_TOOLS = (
+    "bm_write",
+    "bm_edit",
+    "bm_move",
+    "bm_delete",
+    "write_note",
+    "edit_note",
+    "move_note",
+    "delete_note",
+)
 
 
 def read_only_view(surface: ToolSurface) -> ToolSurface:

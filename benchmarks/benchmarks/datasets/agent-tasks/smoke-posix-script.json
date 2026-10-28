@@ -1,0 +1,9 @@
+{
+  "_comment": "Plumbing only: same canned answer as smoke-script.json, using v0.24.1 POSIX grep.",
+  "tasks": {
+    "orphan notes": [
+      {"tool_calls": [{"name": "grep", "arguments": {"pattern": "redis", "project": "{project}"}}]},
+      {"text": "```json\n{\"permalinks\": [\"notes/redis-cache-tuning\", \"notes/postgres-vacuum-notes\", \"notes/coffee-brewing-log\"]}\n```"}
+    ]
+  }
+}

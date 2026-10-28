@@ -146,16 +146,14 @@ class McpAgentSession:
     """AgentSession over a warm ``bm mcp`` stdio subprocess."""
 
     def __init__(self, runtime: SurfaceRuntime) -> None:
-        # required_tool is a verb shared by BOTH surfaces so the session comes
-        # up on any BM build; the authoritative surface check happens in
-        # verify_surface_tools against the advertised tool list, which is the
-        # only way to produce the informative missing-tools message.
+        # Legacy builds do not expose bm_* names. Bootstrap with a verb from
+        # the selected surface, then verify its complete advertised contract.
         self._client = WarmMcpClient(
             command=runtime.command,
             args=runtime.args,
             env=runtime.env,
             request_timeout_seconds=runtime.tool_timeout_seconds,
-            required_tool="bm_write",
+            required_tool=runtime.surface.tool_allowlist[0],
         )
 
     def start(self) -> None:

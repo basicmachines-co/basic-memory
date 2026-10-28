@@ -69,7 +69,9 @@ TASKS: tuple[AgentTaskSpec, ...] = (
             MarkerPresent(marker="BMEVAL-s9next-b881"),
             MarkerAbsent(marker="BMEVAL-s8open-1f2e"),
             MarkerAbsent(marker="BMEVAL-s8next-c9a4"),
-            ToolCalled(name_pattern=r"bm_search|bm_context|bm_read"),
+            ToolCalled(
+                name_pattern=r"bm_search|bm_context|bm_read|search_notes|build_context|read_note|grep|cat"
+            ),
         ),
     ),
     AgentTaskSpec(
@@ -228,7 +230,7 @@ TASKS: tuple[AgentTaskSpec, ...] = (
             # Both tool spellings are substantively correct: the man page is
             # bm-edit(3) while the MCP tool itself is bm_edit.
             AnswerMatches(pattern=r"bm[-_]edit"),
-            ToolCalled(name_pattern=r"bm_read|bm_search|bm_man"),
+            ToolCalled(name_pattern=r"bm_read|bm_search|bm_man|read_note|search_notes|cat|grep|man"),
         ),
     ),
 )
