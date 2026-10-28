@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.accepted_note_search import accepted_search_content_from_markdown
+from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
 from basic_memory.indexing.models import IndexFileJobStatus, RelationTargetRequest
 from basic_memory.markdown.path_links import is_path_target
 from basic_memory.models import Entity
@@ -504,6 +505,7 @@ async def resolve_project_index_completion_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
+    vector_sync: EmbeddingBatchVectorSync | None = None,
 ) -> ResolveRelationsResult | None:
     """Run the final relation-resolution pass for a completed project index.
 
@@ -511,11 +513,16 @@ async def resolve_project_index_completion_relations(
     from the same completion facts; the inline path resolves directly against
     the already project-scoped runtime. A context without complete project
     identity plans no request, so the resolution pass is skipped.
+    ``vector_sync`` re-embeds sources whose relation rows this pass rewrote.
     """
     request = plan_project_index_completion_relation_resolution(context)
     if request is None:
         return None
-    return await resolve_project_relations(runtime, max_passes=max_passes)
+    return await resolve_project_relations(
+        runtime,
+        max_passes=max_passes,
+        vector_sync=vector_sync,
+    )
 
 
 def plan_index_file_relation_resolution(
@@ -557,6 +564,7 @@ async def resolve_project_relations(
     runtime: RelationResolutionRuntime,
     *,
     max_passes: int = 3,
+    vector_sync: EmbeddingBatchVectorSync | None = None,
 ) -> ResolveRelationsResult:
     """Resolve all resolvable forward references for one project runtime.
 
@@ -568,6 +576,10 @@ async def resolve_project_relations(
     resolver from looping forever. Relations left after a stable pass are
     genuine forward references and remain unresolved until their target note
     exists.
+
+    When ``vector_sync`` is set, callers that embed run it once after every
+    pass settles: resolution rewrites the affected sources' relation search
+    rows, and only changed chunks are re-embedded.
     """
     unresolved_before = await runtime.count_unresolved_relations()
     affected_entities: AffectedEntityIds = set()
@@ -596,4 +608,12 @@ async def resolve_project_relations(
         passes=result.passes,
         affected_entities=result.affected_entities,
     )
+    # Trigger: the resolution pass rewrote relation search rows for these sources
+    # after their owners had already embedded them.
+    # Why: chunk keys follow the row text, so those changed relation rows have no
+    # current vector until something re-syncs them; nothing else revisits them.
+    # Outcome: one batch re-embeds the affected sources after resolution committed;
+    # a later batch or reindex is not required.
+    if vector_sync is not None and affected_entities:
+        await vector_sync.sync_entity_vectors_batch(sorted(affected_entities))
     return result
