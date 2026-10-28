@@ -971,14 +971,16 @@ def valid_project_path_value(
     return True
 
 
-def validate_project_path(path: str, project_path: Path | None) -> bool:
+def validate_project_path(
+    path: str, project_path: Path | None, *, allow_literal_tilde: bool = False
+) -> bool:
     """Validate a relative path, resolving symlinks only for a local storage root.
 
     Pass None for remote/object storage. Its logical namespace must never be
     interpreted against the filesystem of the API or MCP process.
     """
 
-    if not valid_project_path_value(path):
+    if not valid_project_path_value(path, allow_literal_tilde=allow_literal_tilde):
         return False
 
     if project_path is None:

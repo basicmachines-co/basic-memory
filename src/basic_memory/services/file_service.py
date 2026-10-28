@@ -113,7 +113,9 @@ class FileService:
                 relative = relative.resolve().relative_to(self.local_project_path)
             except ValueError:
                 raise FileOperationError(f"Path '{path}' is outside the project") from None
-        if not validate_project_path(relative.as_posix(), self.local_project_path):
+        if not validate_project_path(
+            relative.as_posix(), self.local_project_path, allow_literal_tilde=True
+        ):
             raise FileOperationError(f"Path '{path}' is outside the project")
 
     async def read_entity_content(self, entity: EntityModel) -> str:

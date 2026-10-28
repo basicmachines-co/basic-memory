@@ -68,3 +68,12 @@ def test_object_storage_paths_are_relative_keys_not_host_paths(tmp_path: Path):
 def test_absolute_paths_inside_local_root_remain_supported(tmp_path: Path):
     files = FileService(tmp_path)
     files.require_project_path(tmp_path / "folder" / "note.md")
+
+
+@pytest.mark.asyncio
+async def test_guarded_move_preserves_literal_tildes(tmp_path: Path):
+    source = tmp_path / "~source.pdf"
+    source.write_bytes(b"file content")
+    await FileService(tmp_path).move_file("~source.pdf", "notes/~draft.pdf")
+    assert not source.exists()
+    assert (tmp_path / "notes/~draft.pdf").read_bytes() == b"file content"
