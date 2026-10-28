@@ -49,3 +49,8 @@ def test_shared_check_resolves_symlink_ancestors(tmp_path: Path):
 @pytest.mark.parametrize("path", [" note.md ", "cafe\u0301.md", "nested/note.md"])
 def test_portable_validation_does_not_rewrite_filename(path: str):
     assert valid_project_path_value(path)
+
+
+@pytest.mark.parametrize("path", ["\n", " \r ", "note\n.md", "\x00"])
+def test_portable_validation_rejects_control_characters(path: str):
+    assert not valid_project_path_value(path)

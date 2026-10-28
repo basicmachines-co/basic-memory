@@ -15,10 +15,10 @@ from basic_memory.cli.commands.cloud.upload import upload_path
 @pytest.mark.skipif(os.name == "nt", reason="Backslashes are literal filename characters on POSIX")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("single_file", [False, True])
-@pytest.mark.parametrize("name", ["safe\\..\\..\\other-project\\leak.md", "report\\final.md"])
-async def test_upload_refuses_traversing_backslash_name(
-    tmp_path: Path, single_file: bool, name: str
-):
+@pytest.mark.parametrize(
+    "name", ["safe\\..\\..\\other-project\\leak.md", "report\\final.md", "\n", " \r "]
+)
+async def test_upload_refuses_unsafe_destination_name(tmp_path: Path, single_file: bool, name: str):
     source = tmp_path / name
     source.write_bytes(b"private note")
     received: list[str] = []
@@ -50,7 +50,8 @@ async def test_upload_refuses_traversing_backslash_name(
 @pytest.mark.skipif(os.name == "nt", reason="POSIX filename spelling")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "name", [" note.md", "note.md ", "cafe\u0301.md", " ", " /note.md", "backup\\copy.zip", "draft~.md"]
+    "name",
+    [" note.md", "note.md ", "cafe\u0301.md", " ", " /note.md", "backup\\copy.zip", "draft~.md"],
 )
 async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name: str):
     (tmp_path / "note.md").write_bytes(b"ordinary")
