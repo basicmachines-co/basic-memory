@@ -15,7 +15,9 @@ from markdown_it.token import Token
 # those bracket prefixes stay ordinary content (issue #1219).
 _TIMESTAMP_VALUE = r"\d{1,3}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?"
 _TIMESTAMP_CATEGORY = re.compile(rf"^{_TIMESTAMP_VALUE}(?:\s+-\s+{_TIMESTAMP_VALUE})?$")
-_LINKS_TO_DIRECTIVE = re.compile(r"\s+#bm:links_to\s*$")
+# A single-character boundary avoids retrying a leading whitespace run at every
+# position when the terminal directive is absent. Callers already rstrip the prefix.
+_LINKS_TO_DIRECTIVE = re.compile(r"(?<=\s)#bm:links_to\s*$")
 
 
 def remove_links_to_directive(content: str) -> tuple[str, bool]:
