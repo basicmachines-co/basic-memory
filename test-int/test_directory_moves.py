@@ -175,3 +175,45 @@ async def test_notes_and_regular_files_land_in_the_same_existing_folder(
     assert result["failed_moves"] == 0, result["errors"]
     assert sorted(result["moved_files"]) == ["Archive/Plan.md", "Archive/diagram.png"]
     assert (home / "Archive/diagram.png").read_bytes() == image_bytes
+
+
+@pytest.mark.parametrize("source,sibling", [("team_a", "teamXa")])
+async def test_directory_move_treats_sql_wildcards_as_literal_path_characters(
+    client: AsyncClient,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    source: str,
+    sibling: str,
+) -> None:
+    """A folder name cannot select and move accepted notes from a sibling folder."""
+    _, session_maker = engine_factory
+    base = f"/v2/projects/{test_project.external_id}/knowledge"
+    for title, directory in (("Inside", f"{source}/sub"), ("Untouched", sibling)):
+        created = await client.post(
+            f"{base}/write",
+            json={"note": {"title": title, "directory": directory, "content": title}},
+        )
+        assert created.json()["kind"] == "created", created.text
+    home = Path(test_project.path)
+    sibling_bytes = (home / sibling / "Untouched.md").read_bytes()
+
+    response = await client.post(
+        f"{base}/move-directory",
+        json={"source_directory": source, "destination_directory": "archive"},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["moved_files"] == ["archive/sub/Inside.md"], result
+    assert result["failed_moves"] == 0, result
+    assert (home / sibling / "Untouched.md").read_bytes() == sibling_bytes
+    assert not (home / source / "sub/Inside.md").exists()
+    assert (home / "archive/sub/Inside.md").read_text().endswith("Inside")
+    async with db.scoped_session(session_maker) as session:
+        sibling_note = await session.scalar(
+            select(NoteContent)
+            .join(Entity, Entity.id == NoteContent.entity_id)
+            .where(Entity.title == "Untouched")
+        )
+        assert sibling_note is not None
+        assert (sibling_note.file_path, sibling_note.db_version) == (f"{sibling}/Untouched.md", 1)
