@@ -264,21 +264,24 @@ def load_gitignore_patterns(
     return patterns
 
 
-@lru_cache(maxsize=512)
-def _directory_rule(pattern: str) -> GitIgnoreSpec:
-    """Compile a directory rule once, retaining Git's observed globstar behavior."""
-    components = pattern.split("/")
-    for index, component in enumerate(components):
-        if len(component) >= 2 and not component.strip("*"):
-            # Git accepts longer all-star components. A terminal directory globstar
-            # must consume a directory; pathspec otherwise also matches direct files.
-            components[index] = "*" if index == len(components) - 2 else "**"
-    normalized = "/".join(components)
-    # Rule collections are unordered exclusion sets; adding ordered negation is a
-    # separate compatibility change. Preserve literal leading ! and decoded # names.
-    if normalized.startswith(("!", "#")):
-        normalized = "\\" + normalized
-    return GitIgnoreSpec.from_lines([normalized], backend="simple")
+@lru_cache(maxsize=32)
+def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
+    """Compile an ignore set once so large sets cannot churn a per-rule cache."""
+    normalized_patterns: list[str] = []
+    for pattern in patterns:
+        components = pattern.split("/")
+        for index, component in enumerate(components):
+            if len(component) >= 2 and not component.strip("*"):
+                # Git accepts longer all-star components. A terminal directory globstar
+                # must consume a directory; pathspec otherwise also matches direct files.
+                components[index] = "*" if index == len(components) - 2 else "**"
+        normalized = "/".join(components)
+        # Rule collections are unordered exclusion sets; adding ordered negation is a
+        # separate compatibility change. Preserve literal leading ! and decoded # names.
+        if normalized.startswith(("!", "#")):
+            normalized = "\\" + normalized
+        normalized_patterns.append(normalized)
+    return GitIgnoreSpec.from_lines(normalized_patterns, backend="simple")
 
 
 def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[str]) -> bool:
@@ -297,17 +300,18 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
         relative_path = file_path.relative_to(base_path)
         relative_str = str(relative_path)
         relative_posix = relative_path.as_posix()  # Use forward slashes for matching
-        directory_match_path: str | None = None
+        directory_patterns = frozenset(
+            pattern for pattern in ignore_patterns if pattern.endswith("/")
+        )
+        if directory_patterns:
+            # A trailing slash distinguishes directories being pruned from files.
+            directory_match_path = relative_posix + ("/" if file_path.is_dir() else "")
+            if _directory_rules(directory_patterns).match_file(directory_match_path):
+                return True
 
-        # Check each pattern
+        # Non-directory patterns retain their existing matching behavior.
         for pattern in ignore_patterns:
             if pattern.endswith("/"):
-                if directory_match_path is None:
-                    # A trailing slash tells pathspec that walkers are pruning an
-                    # actual directory. Files with the same name remain selectable.
-                    directory_match_path = relative_posix + ("/" if file_path.is_dir() else "")
-                if _directory_rule(pattern).match_file(directory_match_path):
-                    return True
                 continue
 
             # Handle patterns starting with / (root relative)

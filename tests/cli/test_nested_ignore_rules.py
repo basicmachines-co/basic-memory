@@ -1,6 +1,8 @@
 """Directory rules match anchored relative paths, not individual components (#1913)."""
 
+from cProfile import Profile
 from pathlib import Path
+from types import CodeType
 
 import pytest
 
@@ -97,3 +99,23 @@ def test_directory_rule_loader_preserves_git_escapes(
     source.write_text("private content")
     rules = load_gitignore_patterns(root, strict=True)
     assert filter_files([source], root, rules) == ([], 1)
+
+
+def test_large_ignore_set_compiles_once_across_files(tmp_path: Path):
+    rules = {f"excluded-{index}/" for index in range(513)}
+    files = [tmp_path / f"note-{index}.md" for index in range(3)]
+    for path in files:
+        path.write_text("note")
+    # Count real pathspec compilation calls without replacing its implementation
+    # or depending on elapsed time on a busy CI runner.
+    with Profile() as profile:
+        assert filter_files(files, tmp_path, rules) == (files, 0)
+    compilations = sum(
+        entry.callcount
+        for entry in profile.getstats()
+        if isinstance(entry.code, CodeType)
+        and entry.code.co_qualname == "RegexPattern.__init__"
+        and Path(entry.code.co_filename).name == "pattern.py"
+        and "pathspec" in Path(entry.code.co_filename).parts
+    )
+    assert compilations <= len(rules)
