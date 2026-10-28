@@ -274,10 +274,17 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
         relative_path = file_path.relative_to(base_path)
         relative_str = str(relative_path)
         relative_posix = relative_path.as_posix()  # Use forward slashes for matching
+        directory_parts: tuple[str, ...] | None = None
 
         # Check each pattern
         for pattern in ignore_patterns:
             if pattern.endswith("/"):
+                if directory_parts is None:
+                    # Export/ZIP callers pass files; directory walkers also pass
+                    # directories for pruning. A file's own name is never an ancestor.
+                    directory_parts = (
+                        relative_path.parts if file_path.is_dir() else relative_path.parts[:-1]
+                    )
                 directory_pattern = pattern[:-1]
                 # A slash anchors the rule to the project root. Compare whole
                 # ancestor paths so private/keys/ excludes its descendants without
@@ -285,11 +292,11 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
                 if "/" in directory_pattern:
                     directory_pattern = directory_pattern.removeprefix("/")
                     if any(
-                        fnmatch.fnmatch("/".join(relative_path.parts[:end]), directory_pattern)
-                        for end in range(1, len(relative_path.parts) + 1)
+                        fnmatch.fnmatch("/".join(directory_parts[:end]), directory_pattern)
+                        for end in range(1, len(directory_parts) + 1)
                     ):
                         return True
-                elif any(fnmatch.fnmatch(part, directory_pattern) for part in relative_path.parts):
+                elif any(fnmatch.fnmatch(part, directory_pattern) for part in directory_parts):
                     return True
                 continue
 
