@@ -39,3 +39,16 @@ def test_rclone_credentials_are_private(config_home: Path, existing: bool):
         assert stat.S_IMODE(backup.stat().st_mode) == 0o600
         assert backup.read_text() == "[other]\ntype = local\n"
         assert "[other]" in config_path.read_text()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_malformed_existing_config_is_tightened_before_parsing(config_home: Path):
+    import configparser
+
+    config_path = get_rclone_config_path()
+    config_path.write_text("secret_access_key = old-secret\n")
+    config_path.chmod(0o644)
+    with pytest.raises(configparser.MissingSectionHeaderError):
+        configure_rclone_remote("test-access", "test-secret")
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+    assert config_path.read_text() == "secret_access_key = old-secret\n"

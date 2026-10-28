@@ -32,7 +32,10 @@ def get_rclone_config_path() -> Path:
     # This directory contains credentials and their backups, including files
     # created by older versions with the caller's ordinary umask.
     config_dir.chmod(0o700)
-    return config_dir / "rclone.conf"
+    config_path = config_dir / "rclone.conf"
+    if config_path.exists():
+        config_path.chmod(0o600)
+    return config_path
 
 
 def backup_rclone_config() -> Optional[Path]:
@@ -73,7 +76,6 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     with os.fdopen(
         os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
         "w",
-        encoding="utf-8",
     ) as f:
         config_path.chmod(0o600)
         config.write(f)
