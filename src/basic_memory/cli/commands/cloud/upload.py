@@ -94,8 +94,10 @@ async def upload_path(
             if "\\" in relative:
                 raise ValueError(f"Unsupported backslash in upload destination: {relative}")
             destination = relative
+            # These names come from the selected native tree, not path references;
+            # a POSIX colon is literal and will be encoded inside the project URL.
             if not destination or not valid_project_path_value(
-                destination, allow_literal_tilde=True
+                destination, allow_literal_tilde=True, allow_literal_colon=True
             ):
                 raise ValueError(f"Invalid upload destination: {destination}")
             # Validation must not trim or NFC-normalize distinct legal filenames.

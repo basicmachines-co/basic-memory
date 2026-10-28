@@ -78,3 +78,36 @@ async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name:
         if name.endswith(".zip")
         else {"note.md": b"ordinary", name: b"distinct"}
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Colons are literal filename characters on POSIX")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("single_file", [False, True])
+@pytest.mark.parametrize("name", ["a:note.md", "a:", "a:/note.md"])
+async def test_upload_preserves_literal_colons(tmp_path: Path, single_file: bool, name: str):
+    source = tmp_path / name
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"distinct")
+    received: dict[str, bytes] = {}
+    receiver = FastAPI()
+
+    @receiver.put("/webdav/{project}/{path:path}")
+    async def receive(project: str, path: str, request: Request) -> Response:
+        assert project == "authorized-project"
+        received[path] = await request.body()
+        return Response(status_code=201)
+
+    @asynccontextmanager
+    async def client_factory() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=receiver), base_url="http://upload.test"
+        ) as client:
+            yield client
+
+    assert await upload_path(
+        source if single_file else tmp_path,
+        "authorized-project",
+        use_gitignore=False,
+        client_cm_factory=client_factory,
+    )
+    assert received == {source.name if single_file else name: b"distinct"}

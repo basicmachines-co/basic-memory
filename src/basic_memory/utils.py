@@ -932,7 +932,9 @@ def resolve_directory_casing(directory: str, existing_directories: List[str]) ->
     return resolved_prefix
 
 
-def valid_project_path_value(path: str, *, allow_literal_tilde: bool = False) -> bool:
+def valid_project_path_value(
+    path: str, *, allow_literal_tilde: bool = False, allow_literal_colon: bool = False
+) -> bool:
     """Ensure project path is valid."""
     # Allow empty strings as they resolve to the project root
     if not path:
@@ -958,7 +960,7 @@ def valid_project_path_value(path: str, *, allow_literal_tilde: bool = False) ->
         return False
 
     # Block absolute paths (Unix-style starting with / or Windows-style with drive letters)
-    if path.startswith("/") or (len(path) >= 2 and path[1] == ":"):
+    if path.startswith("/") or (not allow_literal_colon and len(path) >= 2 and path[1] == ":"):
         return False
 
     # Path consumers preserve filename spelling, so control-only names need
