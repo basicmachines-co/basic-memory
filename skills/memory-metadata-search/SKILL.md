@@ -7,6 +7,17 @@ description: "Search Basic Memory notes by custom frontmatter fields with equali
 
 Find notes by their structured frontmatter fields instead of (or in addition to) free-text content. Any custom YAML key in a note's frontmatter beyond the standard set (`title`, `type`, `tags`, `permalink`, `schema`) is automatically indexed as `entity_metadata` and becomes queryable.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - **Filtering by status or priority** — find all notes with `status: draft` or `priority: high`
@@ -104,8 +115,8 @@ against the value and a comparison with null is never true.
 
 Frontmatter fields say when a note was filed or reviewed. To ask what a note
 *claims was true* on a date, use observation qualifiers (see **memory-notes**)
-and `bm_search(valid_at="2026-07-01")` or
-`bm_search(valid_overlaps="[2026-07-01,2026-08-01)")`.
+and `bm_search(valid_at="2026-07-01", project="<project>")` or
+`bm_search(valid_overlaps="[2026-07-01,2026-08-01)", project="<project>")`.
 
 ## Using `bm_search` with Metadata
 
@@ -113,7 +124,7 @@ Pass `filters` to `bm_search`. Omit `query` for filter-only searches, or combine
 
 ```python
 # Filter-only — find all notes with a given status
-bm_search(filters={"status": "in-progress"})
+bm_search(filters={"status": "in-progress"}, project="<project>")
 
 # Filter-only — high-priority specs in a specific project
 bm_search(
@@ -123,19 +134,20 @@ bm_search(
 )
 
 # Filter-only — notes with confidence above a threshold
-bm_search(filters={"confidence": {"$gt": 0.7}})
+bm_search(filters={"confidence": {"$gt": 0.7}}, project="<project>")
 
 # Tags and status use the same filter syntax
-bm_search(filters={"status": "active"})
-bm_search(filters={"tags": ["security", "oauth"]})
+bm_search(filters={"status": "active"}, project="<project>")
+bm_search(filters={"tags": ["security", "oauth"]}, project="<project>")
 
 # Text search narrowed by metadata
-bm_search("authentication", filters={"status": "draft"})
+bm_search("authentication", filters={"status": "draft"}, project="<project>")
 
 # Mix text, tags, and an advanced filter
 bm_search(
     "oauth flow",
     filters={"tags": ["security"], "confidence": {"$gt": 0.7}},
+    project="<project>",
 )
 ```
 
@@ -147,11 +159,11 @@ The `tag:` prefix in a query converts to a tag filter automatically:
 
 ```python
 # These are equivalent:
-bm_search("tag:tier1")
-bm_search(filters={"tags": ["tier1"]})
+bm_search("tag:tier1", project="<project>")
+bm_search(filters={"tags": ["tier1"]}, project="<project>")
 
 # Multiple tags (comma or space separated) — all must match:
-bm_search("tag:tier1,alpha")
+bm_search("tag:tier1,alpha", project="<project>")
 ```
 
 ## Example: Custom Frontmatter in Practice
@@ -182,19 +194,19 @@ Queries that find it:
 
 ```python
 # By status and type
-bm_search(filters={"status": "in-progress", "type": "spec"})
+bm_search(filters={"status": "in-progress", "type": "spec"}, project="<project>")
 
 # By numeric threshold
-bm_search(filters={"confidence": {"$gt": 0.7}})
+bm_search(filters={"confidence": {"$gt": 0.7}}, project="<project>")
 
 # By priority set
-bm_search(filters={"priority": {"$in": ["high", "critical"]}})
+bm_search(filters={"priority": {"$in": ["high", "critical"]}}, project="<project>")
 
 # By tag shorthand
-bm_search("tag:security")
+bm_search("tag:security", project="<project>")
 
 # Combined text + metadata
-bm_search("OAuth", filters={"status": "in-progress"})
+bm_search("OAuth", filters={"status": "in-progress"}, project="<project>")
 ```
 
 ## Guidelines
@@ -203,6 +215,6 @@ bm_search("OAuth", filters={"status": "in-progress"})
 - **Use text search for content queries.** If you're looking for notes *about* something, text search is better. Combine both when you need precision.
 - **Custom fields are free.** Any YAML key you put in frontmatter becomes queryable — no schema or configuration required.
 - **Multiple filters are AND.** `{"status": "active", "priority": "high"}` requires both conditions.
-- **Omit `query` for filter-only searches.** `bm_search(filters={"status": "active"})` works without a text query.
+- **Omit `query` for filter-only searches.** `bm_search(filters={"status": "active"}, project="<project>")` works without a text query.
 - **Dot notation for nesting.** Access nested YAML structures with dots: `{"schema.version": "2"}` queries the `version` key inside a `schema` object.
-- **Use the same filters for file discovery.** `bm_find(filters={"status": "active"}, fields=["title", "priority"])` returns selected frontmatter values without reading each note.
+- **Use the same filters for file discovery.** `bm_find(filters={"status": "active"}, fields=["title", "priority"], project="<project>")` returns selected frontmatter values without reading each note.

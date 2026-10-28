@@ -7,6 +7,17 @@ description: "Manage note status transitions in Basic Memory: archive completed 
 
 Manage how entities move through status stages in Basic Memory. The core principle: **archive, never delete.** Completed work is valuable context — move it out of the active view, but keep it in the knowledge graph.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - User says something is "done", "finished", "completed", "submitted", "missed", or "cancelled"
@@ -77,8 +88,8 @@ When the user mentions completion or status change, extract the intent:
 Search Basic Memory with multiple variations to locate the entity:
 
 ```python
-bm_search(query="quarterly report")
-bm_search(query="Q1 report")
+bm_search(query="quarterly report", project="<project>")
+bm_search(query="Q1 report", project="<project>")
 ```
 
 If multiple matches come back, present options and ask which one.
@@ -92,7 +103,8 @@ Use `bm_move` to relocate the entity to the appropriate status folder:
 ```python
 bm_move(
   identifier="tasks/active/quarterly-report",
-  destination="tasks/completed/quarterly-report.md"
+  destination="tasks/completed/quarterly-report.md",
+  project="<project>",
 )
 ```
 
@@ -108,7 +120,8 @@ the body unchanged:
 bm_edit(
   identifier="tasks/completed/quarterly-report.md",
   command="set_metadata",
-  metadata={"status": "completed", "completed": "2026-02-22"}
+  metadata={"status": "completed", "completed": "2026-02-22"},
+  project="<project>",
 )
 ```
 
@@ -150,13 +163,15 @@ If something was archived by mistake, move it back:
 ```python
 bm_move(
   identifier="tasks/completed/quarterly-report",
-  destination="tasks/active/quarterly-report.md"
+  destination="tasks/active/quarterly-report.md",
+  project="<project>",
 )
 
 bm_edit(
   identifier="tasks/active/quarterly-report.md",
   command="set_metadata",
-  metadata={"status": "active"}
+  metadata={"status": "active"},
+  project="<project>",
 )
 ```
 

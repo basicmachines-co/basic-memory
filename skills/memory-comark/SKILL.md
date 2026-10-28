@@ -19,6 +19,17 @@ The full vocabulary, every prop, and every data grammar are in
 [references/components.md](references/components.md). Read it before using a
 component you have not used before.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## Pick a component
 
 Most notes need only these. The reference has the rest (39 in total).
@@ -138,7 +149,7 @@ Semantics to state honestly in the surrounding prose:
 
 ### Check the rendered result before you quote it
 
-In Basic Memory Cloud, `bm_read(view="text")` returns the note as a reader
+In Basic Memory Cloud, `bm_read(identifier="<note>", view="text", project="<project>")` returns the note as a reader
 sees it: every component as plain Markdown, with live queries run now. Read it
 back after writing a live view and confirm the view has rows before you state a
 number in prose. A query over a field no note has renders an empty view.

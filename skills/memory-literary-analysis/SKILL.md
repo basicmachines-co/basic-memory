@@ -7,6 +7,17 @@ description: "Analyze a complete literary work into a structured Basic Memory kn
 
 Transform a complete literary work into a structured knowledge graph. Characters, themes, chapters, locations, symbols, and literary devices become interconnected notes — searchable, validatable, and traversable.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<work-name>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - Analyzing a novel, play, poem, or non-fiction book end-to-end
@@ -63,10 +74,10 @@ audited:
   `/characters` reaches everything filed under `characters/` (including `characters/major/`),
   and never `characters-cut/`.
 
-For MCP, use `bm_read(identifier="<note>", section="Observations")` or
-`start_line`/`end_line` for slices, `bm_find(filters={"type": "chapter"},
-fields=["chapter_number", "pov"])` for metadata, and `bm_search(query="doubloon",
-lines=2)` for matching lines. `bm_list` lists one folder level; `bm_find` recurses.
+For MCP, use `bm_read(identifier="<note>", section="Observations", project="<work-name>")` or
+`start_line`/`end_line` for slices. Use `bm_find(filters={"type": "chapter"}, fields=["chapter_number", "pov"], project="<work-name>")`
+for metadata and `bm_search(query="doubloon", lines=2, project="<work-name>")`
+for matching lines. `bm_list` lists one folder level; `bm_find` recurses.
 MCP list/find/search pages cap at 100; follow `has_more` through every page.
 CLI page sizes and flags below are separate from the MCP shapes.
 
@@ -109,7 +120,8 @@ Schema for character entity notes.
 ## Observations
 - [convention] Major characters in characters/major/, minor in characters/minor/
 - [convention] Observation categories: trait, motivation, arc, quote, appearance, relationship, symbolism, fate
-- [convention] Relations: appears_in, contrasts_with, allied_with, commands, symbolizes, associated_with"""
+- [convention] Relations: appears_in, contrasts_with, allied_with, commands, symbolizes, associated_with""",
+  project="<work-name>",
 )
 ```
 
@@ -138,7 +150,8 @@ Schema for thematic analysis notes.
 
 ## Observations
 - [convention] Observation categories: definition, manifestation, evolution, counterpoint, quote, interpretation
-- [convention] Relations: embodied_by, contrasts_with, reinforced_by, explored_in, expressed_through"""
+- [convention] Relations: embodied_by, contrasts_with, reinforced_by, explored_in, expressed_through""",
+  project="<work-name>",
 )
 ```
 
@@ -167,7 +180,8 @@ Schema for chapter-level analysis notes.
 ## Observations
 - [convention] Chapters stored in chapters/ directory
 - [convention] Observation categories: summary, event, tone, technique, quote, significance, foreshadowing
-- [convention] Relations: features, set_in, explores, contains, employs, follows, precedes, parallels"""
+- [convention] Relations: features, set_in, explores, contains, employs, follows, precedes, parallels""",
+  project="<work-name>",
 )
 ```
 
@@ -194,7 +208,8 @@ Schema for location and setting notes.
 
 ## Observations
 - [convention] Observation categories: description, atmosphere, symbolism, significance, geography
-- [convention] Relations: setting_for, associated_with, symbolizes, contains, part_of"""
+- [convention] Relations: setting_for, associated_with, symbolizes, contains, part_of""",
+  project="<work-name>",
 )
 ```
 
@@ -221,7 +236,8 @@ Schema for symbolic element notes.
 
 ## Observations
 - [convention] Observation categories: meaning, appearance, ambiguity, interpretation, quote, evolution
-- [convention] Relations: represents, associated_with, appears_in, contrasts_with, located_at"""
+- [convention] Relations: represents, associated_with, appears_in, contrasts_with, located_at""",
+  project="<work-name>",
 )
 ```
 
@@ -248,7 +264,8 @@ Schema for literary technique and device notes.
 
 ## Observations
 - [convention] Observation categories: definition, usage, effect, example, significance
-- [convention] Relations: used_in, characterizes, expresses, related_to"""
+- [convention] Relations: used_in, characterizes, expresses, related_to""",
+  project="<work-name>",
 )
 ```
 
@@ -293,7 +310,8 @@ bm_write(
 
 ## Relations
 - associated_with [[<Related Character>]]
-- appears_in [[<Key Location>]]"""
+- appears_in [[<Key Location>]]""",
+  project="<work-name>",
 )
 ```
 
@@ -410,7 +428,8 @@ bm_write(
 - contains [[<Symbol>]]
 - employs [[<Literary Device>]]
 - follows [[Chapter <N-1> - <Previous Title>]]
-- precedes [[Chapter <N+1> - <Next Title>]]"""
+- precedes [[Chapter <N+1> - <Next Title>]]""",
+  project="<work-name>",
 )
 ```
 
@@ -422,7 +441,8 @@ bm_edit(
   command="insert_after_section",
   section="Observations",
   content="""- [arc] Ch.<N>: <What happens to this character>
-- [quote] "<Attributed quote>" (Ch.<N>)"""
+- [quote] "<Attributed quote>" (Ch.<N>)""",
+  project="<work-name>",
 )
 ```
 
@@ -455,7 +475,7 @@ As each chapter is processed, append observations to relevant entities:
 
 ### Adding Prose and Interpretation
 
-After the structured observations are in place, consider adding interpretive prose to major entity notes. Insert 2-4 paragraphs of critical essay before the Observations section with `bm_edit(command="insert_before_section", section="Observations", content=...)`. This prose should:
+After the structured observations are in place, consider adding interpretive prose to major entity notes. Insert 2-4 paragraphs of critical essay before the Observations section with `bm_edit(command="insert_before_section", section="Observations", content=..., project="<work-name>")`. This prose should:
 
 - Argue for a reading of the character, theme, or symbol — not just describe it
 - Connect the entity to the work's larger concerns and to literary tradition
@@ -518,7 +538,8 @@ Analysis of the work's narrative architecture.
 - analyzes [[<Protagonist>]]
 - analyzes [[<Key Character>]]
 - explores [[<Central Theme>]]
-..."""
+...""",
+  project="<work-name>",
 )
 ```
 
@@ -536,18 +557,18 @@ During chapter processing, new minor characters, locations, and symbols will eme
 
 ```python
 # Validate each entity type
-bm_schema(command="validate", note_type="Character")
-bm_schema(command="validate", note_type="Theme")
-bm_schema(command="validate", note_type="Chapter")
-bm_schema(command="validate", note_type="Location")
-bm_schema(command="validate", note_type="Symbol")
-bm_schema(command="validate", note_type="LiteraryDevice")
+bm_schema(command="validate", note_type="Character", project="<work-name>")
+bm_schema(command="validate", note_type="Theme", project="<work-name>")
+bm_schema(command="validate", note_type="Chapter", project="<work-name>")
+bm_schema(command="validate", note_type="Location", project="<work-name>")
+bm_schema(command="validate", note_type="Symbol", project="<work-name>")
+bm_schema(command="validate", note_type="LiteraryDevice", project="<work-name>")
 ```
 
 ### Drift Detection
 
 ```python
-bm_schema(command="diff", note_type="Character")
+bm_schema(command="diff", note_type="Character", project="<work-name>")
 # ... for each type
 ```
 
@@ -741,7 +762,7 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.
 - **Add prose for depth.** After structured data is in place, add interpretive essays to major notes. The prose captures what observations cannot: argument, nuance, opinion, and voice.
-- **Validate periodically.** Run `bm_schema(command="validate")` after each batch, not just at the end. Catch drift early.
+- **Validate periodically.** Run `bm_schema(command="validate", project="<work-name>")` after each batch, not just at the end. Catch drift early.
 - **Quote generously.** Literary analysis lives on textual evidence. Include significant quotes as `[quote]` observations with chapter attribution.
 - **Review and revise.** After completing all chapters, review the full graph from an external perspective. Look for thin notes, missing connections, and gaps in coverage. The first pass is never the last.
 - **Analysis comes last.** Synthesis notes in `analysis/` should be written after all chapters are processed, when you have the full picture.

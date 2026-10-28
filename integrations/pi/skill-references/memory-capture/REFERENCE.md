@@ -14,6 +14,17 @@ description: "Capture a working thread's current state into one coherent Basic M
 
 Capture the gist of a working thread — the decisions made, insights surfaced, and context built — into a single coherent Basic Memory note that reflects where the thread has landed.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## Purpose
 
 A thread has a beginning, middle, and end. Things change as the conversation progresses: an early decision gets revised, a problem looks different in light of new information, a trade-off is settled differently than it first seemed. When this skill is invoked, capture the **current state of understanding**, not the history of how it got there.
@@ -40,7 +51,7 @@ To rewrite the same note on re-capture instead of duplicating, key the note to a
 
 > **Example (hosts with a JSONL transcript):** some agents write a per-session transcript whose filename is a stable session UUID. If yours does, you can derive the id from the most-recently-modified transcript file and use it as `thread_id`. This is optional — only do it if your host actually exposes such a transcript.
 
-**If no stable id is available**, match the existing note by title/topic instead: search for a note covering the same thread (`bm_search(query="<topic>")`), and if you find the one this thread already produced, rewrite it. Omit `thread_id` and rely on a consistent title.
+**If no stable id is available**, match the existing note by title/topic instead: search for a note covering the same thread (`bm_search(query="<topic>", project="<project>")`), and if you find the one this thread already produced, rewrite it. Omit `thread_id` and rely on a consistent title.
 
 ## Decision Flow
 

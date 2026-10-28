@@ -13,6 +13,17 @@ month, and puts it where someone will look for it.
 Inspired by sleep-time compute: memory forms best between working sessions,
 not during them.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Run
 
 - **Scheduled**: once or twice a day, or on a heartbeat
@@ -26,22 +37,22 @@ not during them.
 ```python
 # The last reflection is the checkpoint. Titles carry date and time, so the
 # newest sorts first.
-bm_list(path="reflections", sort="title_desc", page_size=1)
+bm_list(path="reflections", sort="title_desc", page_size=1, project="<project>")
 
 # Everything changed since that date (json gives one row per note). With no
 # reflection yet, use since="7d".
-bm_project(command="recent", since="2026-10-13", items=["note"], output_format="json", page_size=50)
+bm_project(command="recent", since="2026-10-13", items=["note"], output_format="json", page_size=50, project="<project>")
 # Ask for page=2, 3, ... until has_more is false.
 
 # Read each changed note in full before judging it
-bm_read(identifier="meetings/2026-10-14-launch-sync")
+bm_read(identifier="meetings/2026-10-14-launch-sync", project="<project>")
 ```
 
 Timeframes count whole days, so the window can overlap the last reflection.
 Skip notes it lists as `reviewed`, and notes you wrote in an earlier
 reflection, unless someone edited them since.
 
-`bm_project(command="recent")` looks back at most a year. If the last reflection is older
+`bm_project(command="recent", project="<project>")` looks back at most a year. If the last reflection is older
 than that, use `since="365d"` and record in this reflection that changes
 before that window were not reviewed.
 
@@ -65,8 +76,8 @@ For each item, ask:
 Find the durable note for each item before writing anything:
 
 ```python
-bm_search(query="launch checklist owner")
-bm_context(identifier="memory://projects/launch")
+bm_search(query="launch checklist owner", project="<project>")
+bm_context(identifier="memory://projects/launch", project="<project>")
 ```
 
 - **Say when it holds.** A fact with a date gets a qualifier (see
@@ -91,13 +102,14 @@ bm_context(identifier="memory://projects/launch")
   checksum to the edit, so the edit applies only to the revision you read.
 
   ```python
-  note = bm_read(identifier="Launch Plan", output_format="json")
+  note = bm_read(identifier="Launch Plan", output_format="json", project="<project>")
   bm_edit(
       identifier="Launch Plan",
       command="replace_section",
       section="## Owners",
       content="- [owner] Maya owns the launch checklist",
       expected_checksum=note["checksum"],
+      project="<project>",
   )
   ```
 

@@ -107,7 +107,8 @@ description. Status moves open → in-progress → done; blocked is a holding st
 
 ## Observations
 - [convention] Every task carries status as an observation
-- [convention] Done tasks get a close-date appended before archiving"""
+- [convention] Done tasks get a close-date appended before archiving""",
+  project="<project>",
 )
 ```
 
@@ -120,11 +121,11 @@ Key points:
 
 ## Validation & drift
 
-- `bm_schema(command="validate", note_type="task")` — check all notes of a type, or a single note via `identifier=`. It reports **missing required fields** and **invalid enum values** — that's the whole contract. Fields the schema doesn't declare are only counted as informational "unmatched" metadata (schemas are a subset, not a straitjacket), and scalar values are not type-checked, so a clean validate doesn't guarantee more than required-field presence and enum conformance. Use `bm_schema(command="diff")` to surface undeclared fields.
-- `bm_schema(command="diff", note_type="task")` — finds drift: fields notes use that the schema doesn't define (candidates to add as optional), and schema fields nobody uses (candidates to drop).
-- `bm_schema(command="infer", note_type="task")` — when notes of a type already exist without a schema, infer one from their actual structure instead of designing from scratch.
+- `bm_schema(command="validate", note_type="task", project="<project>")` — check all notes of a type, or a single note via `identifier=`. It reports **missing required fields** and **invalid enum values** — that's the whole contract. Fields the schema doesn't declare are only counted as informational "unmatched" metadata (schemas are a subset, not a straitjacket), and scalar values are not type-checked, so a clean validate doesn't guarantee more than required-field presence and enum conformance. Use `bm_schema(command="diff", project="<project>")` to surface undeclared fields.
+- `bm_schema(command="diff", note_type="task", project="<project>")` — finds drift: fields notes use that the schema doesn't define (candidates to add as optional), and schema fields nobody uses (candidates to drop).
+- `bm_schema(command="infer", note_type="task", project="<project>")` — when notes of a type already exist without a schema, infer one from their actual structure instead of designing from scratch.
 
-Evolution loop: `bm_schema(command="diff")` → edit the schema note (append changelog row, bump version if breaking) → `bm_schema(command="validate")` → fix outliers. Suggest the user run this monthly-ish once the system has real volume.
+Evolution loop: `bm_schema(command="diff", project="<project>")` → edit the schema note (append changelog row, bump version if breaking) → `bm_schema(command="validate", project="<project>")` → fix outliers. Suggest the user run this monthly-ish once the system has real volume.
 
 ## Design guidelines
 

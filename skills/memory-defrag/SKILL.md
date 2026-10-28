@@ -10,6 +10,17 @@ time notes grow past their topic, the same fact lands in several places, old
 facts contradict new ones, and finished work lingers. Defrag fixes the content;
 **memory-curate** handles links, relations, and tags.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Run
 
 - **Periodic**: weekly or every other week
@@ -30,13 +41,13 @@ notes nobody touched lately.
 bm_find(path="/", depth=10, page_size=100, project="<project>")
 
 # Recently busy notes, to look at first
-bm_project(command="recent", since="30d", output_format="json", page_size=50)
+bm_project(command="recent", since="30d", output_format="json", page_size=50, project="<project>")
 
 # Notes on one topic, to spot overlap
-bm_search(query="launch plan")
+bm_search(query="launch plan", project="<project>")
 
 # Commitments due on or before today: finished work that lingers, or overdue items
-bm_search(time_kind="due", valid_overlaps="(,2026-10-14]")
+bm_search(time_kind="due", valid_overlaps="(,2026-10-14]", project="<project>")
 ```
 
 Read every note you might change, in full. For each, note its topic, size, last

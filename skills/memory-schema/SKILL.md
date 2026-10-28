@@ -7,6 +7,17 @@ description: "Manage Basic Memory schemas: find unschemaed notes, infer and edit
 
 Manage structured note types using Basic Memory's Picoschema system. Schemas define what fields a note type should have, making notes uniform, queryable, and validatable.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - **New note type emerging** — you notice several notes share the same structure (meetings, people, decisions)
@@ -112,12 +123,12 @@ settings:
 
 Look for clusters of notes that share structure but have no schema:
 
-1. **Search by type**: `bm_search(note_types=["meeting"])` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
+1. **Search by type**: `bm_search(note_types=["meeting"], project="<project>")` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
 
-2. **Infer a schema**: Use `bm_schema(command="infer")` to analyze existing notes and generate a suggested schema:
+2. **Infer a schema**: Use `bm_schema(command="infer", project="<project>")` to analyze existing notes and generate a suggested schema:
    ```python
-   bm_schema(command="infer", note_type="Meeting")
-   bm_schema(command="infer", note_type="Meeting", threshold=0.5)  # fields in 50%+ of notes
+   bm_schema(command="infer", note_type="Meeting", project="<project>")
+   bm_schema(command="infer", note_type="Meeting", threshold=0.5, project="<project>")  # fields in 50%+ of notes
    ```
    The threshold (0.0–1.0) controls how common a field must be to be included. Default is usually fine; lower it to catch rarer fields.
 
@@ -150,7 +161,8 @@ Schema for meeting notes.
 ## Observations
 - [convention] Meeting notes live in memory/meetings/ or as daily entries
 - [convention] Always include date and topic
-- [convention] Action items should become tasks when complex"""
+- [convention] Action items should become tasks when complex""",
+  project="<project>",
 )
 ```
 
@@ -168,13 +180,13 @@ Check how well existing notes conform to their schema:
 
 ```python
 # Validate all notes of a type
-bm_schema(command="validate", note_type="Meeting")
+bm_schema(command="validate", note_type="Meeting", project="<project>")
 
 # Validate a single note
-bm_schema(command="validate", identifier="meetings/2026-02-10-standup")
+bm_schema(command="validate", identifier="meetings/2026-02-10-standup", project="<project>")
 ```
 
-**Important:** `bm_schema(command="validate")` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
+**Important:** `bm_schema(command="validate", project="<project>")` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
 
 Validation reports **missing required fields** (as observation categories, or relations
 for entity-reference fields) and **invalid enum values**. Undeclared observation categories
@@ -188,10 +200,10 @@ type-checked.
 
 ## Detecting Drift
 
-Over time, notes evolve and schemas lag behind. Use `bm_schema(command="diff")` to find divergence:
+Over time, notes evolve and schemas lag behind. Use `bm_schema(command="diff", project="<project>")` to find divergence:
 
 ```python
-bm_schema(command="diff", note_type="Meeting")
+bm_schema(command="diff", note_type="Meeting", project="<project>")
 ```
 
 Diff reports:
@@ -203,7 +215,7 @@ Diff reports:
 
 When note structure changes:
 
-1. **Run diff** to see current state: `bm_schema(command="diff", note_type="Meeting")`
+1. **Run diff** to see current state: `bm_schema(command="diff", note_type="Meeting", project="<project>")`
 2. **Update the schema note** via `bm_edit` with the `metadata` parameter. Top-level
    keys are replaced whole, so pass the complete updated `schema` map along with the new
    `version`:
@@ -220,10 +232,11 @@ When note structure changes:
          "decisions?(array)": "string, decisions made",
          "location?": "string, where it happened"
        }
-     }
+     },
+     project="<project>",
    )
    ```
-3. **Re-validate** to confirm existing notes still pass: `bm_schema(command="validate", note_type="Meeting")`
+3. **Re-validate** to confirm existing notes still pass: `bm_schema(command="validate", note_type="Meeting", project="<project>")`
 4. **Fix outliers** — update notes that don't conform to the new schema
 
 ### Evolution Guidelines
@@ -237,10 +250,10 @@ When note structure changes:
 ## Workflow Summary
 
 ```
-1. Notice repeated note structure → infer schema (bm_schema(command="infer"))
+1. Notice repeated note structure → infer schema (bm_schema(command="infer", project="<project>"))
 2. Review + create schema note   → write to schema/ (bm_write)
-3. Validate existing notes       → check conformance (bm_schema(command="validate"))
+3. Validate existing notes       → check conformance (bm_schema(command="validate", project="<project>"))
 4. Fix outliers                  → edit non-conforming notes (bm_edit)
-5. Periodically check drift      → detect divergence (bm_schema(command="diff"))
+5. Periodically check drift      → detect divergence (bm_schema(command="diff", project="<project>"))
 6. Evolve schema as needed       → update schema note (bm_edit)
 ```

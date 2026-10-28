@@ -14,6 +14,17 @@ Agents run in Basic Memory Cloud only, on plans that include them. A local
 Basic Memory has no agent tools. Confirm the connected server exposes `bm_agent`
 before starting this workflow.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - The user wants recurring work on their notes done for them: follow up on
@@ -25,11 +36,11 @@ before starting this workflow.
 
 | Tool | Does |
 |---|---|
-| `bm_agent(command="list")` | The project's agents and how their recent runs went |
-| `bm_agent(command="run")` | Starts an agent on a note; returns the run id |
-| `bm_agent(command="get")` | One run: status, notes changed, and the agent's last reply |
-| `bm_agent(command="runs")` | Recent runs, newest first, optionally for one agent |
-| `bm_agent(command="mark")` | Mark a run `kept` or `dismissed` with `run_id` and `decision` |
+| `bm_agent(command="list", project="<project>")` | The project's agents and how their recent runs went |
+| `bm_agent(command="run", project="<project>")` | Starts an agent on a note; returns the run id |
+| `bm_agent(command="get", project="<project>")` | One run: status, notes changed, and the agent's last reply |
+| `bm_agent(command="runs", project="<project>")` | Recent runs, newest first, optionally for one agent |
+| `bm_agent(command="mark", project="<project>")` | Mark a run `kept` or `dismissed` with `run_id` and `decision` |
 
 Create and edit agents with `bm_write` and `bm_edit`. There is no separate
 agent tool for that.
@@ -130,7 +141,7 @@ on the version the person ended with. Notes written by agents, imports, or
 
 ## Check a Run
 
-`bm_agent(command="get")` shows the status, the notes the run created, edited, moved, or
+`bm_agent(command="get", project="<project>")` shows the status, the notes the run created, edited, moved, or
 deleted, and the agent's last reply. Every reply is also kept in a run log note, `agents/runs/<agent> run <id>`. Read it for the whole
 conversation; do not edit it.
 

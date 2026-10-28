@@ -18,6 +18,17 @@ Cloud task; locally it is `bm okf export`.
 Keep the project's wikilinks. They are how Basic Memory links notes, and the
 export converts them.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - Asked to prepare a project for OKF export, publishing, or handoff
@@ -30,16 +41,16 @@ export converts them.
 
 ```python
 # Note files must end in lowercase .md
-bm_find(name="*.markdown")
-bm_find(name="*.MD")
+bm_find(name="*.markdown", project="<project>")
+bm_find(name="*.MD", project="<project>")
 
 # index.md and log.md belong to the wiki. A file there with note_type
 # "Index" or "Log" is a wiki page; anything else is a note of your own.
-bm_find(name="index.md")
-bm_find(name="log.md")
+bm_find(name="index.md", project="<project>")
+bm_find(name="log.md", project="<project>")
 
 # Export records relation types under `bm.okf_export`, so a note may not use it
-bm_search(filters={"bm.okf_export": {"$exists": True}})
+bm_search(filters={"bm.okf_export": {"$exists": True}}, project="<project>")
 ```
 
 Page through each `bm_find` until `has_more` is false.
@@ -53,15 +64,15 @@ Page through each `bm_find` until `has_more` is false.
 | A note uses `bm.okf_export`, or `bm` is not a mapping | Rewrite its frontmatter without that key (below) |
 
 ```python
-bm_move(identifier="notes/long-form.markdown", destination="notes/long-form.md")
-bm_move(identifier="notes/index.md", destination="notes/overview.md")
+bm_move(identifier="notes/long-form.markdown", destination="notes/long-form.md", project="<project>")
+bm_move(identifier="notes/index.md", destination="notes/overview.md", project="<project>")
 ```
 
 `bm_move` keeps links to the note working. To rewrite frontmatter, read the
 note as JSON and overwrite only that revision:
 
 ```python
-note = bm_read(identifier="notes/clash", output_format="json")
+note = bm_read(identifier="notes/clash", output_format="json", project="<project>")
 bm_write(
     identifier=note["file_path"],
     title=note["title"],
@@ -69,6 +80,7 @@ bm_write(
     metadata={...},  # the frontmatter without bm.okf_export
     overwrite=True,
     expected_checksum=note["checksum"],
+    project="<project>",
 )
 ```
 

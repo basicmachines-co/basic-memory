@@ -49,6 +49,11 @@ async def search_prompt(
     # Use json format to get structured data for result counting and formatting
     # Prompts preserve their default-project workflow; bm_search requires explicit scope.
     project = await resolve_project_parameter(project=project, context=context)
+    if project is None:
+        return (
+            "Choose a project with bm_project(command='list'), then search with an "
+            "explicit project name or external id."
+        )
     result = await bm_search(
         query=query, since=timeframe, project=project, context=context, output_format="json"
     )
@@ -78,10 +83,10 @@ async def search_prompt(
 
         Based on these {result_count} results, you can:
 
-        1. **Read a specific note** - Use `bm_read("permalink")` to see full content
-        2. **Build context** - Use `bm_context("memory://path")` to see relationships
-        3. **Refine search** - Use `bm_search("refined query")` to narrow results
-        4. **Check recent activity** - Use `bm_project(command="recent", since="7d")` for recent changes
+        1. **Read a specific note** - Use `bm_read("permalink", project={project!r})` to see full content
+        2. **Build context** - Use `bm_context("memory://path", project={project!r})` to see relationships
+        3. **Refine search** - Use `bm_search("refined query", project={project!r})` to narrow results
+        4. **Check recent activity** - Use `bm_project(command="recent", since="7d", project={project!r})` for recent changes
     """)
 
 

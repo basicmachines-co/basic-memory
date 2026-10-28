@@ -3,6 +3,7 @@
 import ast
 import importlib
 import json
+import re
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -162,17 +163,47 @@ async def test_chatgpt_fetch_reports_unresolved_scope(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("module_name", "prompt_name"),
+    ("module_name", "prompt_name", "arguments"),
     [
-        ("continue_conversation", "continue_conversation"),
-        ("recent_activity", "recent_activity_prompt"),
+        ("continue_conversation", "continue_conversation", {}),
+        ("recent_activity", "recent_activity_prompt", {}),
+        ("search", "search_prompt", {"query": "plan"}),
     ],
 )
 async def test_prompts_discover_before_calling_tools_when_no_project_resolves(
-    monkeypatch, module_name, prompt_name
+    monkeypatch, module_name, prompt_name, arguments
 ):
     module = importlib.import_module(f"basic_memory.mcp.prompts.{module_name}")
     monkeypatch.setattr(module, "resolve_project_parameter", AsyncMock(return_value=None))
-    result = await getattr(module, prompt_name)()
+    result = await getattr(module, prompt_name)(**arguments)
     assert "bm_project(command='list')" in result
     assert "explicit project" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("module_name", "prompt_name", "arguments"),
+    [
+        ("search", "search_prompt", {"query": "scopepromptnonce"}),
+        ("continue_conversation", "continue_conversation", {"topic": "scopepromptnonce"}),
+        ("continue_conversation", "continue_conversation", {"topic": "nomatchuniqueword"}),
+        ("continue_conversation", "continue_conversation", {}),
+        ("recent_activity", "recent_activity_prompt", {}),
+    ],
+)
+async def test_every_saved_prompt_followup_call_carries_its_scope(
+    client, test_project, module_name, prompt_name, arguments
+):
+    await tools.bm_write(
+        identifier="notes/plan.md", content="# scopepromptnonce", project=test_project.name
+    )
+    module = importlib.import_module(f"basic_memory.mcp.prompts.{module_name}")
+    result = await getattr(module, prompt_name)(project=test_project.name, **arguments)
+    calls = re.findall(r"`(bm_(?:read|context|search|project)\([^`\n]*\))`", result)
+    assert calls
+    for example in calls:
+        call = ast.parse(example, mode="eval").body
+        assert isinstance(call, ast.Call)
+        scope = [keyword.value for keyword in call.keywords if keyword.arg == "project"]
+        assert len(scope) == 1, example
+        assert ast.literal_eval(scope[0]) == test_project.name
