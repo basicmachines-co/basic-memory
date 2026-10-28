@@ -246,6 +246,13 @@ def _get_files_to_upload(
             rel_path = file_path.relative_to(directory)
             remote_path = str(rel_path).replace("\\", "/")
 
+            # Directory uploads copy the tree's own files, not symlink targets
+            # that may contain private data outside the selected directory.
+            if file_path.is_symlink():
+                if verbose:
+                    print(f"  [SKIP SYMLINK] {remote_path}")
+                continue
+
             # Check if file should be ignored
             if should_ignore_path(file_path, directory, ignore_patterns):
                 ignored_files.append(remote_path)
