@@ -29,7 +29,9 @@ Edits a note in place. `command` picks the change:
 
 - `append` / `prepend` — add `content` at the end or after the frontmatter.
 - `find_replace` — replace the exact text `find_text` with `content`. It must
-  occur `expected_replacements` times (default 1).
+  occur `expected_replacements` times (default 1). The projected replacement
+  result, including existing frontmatter, must fit in 16 MiB of UTF-8 text;
+  oversized results are refused before constructing the replacement.
 - `replace_section`, `insert_before_section`, `insert_after_section` — act on the
   `section` heading, named as bm_read takes it (`Decisions`, `Auth/Decisions`,
   `Decisions[1]`).
