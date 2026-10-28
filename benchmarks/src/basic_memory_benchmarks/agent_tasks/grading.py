@@ -26,10 +26,12 @@ from basic_memory_benchmarks.agent_tasks.spec import (
     AnswerContains,
     AnswerMatches,
     AnswerSetEquals,
+    BodyLinesEqual,
     FileLineDiff,
     FrontmatterEquals,
     FrontmatterListLen,
     FrontmatterMatches,
+    FrontmatterUnchanged,
     Grader,
     JudgeRubric,
     MarkerAbsent,
@@ -40,6 +42,7 @@ from basic_memory_benchmarks.agent_tasks.spec import (
     ObservationLines,
     RelationResolves,
     ToolCalled,
+    ToolErrorMatches,
 )
 from basic_memory_benchmarks.llm.runners import LLMResult, LLMRunner
 
@@ -191,7 +194,11 @@ def _grader_label(grader: Grader) -> str:
             return source
         case FileLineDiff(path=path):
             return path
+        case BodyLinesEqual(path=path) | FrontmatterUnchanged(path=path):
+            return path
         case ToolCalled(name_pattern=pattern):
+            return pattern
+        case ToolErrorMatches(name_pattern=pattern):
             return pattern
         case JudgeRubric():
             return "rubric"
@@ -410,10 +417,47 @@ def evaluate_grader(
             return _eval_relation_resolves(grader, ctx)
         case FileLineDiff():
             return _eval_file_line_diff(grader, ctx)
-        case ToolCalled(name_pattern=pattern, successful_only=successful_only):
+        case BodyLinesEqual(path=path, lines=lines):
+            relpath, problem = _single_file(ctx, path)
+            if relpath is None:
+                return _result(grader, False, problem)
+            body = frontmatter.loads(
+                (ctx.project_dir / relpath).read_text(encoding="utf-8")
+            ).content
+            actual = tuple(line for line in body.splitlines() if line.strip())
+            return _result(grader, actual == lines, f"{relpath}: {len(actual)} body lines")
+        case FrontmatterUnchanged(path=path, except_keys=except_keys, baseline_path=source):
+            relpath, problem = _single_file(ctx, path)
+            if relpath is None:
+                return _result(grader, False, problem)
+            baseline_text = ctx.baseline.get(relpath if source is None else source)
+            if baseline_text is None:
+                return _result(grader, False, "no baseline frontmatter")
+            before = dict(frontmatter.loads(baseline_text).metadata)
+            after = dict(
+                frontmatter.loads((ctx.project_dir / relpath).read_text(encoding="utf-8")).metadata
+            )
+            for key in except_keys:
+                before.pop(key, None)
+                after.pop(key, None)
+            return _result(grader, before == after, f"{relpath}: preserved frontmatter")
+        case ToolErrorMatches(name_pattern=pattern, error_pattern=error_pattern):
+            matched = any(
+                record.kind == "tool"
+                and record.is_error
+                and record.tool_name is not None
+                and re.search(pattern, record.tool_name)
+                and re.search(error_pattern, record.error_excerpt or "", re.IGNORECASE)
+                for record in ctx.turn_records
+            )
+            return _result(
+                grader, matched, "matching refusal" if matched else "no matching refusal"
+            )
+        case ToolCalled(name_pattern=pattern, outcome=outcome):
+            expected_error = None if outcome == "any" else outcome == "error"
             called = any(
                 record.kind == "tool"
-                and (not successful_only or not record.is_error)
+                and (expected_error is None or record.is_error is expected_error)
                 and record.tool_name is not None
                 and re.search(pattern, record.tool_name)
                 for record in ctx.turn_records

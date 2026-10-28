@@ -9,11 +9,12 @@ prompt preamble are identical (the fairness contract).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
 from typing import Any, Protocol
@@ -811,6 +812,10 @@ def run_agent_tasks(
         surface_home = home / surface.name
         (surface_home / "default-home").mkdir(parents=True)
         env = surface_env(surface, isolated_bm_env(surface_home))
+        if config.semantic_search_enabled is not None:
+            env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = str(
+                config.semantic_search_enabled
+            ).lower()
         if bm_version is None:
             bm_version = _bm_version(prefix, env)
         runtime = SurfaceRuntime(
@@ -969,6 +974,9 @@ def run_agent_tasks(
         corpus_checksum=checksum,
         corpus_file_count=corpus_file_count,
         task_manifest_sha256=task_manifest_sha256,
+        task_spec_sha256=hashlib.sha256(
+            json.dumps([asdict(task) for task in tasks], sort_keys=True, default=sorted).encode()
+        ).hexdigest(),
         task_ids=[task.id for task in tasks],
         surfaces=echoes,
         runtime=RuntimeInfo(

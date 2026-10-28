@@ -150,6 +150,7 @@ def run_agent_loop(
             TurnRecord(
                 turn_index=len(turn_records),
                 kind="model",
+                model_id=turn.model,
                 input_tokens=turn.input_tokens,
                 output_tokens=turn.output_tokens,
                 latency_ms=round(turn.latency_ms, 2),

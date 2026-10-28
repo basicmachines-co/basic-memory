@@ -8,6 +8,7 @@ passes; non-required predicates (e.g. ``ToolCalled``) are diagnostics only.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 # A file selector: a glob relative to the project dir, or the sentinel "new"
 # meaning "the file(s) added since the baseline snapshot".
@@ -132,12 +133,38 @@ class FileLineDiff:
 
 
 @dataclass(frozen=True)
+class BodyLinesEqual:
+    """Nonblank body lines match exactly, in order; blank-line layout is ignored."""
+
+    path: PathSel
+    lines: tuple[str, ...]
+    required: bool = True
+
+
+@dataclass(frozen=True)
+class FrontmatterUnchanged:
+    """Preserve baseline frontmatter except explicitly allowed top-level fields."""
+
+    path: PathSel
+    except_keys: tuple[str, ...] = ()
+    baseline_path: str | None = None
+    required: bool = True
+
+
+@dataclass(frozen=True)
 class ToolCalled:
-    """Diagnostic: some dispatched tool call's name matches ``name_pattern``."""
+    """Some dispatched call matches the name and outcome; diagnostic by default."""
 
     name_pattern: str
     required: bool = False
-    successful_only: bool = False
+    outcome: Literal["any", "success", "error"] = "any"
+
+
+@dataclass(frozen=True)
+class ToolErrorMatches:
+    name_pattern: str
+    error_pattern: str
+    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -163,7 +190,10 @@ type Grader = (
     | ObservationLines
     | RelationResolves
     | FileLineDiff
+    | BodyLinesEqual
+    | FrontmatterUnchanged
     | ToolCalled
+    | ToolErrorMatches
     | JudgeRubric
 )
 
@@ -195,6 +225,7 @@ _STATE_FREE_GRADERS = (
     AnswerContains,
     AnswerMatches,
     ToolCalled,
+    ToolErrorMatches,
     JudgeRubric,
 )
 

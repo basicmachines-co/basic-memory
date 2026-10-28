@@ -48,6 +48,9 @@ class AgentTasksConfig(BaseModel):
     # as null — which is exactly this field's "temperature omitted" sentinel, so
     # the recorded run config would silently misreport what was sent.
     model_temperature: float | None = Field(default=0.0, allow_inf_nan=False)
+    # None preserves the product default; false makes plumbing runs independent
+    # of embedding setup. This profile choice is retained in the run manifest.
+    semantic_search_enabled: bool | None = None
     judge_spec: str | None = None
     corpus_dir: str = "benchmarks/datasets/agent-tasks/corpus"
     output_root: str = "benchmarks/runs"
@@ -81,6 +84,7 @@ class TurnRecord(BaseModel):
 
     turn_index: int
     kind: Literal["model", "tool"]
+    model_id: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: float = 0.0
@@ -208,6 +212,7 @@ class AgentTasksManifest(BaseModel):
     # answers/rubrics, excluded questions) — exactly the pre/post-audit A/B.
     # None for shipped-task runs.
     task_manifest_sha256: str | None = None
+    task_spec_sha256: str | None = None
     task_ids: list[str]
     surfaces: list[SurfaceEcho]
     runtime: RuntimeInfo

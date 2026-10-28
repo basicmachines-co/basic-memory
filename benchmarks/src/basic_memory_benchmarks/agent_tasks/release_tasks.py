@@ -38,7 +38,7 @@ RELEASE_TASKS: tuple[AgentTaskSpec, ...] = (
                 ToolCalled(
                     name_pattern=r"^(bm_read|read_note|read_content|cat)$",
                     required=True,
-                    successful_only=True,
+                    outcome="success",
                 ),
             ),
         )
@@ -96,7 +96,7 @@ RELEASE_TASKS: tuple[AgentTaskSpec, ...] = (
                 ),
             ),
             ToolCalled(
-                name_pattern=r"^(bm_list|list_directory|ls)$", required=True, successful_only=True
+                name_pattern=r"^(bm_list|list_directory|ls)$", required=True, outcome="success"
             ),
         ),
     ),

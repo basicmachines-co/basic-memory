@@ -10,6 +10,7 @@ integrity tests.
 from __future__ import annotations
 
 from basic_memory_benchmarks.agent_tasks.release_tasks import RELEASE_TASKS
+from basic_memory_benchmarks.agent_tasks.release_edit_tasks import EDIT_TASKS
 
 from basic_memory_benchmarks.agent_tasks.spec import (
     NEW_FILE_SELECTOR,
@@ -239,7 +240,7 @@ TASKS: tuple[AgentTaskSpec, ...] = (
     ),
 )
 
-TASKS += RELEASE_TASKS
+TASKS += RELEASE_TASKS + EDIT_TASKS
 
 TASKS_BY_ID: dict[str, AgentTaskSpec] = {task.id: task for task in TASKS}
 
