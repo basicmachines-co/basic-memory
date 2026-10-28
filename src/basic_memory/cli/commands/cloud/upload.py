@@ -85,7 +85,11 @@ async def upload_path(
         # and make the HTTP client dispatch outside the selected project route.
         validated_files: list[tuple[Path, str]] = []
         for source, relative in files_to_upload:
-            destination = relative.replace("\\", "/")
+            # A POSIX backslash is a filename character, but the transport treats it
+            # as a separator. Reject it rather than silently changing the remote key.
+            if "\\" in relative:
+                raise ValueError(f"Unsupported backslash in upload destination: {relative}")
+            destination = relative
             normalize_note_move_destination_path(destination)
             # Validation must not trim or NFC-normalize distinct legal filenames.
             validated_files.append((source, destination))
@@ -256,7 +260,7 @@ def _get_files_to_upload(
 
             # Calculate relative path for display/remote
             rel_path = file_path.relative_to(directory)
-            remote_path = str(rel_path).replace("\\", "/")
+            remote_path = rel_path.as_posix()
 
             # Directory uploads copy the tree's own files, not symlink targets
             # that may contain private data outside the selected directory.

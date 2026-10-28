@@ -15,8 +15,11 @@ from basic_memory.cli.commands.cloud.upload import upload_path
 @pytest.mark.skipif(os.name == "nt", reason="Backslashes are literal filename characters on POSIX")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("single_file", [False, True])
-async def test_upload_refuses_traversing_backslash_name(tmp_path: Path, single_file: bool):
-    source = tmp_path / "safe\\..\\..\\other-project\\leak.md"
+@pytest.mark.parametrize("name", ["safe\\..\\..\\other-project\\leak.md", "report\\final.md"])
+async def test_upload_refuses_traversing_backslash_name(
+    tmp_path: Path, single_file: bool, name: str
+):
+    source = tmp_path / name
     source.write_bytes(b"private note")
     received: list[str] = []
     receiver = FastAPI()
