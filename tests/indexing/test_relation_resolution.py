@@ -68,6 +68,18 @@ class StubVectorSync:
         )
 
 
+class ScriptedVectorSync:
+    """Returns scripted batch results and records requested entity batches."""
+
+    def __init__(self, results: list[VectorSyncBatchResult]) -> None:
+        self.results = list(results)
+        self.batches: list[list[int]] = []
+
+    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> VectorSyncBatchResult:
+        self.batches.append(list(entity_ids))
+        return self.results.pop(0)
+
+
 class FakeSession:
     created_count = 0
 
@@ -539,6 +551,77 @@ async def test_resolve_project_relations_syncs_vectors_once_after_last_pass() ->
     assert runtime.resolve_calls == 3
     # One batch after every pass settled, not one sync per resolution pass.
     assert vector_sync.batches == [[10, 11, 12]]
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_relations_drains_deferred_vector_shards() -> None:
+    runtime = StubRelationResolutionRuntime([3, 1], [{10, 11}, set()])
+    vector_sync = ScriptedVectorSync(
+        [
+            VectorSyncBatchResult(
+                entities_total=2,
+                entities_synced=1,
+                entities_failed=0,
+                entities_deferred=1,
+                deferred_entity_ids=(11,),
+                chunks_total=2,
+                chunks_skipped=1,
+            ),
+            VectorSyncBatchResult(
+                entities_total=1,
+                entities_synced=1,
+                entities_failed=0,
+                chunks_total=1,
+                chunks_skipped=1,
+            ),
+        ]
+    )
+
+    result = await resolve_project_relations(runtime, vector_sync=vector_sync)
+
+    assert vector_sync.batches == [[10, 11], [11]]
+    assert result.vector_sync_deferred_entity_ids == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_relations_exposes_failed_vector_entities() -> None:
+    runtime = StubRelationResolutionRuntime([3, 1], [{10, 11}, set()])
+    vector_sync = ScriptedVectorSync(
+        [
+            VectorSyncBatchResult(
+                entities_total=2,
+                entities_synced=1,
+                entities_failed=1,
+                failed_entity_ids=(11,),
+            )
+        ]
+    )
+
+    result = await resolve_project_relations(runtime, vector_sync=vector_sync)
+
+    assert vector_sync.batches == [[10, 11]]
+    assert result.vector_sync_failed_entity_ids == frozenset({11})
+    assert result.vector_sync_deferred_entity_ids == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_relations_stops_draining_without_progress() -> None:
+    runtime = StubRelationResolutionRuntime([3, 1], [{10, 11}, set()])
+    deferred = VectorSyncBatchResult(
+        entities_total=1,
+        entities_synced=0,
+        entities_failed=0,
+        entities_deferred=1,
+        deferred_entity_ids=(11,),
+        chunks_total=2,
+        chunks_skipped=1,
+    )
+    vector_sync = ScriptedVectorSync([deferred, deferred])
+
+    result = await resolve_project_relations(runtime, vector_sync=vector_sync)
+
+    assert vector_sync.batches == [[10, 11], [11]]
+    assert result.vector_sync_deferred_entity_ids == frozenset({11})
 
 
 @pytest.mark.asyncio

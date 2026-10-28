@@ -14,6 +14,7 @@ from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
 from basic_memory.indexing.project_index_maintenance import ProjectIndexMovedEntitySearchRefresher
 from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
 from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
@@ -58,7 +59,11 @@ class StubSearchService:
 
     async def sync_entity_vectors_batch(self, entity_ids, progress_callback=None):
         self.batches.append(list(entity_ids))
-        return None
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
 
 
 class StubRelationRuntime:
