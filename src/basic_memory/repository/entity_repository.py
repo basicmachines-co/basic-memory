@@ -740,7 +740,7 @@ class EntityRepository(Repository[Entity]):
         """Find entities whose file_path starts with the given directory prefix.
 
         Optimized method for listing directory contents without loading all entities.
-        Uses SQL LIKE pattern matching to filter entities by directory path.
+        Matches literal directory names, including SQL wildcard characters.
 
         Args:
             directory_prefix: Directory path prefix (e.g., "docs", "docs/guides")
@@ -749,7 +749,6 @@ class EntityRepository(Repository[Entity]):
         Returns:
             Sequence of entities in the specified directory and subdirectories
         """
-        # Build SQL LIKE pattern
         if directory_prefix == "" or directory_prefix == "/":
             # Root directory - return all entities
             return await self.find_all(session)
@@ -757,12 +756,10 @@ class EntityRepository(Repository[Entity]):
         # Remove leading/trailing slashes for consistency
         directory_prefix = directory_prefix.strip("/")
 
-        # Query entities with file_path starting with prefix
-        # Pattern matches "prefix/" to ensure we get files IN the directory,
-        # not just files whose names start with the prefix
-        pattern = f"{directory_prefix}/%"
-
-        query = self.select().where(Entity.file_path.like(pattern))
+        # A directory name is a literal path: SQL wildcards must not select sibling
+        # notes that a directory move would then rewrite at an unrelated destination.
+        prefix = f"{directory_prefix}/"
+        query = self.select().where(Entity.file_path.startswith(prefix, autoescape=True))
 
         # Skip eager loading - we only need basic entity fields for directory trees
         result = await self.execute_query(session, query, use_query_options=False)
