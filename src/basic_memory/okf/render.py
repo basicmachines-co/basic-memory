@@ -31,9 +31,10 @@ from basic_memory.utils import (
 )
 
 from basic_memory.okf.validation import Document, parse_document
+from basic_memory.yaml_policy import SimpleSafeDumper
 
 
-class ExportDumper(yaml.SafeDumper):
+class ExportDumper(SimpleSafeDumper):
     """Retain YAML mapping order while making unordered sets deterministic."""
 
 

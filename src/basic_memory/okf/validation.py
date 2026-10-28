@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 import yaml
 
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter, strip_bom
+from basic_memory.yaml_policy import SimpleSafeLoader
 
 
 class Diagnostic(BaseModel):
@@ -36,7 +37,7 @@ class Document:
     has_frontmatter: bool
 
 
-class FrontmatterLoader(yaml.SafeLoader):
+class FrontmatterLoader(SimpleSafeLoader):
     """Keep authored timestamp spelling, including ISO T/Z semantics, intact."""
 
 
@@ -44,7 +45,7 @@ FrontmatterLoader.yaml_implicit_resolvers = {
     character: [
         (tag, expression) for tag, expression in resolvers if tag != "tag:yaml.org,2002:timestamp"
     ]
-    for character, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    for character, resolvers in SimpleSafeLoader.yaml_implicit_resolvers.items()
 }
 
 

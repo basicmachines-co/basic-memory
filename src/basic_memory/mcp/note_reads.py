@@ -7,6 +7,7 @@ import yaml
 from httpx import Response
 
 from basic_memory.schemas.v2 import EntityResponseV2
+from basic_memory.yaml_policy import SimpleSafeLoader
 
 
 class ReadNoteJsonPayload(TypedDict):
@@ -77,7 +78,7 @@ def parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]
 
     frontmatter_text = "".join(lines[1:closing_index])
     try:
-        parsed = yaml.safe_load(frontmatter_text)
+        parsed = yaml.load(frontmatter_text, Loader=SimpleSafeLoader)
     except yaml.YAMLError:
         return original_content, None
 

@@ -36,6 +36,10 @@ observations, and relations.
 - `EntityMarkdown` is the parsed boundary representation of a note.
 - A Markdown note maps to one project-scoped entity. An entity is broader than a note because the
   resource model can also represent non-Markdown content.
+- Frontmatter values form a tree. YAML aliases (`*name`) and merge keys (`<<`) are unsupported;
+  repeat the values directly instead. Writers do not emit aliases. Readers preserve unsupported
+  frontmatter as malformed Markdown body content, and strict metadata/OKF readers reject it,
+  so graph expansion cannot precede validation or silently discard canonical bytes.
 
 Use `note` in user-facing APIs and flows that specifically operate on Markdown. Use `entity` when
 code genuinely operates on the broader indexed resource model.
