@@ -28,7 +28,10 @@ class RcloneConfigError(Exception):
 def get_rclone_config_path() -> Path:
     """Get the path to rclone configuration file."""
     config_dir = Path.home() / ".config" / "rclone"
-    config_dir.mkdir(parents=True, exist_ok=True)
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # This directory contains credentials and their backups, including files
+    # created by older versions with the caller's ordinary umask.
+    config_dir.chmod(0o700)
     return config_dir / "rclone.conf"
 
 
@@ -39,7 +42,15 @@ def backup_rclone_config() -> Optional[Path]:
         return None
 
     backup_path = config_path.with_suffix(f".conf.backup-{os.getpid()}")
-    shutil.copy2(config_path, backup_path)
+    with (
+        config_path.open("rb") as source,
+        os.fdopen(
+            os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb"
+        ) as destination,
+    ):
+        # Existing backup files also need tightening before receiving secrets.
+        backup_path.chmod(0o600)
+        shutil.copyfileobj(source, destination)
     console.print(f"[dim]Created backup: {literal(backup_path)}[/dim]")
     return backup_path
 
@@ -59,7 +70,12 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     """Save rclone configuration to file."""
     config_path = get_rclone_config_path()
 
-    with open(config_path, "w") as f:
+    with os.fdopen(
+        os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        config_path.chmod(0o600)
         config.write(f)
 
     console.print(f"[dim]Updated rclone config: {literal(config_path)}[/dim]")
