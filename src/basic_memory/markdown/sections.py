@@ -186,8 +186,11 @@ def scan_sections(body: str) -> tuple[MarkdownSection, ...]:
 
         # A section ends at the next heading of the same or higher level; the
         # heading-level cap of 6 bounds this look-ahead to linear total work.
+        # Index the original list: copying every suffix is quadratic even when
+        # the next heading immediately closes the section.
         end_line_index = line_count
-        for later in headings[position + 1 :]:
+        for later_position in range(position + 1, len(headings)):
+            later = headings[later_position]
             if later.level <= heading.level:
                 end_line_index = later.line_index
                 break
