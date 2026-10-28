@@ -319,11 +319,15 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
         # Use iterative approach with stack to avoid recursion depth issues
         stack = [root_id]
+        visited_nodes: set[str] = set()
 
         while stack:
             node_id = stack.pop()
-            if not node_id:
+            if not node_id or node_id in visited_nodes:
                 continue
+            # Children reference mapping keys, including nodes without messages.
+            # Mark the node before expanding it so malformed cycles cannot hang imports.
+            visited_nodes.add(node_id)
 
             node = mapping.get(node_id)
             if not node:
