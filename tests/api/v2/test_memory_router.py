@@ -25,11 +25,12 @@ memory_router_module = importlib.import_module("basic_memory.api.v2.routers.memo
 
 
 class _RecordingSpan:
-    """Capture the attributes the memory router ships on its root span."""
+    """Capture span attributes and whether the span exited with an exception."""
 
     def __init__(self, name: str, attributes: dict[str, Any]) -> None:
         self.name = name
         self.attributes = attributes
+        self.exited_with: BaseException | None = None
 
     def set_attribute(self, key: str, value: Any) -> None:
         self.attributes[key] = value
@@ -40,7 +41,13 @@ class _RecordingSpan:
     def __enter__(self) -> "_RecordingSpan":
         return self
 
-    def __exit__(self, *exc_info: object) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        _traceback: object,
+    ) -> None:
+        self.exited_with = exc
         return None
 
 
@@ -591,6 +598,7 @@ async def test_get_memory_context_records_input_rejected_outcome(
     assert root_span.attributes["outcome"] == "input_rejected"
     # The span carries a bounded outcome, not the caller's uploaded locator content.
     assert "example.invalid" not in repr(root_span.attributes)
+    assert root_span.exited_with is None
 
 
 @pytest.mark.asyncio
@@ -604,7 +612,9 @@ async def test_get_memory_context_records_success_outcome(
         response = await client.get(f"{v2_project_url}/memory/test/root")
 
     assert response.status_code == 200
-    assert _root_memory_span(spans).attributes["outcome"] == "success"
+    root_span = _root_memory_span(spans)
+    assert root_span.attributes["outcome"] == "success"
+    assert root_span.exited_with is None
 
 
 @pytest.mark.asyncio
@@ -626,7 +636,9 @@ async def test_get_memory_context_keeps_service_failures_as_server_errors(
         app.dependency_overrides.pop(get_context_service_v2_external, None)
 
     assert response.status_code == 500
-    assert _root_memory_span(spans).attributes["outcome"] == "failed"
+    root_span = _root_memory_span(spans)
+    assert root_span.attributes["outcome"] == "failed"
+    assert isinstance(root_span.exited_with, RuntimeError)
 
 
 @pytest.mark.asyncio
@@ -634,13 +646,18 @@ async def test_get_memory_context_preserves_ambiguous_identifier_conflict(
     app: FastAPI,
     client: AsyncClient,
     v2_project_url: str,
+    monkeypatch,
 ):
     """Ambiguous identifiers keep their existing 409 conflict response."""
     app.dependency_overrides[get_context_service_v2_external] = lambda: _AmbiguousContextService()
     try:
-        response = await client.get(f"{v2_project_url}/memory/Bean%20Origins")
+        with _record_memory_router_spans(monkeypatch) as spans:
+            response = await client.get(f"{v2_project_url}/memory/Bean%20Origins")
     finally:
         app.dependency_overrides.pop(get_context_service_v2_external, None)
 
     assert response.status_code == 409
     assert "Ambiguous identifier 'Bean Origins'" in response.json()["detail"]
+    root_span = _root_memory_span(spans)
+    assert root_span.attributes["outcome"] == "input_rejected"
+    assert all(span.exited_with is None for span in spans)

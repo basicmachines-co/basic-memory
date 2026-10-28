@@ -180,6 +180,56 @@ async def get_memory_context(
     Returns:
         GraphContext with the entity and its related context
     """
+    deferred_http_error: tuple[int, str, BaseException] | None = None
+    result: GraphContext | None = None
+
+    async def _build_context() -> GraphContext | None:
+        nonlocal deferred_http_error
+        since = parse_timeframe(timeframe) if timeframe else None
+        limit = page_size
+        offset = (page - 1) * page_size
+
+        with logfire.span(
+            "api.memory.build_context.build_context",
+            domain="memory",
+            action="build_context",
+            phase="build_context",
+            page=page,
+            page_size=page_size,
+        ):
+            try:
+                context = await context_service.build_context(
+                    memory_url,
+                    depth=depth,
+                    since=since,
+                    limit=limit,
+                    offset=offset,
+                    max_related=max_related,
+                    include_observations=include_observations,
+                )
+            except AmbiguousIdentifierError as exc:
+                # A title URL that names several notes has no single context to build.
+                # Defer the caller-visible 409 past this span so Logfire does not
+                # record the locator content as an exception.
+                deferred_http_error = (status.HTTP_409_CONFLICT, str(exc), exc)
+                return None
+
+        with logfire.span(
+            "api.memory.build_context.shape_response",
+            domain="memory",
+            action="build_context",
+            phase="shape_response",
+            result_count=len(context.results),
+        ):
+            async with db.scoped_session(session_maker) as session:
+                return await to_graph_context(
+                    context,
+                    entity_repository=entity_repository,
+                    session=session,
+                    page=page,
+                    page_size=page_size,
+                )
+
     with logfire.span(
         "api.request.memory.build_context",
         entrypoint="api",
@@ -200,57 +250,12 @@ async def get_memory_context(
                 # Why: normalize_memory_url raises ValueError for caller input; letting
                 #   it escape reported a client mistake as an internal server error (#1879).
                 # Outcome: a bounded 400 with the normalizer's specific reason before
-                #   any context traversal.
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=str(exc),
-                ) from exc
-
-            since = parse_timeframe(timeframe) if timeframe else None
-            limit = page_size
-            offset = (page - 1) * page_size
-
-            with logfire.span(
-                "api.memory.build_context.build_context",
-                domain="memory",
-                action="build_context",
-                phase="build_context",
-                page=page,
-                page_size=page_size,
-            ):
-                try:
-                    context = await context_service.build_context(
-                        memory_url,
-                        depth=depth,
-                        since=since,
-                        limit=limit,
-                        offset=offset,
-                        max_related=max_related,
-                        include_observations=include_observations,
-                    )
-                except AmbiguousIdentifierError as exc:
-                    # A title URL that names several notes has no single context to build.
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-                    ) from exc
-            with logfire.span(
-                "api.memory.build_context.shape_response",
-                domain="memory",
-                action="build_context",
-                phase="shape_response",
-                result_count=len(context.results),
-            ):
-                async with db.scoped_session(session_maker) as session:
-                    result = await to_graph_context(
-                        context,
-                        entity_repository=entity_repository,
-                        session=session,
-                        page=page,
-                        page_size=page_size,
-                    )
+                #   any context traversal or span exception.
+                deferred_http_error = (status.HTTP_400_BAD_REQUEST, str(exc), exc)
+            else:
+                result = await _build_context()
         except HTTPException as exc:
-            # Malformed input (400) and ambiguous titles (409) are both caller-visible
-            # outcomes; only a server-side status would be a failure.
+            # Unexpected HTTP errors keep the original in-span outcome handling.
             span.set_attribute(
                 "outcome",
                 "input_rejected" if exc.status_code < 500 else "failed",
@@ -264,5 +269,13 @@ async def get_memory_context(
             span.set_attribute("outcome", "failed")
             raise
 
-        span.set_attribute("outcome", "success")
-        return result
+        span.set_attribute(
+            "outcome",
+            "input_rejected" if deferred_http_error is not None else "success",
+        )
+
+    if deferred_http_error is not None:
+        status_code, detail, cause = deferred_http_error
+        raise HTTPException(status_code=status_code, detail=detail) from cause
+    assert result is not None
+    return result
