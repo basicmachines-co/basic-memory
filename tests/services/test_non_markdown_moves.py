@@ -1,5 +1,6 @@
 """Regular-file moves preserve bytes and identity; Markdown notes move elsewhere."""
 
+import os
 from hashlib import sha256
 from pathlib import Path
 
@@ -167,3 +168,30 @@ async def test_a_failed_index_update_puts_the_file_back(
 
     assert (project_config.home / source).read_bytes() == PDF_BYTES
     assert not (project_config.home / "archive/report.pdf").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Requires unprivileged directory symlinks")
+@pytest.mark.asyncio
+async def test_move_refuses_symlink_destination_before_creating_parent(
+    entity_service: EntityService,
+    project_config: ProjectConfig,
+    test_project: Project,
+    tmp_path: Path,
+) -> None:
+    source = "original/report.pdf"
+    await add_regular_file(
+        entity_service,
+        project_config,
+        file_path=source,
+        content_type="application/pdf",
+        content=PDF_BYTES,
+    )
+    outside = tmp_path.with_name(tmp_path.name + "-outside")
+    outside.mkdir()
+    (project_config.home / "redirect").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="outside.*project"):
+        await entity_service.move_entity(source, "redirect/new/report.pdf")
+
+    assert not (outside / "new").exists()
+    assert (project_config.home / source).read_bytes() == PDF_BYTES

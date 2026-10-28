@@ -1009,7 +1009,7 @@ class EntityService(BaseService[EntityModel]):
             raise ValueError(f"Destination already exists: {destination_path}")
 
         try:
-            await self.file_service.ensure_directory(Path(destination_path).parent)
+            # The storage move validates containment before creating its destination parent.
             await self.file_service.move_file(current_path, destination_path)
             logger.info(f"Moved file: {current_path} -> {destination_path}")
 
