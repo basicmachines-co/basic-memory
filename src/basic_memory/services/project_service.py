@@ -724,6 +724,18 @@ class ProjectService:
 
         # Resolve to absolute path
         resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
+        project_root = self.config_manager.config.project_root
+        if project_root:
+            # Moving must preserve the same strict root boundary as creation,
+            # including symlink targets, before config or database state changes.
+            destination = Path(resolved_path).resolve()
+            resolved_root = Path(project_root).resolve()
+            if destination == resolved_root or not destination.is_relative_to(resolved_root):
+                raise ValueError(
+                    f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
+                    f"All projects must remain under this directory. Invalid path: {new_path}"
+                )
+            resolved_path = destination.as_posix()
 
         # Validate project exists in config
         if name not in self.config_manager.projects:
