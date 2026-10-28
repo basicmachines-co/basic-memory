@@ -192,14 +192,13 @@ async def _read_json(
     mcp_server,
     *,
     identifier: str,
-    project: str | None = None,
+    project: str,
 ) -> dict[str, Any]:
     arguments = {
         "identifier": identifier,
         "output_format": "json",
     }
-    if project is not None:
-        arguments["project"] = project
+    arguments["project"] = project
     return await _call_json(mcp_server, "bm_read", arguments)
 
 
@@ -207,15 +206,14 @@ async def _search_single_permalink(
     mcp_server,
     *,
     title: str,
-    project: str | None = None,
+    project: str,
 ) -> str:
     arguments = {
         "query": title,
         "mode": "text",
         "output_format": "json",
     }
-    if project is not None:
-        arguments["project"] = project
+    arguments["project"] = project
 
     payload = await _call_json(mcp_server, "bm_search", arguments)
     matching_results = [
@@ -232,15 +230,14 @@ async def _search_permalink_exact(
     *,
     permalink: str,
     title: str,
-    project: str | None = None,
+    project: str,
 ) -> str:
     arguments = {
-        "query": permalink if project is not None else f"memory://{permalink}",
+        "query": f"memory://{permalink}",
         "mode": "permalink",
         "output_format": "json",
     }
-    if project is not None:
-        arguments["project"] = project
+    arguments["project"] = project
 
     payload = await _call_json(mcp_server, "bm_search", arguments)
     matching_results = [
@@ -288,6 +285,7 @@ async def test_memory_search_normalizes_display_project_prefix(
             "bm_search",
             {
                 "query": f"memory://{prefix}/{suffix}",
+                "project": project,
                 "output_format": "json",
             },
         )
@@ -324,13 +322,13 @@ async def test_local_short_permalink_round_trips_when_project_is_supplied(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("include_project", [True, False])
-async def test_local_project_permalink_routes_without_project_argument(
+async def test_local_project_permalink_round_trips_with_explicit_project(
     mcp_server,
     alternate_project,
     app_config,
     include_project,
 ):
-    """Local project-qualified IDs carry enough route context for search/read."""
+    """Local qualified IDs round-trip with matching explicit project scope."""
     _save_permalink_config(app_config, include_project=include_project, default_project=None)
 
     title = "Local Project Permalink"
@@ -344,13 +342,16 @@ async def test_local_project_permalink_routes_without_project_argument(
     assert (
         await _search_permalink_exact(
             mcp_server,
+            project=alternate_project.name,
             permalink=qualified_permalink,
             title=title,
         )
         == expected_permalink
     )
 
-    project_read = await _read_json(mcp_server, identifier=qualified_permalink)
+    project_read = await _read_json(
+        mcp_server, project=alternate_project.name, identifier=qualified_permalink
+    )
     assert project_read["permalink"] == expected_permalink
 
 
@@ -390,14 +391,14 @@ async def test_personal_cloud_short_permalink_round_trips_when_project_is_suppli
 
 
 @pytest.mark.asyncio
-async def test_personal_cloud_project_permalink_routes_without_project_argument(
+async def test_personal_cloud_project_permalink_round_trips_with_explicit_project(
     mcp_server,
     alternate_project,
     app_config,
     personal_workspace,
     route_workspaces,
 ):
-    """Legacy project-qualified cloud IDs carry enough route context."""
+    """Legacy cloud IDs round-trip with matching explicit project scope."""
     _save_permalink_config(app_config, include_project=True, default_project=None)
 
     title = "Personal Cloud Project Permalink"
@@ -411,13 +412,16 @@ async def test_personal_cloud_project_permalink_routes_without_project_argument(
         assert (
             await _search_permalink_exact(
                 mcp_server,
+                project=alternate_project.name,
                 permalink=expected_permalink,
                 title=title,
             )
             == expected_permalink
         )
 
-        project_read = await _read_json(mcp_server, identifier=expected_permalink)
+        project_read = await _read_json(
+            mcp_server, project=alternate_project.name, identifier=expected_permalink
+        )
         assert project_read["permalink"] == expected_permalink
 
 
@@ -457,14 +461,14 @@ async def test_team_short_permalink_round_trips_when_project_is_supplied(
 
 
 @pytest.mark.asyncio
-async def test_team_project_permalink_routes_without_project_argument(
+async def test_team_project_permalink_round_trips_with_explicit_project(
     mcp_server,
     alternate_project,
     app_config,
     team_workspace,
     route_workspaces,
 ):
-    """Team project-qualified IDs carry enough route context for search/read."""
+    """Team project-qualified IDs round-trip with explicit project scope."""
     _save_permalink_config(app_config, include_project=True, default_project=None)
 
     title = "Team Project Permalink"
@@ -478,12 +482,15 @@ async def test_team_project_permalink_routes_without_project_argument(
         assert (
             await _search_permalink_exact(
                 mcp_server,
+                project=alternate_project.name,
                 permalink=expected_permalink,
                 title=title,
             )
             == expected_permalink
         )
-        project_read = await _read_json(mcp_server, identifier=expected_permalink)
+        project_read = await _read_json(
+            mcp_server, project=alternate_project.name, identifier=expected_permalink
+        )
         assert project_read["permalink"] == expected_permalink
 
 
@@ -496,7 +503,7 @@ async def test_team_workspace_permalink_routes_to_specific_workspace(
     team_workspace,
     route_workspaces,
 ):
-    """Workspace-qualified IDs route to the project in that workspace."""
+    """Workspace-qualified IDs round-trip with matching explicit workspace scope."""
     _save_permalink_config(app_config, include_project=True, default_project=None)
     team_project = f"{team_workspace.slug}/{test_project.name}"
 
@@ -511,13 +518,16 @@ async def test_team_workspace_permalink_routes_to_specific_workspace(
         assert (
             await _search_permalink_exact(
                 mcp_server,
+                project=team_project,
                 permalink=expected_permalink,
                 title=title,
             )
             == expected_permalink
         )
 
-        workspace_read = await _read_json(mcp_server, identifier=expected_permalink)
+        workspace_read = await _read_json(
+            mcp_server, project=team_project, identifier=expected_permalink
+        )
         assert workspace_read["permalink"] == expected_permalink
 
 
@@ -529,7 +539,7 @@ async def test_write_note_by_project_id_qualifies_permalink_when_headers_not_for
     team_workspace,
     route_workspaces,
 ):
-    """MCP writes should return self-routing IDs even if the API omits slug headers."""
+    """MCP writes preserve workspace-qualified IDs even if the API omits slug headers."""
     _save_permalink_config(app_config, include_project=True, default_project=None)
 
     title = "Project Id Workspace Permalink"
@@ -552,6 +562,7 @@ async def test_write_note_by_project_id_qualifies_permalink_when_headers_not_for
 
         workspace_read = await _read_json(
             mcp_server,
+            project=test_project.external_id,
             identifier=f"memory://{write_payload['permalink']}",
         )
         assert workspace_read["title"] == title

@@ -9,6 +9,7 @@ content tool functionality in constrained mode.
 import os
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 
 @pytest.mark.asyncio
@@ -310,10 +311,15 @@ async def test_constraint_with_invalid_project_override(mcp_server, app, test_pr
 
     try:
         async with Client(mcp_server) as client:
-            # Try various invalid project names - should all be overridden
+            # Blank scope fails validation even when the server is constrained.
+            with pytest.raises(ToolError, match="at least 1 character"):
+                await client.call_tool(
+                    "bm_write", {"project": "", "title": "Blank scope", "content": "Rejected"}
+                )
+
+            # Nonempty project arguments are routed through the server constraint.
             invalid_projects = [
                 "non-existent-project",
-                "",
                 "project-with-special-chars!@#",
                 "a" * 100,  # Very long name
             ]
