@@ -139,6 +139,7 @@ PAGES_WITHOUT_LOCAL_TOOLS = {
     "schema_validate",
     "list_memory_projects",
     "cloud_info",
+    "bm_agent",
     "create_memory_project",
     "delete_project",
     "move_note",
