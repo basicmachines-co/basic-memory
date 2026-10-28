@@ -792,6 +792,25 @@ async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
                     "corpus did not finish materializing and indexing before measurement"
                 )
 
+            # FTS can be ready while the seed corpus is still embedding. Wait
+            # for the public readiness contract so background indexing cannot
+            # overlap the warm-read measurement on either product version.
+            async def index_ready() -> bool:
+                output = await asyncio.to_thread(
+                    checked_output,
+                    [args.bm_command, "status", "--project", project, "--json", "--local"],
+                    env=env,
+                )
+                payload = json.loads(output)
+                readiness = payload.get("readiness")
+                if not isinstance(readiness, dict) or "phase" not in readiness:
+                    raise RuntimeError("status returned no index readiness contract")
+                return readiness["phase"] == "idle"
+
+            index_ready_ms = await poll_until(index_ready, timeout_seconds=args.ready_timeout)
+            if index_ready_ms is None:
+                raise RuntimeError("background indexing did not settle before read measurement")
+
             await asyncio.sleep(args.quiesce_seconds)
 
             sqlite_note_content_rows = (
@@ -836,6 +855,7 @@ async def run(args: argparse.Namespace, *, surface: str = "bm") -> int:
                             "notes_per_size": args.notes_per_size,
                             "materialization_ready_ms": round(materialized_ms, 1),
                             "search_ready_ms": round(searchable_ms, 1),
+                            "index_ready_ms": round(index_ready_ms, 1),
                             "sqlite_note_content_rows": sqlite_note_content_rows,
                         },
                         "metrics": {
