@@ -548,6 +548,7 @@ class LocalNoteContentStorage:
         metadata: dict[str, str] | None = None,
     ) -> RuntimeFileChecksum:
         _ = metadata
+        self.file_service.require_project_path(path)
         path_obj = self.file_service.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.file_service.base_path / path_obj
 

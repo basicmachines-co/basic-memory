@@ -100,6 +100,22 @@ class FileService:
         """
         return self.base_path / entity.file_path
 
+    def require_project_path(self, path: FilePath) -> None:
+        """Require a project path, allowing absolute spellings within a local root.
+
+        General directory creation also serves project setup, so containment is
+        enforced explicitly at project-scoped import, materialization, and move sinks.
+        Object storage accepts only relative keys and never resolves host symlinks.
+        """
+        relative = Path(path)
+        if self.local_project_path is not None and relative.is_absolute():
+            try:
+                relative = relative.resolve().relative_to(self.local_project_path)
+            except ValueError:
+                raise FileOperationError(f"Path '{path}' is outside the project") from None
+        if not validate_project_path(relative.as_posix(), self.local_project_path):
+            raise FileOperationError(f"Path '{path}' is outside the project")
+
     async def read_entity_content(self, entity: EntityModel) -> str:
         """Get entity's content without frontmatter or structured sections.
 
@@ -450,6 +466,8 @@ class FileService:
         Raises:
             FileOperationError: If the move fails
         """
+        self.require_project_path(source)
+        self.require_project_path(destination)
         # Convert strings to Paths and resolve relative paths against base_path
         src_obj = self.base_path / source if isinstance(source, str) else source
         dst_obj = self.base_path / destination if isinstance(destination, str) else destination
