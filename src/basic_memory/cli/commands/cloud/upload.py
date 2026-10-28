@@ -11,7 +11,7 @@ import httpx
 from basic_memory.cli.commands.cloud.webdav import webdav_path
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_client
-from basic_memory.runtime.note_move import normalize_note_move_destination_path
+from basic_memory.utils import valid_project_path_value
 
 # Archive file extensions that should be skipped during upload
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
@@ -85,12 +85,19 @@ async def upload_path(
         # and make the HTTP client dispatch outside the selected project route.
         validated_files: list[tuple[Path, str]] = []
         for source, relative in files_to_upload:
+            # Archives never reach dispatch; their names must not abort note uploads.
+            if _is_archive_file(source):
+                validated_files.append((source, relative))
+                continue
             # A POSIX backslash is a filename character, but the transport treats it
             # as a separator. Reject it rather than silently changing the remote key.
             if "\\" in relative:
                 raise ValueError(f"Unsupported backslash in upload destination: {relative}")
             destination = relative
-            normalize_note_move_destination_path(destination)
+            if not destination or not valid_project_path_value(
+                destination, allow_literal_tilde=True
+            ):
+                raise ValueError(f"Invalid upload destination: {destination}")
             # Validation must not trim or NFC-normalize distinct legal filenames.
             validated_files.append((source, destination))
         files_to_upload = validated_files

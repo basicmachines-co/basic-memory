@@ -49,9 +49,12 @@ async def test_upload_refuses_traversing_backslash_name(
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX filename spelling")
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", [" note.md", "note.md ", "cafe\u0301.md"])
+@pytest.mark.parametrize(
+    "name", [" note.md", "note.md ", "cafe\u0301.md", " ", " /note.md", "backup\\copy.zip"]
+)
 async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name: str):
     (tmp_path / "note.md").write_bytes(b"ordinary")
+    (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / name).write_bytes(b"distinct")
     received: dict[str, bytes] = {}
     receiver = FastAPI()
@@ -70,4 +73,8 @@ async def test_upload_preserves_distinct_filename_spelling(tmp_path: Path, name:
             yield client
 
     assert await upload_path(tmp_path, "authorized-project", client_cm_factory=client_factory)
-    assert received == {"note.md": b"ordinary", name: b"distinct"}
+    assert received == (
+        {"note.md": b"ordinary"}
+        if name.endswith(".zip")
+        else {"note.md": b"ordinary", name: b"distinct"}
+    )
