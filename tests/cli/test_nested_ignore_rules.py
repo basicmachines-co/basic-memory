@@ -119,3 +119,16 @@ def test_large_ignore_set_compiles_once_across_files(tmp_path: Path):
         and "pathspec" in Path(entry.code.co_filename).parts
     )
     assert compilations <= len(rules)
+
+
+@pytest.mark.parametrize("invalid", [r"foo\//", "a/[z-a]/"])
+@pytest.mark.parametrize(
+    ("valid", "relative"), [("private/", "private/secret.md"), ("*.secret", "note.secret")]
+)
+def test_invalid_directory_rule_cannot_disable_exclusions(
+    tmp_path: Path, invalid: str, valid: str, relative: str
+):
+    source = tmp_path / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("private content")
+    assert filter_files([source], tmp_path, {invalid, valid}) == ([], 1)
