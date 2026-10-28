@@ -11,6 +11,7 @@ import httpx
 from basic_memory.cli.commands.cloud.webdav import webdav_path
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_client
+from basic_memory.runtime.note_move import normalize_note_move_destination_path
 
 # Archive file extensions that should be skipped during upload
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
@@ -78,6 +79,14 @@ async def upload_path(
                     "or --no-gitignore to skip .gitignore patterns"
                 )
             return True
+
+        # Validate the same separator-normalized paths that will reach HTTP.
+        # A literal POSIX backslash filename can otherwise become ../ segments
+        # and make the HTTP client dispatch outside the selected project route.
+        files_to_upload = [
+            (source, normalize_note_move_destination_path(relative.replace("\\", "/")))
+            for source, relative in files_to_upload
+        ]
 
         print(f"Found {len(files_to_upload)} file(s) to upload")
 
