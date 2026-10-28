@@ -11,6 +11,7 @@ import re
 import unicodedata
 import secrets
 import stat
+import tempfile
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import aiofiles
@@ -170,15 +171,22 @@ def _create_atomic_temp_path(target: Path) -> tuple[Path, int | None]:
             descriptor = os.open(
                 staging_path,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o666,
+                0o600,
             )
         except FileExistsError:  # pragma: no cover - random collision defense
             continue
         os.close(descriptor)
         try:
-            target_mode = stat.S_IMODE(target.stat().st_mode)
-        except FileNotFoundError:
-            target_mode = None
+            try:
+                target_mode = stat.S_IMODE(target.stat().st_mode)
+            except FileNotFoundError:
+                # Preserve the ordinary creation mode without changing the
+                # process-wide umask. This empty probe lives in a private directory
+                # and never receives content; the content inode starts at 0600.
+                with tempfile.TemporaryDirectory(dir=target.parent) as mode_directory:
+                    mode_probe = Path(mode_directory) / "mode"
+                    mode_probe.touch()
+                    target_mode = stat.S_IMODE(mode_probe.stat().st_mode)
         except Exception:
             staging_path.unlink(missing_ok=True)
             raise
