@@ -258,6 +258,23 @@ def load_gitignore_patterns(
     return patterns
 
 
+def _matches_directory_ancestor(parts: tuple[str, ...], pattern: str) -> bool:
+    """Match a rooted directory rule against ancestors, with Git-style globstar."""
+    matched = [True] + [False] * len(parts)
+    for component in pattern.split("/"):
+        if component == "**":
+            # Globstar consumes zero or more whole directories; other wildcards
+            # operate on one component so a single star never crosses a slash.
+            for end in range(1, len(matched)):
+                matched[end] = matched[end] or matched[end - 1]
+        else:
+            matched = [False] + [
+                matched[end - 1] and fnmatch.fnmatch(part, component)
+                for end, part in enumerate(parts, 1)
+            ]
+    return any(matched)
+
+
 def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[str]) -> bool:
     """Check if a file path should be ignored based on gitignore patterns.
 
@@ -291,10 +308,7 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
                 # accidentally matching other/private/keys/ or keys-other/.
                 if "/" in directory_pattern:
                     directory_pattern = directory_pattern.removeprefix("/")
-                    if any(
-                        fnmatch.fnmatch("/".join(directory_parts[:end]), directory_pattern)
-                        for end in range(1, len(directory_parts) + 1)
-                    ):
+                    if _matches_directory_ancestor(directory_parts, directory_pattern):
                         return True
                 elif any(fnmatch.fnmatch(part, directory_pattern) for part in directory_parts):
                     return True
