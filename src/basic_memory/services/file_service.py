@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import os
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -113,8 +114,13 @@ class FileService:
                 relative = relative.resolve().relative_to(self.local_project_path)
             except ValueError:
                 raise FileOperationError(f"Path '{path}' is outside the project") from None
+        # Native POSIX storage treats colons literally; remote keys keep the
+        # portable drive restriction and never use the host's path semantics.
         if not validate_project_path(
-            relative.as_posix(), self.local_project_path, allow_literal_tilde=True
+            relative.as_posix(),
+            self.local_project_path,
+            allow_literal_tilde=True,
+            allow_literal_colon=self.local_project_path is not None and os.name != "nt",
         ):
             raise FileOperationError(f"Path '{path}' is outside the project")
 

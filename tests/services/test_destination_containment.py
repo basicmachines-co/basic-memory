@@ -60,7 +60,7 @@ async def test_destinations_cannot_escape_project(tmp_path: Path, surface: str, 
 def test_object_storage_paths_are_relative_keys_not_host_paths(tmp_path: Path):
     files = FileService(tmp_path, local_filesystem=False)
     files.require_project_path("notes/valid.md")
-    for path in ("../outside.md", "/absolute.md", "C:\\outside.md"):
+    for path in ("../outside.md", "/absolute.md", "C:\\outside.md", "C:/outside.md"):
         with pytest.raises(FileOperationError, match="outside.*project"):
             files.require_project_path(path)
 
@@ -77,3 +77,15 @@ async def test_guarded_move_preserves_literal_tildes(tmp_path: Path):
     await FileService(tmp_path).move_file("~source.pdf", "notes/~draft.pdf")
     assert not source.exists()
     assert (tmp_path / "notes/~draft.pdf").read_bytes() == b"file content"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Colons are literal filename characters on POSIX")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_name", ["a:source.pdf", "C:/source.pdf"])
+async def test_local_guard_preserves_literal_colons(tmp_path: Path, source_name: str):
+    source = tmp_path / source_name
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"file content")
+    await FileService(tmp_path).move_file(source_name, "notes/a:draft.pdf")
+    assert not source.exists()
+    assert (tmp_path / "notes/a:draft.pdf").read_bytes() == b"file content"
