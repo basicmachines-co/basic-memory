@@ -171,6 +171,22 @@ def run_agent_loop(
             if clock() - started >= budget.max_task_seconds:
                 return stop("wall_clock", None)
             tool_call_count += 1
+            # Legacy tools have a separate ID argument; bm tools use AliasChoices
+            # with canonical project first. Preserve that precedence in the audit.
+            if call.name.startswith("bm_"):
+                project = (
+                    call.arguments["project"]
+                    if "project" in call.arguments
+                    else call.arguments.get("project_id")
+                )
+            else:
+                project_id = call.arguments.get("project_id")
+                project = (
+                    project_id
+                    if isinstance(project_id, str) and project_id
+                    else call.arguments.get("project")
+                )
+            project_scope = project if isinstance(project, str) else None
             # Observe schema mistakes without changing server behavior or the
             # feedback seen by the model. Domain refusals remain tool errors.
             arguments_valid = (
@@ -200,6 +216,8 @@ def run_agent_loop(
                             latency_ms=round((time.perf_counter() - dispatch_started) * 1000.0, 2),
                             tool_name=call.name,
                             arguments_chars=len(str(call.arguments)),
+                            argument_keys=sorted(call.arguments),
+                            project_scope=project_scope,
                             is_error=True,
                             arguments_valid=arguments_valid,
                             arguments_excerpt=_arguments_excerpt(call.arguments),
@@ -220,6 +238,8 @@ def run_agent_loop(
                     latency_ms=round(latency_ms, 2),
                     tool_name=call.name,
                     arguments_chars=len(str(call.arguments)),
+                    argument_keys=sorted(call.arguments),
+                    project_scope=project_scope,
                     result_chars=len(fed_back),
                     is_error=outcome.is_error,
                     arguments_valid=arguments_valid,

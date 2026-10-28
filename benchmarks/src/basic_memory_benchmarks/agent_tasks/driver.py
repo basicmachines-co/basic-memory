@@ -49,6 +49,7 @@ from basic_memory_benchmarks.agent_tasks.models import (
 from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, spec_needs_project_state
 from basic_memory_benchmarks.agent_tasks.surfaces import (
     SURFACES,
+    DECOY_SEARCH_TOOL,
     SurfaceUnavailableError,
     ToolSurface,
     read_only_view,
@@ -435,9 +436,20 @@ def _run_one_task(
     prompt = TASK_PROMPT_TEMPLATE.format(project=project.name, task_prompt=task.prompt)
 
     def dispatch(name: str, arguments: dict[str, Any]) -> ToolOutcome:
+        if config.decoy_search and name == DECOY_SEARCH_TOOL.name:
+            # Same extra server on both products. It performs no network calls
+            # and cannot retrieve local notes; mistaken selection is counted.
+            return ToolOutcome(
+                text="No public web results. This server cannot retrieve Basic Memory project notes.",
+                is_error=False,
+            )
         # {project} placeholders come from the scripted transport, which cannot
         # know per-run project names; a no-op for real model output.
-        resolved = substitute_placeholders(arguments, {"project": project.name})
+        resolved = (
+            substitute_placeholders(arguments, {"project": project.name})
+            if config.model_spec.startswith("scripted:")
+            else arguments
+        )
         return session.call_tool(name, resolved)
 
     loop_result = run_agent_loop(
@@ -501,7 +513,11 @@ def _run_one_task(
 
 
 def build_surface_summary(
-    surface: str, model_spec: str, results: Sequence[AgentTaskResult]
+    surface: str,
+    model_spec: str,
+    results: Sequence[AgentTaskResult],
+    *,
+    decoy_tool_name: str | None = None,
 ) -> SurfaceSummary:
     graded = [row for row in results if row.error is None]
     passed_rows = [row for row in graded if row.passed]
@@ -557,7 +573,7 @@ def build_surface_summary(
         tasks_passed=len(passed_rows),
         tasks_errored=len(results) - len(graded),
         budget_stops={str(reason): count for reason, count in sorted(budget_stops.items())},
-        pass_rate=round(len(passed_rows) / len(graded), 3) if graded else 0.0,
+        pass_rate=round(len(passed_rows) / len(graded), 3) if graded else None,
         total_input_tokens=total_input,
         total_output_tokens=total_output,
         # Headline: tokens over ALL attempted tasks per completed task; None
@@ -572,6 +588,9 @@ def build_surface_summary(
         per_skill=per_skill,
         per_group=per_group,
         per_tool_arguments=per_tool_arguments,
+        decoy_tool_calls=sum(record.tool_name == decoy_tool_name for record in tool_records)
+        if decoy_tool_name is not None
+        else 0,
         judge_input_tokens=sum(row.judge_input_tokens for row in results),
         judge_output_tokens=sum(row.judge_output_tokens for row in results),
         judge_calls=sum(row.judge_calls for row in results),
@@ -609,15 +628,17 @@ def build_agent_summary_markdown(
         # accuracy alone.
         "## Results by surface",
         "",
-        "| Surface | Tokens/completed | Pass rate | Passed/total | Mean tool calls |"
+        "| Surface | Tokens/completed | Pass rate | Passed/graded | Errored | Mean tool calls |"
         " Mean turns | Mean wall s | Total tokens |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for summary in summaries:
         total_tokens = summary.total_input_tokens + summary.total_output_tokens
+        pass_rate = str(summary.pass_rate) if summary.pass_rate is not None else "n/a"
+        graded = summary.tasks_total - summary.tasks_errored
         lines.append(
             f"| {summary.surface} | {_format_tokens_per_completed(summary.tokens_per_completed_task)} |"
-            f" {summary.pass_rate} | {summary.tasks_passed}/{summary.tasks_total} |"
+            f" {pass_rate} | {summary.tasks_passed}/{graded} | {summary.tasks_errored} |"
             f" {summary.mean_tool_calls} | {summary.mean_turns} |"
             f" {summary.mean_wall_seconds} | {total_tokens} |"
         )
@@ -633,7 +654,7 @@ def build_agent_summary_markdown(
 
     lines += ["", "## Tool arguments", ""]
     lines += [
-        "| Surface | Tool | Calls | Schema checked | Invalid arguments | Invalid rate | Tool errors |",
+        "| Surface | Tool | Calls | Schema checked | Schema-invalid | Schema-invalid rate | Tool errors |",
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for summary in summaries:
@@ -650,7 +671,7 @@ def build_agent_summary_markdown(
 
     lines += ["", "## Per skill", ""]
     lines += [
-        "| Surface | Skill | Passed/total | Tokens/completed |",
+        "| Surface | Skill | Passed/attempted | Tokens/completed |",
         "| --- | --- | --- | --- |",
     ]
     for summary in summaries:
@@ -665,7 +686,7 @@ def build_agent_summary_markdown(
     if any(summary.per_group for summary in summaries):
         lines += ["", "## Per group (persona)", ""]
         lines += [
-            "| Surface | Group | Passed/total | Tokens/completed |",
+            "| Surface | Group | Passed/attempted | Tokens/completed |",
             "| --- | --- | --- | --- |",
         ]
         for summary in summaries:
@@ -831,18 +852,23 @@ def run_agent_tasks(
         try:
             available = session.tools()
             observed_names = sorted(tool.name for tool in available)
+            extra_tools = [DECOY_SEARCH_TOOL] if config.decoy_search else []
+            if config.decoy_search and DECOY_SEARCH_TOOL.name in observed_names:
+                raise ValueError("decoy tool name collides with the Basic Memory catalog")
             echoes.append(
                 SurfaceEcho(
                     name=surface.name,
                     config_overrides=dict(surface.config_overrides),
-                    tool_allowlist=list(surface.tool_allowlist),
+                    tool_allowlist=[*surface.tool_allowlist, *(tool.name for tool in extra_tools)],
                     observed_tools=observed_names,
+                    injected_tools=[tool.name for tool in extra_tools],
                     tool_definitions=[
                         tool
                         for name in surface.tool_allowlist
                         for tool in available
                         if tool.name == name
-                    ],
+                    ]
+                    + extra_tools,
                 )
             )
             try:
@@ -858,9 +884,8 @@ def run_agent_tasks(
                 )
                 continue
 
-            by_name = {tool.name: tool for tool in available}
             # Deterministic order: schemas reach the model in allowlist order.
-            tool_defs = [by_name[name] for name in surface.tool_allowlist]
+            tool_defs = echoes[-1].tool_definitions
 
             prepared_groups: dict[str, TaskProject] = {}
             failed_groups: dict[str, str] = {}
@@ -954,7 +979,10 @@ def run_agent_tasks(
     )
     summaries = [
         build_surface_summary(
-            surface, model.spec, [row for row in results if row.surface == surface]
+            surface,
+            model.spec,
+            [row for row in results if row.surface == surface],
+            decoy_tool_name=DECOY_SEARCH_TOOL.name if config.decoy_search else None,
         )
         for surface in config.surfaces
         if surface in ok_surfaces

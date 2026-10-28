@@ -16,6 +16,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import UUID
 
 import frontmatter
 
@@ -43,6 +44,7 @@ from basic_memory_benchmarks.agent_tasks.spec import (
     RelationResolves,
     ToolCalled,
     ToolErrorMatches,
+    ProjectIdUsed,
 )
 from basic_memory_benchmarks.llm.runners import LLMResult, LLMRunner
 
@@ -200,6 +202,8 @@ def _grader_label(grader: Grader) -> str:
             return pattern
         case ToolErrorMatches(name_pattern=pattern):
             return pattern
+        case ProjectIdUsed(name_pattern=pattern):
+            return pattern
         case JudgeRubric():
             return "rubric"
 
@@ -275,6 +279,23 @@ def _eval_frontmatter(
                 len(actual) == length,
                 f"{relpath}: len({grader.key})={len(actual)}, expected {length}",
             )
+
+
+def read_project_external_id(db_path: Path, project_name: str) -> UUID | None:
+    if not db_path.exists():
+        raise RuntimeError(f"Index database not found: {db_path}")
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(
+            "SELECT external_id FROM project WHERE name = ?", (project_name,)
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        return None
+    if not isinstance(row[0], str):
+        raise TypeError("Project external_id must be a UUID string")
+    return UUID(row[0])
 
 
 def _eval_relation_resolves(grader: RelationResolves, ctx: GradingContext) -> PredicateResult:
@@ -441,6 +462,26 @@ def evaluate_grader(
                 before.pop(key, None)
                 after.pop(key, None)
             return _result(grader, before == after, f"{relpath}: preserved frontmatter")
+        case ProjectIdUsed(name_pattern=pattern):
+            expected = read_project_external_id(ctx.db_path, ctx.project_name)
+            if expected is None:
+                return _result(grader, False, "project identity is missing")
+            for record in ctx.turn_records:
+                if (
+                    record.kind != "tool"
+                    or record.is_error
+                    or record.tool_name is None
+                    or not re.search(pattern, record.tool_name)
+                    or record.project_scope is None
+                ):
+                    continue
+                try:
+                    actual = UUID(record.project_scope)
+                except ValueError:
+                    continue
+                if actual == expected:
+                    return _result(grader, True, "correct external project ID used")
+            return _result(grader, False, "no successful call scoped by the correct project ID")
         case ToolErrorMatches(name_pattern=pattern, error_pattern=error_pattern):
             matched = any(
                 record.kind == "tool"

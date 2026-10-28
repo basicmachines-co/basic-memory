@@ -51,6 +51,7 @@ class AgentTasksConfig(BaseModel):
     # None preserves the product default; false makes plumbing runs independent
     # of embedding setup. This profile choice is retained in the run manifest.
     semantic_search_enabled: bool | None = None
+    decoy_search: bool = False
     judge_spec: str | None = None
     corpus_dir: str = "benchmarks/datasets/agent-tasks/corpus"
     output_root: str = "benchmarks/runs"
@@ -92,6 +93,8 @@ class TurnRecord(BaseModel):
     finalized: bool = False
     tool_name: str | None = None
     arguments_chars: int = 0
+    argument_keys: list[str] | None = None
+    project_scope: str | None = None
     result_chars: int = 0
     is_error: bool = False
     # Schema conformance is independent of a domain refusal (e.g. NOT_FOUND).
@@ -161,7 +164,7 @@ class SurfaceSummary(BaseModel):
     tasks_passed: int
     tasks_errored: int
     budget_stops: dict[str, int] = Field(default_factory=dict)
-    pass_rate: float
+    pass_rate: float | None
     total_input_tokens: int
     total_output_tokens: int
     # The headline: total agent tokens over ALL attempted tasks divided by
@@ -180,6 +183,7 @@ class SurfaceSummary(BaseModel):
     judge_calls: int = 0
 
     per_tool_arguments: dict[str, ToolArgumentSummary] = Field(default_factory=dict)
+    decoy_tool_calls: int = 0
 
 
 class SurfaceEcho(BaseModel):
@@ -192,6 +196,7 @@ class SurfaceEcho(BaseModel):
     # Exact descriptions and schemas sent to the model, in advertised order.
     # Names alone cannot reproduce a tool-surface comparison.
     tool_definitions: list[ToolDef] = Field(default_factory=list)
+    injected_tools: list[str] = Field(default_factory=list)
 
 
 class AgentTasksManifest(BaseModel):

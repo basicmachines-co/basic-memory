@@ -168,6 +168,14 @@ class ToolErrorMatches:
 
 
 @dataclass(frozen=True)
+class ProjectIdUsed:
+    """A successful named tool call used this project's external ID as scope."""
+
+    name_pattern: str
+    required: bool = True
+
+
+@dataclass(frozen=True)
 class JudgeRubric:
     """LLM-judged rubric over the final answer (via the package judge seam)."""
 
@@ -194,6 +202,7 @@ type Grader = (
     | FrontmatterUnchanged
     | ToolCalled
     | ToolErrorMatches
+    | ProjectIdUsed
     | JudgeRubric
 )
 

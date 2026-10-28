@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from basic_memory_benchmarks.agent_tasks.spec import (
     AgentTaskSpec,
+    AnswerMatches,
     BodyLinesEqual,
     FrontmatterEquals,
     FrontmatterUnchanged,
@@ -139,8 +140,9 @@ EDIT_TASKS: tuple[AgentTaskSpec, ...] = (
         graders=(
             ToolErrorMatches(
                 name_pattern=r"^(bm_edit|edit_note|bm_write|write_note)$",
-                error_pattern=r"conflict|changed|mismatch|stale",
+                error_pattern=r"\b(?:NOTE_)?REVISION_CONFLICT\b",
             ),
+            AnswerMatches(pattern=r"checksum|conflict|stale|revision|refus|blocked"),
             NotesUntouched(),
             NoteCountDelta(delta=0),
         ),

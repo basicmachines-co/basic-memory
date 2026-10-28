@@ -27,7 +27,7 @@ def project_context(tmp_path: Path) -> GradingContext:
     project = tmp_path / "project"
     shutil.copytree(CORPUS, project)
     return GradingContext(
-        final_answer="done",
+        final_answer="Refused the stale checksum.",
         project_dir=project,
         baseline=snapshot_baseline(project),
         db_path=tmp_path / "unused.db",
@@ -116,7 +116,7 @@ def test_stale_guard_requires_actual_conflict_and_unchanged_files(project_contex
             kind="tool",
             tool_name="bm_edit",
             is_error=True,
-            error_excerpt="INVALID_ARGUMENTS: content required",
+            error_excerpt="INVALID_ARGUMENTS: contract-stale-checksum content required",
         )
     ]
     assert not grade_task(task, project_context)[0]

@@ -9,6 +9,10 @@ from basic_memory_benchmarks.agent_tasks.spec import (
     AnswerContains,
     AnswerSetEquals,
     FrontmatterEquals,
+    MarkerPresent,
+    MarkerAbsent,
+    AnswerMatches,
+    ProjectIdUsed,
     NewNoteUnder,
     NoteCountDelta,
     NotesUntouched,
@@ -43,6 +47,79 @@ RELEASE_TASKS: tuple[AgentTaskSpec, ...] = (
             ),
         )
         for kind, target in READ_TARGETS
+    ),
+    AgentTaskSpec(
+        id="contract-read-long-section",
+        skill="release-contracts",
+        source="docs/1.0.md: bounded bm_read",
+        prompt=(
+            "Read only the Rollback checklist section of architecture/oauth-token-design.md. "
+            "Report its exact tracking token, without tokens from archived validation or forward planning."
+        ),
+        graders=(
+            MarkerPresent(marker="RC-ROLLBACK-CURRENT-7c2a"),
+            MarkerAbsent(marker="RC-ARCHIVED-2c6b"),
+            MarkerAbsent(marker="RC-FUTURE-8a1d"),
+            ToolCalled(
+                name_pattern=r"^(bm_read|read_note|read_content|cat)$",
+                required=True,
+                outcome="success",
+            ),
+        ),
+    ),
+    AgentTaskSpec(
+        id="contract-read-first-lines",
+        skill="release-contracts",
+        source="docs/1.0.md: end_line without start_line",
+        prompt=(
+            "Read the first five physical lines of architecture/oauth-token-design.md, including "
+            'frontmatter, and report its status as {"status": "..."}. Avoid reading the full note.'
+        ),
+        graders=(
+            AnswerMatches(pattern=r'"status"\s*:\s*"draft"'),
+            ToolCalled(
+                name_pattern=r"^(bm_read|read_note|read_content|cat)$",
+                required=True,
+                outcome="success",
+            ),
+        ),
+    ),
+    AgentTaskSpec(
+        id="contract-project-id",
+        skill="release-contracts",
+        source="docs/1.0.md: external project ID scope",
+        prompt=(
+            "Discover this project's external ID, then read architecture/oauth-token-design.md "
+            "with that ID, rather than its name, in the read call's project scope argument. "
+            "Quote the security observation about refresh token reuse exactly. Do not modify notes."
+        ),
+        graders=(
+            AnswerContains(needle="Refresh token reuse triggers whole-family revocation"),
+            ProjectIdUsed(name_pattern=r"^(bm_read|read_note|read_content|cat)$"),
+            NotesUntouched(),
+            NoteCountDelta(delta=0),
+        ),
+    ),
+    AgentTaskSpec(
+        id="contract-find-filename",
+        skill="release-contracts",
+        source="docs/1.0.md: recursive bm_find",
+        prompt=(
+            "Find every Markdown file whose filename contains oauth, recursively across this project. "
+            'Report project-relative paths including .md as {"paths": [...]}.'
+        ),
+        graders=(
+            AnswerSetEquals(
+                key="paths",
+                gold=frozenset(
+                    {
+                        "architecture/oauth-token-design.md",
+                        "architecture/oauth-migration-plan.md",
+                        "notes/oauth-rollout-notes.md",
+                    }
+                ),
+            ),
+        ),
     ),
     AgentTaskSpec(
         id="contract-write-exact-path",

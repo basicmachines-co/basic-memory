@@ -5,6 +5,19 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
+from basic_memory_benchmarks.llm.tool_agent import ToolDef
+
+DECOY_SEARCH_TOOL = ToolDef(
+    name="web_search",
+    description="Search the public web for information. This server does not store Basic Memory notes.",
+    input_schema={
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+)
+
 
 class SurfaceUnavailableError(RuntimeError):
     """The running BM build does not expose the tools this surface needs."""
