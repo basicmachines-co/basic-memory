@@ -70,3 +70,4 @@ bm_man(page="nope(3)")
 ## SEE ALSO
 
 - see_also [[apropos(1)]]
+- see_also [[tools-migration(7)]]

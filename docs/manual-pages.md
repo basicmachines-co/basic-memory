@@ -1,225 +1,74 @@
 # Manual Pages
 
-Basic Memory's manual is written in the style of Unix man pages — and
-implemented as Basic Memory notes ([#952](https://github.com/basicmachines-co/basic-memory/issues/952)).
-Every page is a markdown note conforming to the `Manpage` schema, `SEE ALSO`
-entries are real knowledge-graph relations, and every example on every page
-was executed against a live project before the page shipped. The manual
-documents the tools; the tools verify the manual.
+Basic Memory ships a manual in the style of Unix man pages
+([#952](https://github.com/basicmachines-co/basic-memory/issues/952)). The pages are Markdown
+files bundled in the package, so every install has the same manual: local, Cloud, or offline.
 
 ## Where it lives
 
-Sections 1 and 3 are canonical **in the package**: `src/basic_memory/man/man1/`
-holds the shell commands run against a project (`ls(1)`, `grep(1)`, ...) and
-`bm` subcommands (`okf-export(1)`, `okf-check(1)`), and
-`src/basic_memory/man/man3/` holds one page per MCP tool, so every install ships
-the same pages: local, cloud, or offline. `src/basic_memory/man/man7/` holds
-the concept pages an agent needs without the manual project, such as
-`comark(7)`. `bm.1` at the package root is the
-system man page that `bm man install` copies for `man bm`; it is not a
-`bm man` page.
-The MCP server serves them as resources (`memory://man` is the index,
-`memory://man/bm-search(3)` a page) and `bm man <topic>` prints one in a
-shell. The `manual` project in the Basic Memory team workspace (cloud, shared)
-holds the full manual — sections 5 and 7 are canonical there — and anyone can
-build their own: the schema ships as an opt-in seed at
-`plugins/claude-code/schemas/manpage.md` — copy it into any project's folder
-and start writing pages against it.
+- `src/basic_memory/man/man1/` — shell commands run against a project (`ls(1)`, `grep(1)`, ...)
+  and `bm` subcommands (`okf-export(1)`, `okf-check(1)`).
+- `src/basic_memory/man/man3/` — one page per MCP tool a server registers: the `bm_*` tools,
+  plus the Cloud-registered `bm_agent` and ChatGPT `search`/`fetch` adapters.
+- `src/basic_memory/man/man7/` — concepts an agent needs, such as `comark(7)`, and
+  `tools-migration(7)`, which maps pre-1.0 tools and `bm tool` commands to 1.0.
+- `src/basic_memory/man/bm.1` — the groff system page that `bm man install` copies for
+  `man bm`. It is not a `bm man` page.
 
-Layout:
+A test holds section 3 equal to the tool registry: every registered tool has a page, and every
+section 3 page names a registered tool.
+
+## Reading it
 
 ```
-manual/
-├── schemas/Manpage.md      # the manpage schema (type: schema)
-├── man1/                   # commands            ls(1), okf-export(1), ...
-├── man3/                   # MCP tools           bm-write(3), bm-search(3), ...
-├── man5/                   # file formats        bm-note(5), bm-observation(5), ...
-├── man7/                   # concepts            basic-memory(7), semantic-memory(7), ...
-├── playground/             # scratch notes for destructive examples
-└── diagrams/               # canvas visualizations of the manual graph
+memory://man                      # the index (apropos)
+memory://man/bm-search(3)         # one page
+bm_man(page="bm-search(3)")       # one page, from any MCP client
+bm_man(query="frontmatter filters")
+bm man bm-search                  # one page, in a shell
+bm man apropos WORDS              # search the bundled pages
+bm man list                       # every page with its summary
+bm man install                    # copy bm.1 for `man bm`
 ```
 
-### Why "man1", "man3", "man5"?
-
-The folder names are Unix's, unchanged since 1971. The manual is divided
-into numbered **sections**, pages physically live in directories named
-after them (`/usr/share/man/man1`, `man5`, ...), and the number tells you
-what *kind* of thing is documented — not importance, not reading order:
-
-- **1** — user commands (`ls`, `grep`)
-- **2** — system calls
-- **3** — library functions / APIs (`printf(3)`)
-- **4** — devices
-- **5** — file formats and config files (`crontab(5)`, `passwd(5)`)
-- **6** — games (really)
-- **7** — miscellanea: concepts, conventions, overviews (`regex(7)`, `signal(7)`)
-- **8** — system administration
-
-That's also why man page names carry the parenthesized number —
-`crontab(1)` is the command, `crontab(5)` is the file format, same name in
-two sections. `man 5 crontab` picks the section explicitly.
-
-This manual copies that layout with the sections that have a Basic Memory
-analog:
-
-- **man1/** — shell commands run against a project and `bm` subcommands → `ls(1)`, `okf-export(1)`
-- **man3/** — MCP tools, our equivalent of the "library API" section → `bm-write(3)`
-- **man5/** — file formats: note syntax, observations, relations, schemas → `bm-note(5)`
-- **man7/** — concepts → `basic-memory(7)`, `semantic-memory(7)`
-- **8** is reserved for admin/cloud operations but has no pages yet; 2, 4,
-  and 6 have no analog (no system calls, no devices, and no games — yet)
-
-When a page says `see_also [[bm-note(5)]]`, the `(5)` reads "the
-file-format page," exactly the way a Unix manual cross-references — except
-here it's a traversable relation in the graph instead of a typographic
-convention. The manual explains its own conventions in `man-pages(7)` —
-fittingly, the same page name Linux uses for this, and that almost nobody
-ever reads.
+`bm man install` warns with a one-line `MANPATH` fix if the install root is not on the man path.
 
 ## Page anatomy
 
-Pages use the classic headers where applicable: `NAME`, `SYNOPSIS`,
-`DESCRIPTION`, `PARAMETERS`, `MCP USAGE`, `CLI EQUIVALENT`, `EXAMPLES`,
-`GOTCHAS`, `SEE ALSO`. Frontmatter (validated by the schema):
+Pages use the classic headers where they apply: `NAME`, `SYNOPSIS`, `DESCRIPTION`,
+`PARAMETERS`, `MCP USAGE`, `CLI EQUIVALENT`, `EXAMPLES`, `GOTCHAS`, `SEE ALSO`.
 
 ```yaml
+title: bm-write(3)
 type: manpage
-section: 3                      # 1 | 3 | 5 | 7 | 8
+section: 3                      # 1 | 3 | 7
 name: bm-write                  # page name without section suffix
 summary: create or overwrite a markdown note in the knowledge base
 generated: hand                 # hand | registry | cli  (regeneration ownership)
 tool: bm_write                  # section-3 pages: the MCP tool documented
 command: basic-memory status    # section-1 pages: the CLI command documented
-verified: <version> mcp+cli      # version + path(s) that proved the page
 ```
 
-Field knowledge accumulates as observations — `[gotcha]`, `[bug]` (with issue
-links), `[pattern]` — and `SEE ALSO` entries are `see_also` relations, so the
-manual is a navigable graph, not a folder of files.
+`SEE ALSO` entries are written as `- see_also [[page(N)]]`.
 
-## How to use it
+## Generated sections
 
-Man-style reads (any MCP client or the CLI):
+`just man-regen` renders every section 3 `SYNOPSIS` and `PARAMETERS` block from the live tool
+registry, and every section 1 `SYNOPSIS` and `OPTIONS` block from the Typer command tree. Drift
+tests hold the shipped blocks byte-equal to the rendering, so changing a tool or a command
+without regenerating fails CI. Those pages declare `generated: registry` or `generated: cli`;
+everything else on a page is hand-owned.
 
-```bash
-# read a page
-bm tool read "man3/bm-write-3" --project manual
+## Adding a page
 
-# apropos — find pages by section, tool, or text
-bm tool search --project manual          # then filter, or via MCP:
-#   bm_search(project="manual", filters={"type": "manpage", "section": 3})
-#   bm_search(project="manual", filters={"type": "manpage", "tool": "bm_write"})
+For a new MCP tool, `uv run python scripts/update_man_pages.py --new TOOL` scaffolds a section 3
+page: frontmatter, `NAME`, the generated `SYNOPSIS` and `PARAMETERS`, and empty `EXAMPLES` and
+`SEE ALSO` to fill in. It never overwrites an existing page. Run every example before shipping it.
 
-# traverse SEE ALSO from any page
-#   bm_context(identifier="man3/bm-write-3", project="manual")
-```
+When a tool is removed, remove its page in the same change, and add its replacement to
+`tools-migration(7)`.
 
-From an MCP client, the same pages are resources — no project required:
+### Why "man1", "man3", "man7"?
 
-```
-memory://man                      # the index (apropos)
-memory://man/bm-search(3)      # one page
-memory://man/3/bm-search       # any common spelling resolves,
-memory://man/bm_search         # including the tool name itself
-```
-
-The `bm_man` tool reads the same bundled pages: `bm_man()` is the index,
-`bm_man(page="bm-search(3)")` one page, and `bm_man(query="frontmatter filters")`
-lists the pages that mention every word, like `man -k`. It never reads a manual
-project, so it works in every workspace with no network.
-
-And in a shell, `bm man bm-search` prints the page as Markdown, `bm man apropos
-WORDS` searches the bundled pages, and `bm man list` lists every page with its
-summary.
-
-And for the real thing — `man bm` in an actual terminal:
-
-```bash
-bm man install        # copies bundled groff pages to ~/.local/share/man
-man bm                # the overview page, rendered by man(1)
-man basic-memory      # same page via its alias
-```
-
-`bm man install` warns with a one-line `MANPATH` fix if the install root
-isn't searched by your `man`. Agents with shell access can use `man bm` as
-an offline quick reference; the full per-tool detail stays in the manual
-project's section-3 pages.
-
-## The verification discipline
-
-Two rules make the manual trustworthy:
-
-1. **Examples must have run.** An `EXAMPLES` (or `MCP USAGE` / `CLI
-   EQUIVALENT`) block contains only commands that actually executed against
-   the manual project. Destructive operations (`bm_delete`, `bm_move`,
-   destructive `bm_edit`) run only against `playground/` notes — never
-   against pages. The `verified:` field records the version and which path
-   proved the page: `mcp` (live service), `cli` (dev checkout), or both.
-
-2. **The schema is the linter.** Validate the whole manual any time:
-
-   ```bash
-   bm tool validate manpage --project manual
-   # → {"total_notes": 38, "valid_count": 38, "warning_count": 0, ...}
-   ```
-
-   `bm orphans --project manual` confirms every page is connected to the
-   graph, and `bm_schema(command="diff")`/`bm_schema(command="infer")` report drift between the schema
-   and how pages are actually written.
-
-Because verification exercises real tool calls against the live service,
-building the manual doubles as an end-to-end smoke test. The initial build
-found six bugs in one pass (#954–#959) — including the verification rule
-catching a test that asserted a bug as expected output (#958).
-
-## Adding or updating a page
-
-1. Run the commands you intend to document; keep the actual output.
-2. Write the page with `bm_write`, passing frontmatter through the
-   `metadata` parameter (nested YAML in content frontmatter is unreliable on
-   some clients):
-
-   ```
-   bm_write(title="my-tool(3)", directory="man3", project="manual",
-              content="# my-tool(3)\n\n## NAME\n\nmy-tool — ...",
-              note_type="manpage",
-              metadata={"section": 3, "name": "my-tool",
-                        "summary": "...", "generated": "hand",
-                        "tool": "my_tool", "verified": "<version> mcp"})
-   ```
-
-3. Link related pages in `SEE ALSO` with `see_also [[other-page(3)]]`.
-   Forward references to pages that don't exist yet are fine — they resolve
-   automatically when the target is written.
-4. Validate: `bm tool validate manpage --project manual`.
-
-For mechanical updates to generated sections, prefer `bm_edit` with
-`command="replace_section"` / `command="insert_after_section"` so curated content (EXAMPLES,
-GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
-`generated:` field declares.
-
-## Roadmap
-
-- **Registry generator (section 3: shipped)** — `just man-regen` renders every
-  section-3 MCP SYNOPSIS and PARAMETERS block from the live tool registry and a
-  test holds the shipped blocks byte-equal to the rendering, so a tool change
-  without a regenerate fails CI. Those pages declare `generated: registry`.
-- **CLI generator (section 1: shipped)** — the same `just man-regen` renders
-  every section-1 shell SYNOPSIS and OPTIONS block from the Typer command tree
-  (aliases and paired booleans included, and the full option list, shared and
-  routing flags included), held byte-equal by a drift test. Those pages declare
-  `generated: cli`. Curated sections stay hand-owned; the hand-written corpus
-  remains the template spec for everything else.
-- **New tool pages (shipped)** — `uv run python scripts/update_man_pages.py --new
-  TOOL ...` scaffolds a section-3 page for a registered tool: frontmatter, NAME,
-  the generated SYNOPSIS and PARAMETERS, and empty EXAMPLES and SEE ALSO to curate.
-  It never overwrites an existing page.
-- **Projects as consumers** — `bm man install --project <name>` copies the
-  bundled pages into a project as notes, so `SEE ALSO` becomes traversable
-  relations and the pages join search. (`bm man <topic>`, `bm man list`, the
-  `memory://man` resources, and the bundled section 3 already ship — the
-  second slice of [#610](https://github.com/basicmachines-co/basic-memory/issues/610).)
-- **Groff for section 3** — render the bundled pages to roff so
-  `man search-notes` works after `bm man install`, alongside `bm.1`.
-- **Docs site** — the notes remain canonical for sections 5 and 7, code is
-  canonical for 1 and 3; both render to the hosted docs site.
+Unix numbers manual sections: 1 for commands, 3 for library functions, 7 for overviews and
+conventions. The MCP tools are the library an agent calls, so they live in section 3.

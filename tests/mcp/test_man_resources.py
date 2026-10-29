@@ -43,8 +43,8 @@ async def test_index_resource_links_every_page() -> None:
     for page in bundled_pages():
         assert page.uri in index
     # Served from a local server, the hosted-only page is marked, not offered.
-    assert "cloud-info(3)](memory://man/cloud-info(3)) — " in index
-    assert "(hosted server only) *(tool not registered on this server)*" in index
+    hosted_only = next(line for line in index.splitlines() if "memory://man/bm-agent(3)" in line)
+    assert hosted_only.endswith("*(tool not registered on this server)*")
 
 
 @pytest.mark.asyncio
