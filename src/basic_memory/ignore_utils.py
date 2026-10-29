@@ -2,8 +2,13 @@
 
 import fnmatch
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Set
+
+from pathspec import GitIgnoreSpec
+from pathspec.patterns.gitignore.base import GitIgnorePatternError
+from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
 
 from basic_memory.config import resolve_data_dir
 
@@ -79,6 +84,9 @@ def _parse_ignore_pattern_line(raw_line: str) -> str | None:
     line = raw_line.rstrip("\r\n")
     if not line or line.startswith("#"):
         return None
+    # Directory rules are compiled by pathspec, which needs their original escapes.
+    if line.rstrip(" ").endswith("/"):
+        return line.rstrip(" ")
     # fnmatch has no backslash escapes. Decode literal hashes, spaces, and
     # backslashes together so escaped trailing spaces survive, while unescaped
     # trailing spaces are discarded without changing significant leading ones.
@@ -258,67 +266,93 @@ def load_gitignore_patterns(
     return patterns
 
 
-def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[str]) -> bool:
+@lru_cache(maxsize=32)
+def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
+    """Compile an ignore set once so large sets cannot churn a per-rule cache."""
+    compiled_patterns: list[GitIgnoreSpecPattern] = []
+    for pattern in patterns:
+        components = pattern.split("/")
+        for index, component in enumerate(components):
+            if len(component) >= 2 and not component.strip("*"):
+                # Git accepts longer all-star components. A terminal directory globstar
+                # must consume a directory; pathspec otherwise also matches direct files.
+                components[index] = "*" if index == len(components) - 2 else "**"
+        normalized = "/".join(components)
+        # Rule collections are unordered exclusion sets; adding ordered negation is a
+        # separate compatibility change. Preserve literal leading ! and decoded # names.
+        if normalized.startswith(("!", "#")):
+            normalized = "\\" + normalized
+        try:
+            compiled_patterns.append(GitIgnoreSpecPattern(normalized))
+        except (GitIgnorePatternError, re.error):
+            # Git tolerates unusable lines; one must not disable valid exclusions.
+            continue
+    return GitIgnoreSpec(compiled_patterns, backend="simple")
+
+
+def should_ignore_path(
+    file_path: Path,
+    base_path: Path,
+    ignore_patterns: Set[str],
+    *,
+    is_directory: bool | None = None,
+) -> bool:
     """Check if a file path should be ignored based on gitignore patterns.
 
     Args:
         file_path: The file path to check
         base_path: The base directory for relative path calculation
         ignore_patterns: Set of patterns to match against
+        is_directory: Known entry kind for virtual paths; None inspects the local path.
 
     Returns:
         True if the path should be ignored, False otherwise
     """
-    # Get the relative path from base
     try:
         relative_path = file_path.relative_to(base_path)
-        relative_str = str(relative_path)
-        relative_posix = relative_path.as_posix()  # Use forward slashes for matching
+    except ValueError:
+        # No project-relative spelling exists for a path outside this root.
+        return False
 
-        # Check each pattern
-        for pattern in ignore_patterns:
-            # Handle patterns starting with / (root relative)
-            if pattern.startswith("/"):
-                root_pattern = pattern[1:]  # Remove leading /
+    relative_str = str(relative_path)
+    relative_posix = relative_path.as_posix()  # Use forward slashes for matching
+    directory_patterns = frozenset(pattern for pattern in ignore_patterns if pattern.endswith("/"))
+    if directory_patterns:
+        # A trailing slash distinguishes directories being pruned from files.
+        # Remote and archive entries must not inherit a conflicting local entry's kind.
+        if is_directory is None:
+            is_directory = file_path.is_dir()
+        directory_match_path = relative_posix + ("/" if is_directory else "")
+        if _directory_rules(directory_patterns).match_file(directory_match_path):
+            return True
 
-                # For directory patterns ending with /
-                if root_pattern.endswith("/"):
-                    dir_name = root_pattern[:-1]  # Remove trailing /
-                    # Check if the first part of the path matches the directory name
-                    if len(relative_path.parts) > 0 and relative_path.parts[0] == dir_name:
-                        return True
-                else:
-                    # Regular root-relative pattern
-                    if fnmatch.fnmatch(relative_posix, root_pattern):
-                        return True
-                continue
+    # Non-directory patterns retain their existing matching behavior.
+    for pattern in ignore_patterns:
+        if pattern.endswith("/"):
+            continue
 
-            # Handle directory patterns (ending with /)
-            if pattern.endswith("/"):
-                dir_name = pattern[:-1]  # Remove trailing /
-                # Check if any path part matches the directory name
-                if dir_name in relative_path.parts:
-                    return True
-                continue
+        # Handle patterns starting with / (root relative)
+        if pattern.startswith("/"):
+            root_pattern = pattern[1:]  # Remove leading /
+            if fnmatch.fnmatch(relative_posix, root_pattern):
+                return True
+            continue
 
-            # Direct name match (e.g., ".git", "node_modules")
-            if pattern in relative_path.parts:
+        # Direct name match (e.g., ".git", "node_modules")
+        if pattern in relative_path.parts:
+            return True
+
+        # Check if any individual path part matches the glob pattern
+        # This handles cases like ".*" matching ".hidden.md" in "concept/.hidden.md"
+        for part in relative_path.parts:
+            if fnmatch.fnmatch(part, pattern):
                 return True
 
-            # Check if any individual path part matches the glob pattern
-            # This handles cases like ".*" matching ".hidden.md" in "concept/.hidden.md"
-            for part in relative_path.parts:
-                if fnmatch.fnmatch(part, pattern):
-                    return True
+        # Glob pattern match on full path
+        if fnmatch.fnmatch(relative_posix, pattern) or fnmatch.fnmatch(relative_str, pattern):
+            return True  # pragma: no cover
 
-            # Glob pattern match on full path
-            if fnmatch.fnmatch(relative_posix, pattern) or fnmatch.fnmatch(relative_str, pattern):
-                return True  # pragma: no cover
-
-        return False
-    except ValueError:
-        # If we can't get relative path, don't ignore
-        return False
+    return False
 
 
 def filter_files(

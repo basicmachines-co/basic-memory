@@ -74,6 +74,7 @@ def build_project_zip_import_plan(
                     _ARCHIVE_BASE_PATH / relative_path,
                     _ARCHIVE_BASE_PATH,
                     ignore_patterns,
+                    is_directory=False,
                 ):
                     ignored_files += 1
                     continue
