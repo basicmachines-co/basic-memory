@@ -123,9 +123,10 @@ RESERVED_PROJECT_PERMALINKS = frozenset({"man"})
 # An entity is indexed when it has its canonical search row: `type = 'entity'` keyed
 # by the entity's own id. This is the complement of the missing-rows query in
 # search_repository_base, so indexed + missing equals the entity count even when
-# observation or relation rows outlive a lost entity row (#1826).
+# observation or relation rows outlive a lost entity row (#1826). DISTINCT keeps a
+# duplicated canonical row, which index integrity reports, from counting twice.
 INDEXED_ENTITY_COUNT_SQL = (
-    "SELECT COUNT(*) FROM search_index WHERE project_id = :project_id "
+    "SELECT COUNT(DISTINCT id) FROM search_index WHERE project_id = :project_id "
     "AND type = 'entity' AND id IN (SELECT id FROM entity WHERE project_id = :project_id)"
 )
 
