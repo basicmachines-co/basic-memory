@@ -15,7 +15,6 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.cloud import rclone_commands
 from basic_memory.mcp.clients.project import ProjectClient
 
 # Importing registers project subcommands on the shared app instance.
@@ -165,53 +164,18 @@ def test_auto_routed_cloud_delete_cleans_local_sync_artifacts(
             },
         },
     )
-    bisync_state = tmp_path / "bisync-state" / "research"
+    # Old bisync state from before 1.0 belongs to the user; removal leaves it (#1845).
+    bisync_state = tmp_path / ".basic-memory" / "bisync-state" / "research"
     bisync_state.mkdir(parents=True)
-    monkeypatch.setattr(
-        rclone_commands, "get_project_bisync_state", lambda project_name: bisync_state
-    )
+    (bisync_state / "listing.lst").write_text("old listing\n")
 
     result = runner.invoke(app, ["project", "remove", "research", "--yes"])
 
     assert result.exit_code == 0, result.stdout
-    assert not bisync_state.exists(), "stale bisync state would let a recreated name skip --resync"
+    assert (bisync_state / "listing.lst").exists(), "removal never deletes old bisync state"
     assert local_sync.exists(), "the local sync directory stays without --delete-local-files"
     assert "Local files kept at" in _flat(result.stdout)
     assert "research" not in _projects(config_file)
-
-
-def test_bisync_state_cleanup_uses_the_canonical_entry_name(
-    tmp_path, monkeypatch, runner, cloud_delete
-):
-    """Removing `My Research` as `my-research` must clear `bisync-state/My Research`."""
-    local_sync = tmp_path / "research-sync"
-    local_sync.mkdir()
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        {
-            "main": {"path": str(tmp_path / "main"), "mode": "local"},
-            "My Research": {
-                "path": str(local_sync),
-                "mode": "cloud",
-                "workspace_id": "team-drew",
-                "local_sync_path": str(local_sync),
-                "bisync_initialized": True,
-            },
-        },
-    )
-    states = {"My Research": tmp_path / "bisync-state" / "My Research"}
-    states["My Research"].mkdir(parents=True)
-    monkeypatch.setattr(
-        rclone_commands,
-        "get_project_bisync_state",
-        lambda project_name: states.get(project_name, tmp_path / "bisync-state" / project_name),
-    )
-
-    result = runner.invoke(app, ["project", "remove", "my-research", "--yes"])
-
-    assert result.exit_code == 0, result.stdout
-    assert not states["My Research"].exists()
 
 
 def test_explicit_local_route_leaves_config_removal_to_the_local_service(

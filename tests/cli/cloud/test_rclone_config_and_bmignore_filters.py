@@ -1,9 +1,10 @@
 import os
 import time
+from pathlib import Path
 
 import pytest
 
-from basic_memory.cli.commands.cloud.bisync_commands import (
+from basic_memory.cli.commands.cloud.rclone_filters import (
     convert_bmignore_to_rclone_filters,
     convert_bmignore_to_rclone_prune_filters,
 )
@@ -99,6 +100,27 @@ def test_convert_bmignore_to_rclone_filters_is_cached_when_up_to_date(config_hom
     second = convert_bmignore_to_rclone_filters()
     assert second == first
     assert second.stat().st_mtime >= first_mtime
+
+
+def test_convert_bmignore_to_rclone_filters_falls_back_when_unreadable(config_home, monkeypatch):
+    """An unreadable .bmignore still yields a filter that keeps .git out of transfers."""
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_text("private/**\n", encoding="utf-8")
+    original_open = Path.open
+
+    def fail_bmignore_read(path: Path, *args, **kwargs):
+        if path == bmignore:
+            raise PermissionError("permission denied")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_bmignore_read)
+
+    content = convert_bmignore_to_rclone_filters().read_text(encoding="utf-8")
+
+    assert "# Error reading .bmignore, using minimal filters" in content
+    assert "- .git/**" in content
+    assert "private" not in content
 
 
 def test_convert_bmignore_to_prune_filters_inverts_patterns(config_home):
@@ -228,3 +250,15 @@ def test_rclone_remote_exists(config_home):
     assert rclone_remote_exists("basic-memory-cloud-acme") is False
     configure_rclone_remote(access_key="ak", secret_key="sk", remote_name="basic-memory-cloud-acme")
     assert rclone_remote_exists("basic-memory-cloud-acme") is True
+
+
+def test_rclone_filter_reads_a_bmignore_with_a_utf8_bom(config_home) -> None:
+    """Cloud push and pull filters must not keep a BOM on the first rule (#1946)."""
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_bytes(b"\xef\xbb\xbfprivate\n")
+
+    filters = convert_bmignore_to_rclone_filters().read_text(encoding="utf-8")
+
+    assert "﻿" not in filters
+    assert "- private" in filters.splitlines()

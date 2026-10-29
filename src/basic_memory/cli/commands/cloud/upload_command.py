@@ -144,7 +144,7 @@ def upload(
         # Index project if requested (skip on dry run).
         # Trigger: upload adds new files the watcher has not observed locally.
         # Why: force_full ensures those freshly uploaded files are indexed immediately.
-        # Outcome: upload keeps its eager reindex while sync/bisync stay incremental.
+        # Outcome: upload reindexes the uploaded files before returning.
         if index and not dry_run:
             console.print(f"[blue]Indexing project '{literal(project)}'...[/blue]")
             try:

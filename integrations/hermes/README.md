@@ -192,7 +192,7 @@ hermes gateway restart
 
 Tool calls now route from `bm mcp` → `<cloud_host>/proxy` over HTTPS using your OAuth token (or API key). Notes never touch local disk.
 
-**Don't confuse cloud mode with file sync.** `bm cloud pull` / `bm cloud push` copy files between a *local* project and cloud storage, for keeping local working copies (`bm cloud bisync` is deprecated). For agent-driven capture you want true cloud routing (`set-cloud`), not file sync.
+**Don't confuse cloud mode with file sync.** `bm cloud pull` / `bm cloud push` copy files between a *local* project and cloud storage, for keeping local working copies. For agent-driven capture you want true cloud routing (`set-cloud`), not file sync.
 
 ## Updating / removing
 

@@ -1,4 +1,4 @@
-"""Tests for cloud sync and bisync command behavior."""
+"""Tests for cloud transfer, prune, check, and setup command behavior."""
 
 import importlib
 import re
@@ -33,10 +33,10 @@ def _plain(text: str) -> str:
 
 @pytest.mark.parametrize(
     "command",
-    ["sync", "bisync", "check", "bisync-reset", "prune"],
+    ["check", "prune"],
 )
-def test_cloud_mirror_command_help_marks_personal_workspaces_only(command):
-    """Mirror-family help must say Personal-only and point Team users at push/pull (#851)."""
+def test_cloud_personal_only_command_help_points_at_push_pull(command):
+    """Personal-only command help must say Personal-only and point Team users at push/pull (#851)."""
     result = runner.invoke(app, ["cloud", command, "--help"])
 
     assert result.exit_code == 0, result.output
@@ -46,248 +46,8 @@ def test_cloud_mirror_command_help_marks_personal_workspaces_only(command):
     assert "bm cloud push" in output
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["cloud", "sync", "--name", "research"],
-        ["cloud", "bisync", "--name", "research"],
-        # --project is an alias for --name (issue #817)
-        ["cloud", "sync", "--project", "research"],
-        ["cloud", "bisync", "--project", "research"],
-    ],
-)
-def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv, config_manager):
-    """Cloud sync commands should not trigger an extra explicit cloud project sync."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    config = config_manager.load_config()
-    config.set_project_mode("research", ProjectMode.CLOUD)
-    config_manager.save_config(config)
-
-    monkeypatch.setattr(project_sync_command, "_require_cloud_credentials", lambda _config: None)
-    target_workspace = _workspace("personal-tenant", "personal", "personal", is_default=True)
-    monkeypatch.setattr(
-        project_sync_command,
-        "_require_personal_workspace",
-        lambda _name, _config, **_kwargs: target_workspace,
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_mount_info",
-        lambda **_kwargs: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_cloud_project",
-        lambda _name, **_kwargs: _async_value(
-            SimpleNamespace(name="research", external_id="external-project-id", path="research")
-        ),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_sync_project",
-        lambda _name, _config, _project_data, **_kwargs: (
-            SimpleNamespace(name="research"),
-            "/tmp/research",
-        ),
-    )
-    monkeypatch.setattr(project_sync_command, "project_sync", lambda *args, **kwargs: True)
-    monkeypatch.setattr(project_sync_command, "project_bisync", lambda *args, **kwargs: True)
-
-    result = runner.invoke(app, argv)
-
-    assert result.exit_code == 0, result.output
-    assert "Database sync initiated" not in result.output
-
-
-def test_cloud_bisync_fails_fast_when_sync_entry_disappears(monkeypatch, config_manager):
-    """Bisync should raise a runtime error when validated sync config vanishes before persistence."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    config = config_manager.load_config()
-    config.projects.pop("research", None)
-    config_manager.save_config(config)
-
-    monkeypatch.setattr(project_sync_command, "_require_cloud_credentials", lambda _config: None)
-    monkeypatch.setattr(
-        project_sync_command, "_require_personal_workspace", lambda _name, _config, **_kwargs: None
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_mount_info",
-        lambda: _async_value(SimpleNamespace(bucket_name="tenant-bucket")),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_cloud_project",
-        lambda _name: _async_value(
-            SimpleNamespace(name="research", external_id="external-project-id", path="research")
-        ),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_sync_project",
-        lambda _name, _config, _project_data: (SimpleNamespace(name="research"), "/tmp/research"),
-    )
-    monkeypatch.setattr(project_sync_command, "project_bisync", lambda *args, **kwargs: True)
-
-    result = runner.invoke(app, ["cloud", "bisync", "--name", "research"])
-
-    assert result.exit_code == 1, result.output
-    assert "unexpectedly missing after validation" in result.output
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["cloud", "bisync", "--name", "research"],
-        ["cloud", "bisync-reset", "research"],
-    ],
-)
-def test_cloud_bisync_commands_block_organization_workspace(monkeypatch, argv, config_manager):
-    """Deprecated bisync commands refuse Team workspaces before setup/execution."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    config = config_manager.load_config()
-    config.cloud_api_key = "bmc_test"
-    config.projects["research"] = ProjectEntry(
-        path="/tmp/research",
-        mode=ProjectMode.CLOUD,
-        workspace_id="team-tenant",
-        local_sync_path="/tmp/research",
-    )
-    config_manager.save_config(config)
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_available_workspaces",
-        lambda: _async_value([_workspace("team-tenant", "organization", "team")]),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_mount_info",
-        lambda: pytest.fail("workspace guard should run before mount lookup"),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_project_bisync_state",
-        lambda _name: pytest.fail("workspace guard should run before bisync state lookup"),
-    )
-
-    result = runner.invoke(app, argv)
-
-    assert result.exit_code == 1, result.output
-    output = " ".join(result.output.split())
-    assert "is deprecated and will be removed in a future release" in output
-    assert "bm cloud pull --name research" in output
-    assert "bm cloud push --name research" in output
-
-
-def test_cloud_sync_blocks_organization_workspace(monkeypatch, config_manager):
-    """The deprecated mirror `sync` blocks Team workspaces with the push/pull commands."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    config = config_manager.load_config()
-    config.cloud_api_key = "bmc_test"
-    config.projects["research"] = ProjectEntry(
-        path="/tmp/research",
-        mode=ProjectMode.CLOUD,
-        workspace_id="team-tenant",
-        local_sync_path="/tmp/research",
-    )
-    config_manager.save_config(config)
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_available_workspaces",
-        lambda: _async_value([_workspace("team-tenant", "organization", "team")]),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_mount_info",
-        lambda: pytest.fail("workspace guard should run before mount lookup"),
-    )
-
-    result = runner.invoke(app, ["cloud", "sync", "--name", "research"])
-
-    assert result.exit_code == 1, result.output
-    output = " ".join(result.output.split())
-    assert "`bm cloud sync` is deprecated and does not run on Team workspaces" in output
-    assert "bm cloud push --name research" in output
-    assert "bm cloud pull --name research" in output
-
-
-def test_cloud_sync_allows_personal_workspace(monkeypatch, config_manager):
-    """Personal workspaces keep the one-way mirror sync available."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    routing: dict[str, Any] = {}
-
-    config = config_manager.load_config()
-    config.cloud_api_key = "bmc_test"
-    config.projects["research"] = ProjectEntry(
-        path="/tmp/research",
-        mode=ProjectMode.CLOUD,
-        workspace_id="personal-tenant",
-        local_sync_path="/tmp/research",
-    )
-    config_manager.save_config(config)
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_available_workspaces",
-        lambda: _async_value([_workspace("personal-tenant", "personal", "personal-alt")]),
-    )
-
-    def _mount_info(**kwargs):
-        routing["mount_workspace_id"] = kwargs.get("workspace_id")
-        return _async_value(SimpleNamespace(bucket_name="tenant-bucket"))
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_mount_info",
-        _mount_info,
-    )
-
-    def _cloud_project(_name, **kwargs):
-        routing["project_workspace_id"] = kwargs.get("workspace_id")
-        return _async_value(
-            SimpleNamespace(name="research", external_id="external-project-id", path="research")
-        )
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_cloud_project",
-        _cloud_project,
-    )
-
-    def _sync_project(_name, _config, _project_data, **kwargs):
-        routing["remote_name"] = kwargs.get("remote_name")
-        return SimpleNamespace(name="research"), "/tmp/research"
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "_get_sync_project",
-        _sync_project,
-    )
-    monkeypatch.setattr(project_sync_command, "project_sync", lambda *args, **kwargs: True)
-
-    result = runner.invoke(app, ["cloud", "sync", "--name", "research"])
-
-    assert result.exit_code == 0, result.output
-    assert "research synced successfully" in result.output
-    # Still runs on Personal, but warns on every run (#1596).
-    output = " ".join(result.output.split())
-    assert "`bm cloud sync` is deprecated" in output
-    assert "bm cloud push --name research" in output
-    assert routing == {
-        "mount_workspace_id": "personal-tenant",
-        "project_workspace_id": "personal-tenant",
-        "remote_name": "basic-memory-cloud-personal-alt",
-    }
-
-
 def test_require_personal_workspace_allows_personal_workspace(monkeypatch, config_manager):
-    """Personal workspaces keep the existing rclone sync path available."""
+    """Personal workspaces pass the prune guard."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
     config = config_manager.load_config()
@@ -426,28 +186,6 @@ def test_require_personal_workspace_reports_ambiguous_workspace(monkeypatch, con
         project_sync_command._require_personal_workspace("research", config)
 
     assert exc_info.value.exit_code == 1
-
-
-def test_bisync_reset_skips_workspace_check_without_credentials(monkeypatch, tmp_path):
-    """Resetting local bisync state stays harmless when no cloud credentials exist."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_available_workspaces",
-        lambda: pytest.fail("workspace lookup requires cloud credentials"),
-    )
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_project_bisync_state",
-        lambda _name: tmp_path / "missing-state",
-    )
-
-    result = runner.invoke(app, ["cloud", "bisync-reset", "research"])
-
-    assert result.exit_code == 0, result.output
-    assert "No bisync state found for project 'research'" in result.output
-    assert "`bm cloud bisync-reset` is deprecated" in " ".join(result.output.split())
 
 
 def _stub_transfer_env(
@@ -1135,7 +873,7 @@ def test_cloud_prune_blocks_organization_workspace(monkeypatch, config_manager):
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
     assert "The prune operation" in output
-    # prune is not a deprecated mirror command; only sync/bisync warn (#1596).
+    # prune is a supported Personal-only command, not a removed mirror stub.
     assert "is deprecated" not in output
     assert "only supported on Personal workspaces" in output
     assert "bm cloud push --name research" in output
@@ -1248,86 +986,6 @@ def _workspace(
         is_default=is_default,
         has_active_subscription=True,
     )
-
-
-@pytest.mark.parametrize("command", ["sync", "bisync", "bisync-reset"])
-def test_mirror_commands_are_marked_deprecated_in_help(command):
-    """Help output labels the rclone mirror commands deprecated (#1596)."""
-    result = runner.invoke(app, ["cloud", "--help"], env={"COLUMNS": "200"})
-
-    assert result.exit_code == 0, result.output
-    # CI sets FORCE_COLOR, so strip escape codes before reading table rows.
-    rows = re.sub(r"\x1b\[[0-9;]*m", "", result.output).splitlines()
-    line = next(line for line in rows if line.strip("│ ").startswith(f"{command} "))
-    assert "deprecated" in line.lower()
-
-
-@pytest.mark.parametrize("command", ["sync", "bisync"])
-def test_mirror_commands_show_migration_notice_without_credentials(monkeypatch, command):
-    """A logged-out run still names pull/push before the credential error (#1596)."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
-
-    result = runner.invoke(app, ["cloud", command, "--name", "research"])
-
-    output = _plain(result.output)
-    assert result.exit_code == 1, result.output
-    assert f"`bm cloud {command}` is deprecated" in output
-    assert "bm cloud pull" in output
-    assert "cloud credentials are required" in output
-
-
-@pytest.mark.parametrize("command", ["sync", "bisync"])
-def test_migration_notice_keeps_markup_in_project_names(monkeypatch, command):
-    """Rich must not eat a bracketed project name from the suggested command."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
-
-    result = runner.invoke(app, ["cloud", command, "--name", "[bold]oops[/bold]"])
-
-    assert "bm cloud pull --name '[bold]oops[/bold]'" in _plain(result.output)
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["cloud", "sync", "--name", "research"],
-        ["cloud", "bisync", "--name", "research"],
-        ["cloud", "bisync-reset", "research"],
-    ],
-)
-def test_mirror_commands_print_one_deprecation_notice(monkeypatch, tmp_path, argv):
-    """Only our notice prints; Click's generic DeprecationWarning line is dropped (#1720)."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_project_bisync_state",
-        lambda _name: tmp_path / "missing-state",
-    )
-
-    result = runner.invoke(app, argv)
-
-    output = _plain(result.output)
-    assert "DeprecationWarning" not in output
-    assert output.count("is deprecated and will be removed") == 1
-
-
-@pytest.mark.parametrize("name", ["proj [x]", "a[/b]c", "[bold]x[/bold]"])
-def test_bisync_reset_prints_bracketed_project_names_verbatim(monkeypatch, tmp_path, name):
-    """Bracketed names survive in status lines; a closing tag used to crash (#1720)."""
-    project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    monkeypatch.setattr(project_sync_command, "_has_cloud_credentials", lambda _config: False)
-    monkeypatch.setattr(
-        project_sync_command,
-        "get_project_bisync_state",
-        lambda _name: tmp_path / "missing-state",
-    )
-
-    result = runner.invoke(app, ["cloud", "bisync-reset", name])
-
-    assert result.exit_code == 0, result.output
-    assert f"No bisync state found for project '{name}'" in _plain(result.output)
 
 
 def test_workspace_resolution_error_prints_bracketed_name_verbatim(

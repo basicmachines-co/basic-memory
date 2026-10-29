@@ -1,26 +1,27 @@
-"""Project-scoped rclone sync commands for Basic Memory Cloud.
+"""Project-scoped rclone operations for Personal Basic Memory Cloud workspaces.
 
-This module provides simplified, project-scoped rclone operations:
-- Each project syncs independently
+This module provides the rclone half of the Personal cloud commands:
+- `push` / `pull` (additive `rclone check` + `rclone copy`; never delete)
+- `prune` (confirmed deletion of cloud files matching .bmignore)
+- `check` and `project ls`
 - Routes through the project's tenant-scoped remote (SyncProject.remote_name);
   the default tenant keeps "basic-memory-cloud", others use their own (see #919)
-- Balanced defaults from SPEC-8 Phase 4 testing
-- Per-project bisync state tracking (for the deprecated `bm cloud bisync`, #1596)
 
-Replaces tenant-wide sync with project-scoped workflows.
+The rclone mirror commands (`sync`, `bisync`) were removed in 1.0 (#1845).
 """
 
-import re
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
-from loguru import logger
 from rich.console import Console
 
+from basic_memory.cli.commands.cloud.rclone_filters import (
+    convert_bmignore_to_rclone_filters,
+    convert_bmignore_to_rclone_prune_filters,
+)
 from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
 from basic_memory.cli.commands.cloud.transfer import (
     ConflictStrategy,
@@ -29,19 +30,15 @@ from basic_memory.cli.commands.cloud.transfer import (
     conflict_copy_name,
     strategy_overwrites_dest,
 )
-from basic_memory.utils import shell_command
-from basic_memory.config import resolve_data_dir
 from basic_memory.utils import normalize_project_path
 
 console = Console()
 
-# Minimum rclone version for --create-empty-src-dirs support
-MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
-
 # Tigris edge caching returns stale data for users outside the origin region (iad).
 # --header is rclone's global flag that applies to ALL HTTP transactions (list, download,
-# upload). This is critical because bisync starts with S3 ListObjectsV2, which is neither
-# a download nor upload — so --header-download/--header-upload would miss list requests.
+# upload). This is critical because `rclone check` and `rclone lsf` start with S3
+# ListObjectsV2, which is neither a download nor upload — so
+# --header-download/--header-upload would miss list requests.
 # See: https://www.tigrisdata.com/docs/objects/consistency/
 TIGRIS_CONSISTENCY_HEADERS = [
     "--header",
@@ -85,41 +82,6 @@ def check_rclone_installed(is_installed: IsInstalledFunc = is_rclone_installed) 
         )
 
 
-@lru_cache(maxsize=1)
-def get_rclone_version(run: RunFunc = subprocess.run) -> tuple[int, int, int] | None:
-    """Get rclone version as (major, minor, patch) tuple.
-
-    Returns:
-        Version tuple like (1, 64, 2), or None if version cannot be determined.
-
-    Note:
-        Result is cached since rclone version won't change during runtime.
-    """
-    try:
-        result = run(["rclone", "version"], capture_output=True, text=True, timeout=10)
-        # Parse "rclone v1.64.2" or "rclone v1.60.1-DEV"
-        match = re.search(r"v(\d+)\.(\d+)\.(\d+)", result.stdout)
-        if match:
-            version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            logger.debug(f"Detected rclone version: {version}")
-            return version
-    except Exception as e:
-        logger.warning(f"Could not determine rclone version: {e}")
-    return None
-
-
-def supports_create_empty_src_dirs(version: tuple[int, int, int] | None) -> bool:
-    """Check if installed rclone supports --create-empty-src-dirs flag.
-
-    Returns:
-        True if rclone version >= 1.64.0, False otherwise.
-    """
-    if version is None:
-        # If we can't determine version, assume older and skip the flag
-        return False
-    return version >= MIN_RCLONE_VERSION_EMPTY_DIRS
-
-
 @dataclass
 class SyncProject:
     """Project configured for cloud sync.
@@ -139,11 +101,7 @@ class SyncProject:
     remote_name: str = "basic-memory-cloud"
 
 
-def get_bmignore_filter_path(
-    *,
-    force: bool = False,
-    fail_on_read_error: bool = False,
-) -> Path:
+def get_bmignore_filter_path() -> Path:
     """Get path to rclone filter file.
 
     Uses <config dir>/.bmignore converted to rclone format.
@@ -152,15 +110,7 @@ def get_bmignore_filter_path(
     Returns:
         Path to rclone filter file
     """
-    # Import here to avoid circular dependency
-    from basic_memory.cli.commands.cloud.bisync_commands import (
-        convert_bmignore_to_rclone_filters,
-    )
-
-    return convert_bmignore_to_rclone_filters(
-        force=force,
-        fail_on_read_error=fail_on_read_error,
-    )
+    return convert_bmignore_to_rclone_filters()
 
 
 def get_bmignore_prune_filter_path() -> Path:
@@ -172,40 +122,7 @@ def get_bmignore_prune_filter_path() -> Path:
     Returns:
         Path to inverted rclone filter file
     """
-    # Import here to avoid circular dependency
-    from basic_memory.cli.commands.cloud.bisync_commands import (
-        convert_bmignore_to_rclone_prune_filters,
-    )
-
     return convert_bmignore_to_rclone_prune_filters()
-
-
-def get_project_bisync_state(project_name: str) -> Path:
-    """Get path to project's bisync state directory.
-
-    Honors ``BASIC_MEMORY_CONFIG_DIR`` so isolated instances each keep their
-    own bisync state alongside their config.
-
-    Args:
-        project_name: Name of the project
-
-    Returns:
-        Path to bisync state directory for this project
-    """
-    return resolve_data_dir() / "bisync-state" / project_name
-
-
-def bisync_initialized(project_name: str) -> bool:
-    """Check if bisync has been initialized for this project.
-
-    Args:
-        project_name: Name of the project
-
-    Returns:
-        True if bisync state exists, False otherwise
-    """
-    state_path = get_project_bisync_state(project_name)
-    return state_path.exists() and any(state_path.iterdir())
 
 
 def get_project_remote(project: SyncProject, bucket_name: str) -> str:
@@ -234,8 +151,8 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
 # --- Directional transfer primitives (push / pull) ---
 #
 # These power the `bm cloud push` / `bm cloud pull` commands on Personal
-# workspaces. Unlike the mirror operations (`sync`/`bisync`), they use
-# `rclone copy` so they never delete on the destination, and conflicts are
+# workspaces. Unlike the removed mirror commands (`sync`/`bisync`, #1845), they
+# use `rclone copy` so they never delete on the destination, and conflicts are
 # surfaced to the caller rather than silently resolved. See issue #858 for the
 # full design rationale. Team workspaces run the same commands over the WebDAV
 # transport instead (`webdav_transfer.py`, #1262); the plan vocabulary both
@@ -294,71 +211,6 @@ def _build_transfer_cmd(
         cmd.append("--dry-run")
 
     return cmd
-
-
-def project_sync(
-    project: SyncProject,
-    bucket_name: str,
-    dry_run: bool = False,
-    verbose: bool = False,
-    *,
-    run: RunFunc = subprocess.run,
-    is_installed: IsInstalledFunc = is_rclone_installed,
-    filter_path: Path | None = None,
-) -> bool:
-    """One-way sync: local → cloud.
-
-    Makes cloud identical to local using rclone sync. Cloud files matching the
-    .bmignore filter are deleted too (--delete-excluded), so a file added to
-    .bmignore after it synced does not linger on the remote (#1032).
-
-    Args:
-        project: Project to sync
-        bucket_name: S3 bucket name
-        dry_run: Preview changes without applying
-        verbose: Show detailed output
-
-    Returns:
-        True if sync succeeded, False otherwise
-
-    Raises:
-        RcloneError: If project has no local_sync_path configured or rclone not installed
-    """
-    check_rclone_installed(is_installed=is_installed)
-
-    if not project.local_sync_path:
-        raise RcloneError(f"Project {project.name} has no local_sync_path configured")
-
-    local_path = Path(project.local_sync_path).expanduser()
-    remote_path = get_project_remote(project, bucket_name)
-    # --delete-excluded makes this filter destructive. Rebuild it from the
-    # current .bmignore even when filesystem mtimes make the cache look newer.
-    filter_path = filter_path or get_bmignore_filter_path(
-        force=True,
-        fail_on_read_error=True,
-    )
-
-    cmd = _build_transfer_cmd(
-        "sync",
-        str(local_path),
-        remote_path,
-        filter_path=filter_path,
-        dry_run=dry_run,
-        verbose=verbose,
-        # Trigger: a file synced to cloud, then its pattern was added to .bmignore.
-        # Why: the filter hides ignored paths on both sides of the transfer, so
-        # without this flag the remote copy is stranded — invisible to rclone's
-        # deletion pass yet still stored and indexed on the tenant (#1032). That
-        # breaks this mirror's "make cloud identical to local" contract, since
-        # the filtered local set no longer contains the file.
-        # Outcome: rclone deletes destination files excluded by the filter.
-        # Scoped to this one-way personal mirror only — never bisync/push/pull,
-        # which must not delete based on a single machine's local ignore file.
-        extra_flags=("--delete-excluded",),
-    )
-
-    result = run(cmd, text=True)
-    return result.returncode == 0
 
 
 def _parse_check_combined(output: str) -> TransferPlan:
@@ -597,7 +449,7 @@ def project_transfer(
 
 # --- Prune (issue #1032) ---
 #
-# The sync/bisync filter hides .bmignore paths on both sides of a transfer, so
+# The transfer filter hides .bmignore paths on both sides of a transfer, so
 # a file uploaded before its pattern was added to .bmignore is stranded on the
 # cloud tenant. Prune targets exactly that set: it uses the *inverted* filter
 # (each ignore pattern becomes an include rule, everything else is excluded) so
@@ -665,9 +517,8 @@ def project_prune(
 ) -> bool:
     """Delete exactly the remote files returned by the confirmed preview.
 
-    Complements the one-way mirror's --delete-excluded pass (#1032): targeted
-    cleanup for files uploaded before their pattern was added to .bmignore,
-    without requiring a full mirror run or a configured local_sync_path.
+    Targeted cleanup for files uploaded before their pattern was added to
+    .bmignore (#1032), without requiring a configured local_sync_path.
     Callers preview with ``project_prune_preview`` and pass the confirmed result
     here. ``--files-from-raw -`` keeps the delete set fixed even if the remote or
     .bmignore changes while the confirmation prompt is open.
@@ -697,100 +548,6 @@ def project_prune(
         cmd.append("--verbose")
 
     result = run(cmd, input="".join(f"{path}\n" for path in matches), text=True)
-    return result.returncode == 0
-
-
-def project_bisync(
-    project: SyncProject,
-    bucket_name: str,
-    dry_run: bool = False,
-    resync: bool = False,
-    verbose: bool = False,
-    *,
-    run: RunFunc = subprocess.run,
-    is_installed: IsInstalledFunc = is_rclone_installed,
-    version: tuple[int, int, int] | None = None,
-    filter_path: Path | None = None,
-    state_path: Path | None = None,
-    is_initialized: Callable[[str], bool] = bisync_initialized,
-) -> bool:
-    """Two-way sync: local ↔ cloud.
-
-    Uses rclone bisync with balanced defaults:
-    - conflict_resolve: newer (auto-resolve to most recent)
-    - max_delete: 25 (safety limit)
-    - compare: modtime (ignore size differences from line ending conversions)
-    - check_access: false (skip for performance)
-
-    Args:
-        project: Project to sync
-        bucket_name: S3 bucket name
-        dry_run: Preview changes without applying
-        resync: Force resync to establish new baseline
-        verbose: Show detailed output
-
-    Returns:
-        True if bisync succeeded, False otherwise
-
-    Raises:
-        RcloneError: If project has no local_sync_path, needs --resync, or rclone not installed
-    """
-    check_rclone_installed(is_installed=is_installed)
-
-    if not project.local_sync_path:
-        raise RcloneError(f"Project {project.name} has no local_sync_path configured")
-
-    local_path = Path(project.local_sync_path).expanduser()
-    remote_path = get_project_remote(project, bucket_name)
-    filter_path = filter_path or get_bmignore_filter_path()
-    state_path = state_path or get_project_bisync_state(project.name)
-
-    # Ensure state directory exists
-    state_path.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        "rclone",
-        "bisync",
-        str(local_path),
-        remote_path,
-        *TIGRIS_CONSISTENCY_HEADERS,
-        "--resilient",
-        "--conflict-resolve=newer",
-        "--max-delete=25",
-        "--compare=modtime",  # Ignore size differences from line ending conversions
-        "--filter-from",
-        str(filter_path),
-        "--workdir",
-        str(state_path),
-        # Prevent NUL byte padding on virtual filesystems (e.g. Google Drive File Stream)
-        # See: rclone/rclone#6801
-        "--local-no-preallocate",
-    ]
-
-    # Add --create-empty-src-dirs if rclone version supports it (v1.64+)
-    version = version if version is not None else get_rclone_version(run=run)
-    if supports_create_empty_src_dirs(version):
-        cmd.append("--create-empty-src-dirs")
-
-    if verbose:
-        cmd.append("--verbose")
-    else:
-        cmd.append("--progress")
-
-    if dry_run:
-        cmd.append("--dry-run")
-
-    if resync:
-        cmd.append("--resync")
-
-    # Check if first run requires resync
-    if not resync and not is_initialized(project.name) and not dry_run:
-        raise RcloneError(
-            f"First bisync for {project.name} requires --resync to establish baseline.\n"
-            f"Run: {shell_command('bm', 'project', 'bisync', '--name', project.name, '--resync')}"
-        )
-
-    result = run(cmd, text=True)
     return result.returncode == 0
 
 
