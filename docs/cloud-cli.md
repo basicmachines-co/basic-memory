@@ -468,7 +468,7 @@ Route individual projects through cloud using an API key. This lets you keep som
 **Option A: Create a key in the web app, then save it locally:**
 
 ```bash
-bm cloud api-key save bmc_abc123...
+bm cloud api-key save   # prompts for the key without echoing it
 ```
 
 **Option B: Create a key via CLI (requires OAuth login first):**
@@ -840,7 +840,7 @@ bm cloud promo --off        # Disable CLI cloud promo notices
 ### API Key Management
 
 ```bash
-bm cloud api-key save <key>      # Save a cloud API key (bmc_ prefixed)
+bm cloud api-key save [key]      # Save a cloud API key (bmc_ prefixed); prompts if omitted
 bm cloud api-key create <name>   # Create API key via cloud API (requires OAuth login)
 ```
 

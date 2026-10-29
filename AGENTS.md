@@ -436,7 +436,7 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Logout (global): `basic-memory cloud logout`
 - Check cloud status: `basic-memory cloud status`
 - Setup cloud sync: `basic-memory cloud setup`
-- Save API key: `basic-memory cloud api-key save bmc_...`
+- Save API key: `basic-memory cloud api-key save` (prompts for the key)
 - Create API key: `basic-memory cloud api-key create "name"`
 - Integrity check (local vs cloud, legacy Personal-only): `basic-memory cloud check --name "name"`
 - Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
@@ -488,7 +488,7 @@ Individual projects can be routed through the cloud while others stay local, usi
 
 ```bash
 # Save API key and set project to cloud mode
-basic-memory cloud api-key save bmc_abc123...
+basic-memory cloud api-key save          # prompts for the bmc_ key
 basic-memory project set-cloud research    # route through cloud
 basic-memory project set-local research    # revert to local
 ```
