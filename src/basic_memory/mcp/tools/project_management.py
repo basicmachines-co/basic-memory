@@ -347,6 +347,23 @@ def _format_project_list_json(
     constrained_project: str | None,
 ) -> dict[str, Any]:
     """Format merged project list as structured JSON."""
+    # Trigger: BASIC_MEMORY_MCP_PROJECT pins this server to one project
+    # Why: text output already shows only that project; JSON must not list the others
+    # Outcome: projects holds only entries the constraint names, by bare name,
+    # workspace-qualified name, or external_id — every spelling routing accepts
+    if constrained_project:
+        constrained_permalink = generate_permalink(constrained_project)
+        merged = [
+            project
+            for project in merged
+            if constrained_project == project["external_id"]
+            or constrained_permalink
+            in {
+                generate_permalink(spelling)
+                for spelling in (project["name"], project["qualified_name"])
+                if spelling
+            }
+        ]
     return {
         "projects": merged,
         "default_project": default_project,

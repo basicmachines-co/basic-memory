@@ -15,6 +15,7 @@ from basic_memory.mcp.tools import list_memory_projects, create_memory_project, 
 from basic_memory.config import BasicMemoryConfig, ProjectEntry
 from basic_memory.mcp.tools.project_management import (
     _format_note_file_delete_result,
+    _format_project_list_json,
     _merge_projects,
     _merge_workspace_projects,
 )
@@ -114,6 +115,34 @@ async def test_list_memory_projects_constrained_env(monkeypatch, app, test_proje
     result = await list_memory_projects()
     assert f"Project: {test_project.name}" in result
     assert "constrained to a single project" in result
+
+
+@pytest.mark.asyncio
+async def test_list_memory_projects_constrained_env_json_hides_other_projects(
+    monkeypatch, app, test_project, tmp_path_factory
+):
+    other_root = tmp_path_factory.mktemp("unconstrained-other-project")
+    await create_memory_project(project_name="other-project", project_path=str(other_root))
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
+
+    result = await list_memory_projects(output_format="json")
+
+    assert isinstance(result, dict)
+    assert [project["name"] for project in result["projects"]] == [test_project.name]
+    assert result["constrained_project"] == test_project.name
+
+
+@pytest.mark.parametrize("constraint", ["team/main", "main", "uuid-team-main"])
+def test_project_list_json_matches_every_constraint_spelling(constraint):
+    """A workspace-qualified or external_id constraint keeps its row (#1895 review)."""
+    rows = [
+        {"name": "main", "qualified_name": "team/main", "external_id": "uuid-team-main"},
+        {"name": "other", "qualified_name": "team/other", "external_id": "uuid-team-other"},
+    ]
+
+    result = _format_project_list_json(rows, "main", constraint)
+
+    assert [row["external_id"] for row in result["projects"]] == ["uuid-team-main"]
 
 
 @pytest.mark.asyncio
