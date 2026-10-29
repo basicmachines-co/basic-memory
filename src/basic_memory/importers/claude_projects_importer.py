@@ -62,7 +62,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
                     if destination_folder
                     else f"{project_dir}/docs"
                 )
-                await self.file_service.ensure_directory(docs_dir)
+                await self.ensure_folder_exists(docs_dir)
 
                 # Import prompt template if it exists
                 if project.get("prompt_template"):

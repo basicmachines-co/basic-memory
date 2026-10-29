@@ -87,6 +87,7 @@ class Importer[T: ImportResult]:
         Returns:
             Checksum of written file.
         """
+        self.file_service.require_project_path(file_path)
         content = self.markdown_processor.to_markdown_string(entity)
 
         # Trigger: one imported file can become visible before the remaining batch completes.
@@ -131,6 +132,7 @@ class Importer[T: ImportResult]:
         Args:
             folder: Relative folder path within the project. FileService handles base_path.
         """
+        self.file_service.require_project_path(folder)
         await self.file_service.ensure_directory(folder)
 
     @abstractmethod

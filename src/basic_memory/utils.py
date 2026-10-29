@@ -932,6 +932,19 @@ def resolve_directory_casing(directory: str, existing_directories: List[str]) ->
     return resolved_prefix
 
 
+def resolve_path_within_root(path: str | Path, root: Path, *, allow_root: bool = True) -> Path:
+    """Resolve a local path beneath its root without rewriting filename spelling."""
+    try:
+        resolved_root = root.resolve()
+        resolved = (resolved_root / path).resolve()
+    except (OSError, RuntimeError) as error:
+        # Python 3.12 reports symlink loops as RuntimeError rather than OSError.
+        raise ValueError(f"Cannot resolve path '{path}' within root '{root}'") from error
+    if not resolved.is_relative_to(resolved_root) or (not allow_root and resolved == resolved_root):
+        raise ValueError(f"Path '{path}' is outside the permitted root '{root}'")
+    return resolved
+
+
 def valid_project_path_value(
     path: str, *, allow_literal_tilde: bool = False, allow_literal_colon: bool = False
 ) -> bool:
@@ -971,24 +984,32 @@ def valid_project_path_value(
     return True
 
 
-def validate_project_path(path: str, project_path: Path | None) -> bool:
+def validate_project_path(
+    path: str,
+    project_path: Path | None,
+    *,
+    allow_literal_tilde: bool = False,
+    allow_literal_colon: bool = False,
+) -> bool:
     """Validate a relative path, resolving symlinks only for a local storage root.
 
     Pass None for remote/object storage. Its logical namespace must never be
     interpreted against the filesystem of the API or MCP process.
     """
 
-    if not valid_project_path_value(path):
+    if not valid_project_path_value(
+        path, allow_literal_tilde=allow_literal_tilde, allow_literal_colon=allow_literal_colon
+    ):
         return False
 
     if project_path is None:
         return True
 
     try:
-        resolved = (project_path / path).resolve()
-        return resolved.is_relative_to(project_path.resolve())
-    except (ValueError, OSError):  # pragma: no cover
-        return False  # pragma: no cover
+        resolve_path_within_root(path, project_path)
+        return True
+    except ValueError:
+        return False
 
 
 def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datetime:

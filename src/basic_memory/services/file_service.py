@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import os
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,7 +25,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
-from basic_memory.utils import FilePath, validate_project_path
+from basic_memory.utils import FilePath, resolve_path_within_root, validate_project_path
 from loguru import logger
 
 
@@ -99,6 +100,31 @@ class FileService:
             Absolute Path to the entity file
         """
         return self.base_path / entity.file_path
+
+    def require_project_path(self, path: FilePath) -> None:
+        """Require a project path, allowing absolute spellings within a local root.
+
+        General directory creation also serves project setup, so containment is
+        enforced explicitly at project-scoped import, materialization, and move sinks.
+        Object storage accepts only relative keys and never resolves host symlinks.
+        """
+        relative = Path(path)
+        if self.local_project_path is not None and relative.is_absolute():
+            try:
+                relative = resolve_path_within_root(relative, self.local_project_path).relative_to(
+                    self.local_project_path
+                )
+            except ValueError:
+                raise FileOperationError(f"Path '{path}' is outside the project") from None
+        # Native POSIX storage treats colons literally; remote keys keep the
+        # portable drive restriction and never use the host's path semantics.
+        if not validate_project_path(
+            relative.as_posix(),
+            self.local_project_path,
+            allow_literal_tilde=True,
+            allow_literal_colon=self.local_project_path is not None and os.name != "nt",
+        ):
+            raise FileOperationError(f"Path '{path}' is outside the project")
 
     async def read_entity_content(self, entity: EntityModel) -> str:
         """Get entity's content without frontmatter or structured sections.
@@ -450,6 +476,8 @@ class FileService:
         Raises:
             FileOperationError: If the move fails
         """
+        self.require_project_path(source)
+        self.require_project_path(destination)
         # Convert strings to Paths and resolve relative paths against base_path
         src_obj = self.base_path / source if isinstance(source, str) else source
         dst_obj = self.base_path / destination if isinstance(destination, str) else destination

@@ -47,6 +47,7 @@ from basic_memory.services.exceptions import (
     EntityAlreadyExistsError,
     EntityCreationError,
     EntityNotFoundError,
+    FileOperationError,
 )
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.note_preparation import (
@@ -1002,6 +1003,13 @@ class EntityService(BaseService[EntityModel]):
         # Shared move-path rules, so file and note moves accept identical inputs.
         destination_path = normalize_note_move_destination_path(destination_path)
 
+        # Reject escapes before preflight or rollback can probe outside the project.
+        try:
+            self.file_service.require_project_path(current_path)
+            self.file_service.require_project_path(destination_path)
+        except FileOperationError as error:
+            raise ValueError(f"Move failed: {error}") from error
+
         # Existence checks go through FileService: cloud storage has no local paths.
         if not await self.file_service.exists(current_path):
             raise ValueError(f"Source file not found: {current_path}")
@@ -1009,7 +1017,7 @@ class EntityService(BaseService[EntityModel]):
             raise ValueError(f"Destination already exists: {destination_path}")
 
         try:
-            await self.file_service.ensure_directory(Path(destination_path).parent)
+            # The storage move validates containment before creating its destination parent.
             await self.file_service.move_file(current_path, destination_path)
             logger.info(f"Moved file: {current_path} -> {destination_path}")
 
