@@ -6,6 +6,7 @@ import asyncio
 import os
 from typing import Any
 
+from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
@@ -96,7 +97,10 @@ class OpenAIEmbeddingProvider:
                     raise RuntimeError(
                         "OpenAI embedding response returned duplicate vector indexes."
                     )
-                vectors_by_index[response_index] = [float(value) for value in item.embedding]
+                # OpenAI returns unit vectors; other OpenAI-compatible endpoints may not (#1862).
+                vectors_by_index[response_index] = unit_normalized(
+                    [float(value) for value in item.embedding]
+                )
 
             ordered_vectors: list[list[float]] = []
             for index in range(len(batch)):

@@ -1,5 +1,6 @@
 """Embedding provider protocol for pluggable semantic backends."""
 
+import math
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -32,6 +33,20 @@ class EmbeddingIdentityProvider(Protocol):
     def identity_key(self) -> str:
         """Return a stable identity for persisted-vector invalidation."""
         ...
+
+
+def unit_normalized(vector: list[float]) -> list[float]:
+    """Scale a vector to length 1; a zero vector stays as it is.
+
+    Every provider must return unit vectors: the SQLite vector index turns L2 distance
+    into cosine similarity with ``1 - L²/2``, which holds only for unit vectors. Many
+    models and OpenAI-compatible endpoints return vectors of other lengths, and
+    unnormalized vectors make every semantic match fall below the similarity floor.
+    """
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0:
+        return vector
+    return [value / norm for value in vector]
 
 
 def embedding_provider_identity(provider: EmbeddingProvider) -> str:

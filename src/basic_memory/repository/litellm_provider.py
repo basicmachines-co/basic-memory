@@ -14,11 +14,11 @@ supported embedding models.
 from __future__ import annotations
 
 import asyncio
-import math
 import os
 from importlib import import_module
 from typing import Any
 
+from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
@@ -231,18 +231,9 @@ class LiteLLMEmbeddingProvider:
                 raise RuntimeError("LiteLLM embedding batch did not produce vectors.")
             all_vectors.extend(vectors)
 
-        # sqlite_search_repository.py maps L2 distance to cosine similarity via
-        # `1 - L²/2`, which is correct only for unit-normalized vectors. LiteLLM
-        # routes to many backends (Cohere, Vertex, Bedrock, etc.); not all of
-        # them return normalized embeddings, so we normalize here to honor the
-        # provider contract regardless of the underlying model.
-        normalized: list[list[float]] = []
-        for vector in all_vectors:
-            norm = math.sqrt(sum(x * x for x in vector))
-            if norm > 0:
-                normalized.append([x / norm for x in vector])
-            else:
-                normalized.append(vector)
+        # LiteLLM routes to many backends (Cohere, Vertex, Bedrock, etc.), and not
+        # all of them return unit vectors.
+        normalized = [unit_normalized(vector) for vector in all_vectors]
 
         if normalized and len(normalized[0]) != self.dimensions:
             raise RuntimeError(

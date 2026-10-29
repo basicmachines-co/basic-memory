@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import shutil
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from loguru import logger
 
+from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 if TYPE_CHECKING:
@@ -298,18 +298,16 @@ class FastEmbedEmbeddingProvider:
             if effective_parallel is not None:
                 embed_kwargs["parallel"] = effective_parallel
             vectors = list(model.embed(texts, **embed_kwargs))
-            # sqlite_search_repository.py uses a distance-to-similarity formula that assumes
-            # unit-normalized vectors (see the comment on line 65-67 of that file).
-            # Some models (e.g. multilingual ones) return vectors with norm > 1, so we
-            # L2-normalize here to satisfy that contract regardless of the chosen model.
-            normalized: list[list[float]] = []
-            for vector in vectors:
-                values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
-                norm = math.sqrt(sum(x * x for x in values))
-                if norm > 0:
-                    values = [x / norm for x in values]
-                normalized.append([float(v) for v in values])
-            return normalized
+            # Some models (e.g. multilingual ones) return vectors with norm > 1.
+            return [
+                unit_normalized(
+                    [
+                        float(value)
+                        for value in (vector.tolist() if hasattr(vector, "tolist") else vector)
+                    ]
+                )
+                for vector in vectors
+            ]
 
         vectors = await asyncio.to_thread(_embed_batch)
         if vectors and len(vectors[0]) != self.dimensions:

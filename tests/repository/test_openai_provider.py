@@ -2,6 +2,7 @@
 
 import asyncio
 import builtins
+import math
 import sys
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from basic_memory.repository.embedding_provider_factory import (
     create_embedding_provider,
     reset_embedding_provider_cache,
 )
+from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
@@ -101,6 +103,26 @@ async def test_openai_provider_lazy_loads_and_reuses_client(monkeypatch):
     assert len(first) == 3
     assert len(second) == 2
     assert len(second[0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_returns_unit_vectors(monkeypatch):
+    """OpenAI-compatible endpoints may return unnormalized vectors; search needs unit ones.
+
+    Reported against Volcengine Ark in #1862; fix first proposed by @MbappeWU in #1869.
+    """
+    module = type(sys)("openai")
+    setattr(module, "AsyncOpenAI", _StubAsyncOpenAI)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    provider = OpenAIEmbeddingProvider(model_name="doubao-embedding", dimensions=3)
+
+    vectors = await provider.embed_documents(["three", "eleven chars"])
+
+    # The stub returns [n, n+1, n+2] for an n-character input: far from unit length.
+    for vector in vectors:
+        assert math.isclose(math.sqrt(sum(value * value for value in vector)), 1.0)
+    assert vectors[0][0] < vectors[0][1] < vectors[0][2]
 
 
 @pytest.mark.asyncio
@@ -567,10 +589,10 @@ async def test_openai_provider_runs_batches_concurrently_and_preserves_output_or
 
     assert shared_api.max_in_flight >= 2
     assert vectors == [
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [3.0, 4.0, 5.0],
-        [2.0, 3.0, 4.0],
+        unit_normalized([1.0, 2.0, 3.0]),
+        unit_normalized([4.0, 5.0, 6.0]),
+        unit_normalized([3.0, 4.0, 5.0]),
+        unit_normalized([2.0, 3.0, 4.0]),
     ]
 
 
