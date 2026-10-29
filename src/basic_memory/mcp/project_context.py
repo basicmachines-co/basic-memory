@@ -272,7 +272,7 @@ async def resolve_workspace_qualified_identifier(
     'memory://main/notes' readable as project 'main' with note 'notes': a
     workspace route has to name something *inside* the project, or the same
     string would have two readings and the project-prefix resolver would lose
-    the ones it has always owned. The posix resolver takes the pathless form
+    the ones it has always owned. The path resolver takes the pathless form
     (a project root is a legitimate thing to list) and says so at its own call
     site.
     """
@@ -981,7 +981,7 @@ class DetectedProjectRoute:
     ``project_id`` is the external_id of the exact project that claimed the
     segments, or None for a locally routed session, whose config holds no UUIDs
     and which has no second workspace to be confused with. Callers pass both,
-    the way the posix verbs pass ``ProjectPathRoute``'s pair: a project name is
+    the way path routing passes ``ProjectPathRoute``'s pair: a project name is
     unique only inside one workspace, so handing on the name alone lets it be
     re-resolved against a different accessible workspace that happens to hold
     the same permalink (#1432).
@@ -1025,7 +1025,7 @@ async def detect_project_from_identifier_prefix(
     normal case on this surface — 'specs/search-spec' is an ordinary permalink,
     and a search query is arbitrary text — so the answer for it is None and the
     caller's active/default project applies. That is why these tools do not
-    adopt the posix verbs' refusal rule (#1421): there a first segment naming
+    adopt path routing's refusal rule (#1421): there a first segment naming
     nothing is an error, here it is the common input.
 
     What they do adopt is the *set*, and its precedence. A path-shaped
@@ -1035,19 +1035,20 @@ async def detect_project_from_identifier_prefix(
     stays a fact about the known projects rather than a guess about the string:
 
     1. the local config (``detect_project_from_url_prefix``), free to read;
-    2. ``addressable_projects`` — the session's own mount table, the same set
-       ``ls /`` advertises and ``resolve_project_path_route`` routes by. In a
+    2. ``addressable_projects`` — the session's own projects, the same set
+       ``resolve_project_path_route`` routes by. In a
        hosted session that listing comes from the session's own tenant route, so
        it is exactly the projects of the workspace this session is bound to;
     3. then, and only then, an explicitly workspace-qualified
        '<workspace>/<project>/<path>' route, for projects in workspaces this
        session's own route does not list.
 
-    Mounts before workspace routes is ``resolve_project_path_route``'s order,
-    for its reason: only one reading of '<name>/...' can win, and a name ``ls
-    /`` advertises must address that mount or we advertise an address that
-    resolves somewhere else. Reading it the other way here meant `ls team/docs`
-    and `bm_read("team/docs/x")` disagreed about what 'team' named. It is also
+    Addressable projects before workspace routes is
+    ``resolve_project_path_route``'s order, for its reason: only one reading of
+    '<name>/...' can win, and a project prefix that tool output emits must
+    address that project, or a returned path resolves somewhere else. Reading it
+    the other way here meant `bm_list("team/docs")` and
+    `bm_read("team/docs/x")` disagreed about what 'team' named. It is also
     the cheaper order — a mount hit never builds the account-wide workspace
     index at all.
 
@@ -1124,24 +1125,24 @@ async def detect_project_from_identifier_prefix(
     )
 
 
-# --- Project-qualified path routing (POSIX tools, #1415) ---
+# --- Project-qualified path routing (#1415) ---
 # Projects are mount points: '<project>/path' inputs route to that project so
 # tool inputs accept exactly the prefixed identifiers tool outputs and stored
-# permalinks produce. One resolver serves the MCP posix tools and, through
-# them, the CLI verbs.
+# permalinks produce. One resolver serves the bm_* tools (through
+# open_project_target) and, through them, the CLI verbs.
 #
-# The mount table and the routing table are one set (addressable_projects), so
-# every mount `ls /` advertises is reachable by name and an unqualified
-# reference in a many-project workspace refuses instead of picking a default
-# (#1421).
+# The set a prefix is matched against is one set (addressable_projects), so
+# every project a tool names in its output is reachable by name, and an
+# unqualified reference in a many-project workspace refuses instead of picking a
+# default (#1421).
 #
-# Precedence: the mount table wins the leading path segments, ahead of
+# Precedence: addressable projects win the leading path segments, ahead of
 # workspace-qualified '<workspace>/<project>/<path>' parsing. A project permalink
 # can also be an accessible workspace's slug, and only one reading of '<name>/...'
-# can win. Mount-wins is what the advertised list promises — a name `ls /` shows
-# must address that mount, or we advertise a name that resolves somewhere else,
-# which is worse than not advertising it at all. "Segments", plural: a project
-# name may contain '/', so its advertised permalink can span more than one.
+# can win. Mount-wins keeps the paths tools emit honest — a project prefix in
+# tool output must address that project, or a returned path resolves somewhere
+# else, which is worse than not routing it at all. "Segments", plural: a project
+# name may contain '/', so its permalink can span more than one.
 #
 # Route versus path is inherently ambiguous, so the answer is a precedence
 # order, not a parser. 'acme/docs/foo' is a well-formed workspace route AND a
@@ -1169,12 +1170,12 @@ async def detect_project_from_identifier_prefix(
 # collides with a real workspace and project has an explicit, documented fix in
 # rule 1. Coincidence loses to the address we published.
 #
-# Rule 3 (mounts) sits above all of this: a name `ls /` advertises always
-# addresses that mount.
+# Rule 3 (mounts) sits above all of this: an addressable project's permalink
+# always addresses that project.
 #
 # The cost of that choice, stated plainly: when a project's permalink equals an
 # accessible workspace's slug, that workspace's OTHER projects lose their
-# qualified path spelling. With '/team' advertised as a mount, 'team/docs/x' is
+# qualified path spelling. With 'team' an addressable project, 'team/docs/x' is
 # project 'team', path 'docs/x' — never workspace 'team', project 'docs'. Those
 # projects stay addressable through the project param (project='team/docs' with
 # the project-relative path 'x'), which is the escape hatch the prefix-conflict
@@ -1184,7 +1185,7 @@ async def detect_project_from_identifier_prefix(
 
 @dataclass(frozen=True)
 class ProjectPathRoute:
-    """Effective routing for one posix call: project params + project-relative path.
+    """Effective routing for one tool call: project params + project-relative path.
 
     ``stripped=False`` means the input carried no recognized project prefix:
     ``path`` is the caller's input byte-for-byte and ``project`` is the
@@ -1196,9 +1197,10 @@ class ProjectPathRoute:
     the remainder with no leading slash, "" meaning the project root.
 
     ``project_id`` is the effective external_id for the call — the caller's own
-    when they passed one, otherwise the id of the advertised mount that claimed
-    the prefix. Callers pass both fields to ``get_project_client`` verbatim; the
-    id is what keeps a mount bound to the workspace that advertised it, since a
+    when they passed one, otherwise the id of the addressable project that
+    claimed the prefix. Callers pass both fields to ``get_project_client``
+    verbatim; the id is what keeps a mount bound to the workspace that listed it,
+    since a
     bare project name can name a different project in another accessible
     workspace (#1421).
     """
@@ -1223,13 +1225,13 @@ class AmbiguousMountError(ValueError):
 
 @dataclass(frozen=True)
 class AddressableProject:
-    """One project this session can both advertise and route to.
+    """One project this session can route to by name.
 
     ``name`` is the routing identifier handed to ``get_project_client`` and
     ``permalink`` is the path prefix agents copy out of tool output. A cloud
     session also carries ``external_id``: project names are unique only inside
     one workspace, so the UUID is the only identifier that pins a mount to the
-    workspace whose listing advertised it. A locally routed session reads its
+    workspace whose listing returned it. A locally routed session reads its
     mounts from config, which holds no UUIDs, and has no second workspace to be
     confused with, so ``external_id`` is None there.
     """
@@ -1239,8 +1241,8 @@ class AddressableProject:
     external_id: Optional[str] = None
 
 
-# The session's own project listing. Routing and the mount view ask the same
-# question, so it is memoized — but in *session* state, which fastmcp keys by
+# The session's own project listing. Path routing and identifier detection ask
+# the same question, so it is memoized — but in *session* state, which fastmcp keys by
 # session id and persists across tool calls, not for one request as this comment
 # used to claim. That is the whole finding: a project created out of band — by a
 # teammate, or by the CLI — stayed invisible for the life of the session,
@@ -1271,10 +1273,8 @@ _SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY = "session_project_list_fetched_at"
 # account-wide workspace index — a control-plane call plus one listing per
 # accessible workspace — on *every* miss.
 #
-# Applied in the loader rather than at a call site, so identifier detection, the
-# posix path resolver, and the `ls "/"` mount view get the same freshness from
-# one place. A miss-triggered refresh could not have covered `ls "/"` at all:
-# listing the mounts has no miss to trigger on.
+# Applied in the loader rather than at a call site, so identifier detection and
+# the path resolver get the same freshness from one place.
 _SESSION_PROJECT_LIST_MAX_AGE_SECONDS = 60.0
 
 
@@ -1360,17 +1360,16 @@ async def addressable_projects(
 ) -> tuple[AddressableProject, ...]:
     """Return every project this session can address, sorted by name.
 
-    One source answers two questions that must never disagree: which mounts
-    ``ls /`` advertises, and which first path segment names a project. When
-    they came from different sources, a cloud session could advertise
-    ``/research`` at the root and then fail to recognize ``research/notes/x``,
-    silently routing it to a default project instead (#1421).
+    One source answers which first path segment names a project, for both the
+    path resolver and identifier detection, so the two never disagree. When a
+    cloud session's sources differed, it could list ``research`` and then fail
+    to recognize ``research/notes/x``, silently routing it to a default project
+    instead (#1421).
 
-    A locally routed session's config IS its mount table, so it answers with no
+    A locally routed session's config IS its project set, so it answers with no
     network call. A cloud session's projects live in the tenant database and
     its local config holds only the placeholder 'main' entry, so the session's
-    own project listing answers instead — the same call the mount view has
-    always made to render the root.
+    own project listing answers instead.
     """
     if _session_routes_to_cloud():
         project_list = await _session_project_list(context=context)
@@ -1479,7 +1478,7 @@ async def _detect_workspace_qualified_route(
     session can actually address.
 
     Workspace-qualified memory URLs require three segments so that
-    'memory://main/notes' stays readable as project 'main'. A posix path only
+    'memory://main/notes' stays readable as project 'main'. A routed path only
     reaches here after the mount table declined its leading segments, so nothing
     addressable can be meant by it and the two-segment form unambiguously names
     that project's root — without which 'ls acme/docs/notes' resolved while
@@ -1694,7 +1693,7 @@ async def resolve_project_path_route(
     project_id: Optional[str],
     context: Optional[Context] = None,
 ) -> ProjectPathRoute:
-    """Resolve a posix tool's path/identifier into an effective project route.
+    """Resolve a tool's path/identifier into an effective project route.
 
     First-segment project resolution (#1415), in order:
 
@@ -1717,9 +1716,9 @@ async def resolve_project_path_route(
        UnqualifiedPathRefusedError instead of silently defaulting; a session
        that addresses at most one project keeps today's default resolution.
 
-    Rules 3 and 5 read the set from ``addressable_projects`` — the same set
-    ``ls /`` advertises — so a project can never be listed at the root and then
-    go unrecognized as a path prefix (#1421). Rule 3 deliberately precedes rule
+    Rules 3 and 5 read the set from ``addressable_projects``, the session's own
+    projects, so a project the session lists can never go unrecognized as a path
+    prefix (#1421). Rule 3 deliberately precedes rule
     4; see the mount-precedence note above this section for the collision that
     ordering resolves and the spelling it costs.
     """
@@ -1737,15 +1736,15 @@ async def resolve_project_path_route(
     mount_project_id: Optional[str] = None
     addressable: tuple[AddressableProject, ...] | None = None
 
-    # --- Rule 3: the advertised mount table claims the leading segments ---
-    # Trigger: the input carries a leading segment at all — a bare mount name
-    #   ('ls research') or a path under one.
-    # Why: this set is what `ls /` advertises, and an advertised name that
-    #   resolves somewhere else is worse than one never advertised. The workspace
+    # --- Rule 3: addressable projects claim the leading segments ---
+    # Trigger: the input carries a leading segment at all — a bare project name
+    #   ('research') or a path under one.
+    # Why: tool output emits these permalinks as path prefixes, and an emitted
+    #   name that resolves somewhere else is worse than one never emitted. The workspace
     #   parse below would take '<slug>/<project>/...' first, so a project whose
     #   permalink is also an accessible workspace slug would hand 'team/docs/x'
     #   to project 'docs' in workspace 'team' instead of the mount named 'team'
-    #   — reading another project's data under an advertised name.
+    #   — reading another project's data under a name tool output emitted.
     # Outcome: a leading segment matching an addressable project routes there
     #   with the remainder as the project-relative path, and workspace discovery
     #   is never consulted for it. A local session pays nothing (its config is
@@ -1789,7 +1788,7 @@ async def resolve_project_path_route(
             detected, remainder = explicit, explicit_claim[1]
 
     # --- Rule 4: explicitly workspace-qualified spellings for everything else ---
-    # Trigger: no advertised mount claimed the leading segments, the input has
+    # Trigger: no addressable project claimed the leading segments, the input has
     #   more than one segment, and no project was named.
     # Why: '<workspace>/<project>[/<path>]' addresses projects in workspaces this
     #   session's own route does not list, so they are absent from the mount
