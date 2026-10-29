@@ -263,7 +263,7 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
 
     Args:
         file_path: The file path to check
-        base_path: The base directory for relative path calculation
+        base_path: The base directory for relative path directory for relative path calculation
         ignore_patterns: Set of patterns to match against
 
     Returns:
@@ -284,8 +284,8 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
                 # For directory patterns ending with /
                 if root_pattern.endswith("/"):
                     dir_name = root_pattern[:-1]  # Remove trailing /
-                    # Check if the first part of the path matches the directory name
-                    if len(relative_path.parts) > 0 and relative_path.parts[0] == dir_name:
+                    # Check if the path starts with the directory
+                    if relative_posix.startswith(dir_name + "/") or relative_posix == dir_name:
                         return True
                 else:
                     # Regular root-relative pattern
@@ -296,24 +296,14 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
             # Handle directory patterns (ending with /)
             if pattern.endswith("/"):
                 dir_name = pattern[:-1]  # Remove trailing /
-                # Check if any path part matches the directory name
-                if dir_name in relative_path.parts:
+                # Check if the path starts with the directory
+                if relative_posix.startswith(dir_name + "/") or relative_posix == dir_name:
                     return True
                 continue
 
-            # Direct name match (e.g., ".git", "node_modules")
-            if pattern in relative_path.parts:
+            # For all other patterns, use fnmatch on the full relative path
+            if fnmatch.fnmatch(relative_posix, pattern):
                 return True
-
-            # Check if any individual path part matches the glob pattern
-            # This handles cases like ".*" matching ".hidden.md" in "concept/.hidden.md"
-            for part in relative_path.parts:
-                if fnmatch.fnmatch(part, pattern):
-                    return True
-
-            # Glob pattern match on full path
-            if fnmatch.fnmatch(relative_posix, pattern) or fnmatch.fnmatch(relative_str, pattern):
-                return True  # pragma: no cover
 
         return False
     except ValueError:
