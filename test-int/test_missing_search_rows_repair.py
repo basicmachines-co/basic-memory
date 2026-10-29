@@ -209,3 +209,48 @@ async def test_restore_missing_search_rows_loads_entities_in_bounded_batches(
         {"project_id": test_project.id},
     )
     assert missing == 0
+
+
+@pytest.mark.asyncio
+async def test_entity_row_under_another_id_counts_as_missing(
+    test_project: Project,
+    project_config,
+    engine_factory,
+    config_manager: ConfigManager,
+) -> None:
+    """A stale entity row with the right entity_id but another id is not a projection.
+
+    Search keys entity rows by the entity's own id, as the integrity checker does, so
+    the repair must treat this shape as missing and rebuild it.
+    """
+    _engine, session_maker = engine_factory
+    (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
+    (project_config.home / NOTE_PATH).write_text(NOTE_CONTENT, encoding="utf-8")
+    await _index_project(test_project, embeddings=False)
+    entity_id = await _indexed_note_entity_id(session_maker, test_project)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "UPDATE search_index SET id = :stale_id WHERE project_id = :project_id "
+                "AND type = 'entity' AND entity_id = :entity_id"
+            ),
+            {
+                "stale_id": entity_id + 100_000,
+                "project_id": test_project.id,
+                "entity_id": entity_id,
+            },
+        )
+
+    project_service = ProjectService(ProjectRepository(), session_maker)
+    status = await project_service.get_embedding_status(test_project.id)
+    assert status.entities_missing_search_rows == 1
+
+    repaired = await _index_project(test_project, embeddings=False)
+    assert repaired.restored_search_entities == 1
+    restored = await _count(
+        session_maker,
+        "SELECT COUNT(*) FROM search_index WHERE project_id = :project_id "
+        "AND type = 'entity' AND id = :entity_id",
+        {"project_id": test_project.id, "entity_id": entity_id},
+    )
+    assert restored == 1

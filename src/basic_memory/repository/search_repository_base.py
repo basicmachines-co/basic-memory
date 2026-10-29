@@ -171,15 +171,18 @@ async def purge_stale_search_index_rows(
     return purged
 
 
-# Every indexed entity owns exactly one `type = 'entity'` search row, written with
-# its other rows in one transaction, so an entity without that row has no search
-# projection at all. Plain uncorrelated NOT IN: SQLite FTS5 cannot index
-# `entity_id`, so it reads the project's search rows once per statement instead
-# of once per entity. The SQL text is identical on SQLite FTS5 and Postgres.
+# Every indexed entity owns exactly one `type = 'entity'` search row, keyed by the
+# entity's own id and written with its other rows in one transaction, so an entity
+# without that row has no search projection at all. Match on `id`, as the
+# integrity checker does (`index_integrity._MISSING_ENTITY_ROWS`): a stale entity
+# row that carries the right `entity_id` under another `id` is not a projection.
+# Plain uncorrelated NOT IN: SQLite FTS5 cannot index these columns, so it reads
+# the project's search rows once per statement instead of once per entity. The
+# SQL text is identical on SQLite FTS5 and Postgres.
 ENTITY_IDS_MISSING_SEARCH_ROWS_SQL = (
     "SELECT id FROM entity WHERE project_id = :project_id "
-    "AND id NOT IN (SELECT entity_id FROM search_index WHERE project_id = :project_id "
-    "AND type = 'entity' AND entity_id IS NOT NULL)"
+    "AND id NOT IN (SELECT id FROM search_index WHERE project_id = :project_id "
+    "AND type = 'entity' AND id IS NOT NULL)"
 )
 
 
