@@ -16,8 +16,13 @@ generated: hand
 ## DESCRIPTION
 
 Basic Memory 1.0 has one MCP tool per job, named `bm_*`. The pre-1.0 tools are removed with no
-aliases. `bm tool` mirrors the 1.0 tools: one subcommand per tool, with flags named after the
-tool's parameters. Section 3 documents each tool.
+aliases. Section 3 documents each tool.
+
+`bm tool` mirrors the local note, search, project and schema tools: `read`, `write`, `edit`,
+`move`, `delete`, `list`, `find`, `search`, `context`, `project` and `schema`, with flags named
+after the tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
+`bm man`, [[bm-project-delete(3)]] is `bm project remove`, and the Cloud-only tools
+([[bm-agent(3)]], the ChatGPT `search` and `fetch` adapters) have no `bm tool` command.
 
 ## MCP TOOLS
 
@@ -45,6 +50,11 @@ tool's parameters. Section 3 documents each tool.
 
 | Pre-1.0 | 1.0 |
 | --- | --- |
+| `write-note`, `read-note`, `edit-note`, `delete-note` | `write`, `read`, `edit`, `delete` |
+| `search-notes`, `build-context` | `search`, `context` |
+| `recent-activity`, `recent` | `project recent` |
+| `list-projects`, `projects`, `list-workspaces`, `workspaces` | `project list` |
+| `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate`, `schema infer`, `schema diff` |
 | `write --folder F --type X` | `write --directory F --note-type X`, or `--identifier path.md` |
 | `edit --operation OP` | `edit --command OP` |
 | `delete ID --is-directory` | `delete --identifier ID`, or `delete --path DIR --recursive` |
@@ -52,9 +62,6 @@ tool's parameters. Section 3 documents each tool.
 | `search --meta k=v`, `--filter`, `--tag`, `--status` | `search --filters JSON` |
 | `search --type`, `--entity-type`, `--after_date` | `search --note-types`, `--items`, `--since` |
 | `context URL --timeframe D` | `context IDENTIFIER --since D` |
-| `recent` | `project recent` |
-| `projects`, `workspaces` | `project list` |
-| `validate`, `infer`, `diff` | `schema validate`, `schema infer`, `schema diff` |
 | `--project-id UUID` | `--project UUID` |
 
 `bm tool` prints the tool's text result, or its JSON result with `--json`. It no longer

@@ -53,11 +53,15 @@ command: basic-memory status    # section-1 pages: the CLI command documented
 
 ## Generated sections
 
-`just man-regen` renders every section 3 `SYNOPSIS` and `PARAMETERS` block from the live tool
-registry, and every section 1 `SYNOPSIS` and `OPTIONS` block from the Typer command tree. Drift
-tests hold the shipped blocks byte-equal to the rendering, so changing a tool or a command
-without regenerating fails CI. Those pages declare `generated: registry` or `generated: cli`;
-everything else on a page is hand-owned.
+`just man-regen` renders the `SYNOPSIS` and `PARAMETERS` blocks of every section 3 page whose
+tool the local server registers (`generated: registry`), and the `SYNOPSIS` and `OPTIONS` blocks
+of the section 1 pages (`generated: cli`) from the Typer command tree. Drift tests hold those
+blocks byte-equal to the rendering, so changing a local tool or a command without regenerating
+fails CI. Everything else on a page is hand-owned.
+
+The pages for Cloud-registered tools (`bm-agent(3)`, `chatgpt-search(3)`, `chatgpt-fetch(3)`) are
+maintained by hand: the local registry does not have those tools, so neither the generator nor
+the drift tests cover them. Update them when the Cloud tool's parameters change.
 
 ## Adding a page
 
