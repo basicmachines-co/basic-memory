@@ -13,7 +13,7 @@ from basic_memory import config as config_module
 from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.project_context import routes_to_default_project
-from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
+from basic_memory.mcp.tools import bm_move, read_note, write_note
 from basic_memory.mcp.similar_notes import (
     SIMILAR_NOTES_LIMIT,
     SIMILAR_NOTES_MIN_SIMILARITY,
@@ -434,42 +434,6 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
     assert "permalink: custom/new-permalink" in result2
     assert f"permalink: {initial_permalink}" not in result2
     assert f"[Project: '{test_project.name}']" in result2
-
-
-@pytest.mark.asyncio
-async def test_delete_note_existing(app, test_project):
-    """Test deleting a new note.
-
-    Should:
-    - Create entity with correct type and content
-    - Return valid permalink
-    - Delete the note
-    """
-    result = await write_note(
-        project=test_project.name,
-        title="Test Note",
-        directory="test",
-        content="# Test\nThis is a test note",
-        tags=["test", "documentation"],
-    )
-
-    assert result
-    assert f"project: {test_project.name}" in result
-
-    deleted = await delete_note("test/test-note", project=test_project.name)
-    assert deleted is True
-
-
-@pytest.mark.asyncio
-async def test_delete_note_doesnt_exist(app, test_project):
-    """Test deleting a new note.
-
-    Should:
-    - Delete the note
-    - verify returns false
-    """
-    deleted = await delete_note("doesnt-exist", project=test_project.name)
-    assert deleted is False
 
 
 @pytest.mark.asyncio
@@ -1562,8 +1526,11 @@ class TestWriteNoteOverwriteGuard:
         await write_note(
             project=test_project.name, title="Mover", directory="dirA", content="original"
         )
-        await move_note(
-            "dirA/Mover.md", destination_path="dirB/Mover.md", project=test_project.name
+        await bm_move(
+            identifier="dirA/Mover.md",
+            destination="dirB/Mover.md",
+            project=test_project.name,
+            context=None,
         )
         # The moved note keeps the path's original permalink, so this one is suffixed.
         replacement = await write_note(

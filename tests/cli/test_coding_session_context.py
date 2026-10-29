@@ -116,7 +116,7 @@ def test_claude_coding_profile_writes_coding_session(
     transcript = _transcript(tmp_path)
     mock_write = AsyncMock(return_value={"action": "created"})
     with (
-        patch("basic_memory.mcp.tools.write_note", mock_write),
+        patch("basic_memory.mcp.tools.bm_write", mock_write),
         patch.object(hook_module, "_pull_request_context", return_value=None),
     ):
         result = runner.invoke(
@@ -181,7 +181,7 @@ def test_coding_recall_filters_by_repository_and_merges_codex_sessions() -> None
         )
 
     coding_query = next(query for query in queries if query.get("note_types") == ["coding_session"])
-    assert coding_query["metadata_filters"] == {"repository": "basicmachines-co/basic-memory"}
+    assert coding_query["filters"] == {"repository": "basicmachines-co/basic-memory"}
     assert [row["title"] for row in hook_module._rows(context.sessions)] == ["Coding", "Legacy"]
     assert all(query.get("note_types") != ["codex_session", "session"] for query in queries)
 

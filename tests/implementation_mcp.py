@@ -19,23 +19,18 @@ from basic_memory.mcp.server import mcp
 
 
 IMPLEMENTATION_NAMES = (
-    "basic_memory_diagnostics",
     "build_context",
     "cat",
     "create_memory_project",
-    "delete_note",
     "delete_project",
     "edit_note",
     "fetch",
     "find",
     "grep",
-    "list_directory",
     "list_memory_projects",
     "list_workspaces",
     "ls",
     "man",
-    "move_note",
-    "read_content",
     "read_note",
     "recent_activity",
     "schema_diff",
@@ -44,7 +39,6 @@ IMPLEMENTATION_NAMES = (
     "search",
     "search_notes",
     "tail",
-    "view_note",
     "write_note",
 )
 

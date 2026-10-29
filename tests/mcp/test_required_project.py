@@ -143,14 +143,6 @@ async def test_conflict_recovery_call_includes_scope_and_can_be_dispatched(clien
 
 
 @pytest.mark.asyncio
-async def test_legacy_view_reports_unresolved_scope(monkeypatch):
-    view_module = importlib.import_module("basic_memory.mcp.tools.view_note")
-    monkeypatch.setattr(view_module, "resolve_project_parameter", AsyncMock(return_value=None))
-    with pytest.raises(ToolError, match="View needs a project"):
-        await view_module.view_note("Plan")
-
-
-@pytest.mark.asyncio
 async def test_chatgpt_fetch_reports_unresolved_scope(monkeypatch):
     monkeypatch.setattr(chatgpt_tools, "is_openai_mcp_client", AsyncMock(return_value=True))
     monkeypatch.setattr(

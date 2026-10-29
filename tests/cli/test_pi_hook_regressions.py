@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app
@@ -20,7 +21,7 @@ def test_unmapped_pi_recall_never_queries_ambient_project(
         config = tmp_path / ".pi" / "basic-memory.json"
         config.parent.mkdir()
         config.write_text(json.dumps(settings), encoding="utf-8")
-    with patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock) as search:
+    with patch("basic_memory.mcp.tools.bm_search", new_callable=AsyncMock) as search:
         result = runner.invoke(
             app,
             ["hook", "session-start", "--harness", "pi", "--project-dir", str(tmp_path)],
@@ -36,7 +37,7 @@ def test_pi_checkpoint_reuses_identity_and_separates_branches(tmp_path: Path) ->
     config.parent.mkdir()
     config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
     write = AsyncMock(return_value={"action": "updated"})
-    with patch("basic_memory.mcp.tools.write_note", write):
+    with patch("basic_memory.mcp.tools.bm_write", write):
         for branch in ["branch-a", "branch-a", "branch-b"]:
             result = runner.invoke(
                 app,
@@ -78,7 +79,7 @@ def test_pi_hook_brief_includes_checkpoint_excerpts(tmp_path: Path) -> None:
             },
         ]
     )
-    with patch("basic_memory.mcp.tools.search_notes", search):
+    with patch("basic_memory.mcp.tools.bm_search", search):
         result = runner.invoke(
             app,
             ["hook", "session-start", "--harness", "pi", "--project-dir", str(tmp_path)],
@@ -120,7 +121,7 @@ def test_pi_checkpoint_includes_recent_assistant_turns(tmp_path: Path) -> None:
     config.parent.mkdir()
     config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
     write = AsyncMock(return_value={"action": "updated"})
-    with patch("basic_memory.mcp.tools.write_note", write):
+    with patch("basic_memory.mcp.tools.bm_write", write):
         result = runner.invoke(
             app,
             ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(tmp_path)],
@@ -159,7 +160,7 @@ def test_pi_hook_settings_use_parent_workspace_config(tmp_path: Path) -> None:
     child = tmp_path / "src" / "package"
     child.mkdir(parents=True)
     write = AsyncMock(return_value={"action": "updated"})
-    with patch("basic_memory.mcp.tools.write_note", write):
+    with patch("basic_memory.mcp.tools.bm_write", write):
         result = runner.invoke(
             app,
             ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(child)],
@@ -183,8 +184,8 @@ def test_pi_failed_capture_never_reports_success(tmp_path: Path, branch: str | N
     config = tmp_path / ".pi" / "basic-memory.json"
     config.parent.mkdir()
     config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
-    write = AsyncMock(return_value={"error": "NOTE_WRITE_BLOCKED"})
-    with patch("basic_memory.mcp.tools.write_note", write):
+    write = AsyncMock(side_effect=ToolError("NOTE_WRITE_BLOCKED"))
+    with patch("basic_memory.mcp.tools.bm_write", write):
         result = runner.invoke(
             app,
             ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(tmp_path)],
