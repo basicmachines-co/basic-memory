@@ -526,20 +526,27 @@ async def test_reload_keeps_the_watcher_until_the_project_set_changes(
 
 
 @pytest.mark.asyncio
-async def test_reload_selection_failure_stops_the_cycle(
+async def test_reload_selection_failure_ends_the_cycle_with_its_error(
     app_config, project_repository, session_maker, test_project, monkeypatch
 ):
+    """run() handles a cycle's error; a timer failure must reach it the same way."""
     config = app_config.model_copy(update={"watch_project_reload_interval": 1})
-    watcher = WatchService(config, project_repository, session_maker)
-    stop_event = asyncio.Event()
+    watcher = WatchService(
+        config, project_repository, session_maker, initial_projects=[test_project]
+    )
 
     async def broken_selection():
         raise RuntimeError("database unavailable")
 
+    async def watch_until_stopped(*_paths, stop_event, **_kwargs):
+        await stop_event.wait()
+        for change in ():
+            yield change
+
     monkeypatch.setattr(watcher, "_select_projects_to_watch", broken_selection)
+    monkeypatch.setattr(watch_module, "awatch", watch_until_stopped)
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await asyncio.wait_for(watcher._schedule_restart(stop_event, [test_project]), timeout=3)
-    assert stop_event.is_set()
+        await asyncio.wait_for(watcher._run_watch_cycle([test_project]), timeout=3)
 
 
 @pytest.mark.asyncio

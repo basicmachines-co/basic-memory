@@ -311,6 +311,27 @@ class WatchService:
             finally:
                 self._sorted_watch_filter_roots = previous_filter_roots
 
+    async def _run_watch_cycle(self, projects: Sequence[Project]) -> None:
+        """Run one watch cycle with its reload timer and raise either one's failure."""
+        stop_event = asyncio.Event()
+        timer_task = asyncio.create_task(self._schedule_restart(stop_event, projects))
+        try:
+            await self._watch_projects_cycle(projects, stop_event)
+        finally:
+            timer_task.cancel()
+            # asyncio.wait never raises the task's result, so a cancellation of this
+            # coroutine still propagates while the timer finishes.
+            await asyncio.wait([timer_task])
+            # Retrieve the result even when the cycle itself raised, so asyncio
+            # never reports an unretrieved task exception.
+            timer_error = None if timer_task.cancelled() else timer_task.exception()
+        # Trigger: the timer stopped the cycle because project selection failed.
+        # Why: an unretrieved task exception would bypass the cycle error path
+        #      in run() and only surface as an asyncio warning.
+        # Outcome: the caller records it and retries after its usual delay.
+        if timer_error is not None:
+            raise timer_error
+
     async def _select_projects_to_watch(self) -> list[Project]:
         """Return locally syncable projects that this watcher instance owns."""
         async with db.scoped_session(self.session_maker) as session:
@@ -363,23 +384,13 @@ class WatchService:
                     f"Starting event-index watch cycle for directories: "
                     f"{[project.path for project in projects]}"
                 )
-                stop_event = asyncio.Event()
-                timer_task = asyncio.create_task(self._schedule_restart(stop_event, projects))
-
                 try:
-                    await self._watch_projects_cycle(projects, stop_event)
+                    await self._run_watch_cycle(projects)
                 except Exception as exc:
                     logger.exception("Event-index watch service error during cycle", error=str(exc))
                     self.state.record_error(str(exc))
                     await self.write_status()
                     await asyncio.sleep(5)
-                finally:
-                    if not timer_task.done():
-                        timer_task.cancel()
-                        try:
-                            await timer_task
-                        except asyncio.CancelledError:
-                            pass
 
         except Exception as exc:
             logger.exception("Event-index watch service error", error=str(exc))
