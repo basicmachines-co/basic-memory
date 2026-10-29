@@ -481,32 +481,50 @@ bench-read-cache redis_url="redis://127.0.0.1:6379/0" run_id="latest":
 test-all:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} tests test-int
 
-# Generate HTML coverage report
+# Generate an HTML coverage report from the same four suites `just test` runs:
+# unit and integration, SQLite and Postgres. Each suite is its own process, with
+# the same flags and markers as its test-* recipe, so tests/ and test-int/ fixtures
+# never share a process and on-demand semantic/benchmark tests stay out.
+# [tool.coverage.run] parallel = true gives each run its own data file to combine.
 coverage:
     #!/usr/bin/env bash
-    set -euo pipefail
-    
+    set -uo pipefail
+
     uv run coverage erase
-    
-    echo "🔎 Coverage (SQLite)..."
-    BASIC_MEMORY_ENV=test uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests test-int
-    
-    echo "🔎 Coverage (Postgres via testcontainers)..."
-    # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
-    # See: https://github.com/jlowin/fastmcp/issues/1311
-    TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
-    if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int' || test $? -eq 137
-    else
-        echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int
-    fi
-    
+
+    failed=()
+    run_suite() {
+        local label=$1; shift
+        echo "🔎 Coverage ($label)..."
+        if ! "$@"; then
+            failed+=("$label")
+        fi
+    }
+    pytest_args=(-p pytest_mock -v --no-cov {{PYTEST_FLAGS}})
+    int_markers=(-m "not semantic and not benchmark")
+
+    run_suite "unit, SQLite" env BASIC_MEMORY_ENV=test \
+        uv run coverage run -m pytest "${pytest_args[@]}" tests
+    run_suite "integration, SQLite" env BASIC_MEMORY_ENV=test \
+        uv run coverage run -m pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
+    run_suite "unit, Postgres" env BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 \
+        uv run coverage run -m pytest "${pytest_args[@]}" tests
+    run_suite "integration, Postgres" env BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 \
+        uv run coverage run -m pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
+
     echo "🧩 Combining coverage data..."
     uv run coverage combine
     uv run coverage report -m
     uv run coverage html
     echo "Coverage report generated in htmlcov/index.html"
+
+    # Trigger: a suite failed.
+    # Why: the report still covers every suite that ran, but the run is not green.
+    # Outcome: name the failed suites and exit non-zero.
+    if (( ${#failed[@]} )); then
+        echo "❌ Failed suites: ${failed[*]}"
+        exit 1
+    fi
 
 # Lint and fix code (calls fix)
 lint: fix
