@@ -38,9 +38,14 @@ it on its own machine, with the note tools, in the agent note's project only.
 - **status** (`agent`): whether the agent can run and, if not, Cloud's
   reason (an invalid note, turned off, the spending limit); what starts it;
   whether it reads the web; and the model it runs on.
-- **run** (`agent`, `identifier`): start the agent on a note. It may change
-  notes in the project, and returns a run id. A scheduled agent needs no
-  `identifier`: it runs on its own note, as its schedule does.
+- **run** (`agent`, `identifier`): start the agent. It may change notes in
+  the project, and returns a run id. What it works on depends on `identifier`:
+  - none: the agent follows its instructions and finds its own work, as a
+    scheduled run does.
+  - a note (title, permalink or path): the agent reads that note first.
+  - a folder, ending in `/` (`meetings/`): the agent works on that folder.
+    The folder is relative to the project; `..` and absolute paths are
+    refused.
 - **get** (`run_id`): one run: its status, why it is still waiting, the notes
   it changed, and the agent's last reply.
 - **changes** (`run_id`): each note the run changed, as a unified diff, to
@@ -81,7 +86,8 @@ The frontmatter Cloud reads from an agent note:
   `{allow: [example.com]}` to keep it to those domains. It works only when the
   workspace allows agents to read the web.
 
-Without a watch or a schedule, the agent runs only when someone starts it.
+Without a watch or a schedule, the agent runs only when someone starts it
+with **run**, on nothing, a note or a folder.
 The ready-made agents from the app's **Add an agent** dialog are MCP
 resources: `memory://agents/templates` lists them, and
 `memory://agents/templates/<id>` is one whole agent note, ready to save with
@@ -123,6 +129,9 @@ bm_agent(command="runs", needs_review=True, project="basic-memory-llc")
 - A scheduled run is skipped, for free, when no note in the project changed
   since the agent's last run. A run started with `run` is never skipped that
   way.
+- Starting an agent again on the same thing (the same note, the same folder,
+  or nothing) while a run for it waits to start joins that run instead of
+  queuing a second one.
 - Once the workspace reaches its spending limit, `run` is refused and watches
   and schedules start nothing until the limit is raised.
 
