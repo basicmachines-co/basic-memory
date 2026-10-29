@@ -1,32 +1,86 @@
 # CHANGELOG
 
-## Unreleased
+## v1.0.0 (2026-10-29)
 
-Work on `main` toward 1.0, not yet in a published release. `docs/1.0.md` is the
-working migration guide; this entry gets its version heading when the release is cut.
+Basic Memory 1.0 is a clean-house release. The MCP server exposes only the `bm_*`
+tools, the CLI is built on those same tools, and the pre-1.0 tools, commands and
+compatibility code are removed rather than aliased. `docs/1.0.md` and
+`bm man tools-migration` map every old tool and command to its replacement.
 
 ### Breaking Changes
 
-- **SPEC-35.2**: The MCP server exposes the 1.0 `bm_*` tools: `bm_read`, `bm_write`,
+- **SPEC-35.2: the MCP server exposes only the 1.0 `bm_*` tools**: `bm_read`, `bm_write`,
   `bm_edit`, `bm_delete`, `bm_move`, `bm_search`, `bm_context`, `bm_list`, `bm_find`,
   `bm_project`, `bm_schema` and `bm_man`, plus the separate, opt-in
   `bm_project_delete`. They replace the earlier tools one for one or by command:
   `read_note`/`read_content`/`view_note`/`cat` become `bm_read`, `search_notes`/`grep`
-  become `bm_search`, `recent_activity` and the project tools become `bm_project`, and
-  the schema tools become `bm_schema`. Arguments change too: `project` takes a name,
-  a workspace-qualified name or an external ID; search takes `mode`, `filters`,
-  `items`, `since` and `all_projects`; edits take `command`; context takes
-  `identifier` and `since`. Refusals are MCP tool errors with a typed `error`
+  become `bm_search`, `build_context` becomes `bm_context`, `recent_activity` and the
+  project tools become `bm_project`, and the schema tools become `bm_schema`. The old
+  tools and their modules are deleted, with no aliases. Arguments change too:
+  `project` takes a name, a workspace-qualified name or an external ID; search takes
+  `mode`, `filters`, `items`, `since` and `all_projects`; edits take `command`; context
+  takes `identifier` and `since`. Refusals are MCP tool errors with a typed `error`
   (`NOT_FOUND`, `ALREADY_EXISTS`, `REVISION_CONFLICT`, `LOCKED`, `OUTSIDE_PROJECT`,
   ...). Update MCP allowlists, agent instructions, hooks and recorded fixtures, then
-  restart clients so they reload the tool schemas. The CLI's `bm tool` commands keep
-  their names. `docs/1.0.md` has the full mapping (#1838, #1839, #1849).
+  restart clients so they reload the tool schemas (#1838, #1839, #1849, #1944, #1947,
+  #1959, #1962, #1963, #1964).
 
-- With several projects available, note and search tools require an explicit
-  `project` or a project-qualified target, even when a default project is set. A
-  relative path no longer selects a project because it contains a slash.
+- **Every project-scoped tool requires `project`.** `bm_read`, `bm_write`, `bm_edit`,
+  `bm_move`, `bm_delete`, `bm_list`, `bm_find`, `bm_context` and `bm_schema` require a
+  nonempty `project`, even with one project or a configured default.
+  `bm_search` requires `project`, `projects` or `all_projects=true`, and
+  `bm_project(command="recent")` requires `project`. A relative path no longer selects
+  a project because it contains a slash. `bm_list(path="/")` lists the project's
+  root; `bm_project(command="list")` lists projects (#1934).
+
+- **The ChatGPT `search`/`fetch` adapters are no longer in the local server.** The
+  hosted Cloud server provides them (#1964).
+
+- **`bm tool` mirrors the `bm_*` tools.** One subcommand per tool (`read`, `write`,
+  `edit`, `move`, `delete`, `list`, `find`, `search`, `context`, `project`, `schema`),
+  with flags named after the tool's parameters (`--directory`, `--note-type`,
+  `--command`, `--since`, `--mode`, `--items`, `--filters`). The subcommands
+  `recent`, `projects`, `workspaces`, `validate`, `infer` and `diff` are removed, as are
+  the old flags (`--folder`, `--operation`, `--after_date`, `--meta`), `--project-id`
+  (`--project` takes an ID), `--plain`, and automatic JSON when piped. Output is the
+  tool's text, or its JSON with `--json` (#1943).
+
+- **`bm cat`, `head`, `grep`, `ls`, `find` and `tree` run on the `bm_*` tools, and
+  `bm tail` is removed** (use `bm tool project recent`) (#1960). Behavior changes:
+  - `--plain`, the Rich tables and JSON-when-piped are gone; output is the tool's
+    text, or `--json`. `--project-id` is gone; pass the ID to `--project`.
+  - Without `--project`, the default project is used. A `<project>/path` prefix no
+    longer selects the project by itself, and a prefix that disagrees with
+    `--project` is refused.
+  - `bm ls /` lists the default project's root; `bm project list` lists projects.
+  - `bm cat --lines` always counts the whole file, frontmatter included, and slices
+    print numbered lines under a `Lines N-M of T` header. `bm head` loses
+    `--frontmatter`/`--no-frontmatter` and prints numbered lines.
+  - `bm grep -C/--context-lines` becomes `-C/--lines`, and `grep -C` drops notes with
+    no matching line. `bm grep` returns notes only.
+  - `--page-size` is 1-100 on every verb, and `bm find --fields` prints the tool's
+    text. New flags: `bm grep --path`, `bm ls --glob`, `bm ls --sort`.
+
+- **`bm cloud sync`, `bisync` and `bisync-reset` are removed.** They could delete
+  cloud-only or local files. Use `bm cloud pull` and `bm cloud push`, which never delete
+  on the destination and stop on conflicts until you pick `--on-conflict`. The old
+  commands print the matching pull/push command and exit 1 without touching files
+  (#1953, fixes #1845).
+
+- **`bm schema` resolves its project like `bm tool`.** `--project` accepts a
+  `workspace/project` name or a project ID, an unknown project fails with the tool's
+  error, and with no `--project` and no default project it exits 1 (#1959).
+
+- **LiteLLM is an optional extra.** The default install no longer includes the
+  LiteLLM SDK. If you use LiteLLM embeddings or reranking, install
+  `basic-memory[litellm]` (`441166185`).
 
 ### Features
+
+- **`bm_read` reads line ranges of plain text files**, such as `.txt` and logs, with
+  `start_line`/`end_line` (#1960).
+
+- **Chat imports return the paths of the files they wrote** (#1878).
 
 - **`bm_man` and 1.0 manual pages**: every `bm_*` tool has a section 3 manual page,
   served over MCP and by `bm man` (`aa8bf2644`).
@@ -43,6 +97,56 @@ working migration guide; this entry gets its version heading when the release is
   its suggested fixes (`573c3dfab`).
 
 ### Bug Fixes
+
+- Startup project indexes were unowned background tasks that could outlive the
+  server's database. They now run with the watcher, stop with it, and a project whose
+  index fails is logged without stopping the watcher (#1967).
+
+- **#1956**: Title search ranks the note whose title equals the query first, ahead of
+  longer titles that contain it. Thanks @Flynn-Kawolsky for the report and the minimal
+  repro (#1957).
+
+- **#1852**: File events that arrived while the watcher reloaded its project list were
+  dropped. They are now kept and indexed. Thanks @SWSAmor for the precise reproduction
+  (#1951).
+
+- One project whose directory no longer exists stopped file watching for every
+  project. The watcher now leaves that project out and logs it (#1971).
+
+- On SQLite, `a AND NOT b` returned no results; it now means `a NOT b`, as it already
+  did on Postgres (#1972).
+
+- **#1826**: A note whose search rows were lost (a migration that recreated the
+  search index, a dropped refresh) stayed unsearchable, with no vectors, because its
+  unchanged file never reached an index batch. Each index pass now rebuilds missing
+  search rows and their vectors, and project status counts those notes (#1954).
+
+- **#1862**: With an OpenAI-compatible endpoint that returns unnormalized vectors
+  (such as Volcengine Ark), every semantic match fell below the similarity floor, so
+  vector and hybrid search returned nothing on SQLite. The OpenAI provider now
+  normalizes vectors; with a custom `api_base`, the next index pass re-embeds stored
+  vectors automatically. Thanks @MbappeWU, who diagnosed this and proposed the fix in
+  #1869 (#1948).
+
+- Search ranking weights a note's title above its body in the SQLite bm25 score and
+  keeps weighted scores across metadata filters (`56ba5a96a`, `e2a1a0780`,
+  `6eda1221c`).
+
+- Relation sources are re-embedded after a forward reference resolves (#1884).
+
+- Ignore rules for a directory apply to the files under it, nested directory rules
+  match by ancestry, and a byte-order mark at the start of an ignore file is skipped
+  (#1929, #1949).
+
+- Moves keep the configured project root (#1930). A timed-out search is reported as a
+  tool error (#1942). Malformed `memory://` context locators return 400 (#1885). The
+  JSON project list honors a server's project constraint (#1937).
+
+- Tool output reads better: retry hints name the project as the call did, filter-only
+  results show no score, `tag:` queries are repeated as typed, and section errors end
+  their list with a period (#1974).
+
+- The OpenClaw plugin works on OpenClaw 2026.10 (#1966).
 
 - **#1817**: Files copied into a newly created project's folder before the watcher
   reloaded were never indexed, and the watcher ignored projects added after startup.
@@ -84,6 +188,24 @@ working migration guide; this entry gets its version heading when the release is
 
 - Recovery guidance in tool errors and the manuals now name the `bm_*` tools
   (#1864, #1868).
+
+### Security
+
+These come from a security review of the codebase (CodeRabbit deep scan).
+
+- Project boundaries are enforced where imports and storage write files, against the
+  resolved project root (#1931, `e46f1b4c5`).
+- Note YAML rejects aliases and merge keys, which could expand without bound (#1933).
+- ZIP imports, search queries, CSV previews, Markdown directive scanning, find/replace
+  output, section heading suffixes and ChatGPT conversation graphs are bounded (#1939,
+  #1927, #1926, `74e41b739`, `5f8a0303a`, #1916).
+- Atomic file writes stage privately, and rclone credentials are created with private
+  permissions (#1925, `1b8713e49`, `df611b0dc`).
+- Literal directory prefixes are escaped before moves (#1915). Legacy directory uploads
+  skip file symlinks, and upload destinations are validated after normalization
+  (`d6d289d3e`, #1928).
+- `bm cloud api-key save` prompts for the key without echoing it, so the key no longer
+  has to appear in shell history (#1938).
 
 ## v0.24.1 (2026-10-22)
 
