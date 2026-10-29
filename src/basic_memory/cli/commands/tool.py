@@ -18,9 +18,8 @@ import typer
 from pydantic import BaseModel
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.command_utils import project_or_default, run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager
 
 # MCP tool functions are imported inside each command: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
@@ -75,15 +74,12 @@ def run_tool(
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)
 
-    # Trigger: no --project on a command whose tool needs one.
+    # Trigger: a command whose tool needs a project.
     # Why: MCP callers must name a project, but a person at a shell has a default
     #      project in config, and every other `bm` command already uses it.
     # Outcome: the configured default, or a clear error when none is set.
-    if project is None and default_to_config_project:
-        project = ConfigManager().config.default_project
-        if project is None:
-            typer.echo("Error: no default project is set; pass --project.", err=True)
-            raise typer.Exit(1)
+    if default_to_config_project:
+        project = project_or_default(project)
     arguments["project"] = project
 
     # Only arguments the user supplied are passed, so each tool's own default applies.

@@ -216,8 +216,18 @@ def test_diff_without_schema_prints_message(app, test_project, config_manager) -
 # --- project resolution ---
 
 
+def test_project_passes_through_like_bm_tool(app, test_project, config_manager) -> None:
+    """--project goes to bm_schema unchanged, so a project id routes as it does in bm tool."""
+    write_people(test_project)
+
+    data = bm_schema_json("validate", "person", "--project", test_project.external_id)
+
+    assert data["total_notes"] == 2
+
+
 def test_unknown_project_fails(app, test_project, config_manager) -> None:
     result = bm_schema("validate", "--project", "missing")
 
     assert result.exit_code == 1
-    assert "No project found named: missing" in result.stderr
+    assert "Error during schema validate" in result.stderr
+    assert "missing" in result.stderr

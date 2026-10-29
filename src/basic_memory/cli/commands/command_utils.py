@@ -56,6 +56,25 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(_with_cleanup())
 
 
+def project_or_default(project: str | None) -> str:
+    """The --project value, or the configured default project for a command that needs one.
+
+    The bm_* tools take a required project. A person at a shell has a default project
+    in config, and every other `bm` command already uses it. The value passes through
+    unchanged, so 'workspace/project' and project ids route the way the tools route them.
+    """
+    if project is not None:
+        return project
+    default_project = ConfigManager().config.default_project
+    # Trigger: no --project and no default project in config.
+    # Why: the bm_* tools have no project fallback of their own in 1.0.
+    # Outcome: a clear error instead of a tool call with no project.
+    if default_project is None:
+        typer.echo("Error: no default project is set; pass --project.", err=True)
+        raise typer.Exit(1)
+    return default_project
+
+
 async def run_project_index(
     project: Optional[str] = None,
     force_full: bool = False,

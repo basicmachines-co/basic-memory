@@ -16,9 +16,8 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_schema_tool
+from basic_memory.cli.commands.command_utils import project_or_default, run_schema_tool
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager
 from basic_memory.cli.markup import literal
 
 # MCP tool functions are imported inside each command: importing
@@ -29,23 +28,6 @@ console = Console()
 
 schema_app = typer.Typer(help="Schema management commands")
 app.add_typer(schema_app, name="schema")
-
-
-def _resolve_project_name(project: Optional[str]) -> str:
-    """Resolve project name from CLI argument or config default."""
-    config_manager = ConfigManager()
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-        return project_name
-    # default_project may be unset on purpose (automatic project resolution disabled),
-    # and bm_schema needs a named project.
-    if config_manager.default_project is None:
-        typer.echo("No project given and no default project is set; pass --project.", err=True)
-        raise typer.Exit(1)
-    return config_manager.default_project
 
 
 # --- Rendering helpers ---
@@ -202,7 +184,7 @@ def validate(
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         # Heuristic: if target contains / or ., treat as identifier; otherwise as note type
         note_type, identifier = None, None
@@ -289,7 +271,7 @@ def infer(
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
@@ -365,7 +347,7 @@ def diff(
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
