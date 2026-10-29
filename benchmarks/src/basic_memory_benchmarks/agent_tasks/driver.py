@@ -390,18 +390,22 @@ def verify_seeded_recency(*, prefix: list[str], env: dict[str, str], project: Ta
     result = run_command(
         prefix
         + [
-            "tail",
+            "tool",
+            "project",
+            "recent",
             "--project",
             project.name,
-            "--timeframe",
+            "--since",
             SEEDED_RECENCY_WINDOW,
-            "-n",
+            "--items",
+            "note",
+            "--page-size",
             "100",
             "--json",
         ],
         env=env,
     )
-    recent = {row["file_path"] for row in json.loads(result.stdout)}
+    recent = {row["file_path"] for row in json.loads(result.stdout)["results"]}
     mismatch = recency_mismatch(recent, set(TIMESTAMPS))
     if mismatch is not None:
         raise SeedingError(

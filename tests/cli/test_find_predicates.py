@@ -10,7 +10,7 @@ file pins the translations those rely on.
 import pytest
 
 import basic_memory.mcp.metadata_find as metadata_find
-from basic_memory.mcp.tools.posix_tools import _parse_meta_predicates
+from basic_memory.cli.commands.find_predicates import parse_meta_predicates
 from basic_memory.repository.metadata_filters import (
     MetadataPath,
     ParsedMetadataFilter,
@@ -61,7 +61,7 @@ PREDICATE_GRAMMAR = [
 
 @pytest.mark.parametrize(("predicate", "expected"), PREDICATE_GRAMMAR)
 def test_parse_meta_predicate_grammar(predicate, expected):
-    assert _parse_meta_predicates([predicate]) == expected
+    assert parse_meta_predicates([predicate]) == expected
 
 
 @pytest.mark.parametrize(("predicate", "expected"), PREDICATE_GRAMMAR)
@@ -72,7 +72,7 @@ def test_parsed_predicates_are_valid_api_metadata_filters(predicate, expected):
     dict through it proves the CLI grammar is a strict subset rather than a
     parallel dialect that only fails at request time.
     """
-    assert parse_metadata_filters(_parse_meta_predicates([predicate]))
+    assert parse_metadata_filters(parse_meta_predicates([predicate]))
 
 
 @pytest.mark.parametrize(
@@ -95,11 +95,11 @@ def test_predicate_values_are_json_scalar_inferred(predicate, expected_value):
     filters caller would pass."""
     key = predicate.split("=", 1)[0]
 
-    assert _parse_meta_predicates([predicate]) == {key: expected_value}
+    assert parse_meta_predicates([predicate]) == {key: expected_value}
 
 
 def test_parse_meta_predicates_and_together():
-    assert _parse_meta_predicates(["status=active", "confidence>0.6"]) == {
+    assert parse_meta_predicates(["status=active", "confidence>0.6"]) == {
         "status": "active",
         "confidence": {"$gt": 0.6},
     }
@@ -118,11 +118,11 @@ def test_one_path_grammar_governs_predicates_and_filters(key):
     well_formed = parse_metadata_path(key) is not None
 
     if well_formed:
-        assert _parse_meta_predicates([f"{key}=x"]) == {key: "x"}
+        assert parse_meta_predicates([f"{key}=x"]) == {key: "x"}
         assert parse_metadata_filters({key: "x"})
     else:
         with pytest.raises(ValueError, match="malformed predicate key"):
-            _parse_meta_predicates([f"{key}=x"])
+            parse_meta_predicates([f"{key}=x"])
         with pytest.raises(ValueError, match="Unsupported metadata filter key"):
             parse_metadata_filters({key: "x"})
 
@@ -160,7 +160,7 @@ def test_null_equality_reaches_the_api_as_an_is_null_clause():
     The API parser turns it into an IS NULL clause; an ordinary equality clause
     would be `= NULL`, which no row satisfies.
     """
-    filters = _parse_meta_predicates(["owner=null"])
+    filters = parse_meta_predicates(["owner=null"])
 
     assert filters == {"owner": None}
     assert parse_metadata_filters(filters) == [ParsedMetadataFilter(["owner"], "is_null", None)]

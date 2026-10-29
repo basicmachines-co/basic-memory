@@ -64,6 +64,39 @@ def run_tool(
     **arguments: Any,
 ) -> None:
     """Call a bm_* tool with MCP argument validation and print its result."""
+    result = call_tool(
+        tool,
+        project=project,
+        output_format="json" if json_output else "text",
+        local=local,
+        cloud=cloud,
+        default_to_config_project=default_to_config_project,
+        **arguments,
+    )
+    if json_output:
+        # bm_read returns image and document content as MCP content models; dump them
+        # with their wire names (mimeType), as an MCP client sees them.
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json", by_alias=True)
+        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+    else:
+        print(result)
+
+
+def call_tool(
+    tool: Callable[..., Coroutine[Any, Any, Any]],
+    *,
+    project: str | None,
+    output_format: str,
+    local: bool,
+    cloud: bool,
+    default_to_config_project: bool = True,
+    **arguments: Any,
+) -> Any:
+    """Call a bm_* tool with MCP argument validation and return its result.
+
+    A refusal or an invalid argument prints to stderr and exits 1.
+    """
     # Deferred with the tool stack (#886).
     from fastmcp.exceptions import ToolError
     from pydantic import ValidationError, validate_call
@@ -90,7 +123,7 @@ def run_tool(
             result = run_with_cleanup(
                 validated_tool(
                     **supplied,
-                    output_format="json" if json_output else "text",
+                    output_format=output_format,
                     # Outside an MCP request there is no FastMCP context to inject.
                     context=None,
                 )
@@ -103,15 +136,7 @@ def run_tool(
     except ToolError as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)
-
-    if json_output:
-        # bm_read returns image and document content as MCP content models; dump them
-        # with their wire names (mimeType), as an MCP client sees them.
-        if isinstance(result, BaseModel):
-            result = result.model_dump(mode="json", by_alias=True)
-        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
-    else:
-        print(result)
+    return result
 
 
 # --- Notes ---

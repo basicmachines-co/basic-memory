@@ -23,7 +23,7 @@ multi-word or month-only date is written: `@occurred:"June 10, 2026"`, `@"June 2
 Quoting settles where the token ends; it does not make a date mean something fixed, so
 `@occurred:"2 days ago"` is delimited and still refused. The closing quote is the token
 boundary, so whatever follows it is ordinary content, and a `\\"` inside the value does
-not end the token. The scan mirrors `_split_predicate_items` in `mcp/tools/posix_tools.py`, down to
+not end the token. The scan mirrors `_split_predicate_items` in `cli/commands/find_predicates.py`, down to
 its rule that an unterminated quote is a typo to report rather than a boundary to guess
 at -- scanning on to end of line would hand the author's prose to dateparser. Only the
 double quote opens the form: an apostrophe is ordinary punctuation, and a scan looking

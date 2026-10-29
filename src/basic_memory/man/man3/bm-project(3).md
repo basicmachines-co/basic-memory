@@ -41,7 +41,7 @@ While the local server is running, its watcher picks up a new project's folder
 at the next project reload. Once the watch is attached, a one-time index pass
 includes files copied in before attachment; later changes use normal file events.
 
-The shell counterpart for `recent` is tail(1).
+The shell spelling of `recent` is `bm tool project recent`.
 
 ## PARAMETERS
 
@@ -78,6 +78,5 @@ bm_project(command="recent", since="1d", project="demo")
 
 ## SEE ALSO
 
-- see_also [[tail(1)]]
 - see_also [[bm-project-delete(3)]]
 - see_also [[bm-list(3)]]

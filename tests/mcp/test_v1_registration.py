@@ -6,7 +6,6 @@ import sys
 import pytest
 from fastmcp.exceptions import NotFoundError
 
-from implementation_mcp import IMPLEMENTATION_NAMES
 from basic_memory.mcp import tools
 from basic_memory.mcp.server import mcp, set_project_delete_visibility
 
@@ -24,7 +23,24 @@ V1_TOOLS = {
     "bm_schema",
     "bm_project",
 }
-RETIRED_TOOLS = frozenset(IMPLEMENTATION_NAMES)
+# Pre-1.0 tool names; none may be callable on the 1.0 server.
+RETIRED_TOOLS = frozenset(
+    {
+        "build_context",
+        "cat",
+        "edit_note",
+        "find",
+        "grep",
+        "list_memory_projects",
+        "ls",
+        "man",
+        "read_note",
+        "recent_activity",
+        "search_notes",
+        "tail",
+        "write_note",
+    }
+)
 
 
 def test_fresh_process_exposes_only_v1_tools() -> None:

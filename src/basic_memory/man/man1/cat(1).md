@@ -18,43 +18,41 @@ generated: cli
 ```
 bm cat IDENTIFIER [--lines LINES | --section SECTION]
        [--max-tokens MAX_TOKENS] [--frontmatter | --no-frontmatter]
-       [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
-       [--local | --cloud]
+       [--project PROJECT] [--json] [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
-Prints one note, resolved exactly by title, permalink, or memory:// URL.
-The content can be sliced by a 1-indexed inclusive line range (`--lines
+Prints one note through `bm_read`, resolved by path, permalink, memory://
+URL, or exact title. The content can be sliced by a 1-indexed inclusive line range (`--lines
 "20-40"`, `"20-"` to the end, `"20"` for one line), by a heading
 (`--section Decisions`, path form `Auth/Decisions`, or `Heading[1]` for a
 duplicate), or truncated to an approximate token budget (`--max-tokens`).
 
-`--lines` and `--section` cannot be combined. A section response includes
-start_line and end_line for follow-up `--lines` reads.
+Line numbers count the whole file, frontmatter included; `--frontmatter` and
+`--no-frontmatter` shape only a whole-note read. `--lines` and `--section`
+cannot be combined. A section response includes start_line and end_line for
+follow-up `--lines` reads.
 
-Projects in another cloud workspace are not among the session's own
-projects. Address them as `<workspace-slug>/<project>/<path>`, or pass
-`--project-id` (pass the UUID as `project` in MCP calls). A bare `<project>/<path>` never
-reaches another workspace; when its first segment names a project there, the
-refusal names the workspace and both spellings that work.
-`bm_project(command="list")` (`bm project list`) lists every workspace's projects.
+Without `--project` the configured default project is used. A path may start
+with the project's own name (`<project>/<path>`) when it agrees with `--project`;
+a prefix naming a different project is refused. Projects in another cloud
+workspace are addressed as `--project <workspace-slug>/<project>` or
+`--project <uuid>`; `bm project list` lists every workspace's projects.
 
-On a TTY the note renders as formatted Markdown; `--plain` writes the raw
-content to stdout (slice details go to stderr); `--json`, or piped output,
-emits the structured payload with slice metadata (start_line, end_line,
-total_lines, truncated, continue_line).
+A whole-note read prints the note itself. A slice prints numbered lines under
+a `Lines N-M of T` header with the next range to read. `--json` prints
+`bm_read`'s payload with slice metadata (start_line, end_line, total_lines,
+has_more, next_start_line, truncated, continue_line).
 
 ## OPTIONS
 
-- **--lines** — Line range "N-M", "N-" (to end), or "N" (one line); 1-indexed inclusive
+- **--lines** — Line range "N-M", "N-" (to end), or "N" (one line); 1-indexed, frontmatter included
 - **--section** — Heading slice: "Decisions", "Auth/Decisions", or "Heading[1]"
-- **--max-tokens** — Approximate token budget; truncates at a section/paragraph boundary
-- **--frontmatter / --no-frontmatter** (default: --frontmatter) — Include the YAML frontmatter block (ignored for section/token slices)
-- **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--project** — The project to use. If not provided, the default project will be used.
-- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--max-tokens** — Approximate token budget; cuts at a section or paragraph boundary
+- **--frontmatter / --no-frontmatter** (default: --frontmatter) — Include the YAML frontmatter in a whole-note read
+- **--project** — Project name, 'workspace/project', or project id. Defaults to the default project.
+- **--json** — Print the tool's JSON result
 - **--local** — Force local API routing (ignore cloud mode)
 - **--cloud** — Force cloud API routing
 
@@ -62,7 +60,7 @@ total_lines, truncated, continue_line).
 
 ```
 bm cat specs/search
-bm cat specs/search --lines 20-40 --plain
+bm cat specs/search --lines 20-40
 bm cat specs/search --section Decisions --max-tokens 500
 ```
 

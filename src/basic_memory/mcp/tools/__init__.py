@@ -5,16 +5,6 @@ Basic Memory through the MCP protocol. Importing this module registers
 all tools with the MCP server.
 """
 
-# Shared POSIX implementations used by the shell commands.
-from basic_memory.mcp.tools.posix_tools import (
-    cat as cat,
-    find as find,
-    grep as grep,
-    ls as ls,
-    man as man,
-    tail as tail,
-)
-
 # 1.0 tool surface (SPEC-35.2, #1827).
 from basic_memory.mcp.tools.context import bm_context
 from basic_memory.mcp.tools.delete import bm_delete

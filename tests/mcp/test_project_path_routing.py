@@ -43,7 +43,6 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.project_context_identifiers import (
     split_project_permalink_prefix,
 )
-from basic_memory.mcp.tools import grep, ls
 from basic_memory.mcp.workspace_project_index import (
     WorkspaceProjectEntry,
     WorkspaceProjectIndex,
@@ -955,13 +954,13 @@ async def test_cloud_workspace_refuses_unqualified_path(cloud_session):
 
 
 @pytest.mark.asyncio
-async def test_cloud_workspace_refuses_pathless_call_through_the_tool(cloud_session):
-    """grep/tail carry no path to qualify, so the refusal is the tool's answer:
+async def test_cloud_workspace_refuses_pathless_route(cloud_session):
+    """A pathless call has nothing to qualify, so the refusal is the answer:
     a silent search of one project out of several is the bug being removed."""
     cloud_session("research", "engineering")
 
     with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
-        await grep("needle")
+        await resolve_project_path_route("", project=None, project_id=None)
 
     assert str(excinfo.value) == ("no project specified — active projects: engineering/, research/")
 
@@ -1238,7 +1237,7 @@ async def test_cloud_every_advertised_mount_is_addressable_under_slug_collision(
     itself, and so does every other mount beside it."""
     cloud_session("team", "docs")
 
-    mounts = await ls()
+    mounts = await project_mount_listing(page=1, page_size=10, context=None)
 
     assert [node["name"] for node in mounts["nodes"]] == ["docs", "team"]
     for node in mounts["nodes"]:
@@ -1267,7 +1266,7 @@ async def test_cloud_every_advertised_mount_is_addressable(cloud_session):
     the mismatch #1421 reported."""
     cloud_session("research", "engineering", "personal-notes")
 
-    mounts = await ls()
+    mounts = await project_mount_listing(page=1, page_size=10, context=None)
 
     assert [node["name"] for node in mounts["nodes"]] == [
         "engineering",
@@ -1787,7 +1786,7 @@ async def test_cloud_root_listing_names_the_other_workspaces(cross_workspace_ses
         default_projects=("notes",),
     )
 
-    mounts = await ls()
+    mounts = await project_mount_listing(page=1, page_size=10, context=None)
 
     assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
     assert mounts["workspaces"] == ["acme", "beta"]
@@ -1811,7 +1810,7 @@ async def test_cloud_root_listing_survives_failed_workspace_discovery(
 
     monkeypatch.setattr(project_context, "get_available_workspaces", failing_workspaces)
 
-    mounts = await ls()
+    mounts = await project_mount_listing(page=1, page_size=10, context=None)
 
     assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
     assert "workspaces" not in mounts
@@ -1821,7 +1820,7 @@ async def test_cloud_root_listing_survives_failed_workspace_discovery(
 async def test_cloud_single_workspace_root_listing_adds_nothing(cloud_session):
     cloud_session("research", "engineering")
 
-    mounts = await ls()
+    mounts = await project_mount_listing(page=1, page_size=10, context=None)
 
     assert "workspaces" not in mounts
     assert "note" not in mounts

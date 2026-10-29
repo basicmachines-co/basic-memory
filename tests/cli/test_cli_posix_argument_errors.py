@@ -1,8 +1,9 @@
 """Argument refusals of the POSIX verbs, through the `bm` CLI.
 
-Every case here is refused before the command routes or opens a client, so the
-tests run the real command with no project data behind it. A refusal is exit 1
-with the reason on stderr; behavior that needs notes lives in
+Every case here is refused before the command reads any project data: by the
+CLI's own parsing (--lines, the --meta grammar), by the bm_* tool's argument
+validation, or by the tool's up-front refusals. A refusal is exit 1 with the
+reason on stderr. Behavior that needs notes lives in
 test-int/cli/test_posix_commands_integration.py.
 """
 
@@ -21,115 +22,104 @@ def assert_refused(args: list[str], message: str) -> None:
     assert message in result.stderr
 
 
-# --- cat ---
+# --- cat (bm_read) ---
 
 
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["--section", "A", "--lines", "2-"], "cannot be combined with start_line/end_line"),
-        (["--section", "A", "--lines", "1-3"], "cannot be combined with start_line/end_line"),
-        (["--max-tokens", "0"], "max_tokens must be >= 1"),
-        (["--max-tokens", "-5"], "max_tokens must be >= 1"),
-        # A line range with max_tokens is document-absolute (frontmatter included);
-        # --no-frontmatter ranges are body-relative, so mixing the two is refused.
         (
-            ["--max-tokens", "5", "--lines", "2-", "--no-frontmatter"],
-            "requires include_frontmatter=True",
+            ["--section", "A", "--lines", "2-"],
+            "section cannot be combined with start_line/end_line",
         ),
         (
-            ["--max-tokens", "5", "--lines", "1-3", "--no-frontmatter"],
-            "requires include_frontmatter=True",
+            ["--section", "A", "--lines", "1-3"],
+            "section cannot be combined with start_line/end_line",
         ),
-        (["--lines", "0"], "start_line must be >= 1"),
-        (["--lines", "0-4"], "start_line must be >= 1"),
-        (["--lines", "2-1"], "end_line must be >= start_line"),
-        (["--lines", "abc"], '--lines must be "N-M"'),
+        (["--max-tokens", "0"], "--max-tokens: Input should be greater than or equal to 1"),
+        (["--lines", "0"], "--start-line: Input should be greater than or equal to 1"),
+        (["--lines", "0-4"], "--start-line: Input should be greater than or equal to 1"),
+        (["--lines", "2-1"], "end_line (1) is before start_line (2)"),
+        (["--lines", "abc"], '--lines must be "N-M", "N-" (to end), or "N" (one line)'),
+        (["--lines", "1-x"], '--lines must be "N-M"'),
     ],
 )
 def test_cat_refuses_bad_slice_arguments(args, message):
     assert_refused(["cat", "anything", *args], message)
 
 
-# --- grep ---
+# --- grep (bm_search) ---
 
 
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        ([""], "pattern must not be empty"),
-        (["   "], "pattern must not be empty"),
-        (["ok", "--page", "0"], "page must be >= 1"),
-        (["ok", "--page-size", "0"], "page_size must be >= 1"),
-        (["ok", "--max-matches", "3"], "max_matches requires context_lines"),
-        (["ok", "-C", "1", "--semantic"], "context_lines cannot be combined with semantic"),
-        (["ok", "-C", "1", "--page-size", "101"], "line scanning page_size must be <= 100"),
+        (["--page", "0"], "--page: Input should be greater than or equal to 1"),
+        (["--page-size", "0"], "--page-size: Input should be greater than or equal to 1"),
+        (["--page-size", "101"], "--page-size: Input should be less than or equal to 100"),
+        (["-C", "11"], "--lines: Input should be less than or equal to 10"),
+        (["--max-matches", "0"], "--max-matches: Input should be greater than or equal to 1"),
+        (["--max-matches", "3"], "`max_matches` bounds matching lines; it needs `lines`"),
     ],
 )
 def test_grep_refuses_bad_arguments(args, message):
-    assert_refused(["grep", *args], message)
+    assert_refused(["grep", "ok", *args], message)
 
 
-# --- ls ---
+# --- ls (bm_list) ---
 
 
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["--page", "0"], "page must be >= 1"),
-        (["--page-size", "0"], "page_size must be >= 1"),
-        (["--page-size", "201"], "page_size must be <= 200"),
+        (["--page", "0"], "--page: Input should be greater than or equal to 1"),
+        (["--page-size", "101"], "--page-size: Input should be less than or equal to 100"),
+        (["--sort", "bogus"], "--sort: Input should be 'title_asc'"),
     ],
 )
-def test_ls_refuses_bad_pagination(args, message):
+def test_ls_refuses_bad_arguments(args, message):
     assert_refused(["ls", *args], message)
 
 
-# --- find (directory listing) ---
+# --- find / tree (bm_find) ---
 
 
 @pytest.mark.parametrize(
     ("args", "message"),
     [
-        (["--page", "0"], "page must be >= 1"),
-        (["--page-size", "0"], "page_size must be >= 1"),
-        (["--page-size", "201"], "page_size must be <= 200"),
-    ],
-)
-def test_find_refuses_bad_pagination(args, message):
-    assert_refused(["find", *args], message)
-
-
-# --- find --meta: combination rules ---
-
-
-@pytest.mark.parametrize(
-    ("args", "message"),
-    [
-        # The search API has no filename-glob facility, so a --name pattern has
-        # no faithful translation; refuse rather than silently ignore it.
-        (["--name", "*.md", "--meta", "status=active"], "'name' cannot combine with 'meta'"),
-        # The file-path scope is whole-subtree; a depth bound is inexpressible.
-        (["--depth", "3", "--meta", "status=active"], "'depth' cannot combine with 'meta'"),
-        (["--fields", "title"], "'fields' requires 'meta' predicates"),
+        (["--page", "0"], "--page: Input should be greater than or equal to 1"),
+        (["--page-size", "101"], "--page-size: Input should be less than or equal to 100"),
+        (["--depth", "0"], "--depth: Input should be greater than or equal to 1"),
+        (["--depth", "11"], "--depth: Input should be less than or equal to 10"),
+        # The frontmatter search has no file-name glob and no depth bound, so
+        # both are refused rather than silently ignored.
+        (["--name", "*.md", "--meta", "status=active"], "`name` cannot combine with `filters`"),
+        (["--depth", "3", "--meta", "status=active"], "`depth` cannot combine with `filters`"),
+        (["--fields", "title"], "`fields` needs `filters`"),
         (["--meta", "status=active", "--fields", ""], "must be non-empty"),
-        (["--meta", "status=active", "--fields", "  "], "must be non-empty"),
         (["--meta", "status=active", "--fields", "title,"], "must be non-empty"),
-        # A malformed field path walked an empty segment to null for every hit,
-        # which reads exactly like a field the notes do not carry.
+        # A malformed field path would project to null for every hit, which reads
+        # exactly like a field the notes do not carry.
         (["--meta", "status=active", "--fields", "review..approved"], "malformed field path"),
         (["--meta", "status=active", "--fields", ".owner"], "malformed field path"),
-        (["--meta", "status=active", "--fields", "owner."], "malformed field path"),
         (["--meta", "status=active", "--fields", "title,a..b"], "malformed field path"),
-        # The metadata arm bounds pagination exactly as the listing arm does,
-        # before routing rather than as a transport error from the search API.
-        (["--meta", "status=active", "--page", "0"], "page must be >= 1"),
-        (["--meta", "status=active", "--page-size", "0"], "page_size must be >= 1"),
-        (["--meta", "status=active", "--page-size", "201"], "page_size must be <= 200"),
+        (["--meta", "status=active", "--page", "0"], "--page: Input should be greater"),
     ],
 )
-def test_find_meta_combination_rules_refuse(args, message):
+def test_find_refuses_bad_arguments(args, message):
     assert_refused(["find", *args], message)
+
+
+def test_tree_refuses_bad_depth():
+    assert_refused(["tree", "--depth", "11"], "--depth: Input should be less than or equal to 10")
+
+
+def test_tail_is_gone():
+    """`bm tail` was removed in 1.0; `bm tool project recent` lists recent notes."""
+    result = runner.invoke(cli_app, ["tail"])
+
+    assert result.exit_code == 2
+    assert "No such command 'tail'" in result.stderr
 
 
 # --- find --meta: predicate grammar refusals ---

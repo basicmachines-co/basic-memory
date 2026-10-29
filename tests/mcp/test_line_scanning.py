@@ -1,15 +1,13 @@
-"""Exercise line reads and keyword grep through real project-scoped API clients."""
+"""Exercise line reads and line-match search through real project-scoped API clients."""
 
 import json
-from typing import Any
 
 import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.mcp.tools import bm_read, bm_write, cat, grep
-from basic_memory.schemas.search import SearchResponse
+from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.tools import bm_read, bm_search, bm_write
 from basic_memory.schemas.v2 import EntityResponseV2
 
 
@@ -20,14 +18,24 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
         for n in range(200)
     )
     await bm_write(title="Scan Note", directory="test", content=body, project=test_project.name)
-    full = await cat("Scan Note", project=test_project.name)
+    full = await bm_read("Scan Note", output_format="json", project=test_project.name)
+    assert isinstance(full, dict)
     lines = full["content"].splitlines()
     expected_matches = [n for n, line in enumerate(lines, 1) if "retry" in line]
 
-    result = await grep("retry", context_lines=1, max_matches=2, project=test_project.name)
-    ordinary = await grep("retry", project=test_project.name)
+    result = await bm_search(
+        "retry",
+        mode="text",
+        lines=1,
+        max_matches=2,
+        output_format="json",
+        project=test_project.name,
+    )
+    ordinary = await bm_search(
+        "retry", mode="text", output_format="json", project=test_project.name
+    )
+    assert isinstance(result, dict)
     assert len(json.dumps(result)) < len(json.dumps(ordinary)) / 2
-    assert result["pagination_scope"] == "search_candidates"
     row = result["results"][0]
     assert "content" not in row and "matched_chunk" not in row and "frontmatter" not in row
     assert row["match_count"] == 3
@@ -50,13 +58,6 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
     assert sliced["next_start_line"] == window["end_line"] + 1
     assert sliced["next_end_line"] == window["end_line"] + len(window["content"].splitlines())
     assert sliced["frontmatter"] is None
-    cat_slice = await cat(
-        row["file_path"],
-        start_line=window["start_line"],
-        end_line=window["end_line"],
-        project=test_project.name,
-    )
-    assert cat_slice["content"] == sliced["content"]
     assert len(json.dumps(sliced)) < len(json.dumps(full)) / 10
 
     numbered = await bm_read(
@@ -75,7 +76,8 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
     await bm_write(
         title="Bounds", directory="test", content="alpha\nbeta", project=test_project.name
     )
-    full = await cat("Bounds", project=test_project.name)
+    full = await bm_read("Bounds", output_format="json", project=test_project.name)
+    assert isinstance(full, dict)
     lines = full["content"].splitlines()
     opening = await bm_read("Bounds", end_line=2, output_format="json", project=test_project.name)
     assert isinstance(opening, dict)
@@ -101,7 +103,8 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
 @pytest.mark.asyncio
 async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monkeypatch) -> None:
     await bm_write(title="One Get", directory="test", content="alpha", project=test_project.name)
-    found = await grep("alpha", project=test_project.name)
+    found = await bm_search("alpha", mode="text", output_format="json", project=test_project.name)
+    assert isinstance(found, dict)
     identifier = found["results"][0]["external_id"]
     original = KnowledgeClient.get_entity
     calls: list[tuple[str, str | None]] = []
@@ -122,52 +125,6 @@ async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monk
     assert calls == [(identifier, "1-2")]
 
 
-@pytest.mark.asyncio
-async def test_grep_candidate_pagination_survives_no_current_match(
-    client, test_project, monkeypatch
-) -> None:
-    for title in ("First", "Second"):
-        await bm_write(title=title, directory="test", content="retry", project=test_project.name)
-    original = KnowledgeClient.get_entity
-
-    async def changed_content(self: KnowledgeClient, entity_id: str) -> EntityResponseV2:
-        entity = await original(self, entity_id)
-        # Simulate a newer accepted document while the index still matches retry.
-        return entity.model_copy(update={"content": "already fixed\n"})
-
-    monkeypatch.setattr(KnowledgeClient, "get_entity", changed_content)
-    first = await grep("retry", context_lines=0, page_size=1, project=test_project.name)
-    assert first["has_more"] is True
-    row = first["results"][0]
-    assert row["match_count"] == 0 and row["windows"] == []
-    assert row["total_lines"] == 1
-    assert row["next_match_line"] is None
-    second = await grep("retry", context_lines=0, page=2, page_size=1, project=test_project.name)
-    assert second["results"][0]["external_id"] != row["external_id"]
-
-
-@pytest.mark.asyncio
-async def test_grep_refuses_missing_candidate_identity(client, test_project, monkeypatch) -> None:
-    await bm_write(title="Legacy", directory="test", content="retry", project=test_project.name)
-    original = SearchClient.search
-
-    async def old_server(
-        self: SearchClient, query: dict[str, Any], *, page: int, page_size: int
-    ) -> SearchResponse:
-        response = await original(self, query, page=page, page_size=page_size)
-        return response.model_copy(
-            update={
-                "results": [
-                    row.model_copy(update={"external_id": None}) for row in response.results
-                ]
-            }
-        )
-
-    monkeypatch.setattr(SearchClient, "search", old_server)
-    with pytest.raises(ToolError, match="external_id"):
-        await grep("retry", context_lines=0, project=test_project.name)
-
-
 @pytest.mark.parametrize(
     "bounds", [{"start_line": 0}, {"end_line": 0}, {"start_line": 5, "end_line": 3}]
 )
@@ -181,34 +138,3 @@ async def test_invalid_read_bounds_fail_before_routing(bounds: dict[str, int]) -
             "bm_read", {"identifier": "any", "project": "any", **bounds}, raise_on_error=False
         )
     assert result.is_error
-
-
-@pytest.mark.parametrize(
-    ("semantic", "context_lines", "max_matches", "page_size", "pattern"),
-    [
-        (True, 1, 10, 10, "retry"),
-        (False, -1, 10, 10, "retry"),
-        (False, 11, 10, 10, "retry"),
-        (False, 0, 0, 10, "retry"),
-        (False, 0, 101, 10, "retry"),
-        (False, 0, 10, 101, "retry"),
-        (False, None, 3, 10, "retry"),
-        (False, 0, 10, 10, "a\nb"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_invalid_grep_options_fail_before_routing(
-    semantic: bool,
-    context_lines: int | None,
-    max_matches: int,
-    page_size: int,
-    pattern: str,
-) -> None:
-    with pytest.raises(ValueError):
-        await grep(
-            pattern,
-            semantic=semantic,
-            context_lines=context_lines,
-            max_matches=max_matches,
-            page_size=page_size,
-        )

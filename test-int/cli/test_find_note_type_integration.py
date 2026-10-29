@@ -132,11 +132,10 @@ def test_find_type_membership_preserves_scope_and_other_predicates(
             "status=Active",
             "--fields",
             "chapter_number",
-            "--plain",
         ],
     )
     assert result.exit_code == 0, result.output
-    assert 'book/Chapter One.md\t{"chapter_number":1}' in result.stdout
+    assert "- book/Chapter One.md | Chapter One | chapter_number=1" in result.stdout
     assert "Metaphor" not in result.stdout
     assert "Other Chapter" not in result.stdout
 

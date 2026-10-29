@@ -377,8 +377,8 @@ class ClickCommand(Protocol):
 
 
 # Option pairs the CLI rejects in combination — ``--json``/``--plain`` guarded by
-# _validate_output_flags and ``--local``/``--cloud`` by validate_routing_flags in
-# cli/commands/posix.py; cat's --lines/--section conflict in mcp/tools/posix_tools.py.
+# validate_output_flags (cli/commands/output.py), ``--local``/``--cloud`` by
+# validate_routing_flags, and cat's --lines/--section by bm_read's refusal.
 # Click carries no cross-parameter constraint, so the
 # generator must name them here: the SYNOPSIS shows a fully-present pair as one
 # ``[--json | --plain]`` alternative rather than two freely-combinable tokens, the

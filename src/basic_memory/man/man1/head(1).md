@@ -16,26 +16,23 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm head IDENTIFIER [--lines N] [--frontmatter | --no-frontmatter]
-        [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
+bm head IDENTIFIER [--lines N] [--project PROJECT] [--json]
         [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
-Prints the first `-n` lines (default 10) of one note, resolved exactly by
-title, permalink, or memory:// URL. head is `bm cat` with a fixed line
-range, so its JSON payload is exactly cat's: content plus start_line,
-end_line, and total_lines.
+Prints the first `-n` lines (default 10) of one note through `bm_read`,
+resolved by path, permalink, memory:// URL, or exact title. Lines count the
+whole file, frontmatter included. The text result numbers the lines; `--json`
+is `bm_read`'s slice payload: content plus start_line, end_line, total_lines,
+and the next range to read.
 
 ## OPTIONS
 
 - **-n, --lines** (default: 10) — Number of lines to print (from line 1)
-- **--frontmatter / --no-frontmatter** (default: --frontmatter) — Include the YAML frontmatter block
-- **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--project** — The project to use. If not provided, the default project will be used.
-- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--project** — Project name, 'workspace/project', or project id. Defaults to the default project.
+- **--json** — Print the tool's JSON result
 - **--local** — Force local API routing (ignore cloud mode)
 - **--cloud** — Force cloud API routing
 
@@ -43,11 +40,10 @@ end_line, and total_lines.
 
 ```
 bm head specs/search
-bm head specs/search -n 3 --plain
+bm head specs/search -n 3
 ```
 
 ## SEE ALSO
 
 - see_also [[cat(1)]]
-- see_also [[tail(1)]]
 - see_also [[bm-read(3)]]
