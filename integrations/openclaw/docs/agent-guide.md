@@ -166,7 +166,8 @@ write_note(
 ### `edit_note`
 **Purpose**: Modify existing notes incrementally
 **When to use**: To add updates, fix information, or organize existing content
-**Operations**: append, prepend, find_replace, replace_section
+**Operations**: append, prepend, find_replace, replace_section, insert_after_section, insert_before_section
+**Adding to a section**: `append` always adds to the very end of the note, after `## Relations`. To add an observation, use `insert_after_section` with `section="Observations"`; the text goes directly below that heading. `insert_before_section` adds directly above a heading, at the end of the section before it. `section` is only accepted with the three section operations.
 **Frontmatter updates**: Pass `metadata` to merge custom frontmatter fields in the same call. Provided keys replace existing values, unrelated fields remain unchanged, and nested objects are supported.
 
 **Examples**:
@@ -181,6 +182,14 @@ edit_note(
 Authentication implementation is complete. All tests passing.
 Next: Deploy to staging environment.
 """
+)
+
+# Add an observation to the Observations section
+edit_note(
+  identifier="projects/api-redesign",
+  operation="insert_after_section",
+  section="Observations",
+  content="- [decision] Ship token refresh behind a feature flag"
 )
 
 # Update a specific section

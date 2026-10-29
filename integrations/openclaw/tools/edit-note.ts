@@ -1,6 +1,11 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import {
+  type BmClient,
+  describeToolError,
+  type EditOperation,
+  isNoteNotFoundError,
+} from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerEditTool(
@@ -13,8 +18,11 @@ export function registerEditTool(
       label: "Edit Note",
       description:
         "Incrementally edit an existing note in the Basic Memory knowledge graph. " +
-        "Supports append, prepend, find/replace, and section replacement " +
-        "without rewriting the entire note. The result returns the note's " +
+        "Supports append, prepend, find/replace, replacing a section, and inserting " +
+        "next to a section heading, without rewriting the entire note. To add to a " +
+        "specific section (for example a new observation), use insert_after_section " +
+        "with that heading; append always adds to the very end of the note. " +
+        "The result returns the note's " +
         "permalink and file_path: cite those exact values when confirming " +
         "the edit — never report a save that no tool call performed.",
       parameters: Type.Object({
@@ -27,11 +35,15 @@ export function registerEditTool(
             Type.Literal("prepend"),
             Type.Literal("find_replace"),
             Type.Literal("replace_section"),
+            Type.Literal("insert_before_section"),
+            Type.Literal("insert_after_section"),
           ],
           {
             description:
-              "Edit operation: append (add to end), prepend (add to start), " +
-              "find_replace (replace matching text), replace_section (replace a heading section)",
+              "Edit operation: append (add to end of note), prepend (add to start), " +
+              "find_replace (replace matching text), replace_section (replace a heading section), " +
+              "insert_after_section (add directly below a heading, at the top of its section), " +
+              "insert_before_section (add directly above a heading, at the end of the section before it)",
           },
         ),
         content: Type.String({
@@ -45,7 +57,8 @@ export function registerEditTool(
         section: Type.Optional(
           Type.String({
             description:
-              "Section heading to replace (required for replace_section)",
+              "Section heading, e.g. 'Observations' (required for replace_section, " +
+              "insert_before_section and insert_after_section; not allowed with other operations)",
           }),
         ),
         expected_replacements: Type.Optional(
@@ -74,7 +87,7 @@ export function registerEditTool(
         _toolCallId: string,
         params: {
           identifier: string
-          operation: "append" | "prepend" | "find_replace" | "replace_section"
+          operation: EditOperation
           content: string
           find_text?: string
           section?: string
@@ -116,13 +129,17 @@ export function registerEditTool(
           }
         } catch (err) {
           log.error("edit_note failed", err)
+          // Trigger: any edit failure, including invalid arguments and
+          //   checksum conflicts, not only a missing note.
+          // Why: a blanket "may not exist" sent agents hunting for the wrong
+          //   problem; the server's message says what to change.
+          // Outcome: the agent sees the server's reason verbatim.
+          const reason = describeToolError(err)
+          const text = isNoteNotFoundError(err)
+            ? `Failed to edit note "${params.identifier}": it does not exist. ${reason}`
+            : `Failed to edit note "${params.identifier}": ${reason}`
           return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Failed to edit note "${params.identifier}". It may not exist.`,
-              },
-            ],
+            content: [{ type: "text" as const, text }],
             details: {
               identifier: params.identifier,
               operation: params.operation,

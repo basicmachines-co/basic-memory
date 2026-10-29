@@ -87,7 +87,7 @@ export interface EditNoteResult {
   title: string
   permalink: string
   file_path: string
-  operation: "append" | "prepend" | "find_replace" | "replace_section"
+  operation: EditOperation
   checksum?: string | null
 }
 
@@ -106,6 +106,16 @@ interface WriteNoteOptions {
   /** Checksum of the revision read; overwrite only while it is still current. */
   expectedChecksum?: string
 }
+
+// bm_edit commands the plugin exposes. set_metadata is left out: edit_note
+// already merges `metadata` alongside any other operation.
+export type EditOperation =
+  | "append"
+  | "prepend"
+  | "find_replace"
+  | "replace_section"
+  | "insert_before_section"
+  | "insert_after_section"
 
 interface EditNoteOptions {
   find_text?: string
@@ -281,6 +291,18 @@ function parseRefusalPayload(text: string): Record<string, unknown> | null {
     return null
   }
   return isRecord(parsed) && typeof parsed.error === "string" ? parsed : null
+}
+
+/**
+ * The server's own explanation of a failed tool call, for showing to an agent.
+ * A refusal payload becomes "CODE: message"; other tool text passes through.
+ */
+export function describeToolError(err: unknown): string {
+  if (!(err instanceof BmToolError)) return getErrorMessage(err)
+  const payload = parseRefusalPayload(err.toolMessage)
+  if (!payload) return err.toolMessage || err.message
+  const message = asString(payload.message)
+  return message ? `${payload.error}: ${message}` : String(payload.error)
 }
 
 function projectMatchesWorkspace(
@@ -811,7 +833,7 @@ export class BmClient {
 
   async editNote(
     identifier: string,
-    operation: "append" | "prepend" | "find_replace" | "replace_section",
+    operation: EditOperation,
     content: string,
     options: EditNoteOptions = {},
     project?: string,
