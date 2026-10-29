@@ -957,7 +957,7 @@ class SearchService:
         if not await self.repository.semantic_effectively_enabled():
             logger.warning("Skipping vector reindex: semantic search is unavailable on this host")
             return {
-                "total_entities": len(entity_ids),
+                "total_entities": len(entity_ids) + len(repair.failed_entity_ids),
                 "embedded": 0,
                 "skipped": len(entity_ids),
                 "errors": len(repair.failed_entity_ids),
@@ -1017,7 +1017,8 @@ class SearchService:
 
         await self.repository.reconcile_vector_index()
         stats = {
-            "total_entities": batch_result.entities_total,
+            # Failed repairs skip vector sync but are part of what this run covered.
+            "total_entities": batch_result.entities_total + len(repair.failed_entity_ids),
             "embedded": embedded,
             "skipped": skipped,
             "errors": errors,

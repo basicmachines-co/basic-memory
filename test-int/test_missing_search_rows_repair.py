@@ -338,7 +338,9 @@ async def test_one_unreadable_file_does_not_stop_the_repair(
     # reindex --embeddings reports the failed repair as an error instead of
     # embedding the entity with no source rows and reporting success.
     stats = await search_service.reindex_vectors(force_full=True)
-    assert stats["errors"] >= 1
+    assert stats["errors"] == 1
+    # The failed repair counts in the total, so errors never exceed what was attempted.
+    assert stats["total_entities"] == 2
     assert any("bad.md" in error for error in stats["sample_errors"])
     good_rows = await _count(
         session_maker,
