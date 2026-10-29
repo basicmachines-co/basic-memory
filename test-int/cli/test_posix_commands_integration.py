@@ -277,6 +277,20 @@ def test_grep_matches_keywords_and_lines():
     note_lines = bm_json("cat", "Grep Target")["content"].splitlines()
     assert note_lines[window["match_lines"][0] - 1] == window["content"]
 
+    # REGRESSION: a note whose observation and relation match too is one row,
+    # not one per index row, with or without -C (#1960 review).
+    write_note(
+        "Facts Target",
+        "facts",
+        "# Facts Target\n\n- [fact] posixgrepneedle observed\n"
+        "- mentions [[Posixgrepneedle Source]]",
+    )
+    facts = bm_json("grep", "posixgrepneedle", "--path", "facts")
+    assert [(row["type"], row["title"]) for row in facts["results"]] == [("entity", "Facts Target")]
+    assert facts["total"] == 1
+    facts_lines = bm_json("grep", "posixgrepneedle", "--path", "facts", "-C", "0")
+    assert [row["file_path"] for row in facts_lines["results"]] == ["facts/Facts Target.md"]
+
 
 # --- ls ---
 

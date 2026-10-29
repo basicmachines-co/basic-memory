@@ -232,6 +232,9 @@ def grep(
         bm_search,
         query=pattern,
         mode="hybrid" if semantic else "text",
+        # grep answers which notes contain the pattern, one row per note, so it
+        # names that rather than relying on the search's default item kinds.
+        items=["note"],
         lines=context_lines,
         max_matches=max_matches,
         path=path,
