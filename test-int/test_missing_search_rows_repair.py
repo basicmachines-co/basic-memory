@@ -298,3 +298,44 @@ async def test_partially_indexed_entity_is_counted_once(
     )
     assert status.entities_missing_search_rows == 1
     assert status.total_indexed_entities + status.entities_missing_search_rows == entities
+
+
+@pytest.mark.asyncio
+async def test_one_unreadable_file_does_not_stop_the_repair(
+    test_project: Project,
+    project_config,
+    engine_factory,
+    config_manager: ConfigManager,
+) -> None:
+    """A file that cannot be decoded is skipped; the other entities still converge."""
+    _engine, session_maker = engine_factory
+    notes = project_config.home / "notes"
+    notes.mkdir(parents=True, exist_ok=True)
+    for name in ("bad", "good"):
+        (notes / f"{name}.md").write_text(
+            NOTE_CONTENT.replace("lost-rows", name).replace("Lost Rows", name.title()),
+            encoding="utf-8",
+        )
+    await _index_project(test_project, embeddings=False)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("DELETE FROM search_index WHERE project_id = :project_id"),
+            {"project_id": test_project.id},
+        )
+    # Invalid UTF-8 after indexing: the read fails during the repair, not the scan.
+    (notes / "bad.md").write_bytes(b"\xff\xfe not utf-8 \xc3\x28")
+
+    dependencies = await LocalProjectIndexRuntimeFactory().dependencies_for_project(test_project)
+    search_service = dependencies.search_service
+    assert isinstance(search_service, SearchService)
+
+    restored = await search_service.restore_missing_search_rows()
+
+    assert len(restored) == 1
+    good_rows = await _count(
+        session_maker,
+        "SELECT COUNT(*) FROM search_index s JOIN entity e ON e.id = s.id "
+        "WHERE s.project_id = :project_id AND s.type = 'entity' AND e.file_path = :path",
+        {"project_id": test_project.id, "path": "notes/good.md"},
+    )
+    assert good_rows == 1

@@ -723,6 +723,7 @@ class SearchService:
         )
         restored: list[RestoredSearchEntity] = []
         unreadable = 0
+        failed = 0
         # A migration that recreated search_index can leave every entity without
         # rows. Each batch loads entities with their observations and relations,
         # so batches are loaded, indexed, and dropped one at a time to keep memory
@@ -730,19 +731,34 @@ class SearchService:
         for id_batch in batched(entity_ids, batch_size):
             async with db.scoped_session(self.session_maker) as session:
                 entities = await self.entity_repository.find_by_ids(session, list(id_batch))
-            result = await self.index_entities(entities, content_by_entity_id={})
-            unreadable += len(result.missing_content_entity_ids)
-            restored.extend(
-                RestoredSearchEntity(entity_id=entity.id, checksum=entity.checksum)
-                for entity in entities
-                if entity.id not in result.missing_content_entity_ids
-            )
+            for entity in entities:
+                try:
+                    await self.index_entity_data(entity)
+                except FileNotFoundError:
+                    unreadable += 1
+                    continue
+                except Exception:
+                    # Trigger: one file cannot be read or parsed (e.g. invalid UTF-8).
+                    # Why: file batches already isolate per-file failures; aborting here
+                    #      would stop every later entity from converging on each pass.
+                    # Outcome: log it, leave it out of the restored and vector targets,
+                    #          and keep repairing the rest. Cancellation still propagates.
+                    failed += 1
+                    logger.exception(
+                        "Could not restore search rows for entity",
+                        project_id=self.repository.project_id,
+                        entity_id=entity.id,
+                        file_path=entity.file_path,
+                    )
+                    continue
+                restored.append(RestoredSearchEntity(entity_id=entity.id, checksum=entity.checksum))
         if entity_ids:
             logger.info(
                 "Restored missing search rows",
                 project_id=self.repository.project_id,
                 restored=len(restored),
                 unreadable=unreadable,
+                failed=failed,
             )
         return restored
 
