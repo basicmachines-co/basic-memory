@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_agent(command, agent=None, identifier=None, run_id=None, decision=None,
-         since=None, needs_review=False, output_format="text", project=None)
+bm_agent(command, project, agent=None, identifier=None, run_id=None,
+         decision=None, since=None, needs_review=False, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -54,6 +54,10 @@ it on its own machine, with the note tools, in the agent note's project only.
   in projects the caller can edit. The reply names the runs Cloud refused.
 - **mark** (`run_id`, `decision`): record a finished run as `kept` or
   `dismissed`, for the whole workspace. It changes no notes.
+
+Every command needs `project`: a project name, `workspace/project`, or
+external id, as for the note tools. For **review** and **keep_all** it only
+picks the workspace.
 
 Undo is not a command. It puts notes back, so it stays the person's click on
 the run's page, where they can see what goes back.
