@@ -422,8 +422,8 @@ async def invalidate_project_caches(context: Optional[Context] = None) -> None:
     The session listing is the one that decides which first path segment names a
     project (``addressable_projects``), so leaving it behind made a project
     created mid-session unaddressable by name and a deleted one keep routing to
-    its dead external_id — for ``ls "/"``, the posix resolver, and identifier
-    detection, which reads the same mount table (#1432 review).
+    its dead external_id in identifier detection, which reads the same mount
+    table (#1432 review).
 
     Deliberately NOT cleared: ``active_workspace`` and ``available_workspaces``
     hold workspace metadata — tenant id, slug, type — which no project
