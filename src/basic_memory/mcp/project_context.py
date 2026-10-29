@@ -141,7 +141,6 @@ async def _resolve_default_project_from_api() -> Optional[str]:
 
 async def resolve_project_parameter(
     project: Optional[str] = None,
-    allow_discovery: bool = False,
     default_project: Optional[str] = None,
     context: Optional[Context] = None,
 ) -> Optional[str]:
@@ -155,22 +154,16 @@ async def resolve_project_parameter(
     1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
     2. EXPLICIT: project parameter passed directly
     3. DEFAULT: default_project from config (if set)
-    4. Fallback: discovery (if allowed) → NONE
+    4. Fallback: NONE
 
     Args:
         project: Optional explicit project parameter
-        allow_discovery: If True, allows returning None for discovery mode
-            (used by tools like recent_activity that can operate across all projects)
         default_project: Optional explicit default project. If not provided, reads from ConfigManager.
 
     Returns:
         Resolved project name or None if no resolution possible
     """
-    with logfire.span(
-        "routing.resolve_project",
-        requested_project=project,
-        allow_discovery=allow_discovery,
-    ):
+    with logfire.span("routing.resolve_project", requested_project=project):
         config = ConfigManager().config
 
         # Trigger: project already resolved earlier in the same MCP request
@@ -204,7 +197,7 @@ async def resolve_project_parameter(
         resolver = ProjectResolver.from_env(
             default_project=default_project,
         )
-        result = resolver.resolve(project=project, allow_discovery=allow_discovery)
+        result = resolver.resolve(project=project)
         return _canonicalize_project_name(result.project, config)
 
 

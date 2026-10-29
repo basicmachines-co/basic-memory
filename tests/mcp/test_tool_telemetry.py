@@ -9,9 +9,8 @@ import logfire
 import pytest
 from typing import Any
 
-from basic_memory.mcp.tools import bm_write
+from basic_memory.mcp.tools import bm_context, bm_write
 
-build_context_module = importlib.import_module("basic_memory.mcp.tools.build_context")
 edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
 read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
 search_module = importlib.import_module("basic_memory.mcp.tools.search")
@@ -205,7 +204,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
 
 
 @pytest.mark.asyncio
-async def test_build_context_emits_root_operation_and_project_context(
+async def test_bm_context_emits_client_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
     await bm_write(
@@ -218,32 +217,21 @@ async def test_build_context_emits_root_operation_and_project_context(
     spans, fake_span = _recording_spans()
     monkeypatch.setattr(logfire, "span", fake_span)
 
-    await build_context_module.build_context(
-        url="memory://notes/context-telemetry-note",
+    await bm_context(
+        identifier="memory://notes/context-telemetry-note",
         project=test_project.name,
         depth=2,
-        timeframe="7d",
+        since="7d",
         page=1,
         page_size=5,
         max_related=3,
         output_format="json",
     )
 
-    assert spans[0] == (
-        "mcp.tool.build_context",
-        {
-            "entrypoint": "mcp",
-            "tool_name": "build_context",
-            "requested_project": test_project.name,
-            "requested_project_id": None,
-            "depth": 2,
-            "timeframe": "7d",
-            "page": 1,
-            "page_size": 5,
-            "max_related": 3,
-            "output_format": "json",
-            "is_memory_url": True,
-        },
+    assert _contains_span_attrs(
+        spans,
+        "mcp.client.memory.build_context",
+        {"client_name": "memory", "operation": "build_context", "page": 1, "page_size": 5},
     )
     span_names = [name for name, _ in spans]
     assert "api.request.memory.build_context" in span_names
