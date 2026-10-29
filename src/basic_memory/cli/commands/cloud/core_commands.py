@@ -328,15 +328,25 @@ cloud_app.add_typer(api_key_app, name="api-key")
 
 @api_key_app.command("save")
 def api_key_save(
-    api_key: str = typer.Argument(..., help="API key (bmc_ prefixed) for cloud access"),
+    api_key: str | None = typer.Argument(
+        None,
+        help="API key (bmc_ prefixed). Omit it to enter the key at a hidden prompt.",
+    ),
 ) -> None:
     """Save an existing API key to local config.
 
-    Use when you already have an API key (e.g., from the web app).
+    Use when you already have an API key (e.g., from the web app). Run without
+    an argument to keep the key out of shell history and process listings.
 
     Example:
-      bm cloud api-key save bmc_abc123...
+      bm cloud api-key save
     """
+    # Trigger: no key on the command line
+    # Why: argv is visible in shell history and to other users via ps
+    # Outcome: read the key from a prompt that does not echo it
+    if api_key is None:
+        api_key = typer.prompt("API key", hide_input=True).strip()
+
     if not api_key.startswith("bmc_"):
         console.print("[red]Error: API key must start with 'bmc_'[/red]")
         raise typer.Exit(1)
