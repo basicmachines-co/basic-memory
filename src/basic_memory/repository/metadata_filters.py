@@ -125,7 +125,7 @@ def _normalize_numeric(value: object, raw_key: str) -> float:
          made the bound infinite, matching every note or none.
     Outcome: one refusal covering both, worded like this module's other filter
              errors, so every surface that builds filters (find's predicates,
-             search_notes' metadata_filters) reports it as the bad value it is
+             bm_search's and bm_find's filters) reports it as the bad value it is
              and the router answers 400.
     """
     try:

@@ -232,8 +232,8 @@ type ItemKind = Literal["note", "observation", "relation"]
 def _parse_item_kinds(value: Any) -> Any:
     """Split list-shaped input and read the API's word "entity" as "note".
 
-    Callers written against `search_notes(entity_types=...)` send "entity"; the alias
-    alone would carry that value into a field that no longer accepts it.
+    Callers using the `entity_types` alias often send the API's word "entity"; the
+    alias alone would carry that value into a field that accepts only "note".
     """
     if value is None:
         return None
