@@ -88,9 +88,9 @@ def project_permalink(name: str, *, top_level: bool) -> str:
     # Why: the permalink is the project's address, and the resolver matches
     #   it segment by segment against a path whose leading slashes are
     #   already stripped. An empty segment means no path can ever match it:
-    #   '' advertises at the root as '/', indistinguishable from every other
-    #   such project, and '/foo' advertises '//foo' and cannot be entered.
-    #   Either way the mount view lists something unaddressable (#1421). A '.'
+    #   '' is indistinguishable from every other such project, and '/foo'
+    #   becomes the prefix '//foo', which no path can enter. Either way the
+    #   project is listed but unaddressable (#1421). A '.'
     #   or '..' segment is worse: as a directory it names the parent or the
     #   root itself, so deleting that project's files would delete the root.
     # Outcome: refused at the boundary that creates projects, so an
@@ -326,8 +326,8 @@ class ProjectService:
             # Trigger: a different name that normalizes to an existing project's
             #   permalink ('My Docs' beside 'my-docs').
             # Why: the permalink is the address, so two of them are one address
-            #   for two projects. The mount view advertises both at the same
-            #   path and the resolver can only pick one, leaving the other
+            #   for two projects. Both carry the same path prefix and the
+            #   resolver can only pick one, leaving the other
             #   unreachable and its paths reading the wrong project's content.
             # Outcome: refused here, where the second one would be created.
             for existing in existing_projects:

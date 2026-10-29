@@ -488,7 +488,7 @@ def test_render_options_includes_shared_and_global_flags() -> None:
     # bullets to the full set. That growth is the point, not a regression.
     _, grep = _cli_command(find_page(PageRef("grep", 1)))
     options = render_options(grep)
-    for shared in ("--json", "--plain", "--project", "--project-id", "--local", "--cloud"):
+    for shared in ("--json", "--project", "--local", "--cloud"):
         assert f"- **{shared}**" in options, f"{shared} missing from generated OPTIONS"
 
 
@@ -504,32 +504,32 @@ def test_render_options_preserves_aliases_and_boolean_pairs() -> None:
 
 def test_render_cli_synopsis_groups_mutually_exclusive_options() -> None:
     # --json/--plain and --local/--cloud are rejected in combination by the CLI
-    # (validate_routing_flags / _validate_output_flags exit 1 for both pairs), so the
+    # (validate_routing_flags / validate_output_flags exit 1 for both pairs), so the
     # SYNOPSIS must show each pair as a single `|` alternative, not two freely-
     # combinable tokens.
     grep_path, grep = _cli_command(find_page(PageRef("grep", 1)))
     synopsis = render_cli_synopsis(grep_path, grep)
-    assert "[--json | --plain]" in synopsis
     assert "[--local | --cloud]" in synopsis
     # never the flattened, freely-combinable spelling the constraint forbids
-    for flattened in ("[--json]", "[--plain]", "[--local]", "[--cloud]"):
+    for flattened in ("[--local]", "[--cloud]"):
         assert flattened not in synopsis
-    # --project/--project-id are NOT mutually exclusive (--project-id takes
-    # precedence), so they stay separate tokens rather than being grouped.
-    _, find = _cli_command(find_page(PageRef("find", 1)))
-    find_synopsis = render_cli_synopsis("find", find)
-    assert "[--project PROJECT]" in find_synopsis
-    assert "[--project-id PROJECT_ID]" in find_synopsis
-    assert "--project |" not in find_synopsis
+    # No section-1 verb has --plain any more, so the output pair is pinned on a
+    # command shape that carries both flags.
+    output_pair = _FakeClickCommand(
+        [
+            _FakeClickParam("option", "json", ["--json"], is_flag=True),
+            _FakeClickParam("option", "plain", ["--plain"], is_flag=True),
+        ]
+    )
+    assert "[--json | --plain]" in render_cli_synopsis("t", output_pair)
 
     _, cat = _cli_command(find_page(PageRef("cat", 1)))
     cat_synopsis = render_cli_synopsis("cat", cat)
     assert "[--lines LINES | --section SECTION]" in cat_synopsis
     assert "[--lines LINES]" not in cat_synopsis
     assert "[--section SECTION]" not in cat_synopsis
-    # A partial pair stays usable: tail has --lines but no --section.
-    _, tail = _cli_command(find_page(PageRef("tail", 1)))
-    assert "[--lines N]" in render_cli_synopsis("tail", tail)
+    # A partial pair stays usable: grep has --lines but no --section.
+    assert "[--lines CONTEXT_LINES]" in synopsis
 
 
 def test_render_cli_synopsis_keeps_repeatable_options_repeatable() -> None:
@@ -557,7 +557,7 @@ def test_find_synopsis_separates_listing_and_metadata_constraints() -> None:
     assert "--depth" not in metadata
     for form in (listing, metadata):
         assert form.startswith("bm find [PATH]")
-        assert "[--json | --plain]" in form
+        assert "[--json]" in form
         assert "[--local | --cloud]" in form
         assert all(len(line) <= 76 for line in form.splitlines())
     # Both forms survive the actual page replacement/extraction boundary.
@@ -612,7 +612,7 @@ def test_render_options_is_not_grouped_for_mutually_exclusive_pairs() -> None:
     # option as its own bullet, so each flag keeps its own description.
     _, grep = _cli_command(find_page(PageRef("grep", 1)))
     options = render_options(grep)
-    for flag in ("--json", "--plain", "--local", "--cloud"):
+    for flag in ("--local", "--cloud"):
         assert f"- **{flag}**" in options
 
 

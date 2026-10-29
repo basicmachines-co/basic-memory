@@ -17,26 +17,25 @@ generated: cli
 
 ```
 bm find [PATH] [--name NAME] [--depth DEPTH] [--page PAGE]
-        [--page-size PAGE_SIZE] [--json | --plain] [--project PROJECT]
-        [--project-id PROJECT_ID] [--local | --cloud]
+        [--page-size PAGE_SIZE] [--project PROJECT] [--json]
+        [--local | --cloud]
 
-bm find [PATH] [--page PAGE] [--page-size PAGE_SIZE]
-        --meta META [--meta META ...] [--fields FIELDS] [--json | --plain]
-        [--project PROJECT] [--project-id PROJECT_ID] [--local | --cloud]
+bm find [PATH] --meta META [--meta META ...] [--fields FIELDS] [--page PAGE]
+        [--page-size PAGE_SIZE] [--project PROJECT] [--json]
+        [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
 Two modes, chosen by `--meta`.
 
-Without `--meta`, find recursively lists files under a directory (default:
-the project root), optionally filtered by a file-name glob. Depth is bounded
-1-10 by the directory API. On a TTY results render as a table; `--plain`
-prints one path per line, find(1) style; `--json` (or piped output) emits the
-listing with pagination and totals.
+find calls `bm_find`. Without `--meta`, it recursively lists files under a
+directory (default: the project root), optionally filtered by a file-name
+glob. Depth is bounded 1-10 by the directory API. `--json` emits the listing
+with pagination and totals.
 
-With `--meta`, find queries notes by their frontmatter instead: every
-predicate must hold, and `PATH` still scopes the results — server-side, by
+With `--meta`, find queries notes by their frontmatter instead: the
+predicates become `bm_find`'s `filters`, every predicate must hold, and `PATH` still scopes the results — server-side, by
 file-path prefix, so the totals are exact and every page is reachable. The
 payload becomes the search response shape (the same one `bm grep` returns),
 not the directory listing. Non-markdown files carry no frontmatter and are
@@ -54,16 +53,15 @@ Only the surrounding separators and a leading `./` are notation — the plain
 listing reads them the same way, so one `PATH` names one subtree with or
 without `--meta`. Everything else belongs to the path, including whitespace: a
 directory named `" specs "` is addressed by that exact spelling.
-`PATH` may also name a project (`bm find myproject --meta ...`) — that is a
-routing prefix, a mount point rather than a subtree, and scopes to that
-project's root.
+`PATH` may also start with the project's own name
+(`bm find myproject --meta ... --project myproject`) — that prefix is a mount
+point rather than a subtree, and scopes to that project's root.
 
-Projects in another cloud workspace are not among the session's own
-projects. Address them as `<workspace-slug>/<project>/<path>`, or pass
-`--project-id` (pass the UUID as `project` in MCP calls). A bare `<project>/<path>` never
-reaches another workspace; when its first segment names a project there, the
-refusal names the workspace and both spellings that work.
-`bm_project(command="list")` (`bm project list`) lists every workspace's projects.
+Without `--project` the configured default project is used. A path may start
+with the project's own name (`<project>/<path>`) when it agrees with `--project`;
+a prefix naming a different project is refused. Projects in another cloud
+workspace are addressed as `--project <workspace-slug>/<project>` or
+`--project <uuid>`; `bm project list` lists every workspace's projects.
 
 `--fields` is the SELECT to the predicates' WHERE: each hit comes back as the
 note's identity — title, permalink, file path, external id, last-updated — plus
@@ -139,15 +137,13 @@ predicates keep their existing frontmatter comparison behavior.
 ## OPTIONS
 
 - **--name** — File-name glob, e.g. "*.md"
-- **--depth** (default: 10) — Recursion depth (API bound 1-10)
-- **--page** (default: 1) — Page number (1-indexed)
-- **--page-size** (default: 10) — Nodes per page
-- **--meta** — Metadata predicate, repeatable: 'status=active', 'confidence>0.6', 'priority in high,critical', 'tags has security', 'score between 0.3,0.8', 'owner=null' (key missing or null). PATH still scopes the query, by file path
-- **--fields** — Comma-separated frontmatter fields to show per hit, e.g. "title,priority" (requires --meta)
-- **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--project** — The project to use. If not provided, the default project will be used.
-- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--depth** — Folder levels to search (1-10)
+- **--meta** — Frontmatter predicate, repeatable: 'status=active', 'confidence>0.6', 'priority in high,critical', 'tags has security', 'score between 0.3,0.8', 'owner=null' (key missing or null). PATH still scopes the query
+- **--fields** — Comma-separated frontmatter fields to show per hit, e.g. "title,priority" (needs --meta)
+- **--page** — Page number (1-indexed)
+- **--page-size** — Results per page (1-100)
+- **--project** — Project name, 'workspace/project', or project id. Defaults to the default project.
+- **--json** — Print the tool's JSON result
 - **--local** — Force local API routing (ignore cloud mode)
 - **--cloud** — Force cloud API routing
 
@@ -156,13 +152,13 @@ predicates keep their existing frontmatter comparison behavior.
 ```
 bm find --name "*.md"
 bm find /specs --depth 3
-bm find /notes --name "auth*" --plain
+bm find /notes --name "auth*"
 bm find --meta "status=active"
 bm find /specs --meta "status=active" --meta "confidence>0.6"
-bm find myproject --meta "status=active"
+bm find myproject --meta "status=active" --project myproject
 bm find --meta "owner=null" --fields title
 bm find --meta "tags has security,oauth" --fields title,priority
-bm find --meta "status=active" --fields title --plain
+bm find --meta "status=active" --fields title --json
 ```
 
 ## SEE ALSO

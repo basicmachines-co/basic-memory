@@ -136,40 +136,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
         "project",
     ],
-    "cat": [
-        "identifier",
-        "start_line",
-        "end_line",
-        "section",
-        "max_tokens",
-        "include_frontmatter",
-        "project",
-        "project_id",
-    ],
-    "find": [
-        "path",
-        "name",
-        "depth",
-        "page",
-        "page_size",
-        "meta",
-        "fields",
-        "project",
-        "project_id",
-    ],
-    "grep": [
-        "pattern",
-        "semantic",
-        "page",
-        "page_size",
-        "project",
-        "project_id",
-        "context_lines",
-        "max_matches",
-    ],
-    "ls": ["path", "page", "page_size", "project", "project_id"],
-    "man": ["page", "query", "project", "project_id"],
-    "tail": ["timeframe", "lines", "project", "project_id"],
 }
 
 
@@ -191,16 +157,7 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
 }
 
-# The POSIX tools are enabled by default during lifespan startup, but remain
-# hidden before config is read. Optional status keeps this direct-list contract
-# independent of whether another test has started the shared server.
 OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
-    "cat": {"readOnlyHint": True, "destructiveHint": False},
-    "find": {"readOnlyHint": True, "destructiveHint": False},
-    "grep": {"readOnlyHint": True, "destructiveHint": False},
-    "ls": {"readOnlyHint": True, "destructiveHint": False},
-    "man": {"readOnlyHint": True, "destructiveHint": False},
-    "tail": {"readOnlyHint": True, "destructiveHint": False},
     # Listed only when enable_project_delete is on.
     "bm_project_delete": {"readOnlyHint": False, "destructiveHint": True},
 }
@@ -230,12 +187,6 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_project_delete": tools.bm_project_delete,
     "bm_schema": tools.bm_schema,
     "bm_man": tools.bm_man,
-    "cat": tools.cat,
-    "find": tools.find,
-    "grep": tools.grep,
-    "ls": tools.ls,
-    "man": tools.man,
-    "tail": tools.tail,
 }
 
 

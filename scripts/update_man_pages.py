@@ -60,7 +60,7 @@ import basic_memory.mcp.tools  # noqa: F401  (importing registers the tools)
 # fast path in cli/main.py skips these imports, so a script that walks the tree
 # must import them explicitly or every subcommand comes back empty.
 from basic_memory.cli.app import app
-import basic_memory.cli.commands.posix  # noqa: F401  (registers cat/grep/ls/find/tail/head/tree)
+import basic_memory.cli.commands.posix  # noqa: F401  (registers cat/grep/ls/find/head/tree)
 import basic_memory.cli.commands.okf  # noqa: F401 (registers OKF commands)
 import basic_memory.cli.commands.man  # noqa: F401  (registers `bm man apropos`)
 

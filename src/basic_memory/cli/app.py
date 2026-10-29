@@ -54,7 +54,6 @@ SKIP_INIT_COMMANDS = frozenset(
         "grep",
         "ls",
         "find",
-        "tail",
         "head",
         "tree",
     }

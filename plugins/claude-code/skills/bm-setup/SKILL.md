@@ -232,16 +232,21 @@ nudge — the config's presence is the signal that setup has run.
 ### 4. Smoke-test the wiring
 Before you close, prove recall actually resolves — this catches a misnamed project,
 missing cloud credentials, or a ref that doesn't route, while the user is still here
-to fix it. Run the same structured query the SessionStart hook runs, via the CLI it
-uses (`basic-memory` / `bm` / `uvx --prerelease=allow basic-memory`):
+to fix it. Use the CLI the hook uses (`basic-memory` / `bm` /
+`uvx --prerelease=allow basic-memory`). `--project` takes a project name,
+`workspace/project`, or a project id.
 
-- **Primary:** `… tool search --type schema --page-size 10` against
-  `primaryProject` — use `--project-id <uuid>` for a UUID, `--project <ref>`
-  otherwise. It should return the schemas you just seeded. For a coding setup,
-  confirm the `Coding Session` schema is present.
-- **One shared project** (only if `secondaryProjects` is non-empty): a
-  `--type decision --status open` query against the first ref. It just needs to
-  return *cleanly* — `0 results` is fine; an **error** means the ref doesn't route.
+- **Primary:** run the open-decision query the SessionStart hook runs against
+  `primaryProject`:
+  `… tool search --note-types decision --filters '{"status": "open"}' --page-size 5 --project <primaryProject>`.
+  It just needs to return *cleanly* — `0 results` is fine; an **error** means the
+  ref doesn't route.
+- **Seeded schemas:** `… tool search --note-types schema --page-size 10 --project <primaryProject>`
+  should return the schemas you just seeded. For a coding setup, confirm the
+  `Coding Session` schema is present.
+- **One shared project** (only if `secondaryProjects` is non-empty): the same
+  open-decision query with `--project <first ref>`. Again `0 results` is fine; an
+  **error** means the ref doesn't route.
 - **Hook health:** run
   `basic-memory hook status --harness claude --project-dir <project-root>` with
   the first available `basic-memory`, `bm`, or `uvx --prerelease=allow basic-memory` launcher. It

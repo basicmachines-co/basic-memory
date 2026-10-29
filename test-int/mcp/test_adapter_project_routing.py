@@ -6,11 +6,6 @@ from fastmcp.client.transports import FastMCPTransport
 from mcp import types as mt
 
 
-import implementation_mcp
-
-implementation_server = implementation_mcp.implementation_server
-
-
 async def seed_projects(
     client: Client[FastMCPTransport], default_project: str, other_path: str
 ) -> None:
@@ -31,9 +26,9 @@ async def seed_projects(
 @pytest.mark.parametrize("prompt_name", ["search_knowledge_base", "continue_conversation"])
 @pytest.mark.parametrize("explicit_project", [False, True])
 async def test_prompts_select_project_with_multiple_projects(
-    implementation_server, app, test_project, tmp_path, prompt_name, explicit_project
+    mcp_server, app, test_project, tmp_path, prompt_name, explicit_project
 ):
-    async with Client(implementation_server) as client:
+    async with Client(mcp_server) as client:
         await seed_projects(
             client, test_project.name, str(tmp_path.parent / (tmp_path.name + "-other"))
         )

@@ -86,7 +86,8 @@ def format_line_read(
                 range(start_line, end_line + 1), content.split("\n"), strict=True
             )
         )
-        if end_line >= start_line
+        # An empty document is the range 0-0 of 0 and has no lines to number.
+        if total_lines and end_line >= start_line
         else ""
     )
     if end_line < total_lines:

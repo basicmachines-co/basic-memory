@@ -16,40 +16,35 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm ls [PATH] [--page PAGE] [--page-size PAGE_SIZE] [--json | --plain]
-      [--project PROJECT] [--project-id PROJECT_ID] [--local | --cloud]
+bm ls [PATH] [--glob GLOB] [--sort SORT] [--page PAGE]
+      [--page-size PAGE_SIZE] [--project PROJECT] [--json]
+      [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
-Lists the immediate contents of one directory (default: the project root).
-Directories print with a trailing slash. On a TTY the listing renders as a
-table with title, permalink, and update time; `--plain` prints one path per
-line, ls -1 style; `--json` (or piped output) emits the listing with
-pagination and totals.
+Lists the immediate contents of one directory (default: the project root)
+through `bm_list`. `--glob` filters file names and `--sort` orders files;
+folders always come first. `--json` emits the listing with pagination and
+totals.
 
 `bm ls` lists files inside one project; the unrelated `bm project ls` lists
 projects.
 
-The MCP `bm_list` tool lists the session's projects as mount points at `/`. A cloud
-session that can reach several workspaces also gets their slugs and a note on
-reaching their projects.
-
-Projects in another cloud workspace are not among the session's own
-projects. Address them as `<workspace-slug>/<project>/<path>`, or pass
-`--project-id` (pass the UUID as `project` in MCP calls). A bare `<project>/<path>` never
-reaches another workspace; when its first segment names a project there, the
-refusal names the workspace and both spellings that work.
-`bm_project(command="list")` (`bm project list`) lists every workspace's projects.
+Without `--project` the configured default project is used. A path may start
+with the project's own name (`<project>/<path>`) when it agrees with `--project`;
+a prefix naming a different project is refused. Projects in another cloud
+workspace are addressed as `--project <workspace-slug>/<project>` or
+`--project <uuid>`; `bm project list` lists every workspace's projects.
 
 ## OPTIONS
 
-- **--page** (default: 1) — Page number (1-indexed)
-- **--page-size** (default: 10) — Nodes per page
-- **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--project** — The project to use. If not provided, the default project will be used.
-- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--glob** — File-name glob, e.g. '*.md'
+- **--sort** — File order
+- **--page** — Page number (1-indexed)
+- **--page-size** — Results per page (1-100)
+- **--project** — Project name, 'workspace/project', or project id. Defaults to the default project.
+- **--json** — Print the tool's JSON result
 - **--local** — Force local API routing (ignore cloud mode)
 - **--cloud** — Force cloud API routing
 
@@ -58,7 +53,7 @@ refusal names the workspace and both spellings that work.
 ```
 bm ls
 bm ls /specs
-bm ls /notes --plain
+bm ls /notes --glob '*.md' --sort updated_desc
 ```
 
 ## SEE ALSO

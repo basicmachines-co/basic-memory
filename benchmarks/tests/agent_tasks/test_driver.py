@@ -101,13 +101,13 @@ def _seeded_status(*, indexed: int, files: int, phase: str = "idle") -> str:
 def _bm_stdout(command: list[str]) -> str:
     """What the stubbed bm prints for the seed guards.
 
-    `status --json` reports a fully indexed project and `tail --json` the aged
-    gold set, so the guards pass unless a test overrides one of them.
+    `status --json` reports a fully indexed project and `tool project recent
+    --json` the aged gold set, so the guards pass unless a test overrides one of them.
     """
     if "status" in command:
         return _seeded_status(indexed=25, files=25)
-    if "tail" in command:
-        return json.dumps([{"file_path": relpath} for relpath in TIMESTAMPS])
+    if "recent" in command:
+        return json.dumps({"results": [{"file_path": relpath} for relpath in TIMESTAMPS]})
     return ""
 
 
@@ -314,15 +314,19 @@ def test_state_graded_task_reindexes_before_grading(
     # seeded project (settle_index is stubbed, so these are the only status calls).
     statuses = [cmd[cmd.index("status") :] for cmd in commands if "status" in cmd]
     assert statuses == [["status", "--project", project, "--json", "--local"]]
-    tails = [cmd[cmd.index("tail") :] for cmd in commands if "tail" in cmd]
-    assert tails == [
+    recents = [cmd[cmd.index("tool") :] for cmd in commands if "recent" in cmd]
+    assert recents == [
         [
-            "tail",
+            "tool",
+            "project",
+            "recent",
             "--project",
             project,
-            "--timeframe",
+            "--since",
             driver.SEEDED_RECENCY_WINDOW,
-            "-n",
+            "--items",
+            "note",
+            "--page-size",
             "100",
             "--json",
         ]
@@ -704,7 +708,7 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     # Grouped corpora carry no aged-mtime contract, so the recency guard is
     # specific to the shipped corpus and must not run here; the index-count
     # guard runs for every seeded project, once per persona.
-    assert not [cmd for cmd in commands if "tail" in cmd]
+    assert not [cmd for cmd in commands if "recent" in cmd]
     # Slice from the verb: the uv prefix carries its own `--project <checkout>`.
     statuses = sorted(cmd[cmd.index("status") + 2] for cmd in commands if "status" in cmd)
     assert statuses == added_projects
@@ -1018,12 +1022,14 @@ def test_seeding_records_a_project_that_lost_its_aged_mtimes(
     the files outside the gold set, and the run keeps the other projects' spend.
     """
     _stub_bm(monkeypatch)
-    whole_corpus = json.dumps([{"file_path": relpath} for relpath in corpus_files(CORPUS_DIR)])
+    whole_corpus = json.dumps(
+        {"results": [{"file_path": relpath} for relpath in corpus_files(CORPUS_DIR)]}
+    )
     monkeypatch.setattr(
         driver,
         "run_command",
         lambda command, **kwargs: SimpleNamespace(
-            stdout=whole_corpus if "tail" in command else _bm_stdout(command), stderr=""
+            stdout=whole_corpus if "recent" in command else _bm_stdout(command), stderr=""
         ),
     )
     monkeypatch.chdir(tmp_path)

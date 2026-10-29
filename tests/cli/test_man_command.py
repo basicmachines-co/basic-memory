@@ -166,7 +166,6 @@ DOCUMENTED_VERBS = {
     "grep",
     "head",
     "ls",
-    "tail",
     "tree",
 } | NESTED_COMMAND_PATHS.keys()
 

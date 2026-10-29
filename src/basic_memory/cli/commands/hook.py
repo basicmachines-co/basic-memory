@@ -1083,7 +1083,7 @@ def _checkpoint_note(
         ).hexdigest()
         title = f"Pi session {identity}"
 
-    # Frontmatter as a dict (write_note serializes + quotes it); `type` rides the
+    # Frontmatter as a dict (bm_write serializes + quotes it); `type` rides the
     # note_type arg. Order preserved for stable, readable output.
     metadata: dict[str, Any] = {
         "status": "open",

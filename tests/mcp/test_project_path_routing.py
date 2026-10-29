@@ -25,6 +25,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
     AddressableProject,
+    addressable_projects,
     DetectedProjectRoute,
     ProjectPathRoute,
     ProjectPrefixConflictError,
@@ -42,7 +43,6 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.project_context_identifiers import (
     split_project_permalink_prefix,
 )
-from basic_memory.mcp.tools import grep, ls
 from basic_memory.mcp.workspace_project_index import (
     WorkspaceProjectEntry,
     WorkspaceProjectIndex,
@@ -759,8 +759,9 @@ async def test_out_of_band_project_becomes_addressable_when_the_snapshot_ages_ou
     context = ContextState()
     config = ConfigManager().config
 
-    advertised = await ls("/", context=ctx(context))
-    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+    assert {project.name for project in await addressable_projects(context=ctx(context))} == {
+        "research"
+    }
 
     session.tenant.append(
         ProjectItem(
@@ -782,8 +783,10 @@ async def test_out_of_band_project_becomes_addressable_when_the_snapshot_ages_ou
 
     await _age_out_session_project_list(context)
 
-    advertised = await ls("/", context=ctx(context))
-    assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
+    assert {project.name for project in await addressable_projects(context=ctx(context))} == {
+        "new-project",
+        "research",
+    }
     assert await detect_project_from_identifier_prefix(
         "new-project/notes/x", config, context=ctx(context)
     ) == DetectedProjectRoute(project="new-project", project_id="new-project-external-id")
@@ -842,8 +845,9 @@ async def test_project_created_mid_session_is_addressable_without_a_restart(clou
     context = ContextState()
     config = ConfigManager().config
 
-    advertised = await ls("/", context=ctx(context))
-    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+    assert {project.name for project in await addressable_projects(context=ctx(context))} == {
+        "research"
+    }
 
     # What create_memory_project does: the tenant serves the new project, and
     # the tool invalidates this session's project caches.
@@ -858,8 +862,10 @@ async def test_project_created_mid_session_is_addressable_without_a_restart(clou
     )
     await invalidate_project_caches(ctx(context))
 
-    advertised = await ls("/", context=ctx(context))
-    assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
+    assert {project.name for project in await addressable_projects(context=ctx(context))} == {
+        "new-project",
+        "research",
+    }
 
     route = await resolve_project_path_route(
         "new-project/notes/x", project=None, project_id=None, context=ctx(context)
@@ -901,8 +907,9 @@ async def test_project_deleted_mid_session_stops_resolving(cloud_session):
         await detect_project_from_identifier_prefix("doomed/notes/x", config, context=ctx(context))
         is None
     )
-    advertised = await ls("/", context=ctx(context))
-    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+    assert {project.name for project in await addressable_projects(context=ctx(context))} == {
+        "research"
+    }
 
 
 @pytest.mark.asyncio
@@ -954,13 +961,13 @@ async def test_cloud_workspace_refuses_unqualified_path(cloud_session):
 
 
 @pytest.mark.asyncio
-async def test_cloud_workspace_refuses_pathless_call_through_the_tool(cloud_session):
-    """grep/tail carry no path to qualify, so the refusal is the tool's answer:
+async def test_cloud_workspace_refuses_pathless_route(cloud_session):
+    """A pathless call has nothing to qualify, so the refusal is the answer:
     a silent search of one project out of several is the bug being removed."""
     cloud_session("research", "engineering")
 
     with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
-        await grep("needle")
+        await resolve_project_path_route("", project=None, project_id=None)
 
     assert str(excinfo.value) == ("no project specified — active projects: engineering/, research/")
 
@@ -1237,45 +1244,43 @@ async def test_cloud_every_advertised_mount_is_addressable_under_slug_collision(
     itself, and so does every other mount beside it."""
     cloud_session("team", "docs")
 
-    mounts = await ls()
+    mounts = await addressable_projects(context=None)
 
-    assert [node["name"] for node in mounts["nodes"]] == ["docs", "team"]
-    for node in mounts["nodes"]:
-        permalink = node["permalink"]
+    assert [project.name for project in mounts] == ["docs", "team"]
+    for project in mounts:
+        permalink = project.permalink
 
         external_id = f"{permalink}-external-id"
 
         root_route = await resolve_project_path_route(permalink, project=None, project_id=None)
         assert root_route == ProjectPathRoute(
-            project=node["name"], path="", stripped=True, project_id=external_id
+            project=project.name, path="", stripped=True, project_id=external_id
         )
 
         path_route = await resolve_project_path_route(
             f"{permalink}/notes/x", project=None, project_id=None
         )
         assert path_route == ProjectPathRoute(
-            project=node["name"], path="notes/x", stripped=True, project_id=external_id
+            project=project.name, path="notes/x", stripped=True, project_id=external_id
         )
 
 
 @pytest.mark.asyncio
 async def test_cloud_every_advertised_mount_is_addressable(cloud_session):
-    """Round trip over the advertised list: `ls "/"` and the resolver read one
-    source, so every mount the root advertises routes — as a bare mount name
+    """Round trip over the mount set: every addressable project routes — as a bare mount name
     and as a path under it. A mount that listed but did not route is exactly
     the mismatch #1421 reported."""
     cloud_session("research", "engineering", "personal-notes")
 
-    mounts = await ls()
+    mounts = await addressable_projects(context=None)
 
-    assert [node["name"] for node in mounts["nodes"]] == [
+    assert [project.name for project in mounts] == [
         "engineering",
         "personal-notes",
         "research",
     ]
-    for node in mounts["nodes"]:
-        permalink = node["permalink"]
-        assert node["directory_path"] == f"/{permalink}"
+    for project in mounts:
+        permalink = project.permalink
 
         root_route = await resolve_project_path_route(permalink, project=None, project_id=None)
         assert root_route.stripped is True
@@ -1774,56 +1779,6 @@ async def test_cloud_refusal_points_to_other_workspaces_when_no_project_matches(
         "no project 'My Workspace' — active projects: engineering/, research/. "
         + OTHER_WORKSPACES_HINT
     )
-
-
-@pytest.mark.asyncio
-async def test_cloud_root_listing_names_the_other_workspaces(cross_workspace_session):
-    """`ls /` lists only this workspace's projects, so it also says that other
-    workspaces exist and how to reach them (#1778). They are not rows: a bare
-    slug is not a routable path, and every row must be one."""
-    cross_workspace_session(
-        session_projects=("research", "engineering"),
-        default_projects=("notes",),
-    )
-
-    mounts = await ls()
-
-    assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
-    assert mounts["workspaces"] == ["acme", "beta"]
-    assert OTHER_WORKSPACES_HINT in mounts["note"]
-    assert "acme, beta" in mounts["note"]
-
-
-@pytest.mark.asyncio
-async def test_cloud_root_listing_survives_failed_workspace_discovery(
-    cross_workspace_session, monkeypatch
-):
-    """The workspace slugs only annotate `ls /`; a control-plane failure must leave
-    the session's own mounts listed (#1780 review)."""
-    cross_workspace_session(
-        session_projects=("research", "engineering"),
-        default_projects=("notes",),
-    )
-
-    async def failing_workspaces(context=None):
-        raise ToolError("control plane unavailable")
-
-    monkeypatch.setattr(project_context, "get_available_workspaces", failing_workspaces)
-
-    mounts = await ls()
-
-    assert [node["name"] for node in mounts["nodes"]] == ["engineering", "research"]
-    assert "workspaces" not in mounts
-
-
-@pytest.mark.asyncio
-async def test_cloud_single_workspace_root_listing_adds_nothing(cloud_session):
-    cloud_session("research", "engineering")
-
-    mounts = await ls()
-
-    assert "workspaces" not in mounts
-    assert "note" not in mounts
 
 
 @pytest.mark.asyncio

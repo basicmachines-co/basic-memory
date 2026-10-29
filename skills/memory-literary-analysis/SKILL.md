@@ -65,7 +65,7 @@ answer, exit 0, no warning — so learn it here rather than from a graph you tho
 audited:
 
 - **`find` pages, and the default page is 10.** Any query whose answer is "all N chapters"
-  needs `--page-size 200` (the maximum) — see [Coverage Checks](#coverage-checks).
+  needs `--page-size 100` (the maximum) and paging — see [Coverage Checks](#coverage-checks).
 - **`--name` cannot combine with `--meta`.** The metadata search has no filename glob. Scope a
   `--meta` query with the positional path instead: `find /characters --meta
   'note_type=character'`. That path is matched on a directory boundary against the *file path*
@@ -361,14 +361,14 @@ re-reading the whole book into context:
 
 ```bash
 grep -n '^CHAPTER ' ~/basic-memory/moby-dick/moby-dick.txt   # heading -> line number
-bm cat moby-dick/moby-dick.txt --lines 4200-4890 --plain   # one chapter, not the whole text
+bm cat moby-dick.txt --lines 4200-4890 --project moby-dick   # one chapter, not the whole text
 ```
 
 `grep -n` here is the shell's grep on a filesystem path (this is the map-building step, and
-it needs the file). `bm cat` then takes the *note identifier* and returns exactly that slice plus a
-`lines 4200-4890 of N` footer. Spell the identifier project-qualified
-(`<work>/<work>.txt`) so it routes to the right project. `bm head moby-dick/moby-dick.txt -n 40` is the cheap
-way to eyeball the heading format before writing the grep pattern.
+it needs the file). `bm cat` then takes the *note identifier* and returns exactly that slice,
+numbered, under a `Lines 4200-4890 of N` header. Pass `--project <work>` so it reads from the
+right project. `bm head moby-dick.txt -n 40 --project moby-dick` is the cheap way to eyeball
+the heading format before writing the grep pattern.
 
 Store the map in the project (a note or a small JSON file) so later batches — and a resumed
 run after context compaction — do not have to rediscover it. On a long work this is the
@@ -493,17 +493,17 @@ After all chapters are processed:
 Do not re-read every note to decide what is thin. Query for it:
 
 ```bash
-bm find --meta 'note_type=chapter' --fields chapter_number,pov,setting --page-size 200
-bm find --meta 'note_type=character' --fields role,status --page-size 200   # who is still a stub
-bm find --meta 'chapter_number>100' --fields pov --page-size 200           # late-book POV drift
+bm find --meta 'note_type=chapter' --fields chapter_number,pov,setting --page-size 100
+bm find --meta 'note_type=character' --fields role,status --page-size 100   # who is still a stub
+bm find --meta 'chapter_number>100' --fields pov --page-size 100           # late-book POV drift
 ```
 
-A field a note never set comes back as a blank cell (`null` under `--json`), so rows with
+A field a note never set comes back as `None` (`null` under `--json`), so rows with
 blanks are the work queue. This turns "audit the graph" from a read of every note into one
 call per question.
 
 `bm_write` snake-cases `note_type` (`Chapter` is stored as `chapter`), and `--meta`
-type predicates are normalized the same way, so either spelling matches. `--page-size 200`
+type predicates are normalized the same way, so either spelling matches. `--page-size 100`
 is not decoration: without it these return the first 10 rows and the work queue looks ten
 items long.
 
@@ -582,14 +582,14 @@ Fix issues found — common fixes:
 Schema validation proves notes match their shape. These prove the graph is *complete*:
 
 ```bash
-bm find --meta 'note_type=chapter' --fields chapter_number --page-size 200   # every chapter present?
-bm find --meta 'note_type=chapter' --fields pov,setting --page-size 200      # missing context?
-bm find /characters --meta 'note_type=character' --fields role --page-size 200  # inventory vs. seed list
+bm find --meta 'note_type=chapter' --fields chapter_number --page-size 100   # every chapter present?
+bm find --meta 'note_type=chapter' --fields pov,setting --page-size 100      # missing context?
+bm find /characters --meta 'note_type=character' --fields role --page-size 100  # inventory vs. seed list
 ```
 
 **A coverage check that pages is not a coverage check.** `bm find` defaults to
 `--page-size 10`, so the un-sized form of the first query "proves" a 138-chapter work has 10
-chapters. 200 is the maximum page size; past that, iterate with `--page 2`, `--page 3`, … .
+chapters. 100 is the maximum page size; past that, iterate with `--page 2`, `--page 3`, … .
 Scope a `--meta` query with the positional path (`/characters`), never `--name` — the two
 options are mutually exclusive, because the metadata search has no filename glob. The
 positional path scopes by the *file path* a note is indexed under, matched on a directory
@@ -597,12 +597,10 @@ boundary: `/characters` admits `characters/major/ahab.md` but never `characters-
 not a permalink match, so a note that pins its own `permalink:` is still found where its file
 lives.
 
-Read the count off the footer, not off the rows you can see. In a terminal every `find`
-result reports `page 1 • total 138`, and appends `• more available (--page)` when the page
-truncated the answer — that suffix appearing is the check *failing*, whatever the visible
-rows say. **The footer is a TTY feature.** Piped output without `--plain` is JSON, which
-carries `total` and `has_more`; with `--plain` the rows go to stdout and a has-more notice
-goes to stderr. For scripts, read `has_more` from `--json`.
+Read the count off the result, not off the rows you can see. The text result opens with the
+total (`138 notes under '/' match:`) and ends with `More results available.` when the page
+truncated the answer — that line appearing is the check *failing*, whatever the visible rows
+say. For scripts, read `total` and `has_more` from `--json`.
 
 For the sequence gap — the failure that a count alone cannot catch — take the numbers from
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
@@ -611,7 +609,7 @@ For the sequence gap — the failure that a count alone cannot catch — take th
 expected=138; page=1; rows='[]'
 while :; do
   resp=$(bm find --meta 'note_type=chapter' --fields chapter_number \
-           --page-size 200 --page $page --project <work> --json)
+           --page-size 100 --page $page --project <work> --json)
   rows=$(jq -n --argjson acc "$rows" --argjson r "$resp" \
            '$acc + [$r.results[] | {title, n: .fields.chapter_number}]')
   [ "$(jq -r '.has_more' <<<"$resp")" = "true" ] || break
@@ -627,9 +625,9 @@ jq -n --argjson rows "$rows" --argjson expected "$expected" '
       out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
 ```
 
-The loop is not ceremony. `--page-size` caps at 200, so a single call cannot inventory a work
-with more than 200 chapters — and rerunning it with `--page 2` *replaces* the numbers rather
-than accumulating them, which reports chapters 1-200 as missing on a corpus that is complete.
+The loop is not ceremony. `--page-size` caps at 100, so a single call cannot inventory a work
+with more than 100 chapters — and rerunning it with `--page 2` *replaces* the numbers rather
+than accumulating them, which reports chapters 1-100 as missing on a corpus that is complete.
 Walk until `has_more` is false and check the union.
 
 `--fields` returns YAML-native types, so `chapter_number: 63` comes back as `63`. The
@@ -679,13 +677,27 @@ orphans behind has made the graph worse.
 With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
 
 ```bash
-bm grep "features [[" --page-size 200 --project <work> --json   # every chapter's cast, one call
-bm find --meta 'note_type=theme' --fields prevalence --page-size 200  # thematic weight
+bm find --meta 'note_type=theme' --fields prevalence --page-size 100  # thematic weight
 bm grep "doubloon" --page-size 100 --project <work>                # every mention of a symbol
 ```
 
-"Which characters share the most chapters" is the first line plus a local parse of each
-row's `content` for `features [[...]]` — one call instead of a read per chapter. Do not
+"Which characters share the most chapters" is a search for `features [[` plus a local parse
+of each row's `content` for `features [[...]]` — one call per 100 chapters instead of a read
+per chapter. Page until `has_more` is false, as the coverage check does; a 138-chapter work
+needs two pages:
+
+```bash
+page=1; rows='[]'
+while :; do
+  resp=$(bm grep "features [[" --page-size 100 --page $page --project <work> --json)
+  rows=$(jq -n --argjson acc "$rows" --argjson r "$resp" '$acc + $r.results')
+  [ "$(jq -r '.has_more' <<<"$resp")" = "true" ] || break
+  page=$((page + 1))
+done
+jq 'length' <<<"$rows"   # one row per chapter that lists its cast
+```
+
+Do not
 reach for `bm tool context 'memory://characters/major/*'` here: a
 wildcard context is capped at 100 related rows across all primaries and returns one primary
 row per indexed observation, so it neither enumerates the cast nor walks the web.
@@ -699,14 +711,15 @@ the default page would have dropped. `--semantic` ranks by meaning instead, whic
 "what is this about?" rather than "where does this word appear?".
 
 Two more facts about `grep` rows. Matching is case-insensitive and note-level: a hit is a
-note, not a line, and there is no `-n` or context. And each row's `content` is capped at
+note, not a line, unless you pass `-C N` for matching lines with context. And each row's
+`content` is capped at
 4000 characters; `content_truncated: true` marks a cut row, so a long note's tail (such as a
 final chapter's `follows`/`precedes` relations) may be missing from a grep-driven scan.
 When a parse depends on the end of a note, `cat` that note.
 
 `--page-size` raises the ceiling, it does not remove it. A symbol in a long work can exceed
-even 100, so check whether the last page was full and walk `--page 2`, `--page 3` until it is
-not. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
+even 100, so walk `--page 2`, `--page 3` until `has_more` is false, as in the cast loop
+above. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
 answer, exit 0, and no sign that the tail is missing.
 
 And `grep` searches **your notes, not the source**. The `<work>.txt` is indexed as an entity,

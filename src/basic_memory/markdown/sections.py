@@ -324,7 +324,8 @@ class NoteSlice:
 
     ``content`` never carries a frontmatter block unless an explicit line range
     covered it; line numbers always count over the full stored document
-    (frontmatter included), matching line-range follow-up reads.
+    (frontmatter included), matching line-range follow-up reads. An empty
+    document has no line 1, so any slice of it is the empty range 0-0 of 0.
     """
 
     content: str
@@ -586,7 +587,14 @@ def slice_note_content(
         start_line = frontmatter_lines + 1
         end_line = total_lines
 
-    selected = doc_lines[start_line - 1 : end_line]
+    # Trigger: the document has no lines at all (an empty text file).
+    # Why: a range from line 1 to the last line came back as 1-0, a range that
+    #      ends before it starts, which no follow-up read can use.
+    # Outcome: the empty range 0-0 of 0, with empty content.
+    if total_lines == 0:
+        start_line = end_line = 0
+
+    selected = doc_lines[max(start_line - 1, 0) : end_line]
     content = "\n".join(selected)
     truncated = False
     continue_line: int | None = None

@@ -16,55 +16,53 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm grep PATTERN [--semantic] [--context-lines CONTEXT_LINES]
-        [--max-matches MAX_MATCHES] [--page PAGE] [--page-size PAGE_SIZE]
-        [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
+bm grep PATTERN [--semantic] [--lines CONTEXT_LINES]
+        [--max-matches MAX_MATCHES] [--path PATH] [--page PAGE]
+        [--page-size PAGE_SIZE] [--project PROJECT] [--json]
         [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
-Searches note content by full-text keyword matching, so a pattern that appears in
-no note returns no results. It is not a regex: the pattern is tokenized like any
+Searches note content through `bm_search` in text mode: full-text keyword
+matching, so a pattern that appears in no note returns no results. It is not a regex: the pattern is tokenized like any
 full-text query. `-s` (`--semantic`) ranks by meaning instead, with hybrid
 semantic plus full-text search when semantic search is enabled for the project.
 Semantic results are nearest neighbours, so they can include notes that do not
-contain the pattern. Results carry title, score, permalink, and the matched
-snippet; on a TTY they render as a table, and `--json` (or piped output) emits
-the search response with pagination.
+contain the pattern. The text result lists each hit with its path and a match
+excerpt; `--json` emits the search response with pagination.
 
-With `-C N`, return compact literal match windows instead. The full-text index
-selects a page of candidate notes, then their current content is checked for
-case-insensitive literal substrings. Matching line numbers include frontmatter
-and can be passed directly to `bm_read(start_line=..., end_line=...)` or
-`bm cat ... --lines N-M`. Overlapping context windows merge to avoid repeated text.
-The full body and search excerpt are omitted in this mode, including JSON output.
+With `-C N`, each hit returns its matching lines with N lines of context
+instead of an excerpt. The full-text index selects a page of ranked notes, then
+their current content is scanned for lines containing the query's words or
+quoted phrases. Line numbers include frontmatter and can be passed directly to
+`bm cat ... --lines N-M`. Overlapping context windows merge to avoid repeated
+text, and `--max-matches` bounds the lines shown per note.
 
 This is not an exhaustive filesystem grep: index tokenization, stemming, or edits
-can produce a candidate with zero literal matches, or omit a substring-only match.
-Pagination and totals refer to search candidates, not exact matching notes or lines.
-Each candidate reports `match_count`, `total_lines`, `windows`, and `next_match_line`
-(the first omitted matching line, or null). Use the latter for a targeted note read.
-Line positions can change if the note is edited between calls.
+can rank a note with no matching line, and such notes are dropped from the page.
+`total` therefore counts ranked candidates and `total_is_exact` is false; page with
+`has_more`. Each hit reports `match_count`, `windows`, and `next_match_line` (the
+first omitted matching line, or null). Line positions can change if the note is
+edited between calls.
 
 ## OPTIONS
 
 - **-s, --semantic** — Rank by meaning instead of matching keywords
-- **-C, --context-lines** — Compact line matches with surrounding context (not with --semantic)
-- **--max-matches** (default: 10) — Matching lines per candidate in context mode
-- **--page** (default: 1) — Page number (1-indexed)
-- **--page-size** (default: 10) — Results per page
-- **--json** — Output raw JSON instead of formatted display
-- **--plain** — Output undecorated plain text (no colors/markup), even when piped
-- **--project** — The project to use. If not provided, the default project will be used.
-- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **-C, --lines** — Return matching lines with this many lines of context (0-10)
+- **--max-matches** — Matching lines per note with -C (1-100)
+- **--path** — Search only this folder
+- **--page** — Page number (1-indexed)
+- **--page-size** — Results per page (1-100)
+- **--project** — Project name, 'workspace/project', or project id. Defaults to the default project.
+- **--json** — Print the tool's JSON result
 - **--local** — Force local API routing (ignore cloud mode)
 - **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 
 ```
-bm grep "retry" -C 3 --max-matches 5 --plain
+bm grep "retry" -C 3 --max-matches 5
 bm grep --semantic "auth token rotation"
 bm grep "BASIC_MEMORY_FORCE_LOCAL"
 bm grep "deploy checklist" --json | jq '.results[].permalink'

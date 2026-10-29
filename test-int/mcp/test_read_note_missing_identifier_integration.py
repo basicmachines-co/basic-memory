@@ -44,9 +44,15 @@ async def test_binary_uuid_line_read_reports_content_error(
             raise_on_error=False,
         )
 
+    # A line range on a text file is a supported read, so the refusal is about the
+    # missing bytes: the API's 404 reaches a JSON caller as a structured NOT_FOUND.
+    # (Before text files took line ranges, this read was refused as UNSUPPORTED
+    # before the file was ever opened.)
     assert result.is_error
     block = result.content[0]
     assert block.type == "text"
-    assert json.loads(block.text)["error"] == "UNSUPPORTED"
+    refused = json.loads(block.text)
+    assert refused["error"] == "NOT_FOUND"
+    assert "legacy/legacy.txt" in refused["message"]
     async with db.scoped_session(session_maker) as session:
         assert await entity_repository.get_by_external_id(session, entity.external_id) is not None

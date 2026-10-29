@@ -98,7 +98,7 @@ def _env_var_name(key: str) -> str:
 
 
 def _redact_for_display(key: str, raw: str) -> str:
-    """Mask secrets and URL credentials the same way `basic_memory_diagnostics` does (#963)."""
+    """Mask secrets and URL credentials with the shared redaction rules (#963)."""
     if key in SECRET_FIELDS:
         return SECRET_MASK
     if key in URL_FIELDS:

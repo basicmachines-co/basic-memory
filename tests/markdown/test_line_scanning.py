@@ -59,6 +59,12 @@ def test_numbered_read_preserves_blank_lines_and_bounds_continuation() -> None:
     assert "next: start_line=6, end_line=6" in text
 
 
+def test_an_empty_document_numbers_no_lines() -> None:
+    text = format_line_read("", start_line=0, end_line=0, total_lines=0)
+
+    assert text == "Lines 0-0 of 0 (document, including frontmatter); EOF"
+
+
 @pytest.mark.parametrize(("first", "last", "total"), [(1, 0, 0), (20, 10, 10)])
 def test_numbered_empty_or_past_eof(first: int, last: int, total: int) -> None:
     assert format_line_read("", start_line=first, end_line=last, total_lines=total).endswith(

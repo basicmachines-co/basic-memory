@@ -302,8 +302,8 @@ def render_parameters(tool_name: str, parameters: Mapping[str, Any]) -> str:
     (the order clients see) — mirroring render_synopsis. Each bullet names the
     parameter, its type when the schema gives one, whether it is required or
     optional (with the default for optionals that carry one), and its description.
-    Returns "" when the schema has no properties, so tools like
-    basic_memory_diagnostics get no section.
+    Returns "" when the schema has no properties, so a tool that takes no
+    arguments gets no section.
     """
     required: list[str] = parameters.get("required") or []
     properties: Mapping[str, Any] = parameters.get("properties") or {}
@@ -377,8 +377,8 @@ class ClickCommand(Protocol):
 
 
 # Option pairs the CLI rejects in combination — ``--json``/``--plain`` guarded by
-# _validate_output_flags and ``--local``/``--cloud`` by validate_routing_flags in
-# cli/commands/posix.py; cat's --lines/--section conflict in mcp/tools/posix_tools.py.
+# validate_output_flags (cli/commands/output.py), ``--local``/``--cloud`` by
+# validate_routing_flags, and cat's --lines/--section by bm_read's refusal.
 # Click carries no cross-parameter constraint, so the
 # generator must name them here: the SYNOPSIS shows a fully-present pair as one
 # ``[--json | --plain]`` alternative rather than two freely-combinable tokens, the

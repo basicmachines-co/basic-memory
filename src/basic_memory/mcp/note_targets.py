@@ -233,8 +233,9 @@ class PathQualifier:
     def for_route(cls, route: ProjectPathRoute) -> "PathQualifier":
         if not route.stripped or route.project is None:
             return cls(prefix=None)
-        # The permalink form is the spelling `ls "/"` advertises and the resolver
-        # normalizes to, so it round-trips for display names too ('My Research').
+        # The permalink form is the spelling addressable_projects carries and the
+        # resolver normalizes to, so it round-trips for display names too
+        # ('My Research').
         return cls(prefix=generate_permalink(route.project))
 
     def path(self, value: str) -> str:
