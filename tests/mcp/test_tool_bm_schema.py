@@ -1,13 +1,7 @@
-"""Tests for schema MCP tools (validate, infer, diff).
-
-Covers the tool function logic including success paths and error/exception paths.
-The success-path tests use the full ASGI stack via the app fixture.
-Error-path tests monkeypatch SchemaClient methods to trigger the except branch.
-"""
+"""Tests for bm_schema (validate, infer, diff) through the full ASGI stack."""
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import json
 
@@ -16,8 +10,7 @@ from fastmcp.exceptions import ToolError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
-from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
-from basic_memory.mcp.tools import bm_write
+from basic_memory.mcp.tools import bm_schema, bm_write
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 
@@ -26,7 +19,7 @@ from basic_memory.repository import ProjectRepository
 
 
 def _write_schema_file(project_path: Path, filename: str, content: str):
-    """Write a markdown file directly to disk (bypasses write_note frontmatter generation)."""
+    """Write a markdown file directly to disk (bypasses bm_write frontmatter generation)."""
     path = project_path / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -120,7 +113,8 @@ async def test_schema_validate_by_type(app, test_project, index_project):
     # Index so the database picks up the files written directly to disk.
     await index_project()
 
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         note_type="person",
         project=test_project.name,
     )
@@ -146,7 +140,8 @@ async def test_schema_validate_json_output(app, test_project, index_project):
 
     await index_project()
 
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         note_type="person",
         project=test_project.name,
         output_format="json",
@@ -206,7 +201,8 @@ permalink: pico/pico-test-1
 
     await index_project()
 
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         note_type="pico_test",
         project=test_project.name,
         output_format="json",
@@ -239,7 +235,8 @@ async def test_schema_validate_by_identifier(app, test_project, index_project):
 
     await index_project()
 
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         identifier="people/alice",
         project=test_project.name,
     )
@@ -253,7 +250,7 @@ async def test_schema_validate_by_identifier(app, test_project, index_project):
 async def test_schema_validate_by_title(app, test_project, index_project):
     """Validate a specific note by title (not permalink).
 
-    Regression test for issue #33: schema_validate(identifier="Note Title")
+    Regression test for issue #33: validating with identifier="Note Title")
     returned 0 notes because the router only searched by permalink.
     """
     project_path = Path(test_project.path)
@@ -268,7 +265,8 @@ async def test_schema_validate_by_title(app, test_project, index_project):
     await index_project()
 
     # Use the title "Alice" instead of the permalink "people/alice"
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         identifier="Alice",
         project=test_project.name,
     )
@@ -301,7 +299,8 @@ async def test_schema_validate_identifier_no_schema_refuses_with_guidance(
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_validate(
+        await bm_schema(
+            command="validate",
             identifier="Alice",
             project=test_project.name,
         )
@@ -327,7 +326,8 @@ async def test_schema_infer(app, test_project, index_project):
 
     await index_project()
 
-    result = await schema_infer(
+    result = await bm_schema(
+        command="infer",
         note_type="person",
         project=test_project.name,
     )
@@ -369,7 +369,8 @@ permalink: people/dave
 
     await index_project()
 
-    result = await schema_diff(
+    result = await bm_schema(
+        command="diff",
         note_type="person",
         project=test_project.name,
     )
@@ -399,7 +400,7 @@ async def test_schema_validate_all_types(app, test_project, index_project):
 
     await index_project()
 
-    result = await schema_validate(project=test_project.name)
+    result = await bm_schema(command="validate", project=test_project.name)
 
     assert isinstance(result, str)
     assert "Schema Validation: all" in result
@@ -424,7 +425,7 @@ async def test_schema_validate_all_types_json(app, test_project, index_project):
 
     await index_project()
 
-    result = await schema_validate(project=test_project.name, output_format="json")
+    result = await bm_schema(command="validate", project=test_project.name, output_format="json")
 
     assert isinstance(result, dict)
     assert result["total_notes"] == 1
@@ -442,7 +443,7 @@ async def test_schema_validate_all_types_no_schemas_refuses_with_guidance(
 ):
     """With no arguments and no schemas defined, refuse with guidance — not 'unknown'.
 
-    Regression test for issue #1013: schema_validate() without note_type or
+    Regression test for issue #1013: validate without note_type or
     identifier reported "No Notes Found of Type 'unknown'" instead of
     explaining that no schemas exist yet.
     """
@@ -459,7 +460,7 @@ async def test_schema_validate_all_types_no_schemas_refuses_with_guidance(
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_validate(project=test_project.name)
+        await bm_schema(command="validate", project=test_project.name)
     result = str(refused.value)
 
     assert isinstance(result, str)
@@ -473,20 +474,20 @@ async def test_schema_validate_all_types_no_schemas_json(app, test_project, inde
     """JSON output with no schemas defined returns a clear error dict."""
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_validate(project=test_project.name, output_format="json")
+        await bm_schema(command="validate", project=test_project.name, output_format="json")
     result = json.loads(str(refused.value))
 
     assert result == {"error": "NOT_FOUND", "message": "No schemas defined in this project"}
 
 
-# --- write_note metadata → schema workflow ---
+# --- bm_write metadata → schema workflow ---
 
 
 @pytest.mark.asyncio
-async def test_write_note_metadata_creates_schema_note(app, test_project, index_project):
+async def test_bm_write_metadata_creates_schema_note(app, test_project, index_project):
     """Create a schema note via bm_write(metadata=...), then validate against it.
 
-    Proves the end-to-end workflow: write_note → sync → schema_validate.
+    Proves the end-to-end workflow: bm_write → index → bm_schema validate.
     """
     project_path = Path(test_project.path)
 
@@ -498,7 +499,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, index_
             PERSON_NOTE.format(name=name, permalink=name.lower()),
         )
 
-    # 2. Create the schema note via write_note with metadata
+    # 2. Create the schema note via bm_write with metadata
     await bm_write(
         title="Person",
         directory="schemas",
@@ -516,8 +517,9 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, index_
     # 3. Sync picks up person notes written directly to disk
     await index_project()
 
-    # 4. Validate — schema_validate should find the schema and validate person notes
-    result = await schema_validate(
+    # 4. Validate — bm_schema should find the schema and validate person notes
+    result = await bm_schema(
+        command="validate",
         note_type="person",
         project=test_project.name,
     )
@@ -583,7 +585,8 @@ permalink: employees/{name.lower()}
     await index_project()
 
     # Validate — must find "Employee Schema" via entity_metadata['entity'] == "employee"
-    result = await schema_validate(
+    result = await bm_schema(
+        command="validate",
         note_type="employee",
         project=test_project.name,
     )
@@ -637,7 +640,8 @@ permalink: things/{name}
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_infer(
+        await bm_schema(
+            command="infer",
             note_type="widget",
             project=test_project.name,
         )
@@ -658,7 +662,8 @@ async def test_schema_validate_no_notes_refuses_with_guidance(app, test_project,
     """When no notes of the requested type exist, refuse with guidance on creating notes."""
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_validate(
+        await bm_schema(
+            command="validate",
             note_type="employee",
             project=test_project.name,
         )
@@ -689,7 +694,8 @@ async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_validate(
+        await bm_schema(
+            command="validate",
             note_type="person",
             project=test_project.name,
         )
@@ -719,7 +725,8 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await schema_diff(
+        await bm_schema(
+            command="diff",
             note_type="person",
             project=test_project.name,
         )
@@ -733,43 +740,229 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
     assert "How to Create a Schema" in result
 
 
-# --- Error-path tests (monkeypatched SchemaClient) ---
+# --- Report rendering ---
 
 
 @pytest.mark.asyncio
-async def test_schema_validate_error_propagates(app, test_project):
-    """When SchemaClient.validate raises, the error reaches the caller as a tool error."""
-    mock_validate = AsyncMock(side_effect=RuntimeError("connection lost"))
+async def test_schema_validate_renders_warnings_and_errors(app, test_project, index_project):
+    """A warn-mode schema reports warnings; a strict-mode schema reports errors."""
+    project_path = Path(test_project.path)
 
-    with patch("basic_memory.mcp.clients.schema.SchemaClient.validate", mock_validate):
-        with pytest.raises(RuntimeError, match="connection lost"):
-            await schema_validate(
-                note_type="person",
-                project=test_project.name,
-            )
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "schemas/Contract.md",
+        """\
+---
+title: Contract
+type: schema
+entity: contract
+version: 1
+schema:
+  party: string, counterparty
+settings:
+  validation: strict
+---
+
+# Contract
+""",
+    )
+    # Neither note carries its schema's required field.
+    _write_schema_file(
+        project_path,
+        "people/Nameless.md",
+        """\
+---
+title: Nameless
+type: person
+permalink: people/nameless
+---
+
+# Nameless
+
+## Observations
+- [role] Engineer
+""",
+    )
+    _write_schema_file(
+        project_path,
+        "contracts/Lease.md",
+        """\
+---
+title: Lease
+type: contract
+permalink: contracts/lease
+---
+
+# Lease
+
+## Observations
+- [term] Two years
+""",
+    )
+
+    await index_project()
+
+    result = await bm_schema(command="validate", project=test_project.name)
+
+    assert isinstance(result, str)
+    assert "- **Nameless** — valid" in result
+    assert "  - warning: " in result
+    assert "- **Lease** — INVALID" in result
+    assert "  - error: " in result
 
 
 @pytest.mark.asyncio
-async def test_schema_infer_error_propagates(app, test_project):
-    """When SchemaClient.infer raises, the error reaches the caller as a tool error."""
-    mock_infer = AsyncMock(side_effect=RuntimeError("db unavailable"))
+async def test_schema_infer_reports_excluded_fields(app, test_project, index_project):
+    """Fields below the threshold are listed as excluded in text and JSON output."""
+    project_path = Path(test_project.path)
 
-    with patch("basic_memory.mcp.clients.schema.SchemaClient.infer", mock_infer):
-        with pytest.raises(RuntimeError, match="db unavailable"):
-            await schema_infer(
-                note_type="person",
-                project=test_project.name,
-            )
+    for name in ["Alice", "Bob", "Charlie", "Dana", "Eve"]:
+        _write_schema_file(
+            project_path,
+            f"people/{name}.md",
+            PERSON_NOTE.format(name=name, permalink=name.lower()),
+        )
+    # One note in six carries a hobby, below the default 25% threshold.
+    _write_schema_file(
+        project_path,
+        "people/Frank.md",
+        """\
+---
+title: Frank
+type: person
+permalink: people/frank
+---
+
+# Frank
+
+## Observations
+- [name] Frank
+- [hobby] Chess
+""",
+    )
+
+    await index_project()
+
+    text = await bm_schema(command="infer", note_type="person", project=test_project.name)
+    assert isinstance(text, str)
+    assert "## Suggested Schema" in text
+    assert "## Excluded (below threshold)" in text
+    assert "- hobby" in text
+
+    data = await bm_schema(
+        command="infer", note_type="person", project=test_project.name, output_format="json"
+    )
+    assert isinstance(data, dict)
+    assert data["notes_analyzed"] == 6
+    assert "hobby" in data["excluded"]
 
 
 @pytest.mark.asyncio
-async def test_schema_diff_error_propagates(app, test_project):
-    """When SchemaClient.diff raises, the error reaches the caller as a tool error."""
-    mock_diff = AsyncMock(side_effect=RuntimeError("network error"))
+async def test_schema_infer_no_notes_refuses(app, test_project, index_project):
+    """Inferring a type with no notes refuses instead of returning an empty report."""
+    with pytest.raises(ToolError) as refused:
+        await bm_schema(command="infer", note_type="nobody", project=test_project.name)
 
-    with patch("basic_memory.mcp.clients.schema.SchemaClient.diff", mock_diff):
-        with pytest.raises(RuntimeError, match="network error"):
-            await schema_diff(
-                note_type="person",
-                project=test_project.name,
-            )
+    assert "No Notes Found of Type 'nobody'" in str(refused.value)
+
+
+@pytest.mark.asyncio
+async def test_schema_diff_renders_every_drift_kind(app, test_project, index_project):
+    """New, dropped and cardinality drift each get their own section."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(
+        project_path,
+        "schemas/Person.md",
+        """\
+---
+title: Person
+type: schema
+entity: person
+version: 1
+schema:
+  name: string, full name
+  role?: string, job title
+  email?: string, contact address
+settings:
+  validation: warn
+---
+
+# Person
+""",
+    )
+    # Every note repeats [role] (array usage for a single-value field), adds an
+    # undeclared [hobby], and never carries the declared email.
+    for name in ["Alice", "Bob"]:
+        _write_schema_file(
+            project_path,
+            f"people/{name}.md",
+            f"""\
+---
+title: {name}
+type: person
+permalink: people/{name.lower()}
+---
+
+# {name}
+
+## Observations
+- [name] {name}
+- [role] Engineer
+- [role] Manager
+- [hobby] Chess
+""",
+        )
+
+    await index_project()
+
+    result = await bm_schema(command="diff", note_type="person", project=test_project.name)
+
+    assert isinstance(result, str)
+    assert "## New Fields (in notes but not in schema)" in result
+    assert "**hobby**" in result
+    assert "## Dropped Fields (in schema but rare in notes)" in result
+    assert "**email**" in result
+    assert "## Cardinality Changes" in result
+    assert "role: schema declares single-value but usage is typically array" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_diff_no_drift(app, test_project, index_project):
+    """A schema that matches its notes reports no drift, in text and JSON."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await index_project()
+
+    text = await bm_schema(command="diff", note_type="person", project=test_project.name)
+    assert isinstance(text, str)
+    assert "No drift detected" in text
+
+    data = await bm_schema(
+        command="diff", note_type="person", project=test_project.name, output_format="json"
+    )
+    assert isinstance(data, dict)
+    assert data["schema_found"] is True
+    assert data["new_fields"] == []
+    assert data["dropped_fields"] == []
+
+
+@pytest.mark.asyncio
+async def test_schema_diff_no_notes_refuses(app, test_project, index_project):
+    """A schema with no notes of its type refuses: an empty comparison is not 'no drift'."""
+    _write_schema_file(Path(test_project.path), "schemas/Meeting.md", MEETING_SCHEMA)
+
+    await index_project()
+
+    with pytest.raises(ToolError) as refused:
+        await bm_schema(command="diff", note_type="meeting", project=test_project.name)
+
+    assert "No Notes Found of Type 'meeting'" in str(refused.value)
