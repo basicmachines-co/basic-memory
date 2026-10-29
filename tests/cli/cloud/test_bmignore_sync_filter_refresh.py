@@ -74,3 +74,15 @@ def test_destructive_filter_refresh_fails_when_bmignore_is_unreadable(
 
     with pytest.raises(BisyncError, match="Failed to read .*permission denied"):
         convert_bmignore_to_rclone_filters(force=True, fail_on_read_error=True)
+
+
+def test_rclone_filter_reads_a_bmignore_with_a_utf8_bom(config_home) -> None:
+    """Cloud push and pull filters must not keep a BOM on the first rule (#1946)."""
+    bmignore = get_bmignore_path()
+    bmignore.parent.mkdir(parents=True, exist_ok=True)
+    bmignore.write_bytes(b"\xef\xbb\xbfprivate\n")
+
+    filters = convert_bmignore_to_rclone_filters(force=True).read_text(encoding="utf-8")
+
+    assert "﻿" not in filters
+    assert "- private" in filters.splitlines()

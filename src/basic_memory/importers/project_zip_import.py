@@ -181,7 +181,7 @@ def load_archive_root_ignore_patterns(
             continue
 
         try:
-            content = archive.read(info).decode("utf-8")
+            content = archive.read(info).decode("utf-8-sig")
         except UnicodeDecodeError:
             continue
 

@@ -402,3 +402,34 @@ def test_ignore_pattern_whitespace_and_hashes(
     assert patterns == {matching_name, "*~"}
     assert should_ignore_path(tmp_path / matching_name, tmp_path, patterns)
     assert not should_ignore_path(tmp_path / nonmatching_name, tmp_path, patterns)
+
+
+def test_rules_naming_a_directory_cover_the_files_beneath_it(tmp_path):
+    """`/archive` and `drafts/old` name directories; their files are ignored too.
+
+    Scans prune the directory itself, but prune planning and single-file indexing check
+    file paths. First reported with a fix by @jaeminbird in #1945.
+    """
+    patterns = {"/archive", "drafts/old"}
+
+    def ignored(relative: str) -> bool:
+        return should_ignore_path(tmp_path / relative, tmp_path, patterns, is_directory=False)
+
+    assert ignored("archive/old.md")
+    assert ignored("archive/2025/q1.md")
+    assert ignored("drafts/old/plan.md")
+    # Anchored rules match from the project root, and only whole directory names.
+    assert not ignored("notes/archive/old.md")
+    assert not ignored("drafts/older/plan.md")
+    assert not ignored("notes/drafts/old/plan.md")
+
+
+def test_gitignore_with_a_utf8_bom_applies_its_first_rule(tmp_path, monkeypatch):
+    """Notepad and PowerShell 5.1 write a BOM; Git skips it, so must we (#1946)."""
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / ".gitignore").write_bytes(b"\xef\xbb\xbfprivate/\n")
+
+    patterns = load_gitignore_patterns(tmp_path)
+
+    assert "private/" in patterns
+    assert should_ignore_path(tmp_path / "private" / "a.md", tmp_path, patterns)

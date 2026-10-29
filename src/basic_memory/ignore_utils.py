@@ -194,7 +194,7 @@ def load_bmignore_patterns() -> Set[str]:
     patterns = set()
 
     try:
-        with bmignore_path.open("r", encoding="utf-8") as f:
+        with bmignore_path.open("r", encoding="utf-8-sig") as f:
             for line in f:
                 pattern = _parse_ignore_pattern_line(line)
                 if pattern:
@@ -235,7 +235,7 @@ def load_gitignore_patterns(
         paths = [bmignore_path, base_path / ".gitignore"] if use_gitignore else [bmignore_path]
         for path in paths:
             try:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_text(encoding="utf-8-sig")
             except FileNotFoundError:
                 content = ""
             patterns.update(
@@ -254,7 +254,7 @@ def load_gitignore_patterns(
         gitignore_file = base_path / ".gitignore"
         if gitignore_file.exists():
             try:
-                with gitignore_file.open("r", encoding="utf-8") as f:
+                with gitignore_file.open("r", encoding="utf-8-sig") as f:
                     for line in f:
                         pattern = _parse_ignore_pattern_line(line)
                         if pattern:
@@ -326,6 +326,11 @@ def should_ignore_path(
         if _directory_rules(directory_patterns).match_file(directory_match_path):
             return True
 
+    # A rule that names a directory excludes everything beneath it, as in Git. Scans
+    # prune such directories before reaching their files, so file-level callers
+    # (prune planning, single-file indexing) must match the rule against each parent.
+    parent_paths = [parent.as_posix() for parent in relative_path.parents[:-1]]
+
     # Non-directory patterns retain their existing matching behavior.
     for pattern in ignore_patterns:
         if pattern.endswith("/"):
@@ -334,9 +339,13 @@ def should_ignore_path(
         # Handle patterns starting with / (root relative)
         if pattern.startswith("/"):
             root_pattern = pattern[1:]  # Remove leading /
-            if fnmatch.fnmatch(relative_posix, root_pattern):
+            if any(fnmatch.fnmatch(path, root_pattern) for path in (relative_posix, *parent_paths)):
                 return True
             continue
+
+        # A slash inside a rule ("drafts/old") anchors it to a path from the root.
+        if "/" in pattern and any(fnmatch.fnmatch(path, pattern) for path in parent_paths):
+            return True
 
         # Direct name match (e.g., ".git", "node_modules")
         if pattern in relative_path.parts:
