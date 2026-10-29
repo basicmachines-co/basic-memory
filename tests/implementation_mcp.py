@@ -19,7 +19,6 @@ from basic_memory.mcp.server import mcp
 
 
 IMPLEMENTATION_NAMES = (
-    "build_context",
     "cat",
     "edit_note",
     "fetch",
@@ -29,7 +28,6 @@ IMPLEMENTATION_NAMES = (
     "ls",
     "man",
     "read_note",
-    "recent_activity",
     "search",
     "search_notes",
     "tail",

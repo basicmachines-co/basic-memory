@@ -118,9 +118,7 @@ async def bm_project(
                 )
             project_name, project_id = routing_arguments(parse_project(project))
             activity = await recent_activity_page(
-                # recent_activity names whole notes "entity", the API's word.
-                type=["entity" if item == "note" else item for item in items] if items else "",
-                depth=1,
+                items=items,
                 timeframe=since,
                 page=page,
                 page_size=page_size,
@@ -136,16 +134,12 @@ async def bm_project(
                 case str() as text if output_format == "text":
                     return text
                 case RecentRows() as recent:
-                    payload: dict[str, Any] = {
+                    return {
                         "results": recent.rows,
                         "page": recent.page,
                         "page_size": recent.page_size,
                         "has_more": recent.has_more,
                     }
-                    # Projects never indexed, beside the activity of those that were.
-                    if recent.guidance:
-                        payload["guidance"] = "\n\n".join(recent.guidance)
-                    return payload
                 case str() as guidance:
                     return {"results": [], "guidance": guidance}
 

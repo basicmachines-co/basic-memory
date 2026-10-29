@@ -1,7 +1,7 @@
 """Schemas for memory context."""
 
 from datetime import datetime
-from typing import List, Optional, Annotated, Sequence, Literal, Union, Dict
+from typing import List, Optional, Annotated, Sequence, Literal, Union
 
 from annotated_types import MinLen, MaxLen
 from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, field_serializer
@@ -17,8 +17,8 @@ MAX_CONTEXT_RELATED_RESULTS = 100
 # dense graph its cost grows exponentially with depth. Five matches the prompt
 # API's existing cap and keeps the documented 1-3 range comfortably inside it.
 MAX_CONTEXT_DEPTH = 5
-# recent_activity has always accepted larger pages than build_context because its
-# default request is entity-only summaries, not full context bodies.
+# Recent activity accepts larger pages than graph context because its default
+# request is note-only summaries, not full context bodies.
 MAX_RECENT_ACTIVITY_PAGE_SIZE = 100
 
 
@@ -266,52 +266,3 @@ class GraphContext(BaseModel):
     page: Optional[int] = None
     page_size: Optional[int] = None
     has_more: bool = False
-
-
-class ActivityStats(BaseModel):
-    """Statistics about activity across all projects."""
-
-    total_projects: int
-    active_projects: int = Field(description="Projects with activity in timeframe")
-    most_active_project: Optional[str] = None
-    total_items: int = Field(description="Total items across all projects")
-    total_entities: int = 0
-    total_relations: int = 0
-    total_observations: int = 0
-
-
-class ProjectActivity(BaseModel):
-    """Activity summary for a single project."""
-
-    project_name: str
-    project_path: str
-    activity: GraphContext = Field(description="The actual activity data for this project")
-    item_count: int = Field(description="Total items in this project's activity")
-    last_activity: Optional[
-        Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
-    ] = Field(default=None, description="Most recent activity timestamp")
-    active_folders: List[str] = Field(default_factory=list, description="Most active folders")
-
-    @field_serializer("last_activity")
-    def serialize_last_activity(self, dt: Optional[datetime]) -> Optional[str]:
-        return dt.isoformat() if dt else None  # pragma: no cover
-
-
-class ProjectActivitySummary(BaseModel):
-    """Summary of activity across all projects."""
-
-    projects: Dict[str, ProjectActivity] = Field(
-        description="Activity per project, keyed by project name"
-    )
-    summary: ActivityStats
-    timeframe: str = Field(description="The timeframe used for the query")
-    generated_at: Annotated[
-        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
-    ]
-    guidance: Optional[str] = Field(
-        default=None, description="Assistant guidance for project selection and session management"
-    )
-
-    @field_serializer("generated_at")
-    def serialize_generated_at(self, dt: datetime) -> str:
-        return dt.isoformat()  # pragma: no cover
