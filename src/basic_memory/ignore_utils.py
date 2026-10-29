@@ -293,6 +293,17 @@ def _gitignore_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
     return GitIgnoreSpec(compiled_patterns, backend="simple")
 
 
+def _gitignore_escaped(decoded_pattern: str) -> str:
+    r"""Re-escape a decoded rule so pathspec reads its backslashes and spaces literally.
+
+    The line parser decodes `\\`, `\ ` and `\#` for fnmatch, which has no escapes;
+    pathspec does, so a literal backslash or trailing space must be escaped again.
+    """
+    escaped = decoded_pattern.replace("\\", "\\\\")
+    stripped = escaped.rstrip(" ")
+    return stripped + "\\ " * (len(escaped) - len(stripped))
+
+
 def should_ignore_path(
     file_path: Path,
     base_path: Path,
@@ -336,7 +347,9 @@ def should_ignore_path(
     # Outcome: Git's own semantics decide, so a wildcard never crosses a "/" and an
     #          anchored rule never matches a nested directory.
     path_rules = frozenset(
-        pattern for pattern in ignore_patterns if "/" in pattern and not pattern.endswith("/")
+        _gitignore_escaped(pattern)
+        for pattern in ignore_patterns
+        if "/" in pattern and not pattern.endswith("/")
     )
     if path_rules and _gitignore_rules(path_rules).match_file(relative_posix):
         return True

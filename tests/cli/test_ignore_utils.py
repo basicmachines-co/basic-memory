@@ -1,5 +1,6 @@
 """Tests for ignore_utils module."""
 
+import sys
 import tempfile
 from pathlib import Path
 
@@ -445,3 +446,17 @@ def test_gitignore_with_a_utf8_bom_applies_its_first_rule(tmp_path, monkeypatch)
 
     assert "private/" in patterns
     assert should_ignore_path(tmp_path / "private" / "a.md", tmp_path, patterns)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a backslash separates paths on Windows")
+def test_path_rule_with_an_escaped_backslash_matches_the_literal_name(tmp_path, monkeypatch):
+    """`foo\\bar/baz` in .gitignore names the directory `foo\bar/baz`, as in Git."""
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / ".gitignore").write_text("foo\\\\bar/baz\n", encoding="utf-8")
+    patterns = load_gitignore_patterns(tmp_path)
+
+    def ignored(relative: str) -> bool:
+        return should_ignore_path(tmp_path / relative, tmp_path, patterns, is_directory=False)
+
+    assert ignored("foo\\bar/baz/note.md")
+    assert not ignored("foobar/baz/note.md")
