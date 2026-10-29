@@ -10,6 +10,8 @@ Design principles:
 - File indexing decisions are centralized here
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -108,3 +110,22 @@ def set_container(container: McpContainer) -> None:
     """Set the MCP container (called by lifespan)."""
     global _container
     _container = container
+
+
+@contextmanager
+def installed_container(container: McpContainer) -> Iterator[None]:
+    """Expose a container for one server lifespan, then restore the previous one.
+
+    Trigger: an in-process MCP session (``Client(mcp)``) enters and exits the lifespan.
+    Why: set_container() alone left the last lifespan's container, and its config,
+      installed after the session ended. Later code in the same process, such as
+      the default search mode, then read a config that no longer applied.
+    Outcome: the container lives exactly as long as the lifespan that created it.
+    """
+    global _container
+    previous = _container
+    _container = container
+    try:
+        yield
+    finally:
+        _container = previous

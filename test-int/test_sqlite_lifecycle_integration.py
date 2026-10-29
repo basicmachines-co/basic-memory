@@ -48,27 +48,39 @@ async def test_file_sqlite_concurrent_writes_commit_and_dispose(tmp_path: Path) 
             await connection.execute(text("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)"))
             await connection.execute(text("CREATE VIRTUAL TABLE notes_fts USING fts5(body)"))
 
-        async def write_notes(writer: int) -> None:
-            for index in range(40):
-                note_id = writer * 40 + index
-                async with engine.begin() as connection:
+        async def write_note(note_id: int) -> None:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("INSERT INTO notes VALUES (:id, :body)"),
+                    {"id": note_id, "body": "searchable note"},
+                )
+                await connection.execute(
+                    text("INSERT INTO notes_fts(rowid, body) VALUES (:id, :body)"),
+                    {"id": note_id, "body": "searchable note"},
+                )
+                assert (
                     await connection.execute(
-                        text("INSERT INTO notes VALUES (:id, :body)"),
-                        {"id": note_id, "body": "searchable note"},
+                        text("SELECT body FROM notes WHERE id = :id"), {"id": note_id}
                     )
-                    await connection.execute(
-                        text("INSERT INTO notes_fts(rowid, body) VALUES (:id, :body)"),
-                        {"id": note_id, "body": "searchable note"},
-                    )
-                    assert (
-                        await connection.execute(
-                            text("SELECT body FROM notes WHERE id = :id"), {"id": note_id}
-                        )
-                    ).scalar_one() == "searchable note"
+                ).scalar_one() == "searchable note"
 
-        async with asyncio.timeout(90), asyncio.TaskGroup() as writers:
-            for writer in range(64):
-                writers.create_task(write_notes(writer))
+        # Trigger: 64 writers share the pool's connections, and every round they all
+        #   want SQLite's single write lock at once.
+        # Why: SQLite's busy handler polls with growing sleeps (up to 100 ms) instead of
+        #   queueing waiters. When writers ran 40 transactions back to back, the other
+        #   pooled connections could hand the lock between themselves for the whole run
+        #   while one waiter kept sleeping through every free moment; on a slow Windows
+        #   runner that waiter passed busy_timeout (10 s) and raised "database is
+        #   locked" (#1955). Nothing in production holds the write lock saturated for
+        #   20 s, and the busy handler never promised fairness.
+        # Outcome: each round ends when its 64 writes commit, so a waiting connection
+        #   competes only with that round's work (well under a second), never with the
+        #   rest of the run. Contention per round is unchanged.
+        async with asyncio.timeout(90):
+            for index in range(40):
+                async with asyncio.TaskGroup() as writers:
+                    for writer in range(64):
+                        writers.create_task(write_note(writer * 40 + index))
         async with engine.connect() as connection:
             assert (await connection.execute(text("SELECT count(*) FROM notes"))).scalar() == 2560
             assert (

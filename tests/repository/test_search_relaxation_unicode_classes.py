@@ -13,6 +13,7 @@ marks word boundaries in Thai and Khmer, and Han numerals stay content words
 rather than identifiers.
 """
 
+import gc
 import time
 import unicodedata
 
@@ -244,6 +245,30 @@ def test_structural_punctuation_keeps_splitting(structural: str) -> None:
     assert len(relaxation_word_tokens(f"сло{structural}во доступа")) == 3
 
 
+def _tokenizing_cpu_seconds(text: str) -> float:
+    """CPU time this thread spends tokenizing ``text``, best of five runs.
+
+    The ratios below measure algorithmic growth, so the clock must not include time
+    the test spent descheduled. Wall-clock time (perf_counter) does: on a loaded CI
+    runner another process can take the CPU in the middle of one measurement and
+    turn a linear ×2.0 into a "quadratic" ×2.5 (#1955). thread_time() counts only
+    this thread's CPU work. The collector is paused because a collection that lands
+    in one measurement and not the other is the same kind of outside noise.
+    """
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        samples = []
+        for _ in range(5):
+            start = time.thread_time()
+            relaxation_word_tokens(text)
+            samples.append(time.thread_time() - start)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
+    return min(samples)
+
+
 def test_tokenizing_scales_linearly_with_query_length() -> None:
     """Doubling the query must roughly double the work, not more.
 
@@ -252,19 +277,16 @@ def test_tokenizing_scales_linearly_with_query_length() -> None:
     quadratic: an unbounded query full of apostrophes then ties up the worker
     that tokenizes it. The ratio is asserted rather than a duration, so the test
     does not depend on how fast the machine is.
+
+    There is no operation count to assert instead: the slicing version makes the
+    same calls and inspects the same characters, and only the bytes each slice
+    copies grow, inside C. Measured here, the indexed reader scales at ×2.0 and the
+    sliced one at ×3.2.
     """
     query = "a'b " * (128 * 1024 // 4)
 
-    def elapsed(text: str) -> float:
-        start = time.perf_counter()
-        relaxation_word_tokens(text)
-        return time.perf_counter() - start
-
-    # Fastest of three runs each: the ratio, not the duration, is what is being
-    # asserted, so a slow or busy machine does not turn this red. Measured here,
-    # the indexed reader scales at ×2.0 and the sliced one at ×3.2.
-    single = min(elapsed(query) for _ in range(3))
-    double = min(elapsed(query * 2) for _ in range(3))
+    single = _tokenizing_cpu_seconds(query)
+    double = _tokenizing_cpu_seconds(query * 2)
 
     assert double < single * 2.5, (
         f"tokenizing scaled worse than linearly: {single * 1000:.1f} ms then {double * 1000:.1f} ms"
@@ -278,20 +300,13 @@ def test_trailing_format_trim_scales_linearly() -> None:
     trailing trim runs. Trimming one character at a time copies the shrinking
     token at every step, which is quadratic: an unbounded query ending in enough
     soft hyphens then ties up the worker that tokenizes it. As above, the ratio
-    is asserted rather than a duration.
+    is asserted rather than a duration, in CPU time.
     """
-
-    def elapsed(count: int) -> float:
-        text = "a" + "\u00ad" * count
-        start = time.perf_counter()
-        relaxation_word_tokens(text)
-        return time.perf_counter() - start
-
     # Sized so the trim dominates the measurement: at shorter lengths the
     # tokenizer's linear per-character work dilutes the quadratic term below
     # the ratio threshold and a regression would pass unnoticed.
-    single = min(elapsed(256 * 1024) for _ in range(3))
-    double = min(elapsed(512 * 1024) for _ in range(3))
+    single = _tokenizing_cpu_seconds("a" + "\u00ad" * (256 * 1024))
+    double = _tokenizing_cpu_seconds("a" + "\u00ad" * (512 * 1024))
 
     assert double < single * 2.5, (
         f"trailing trim scaled worse than linearly: {single * 1000:.1f} ms then {double * 1000:.1f} ms"
