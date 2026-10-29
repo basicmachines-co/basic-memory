@@ -326,6 +326,11 @@ def should_ignore_path(
         if _directory_rules(directory_patterns).match_file(directory_match_path):
             return True
 
+    # A rule that excludes a directory excludes everything beneath it, as in Git.
+    # Scans prune such directories before reaching their files; callers that check
+    # file paths directly (prune planning, single-file indexing) need the same answer.
+    ancestors = [parent.as_posix() for parent in relative_path.parents[:-1]]
+
     # Non-directory patterns retain their existing matching behavior.
     for pattern in ignore_patterns:
         if pattern.endswith("/"):
@@ -334,7 +339,10 @@ def should_ignore_path(
         # Handle patterns starting with / (root relative)
         if pattern.startswith("/"):
             root_pattern = pattern[1:]  # Remove leading /
-            if fnmatch.fnmatch(relative_posix, root_pattern):
+            if any(
+                fnmatch.fnmatch(candidate, root_pattern)
+                for candidate in (relative_posix, *ancestors)
+            ):
                 return True
             continue
 
@@ -351,6 +359,10 @@ def should_ignore_path(
         # Glob pattern match on full path
         if fnmatch.fnmatch(relative_posix, pattern) or fnmatch.fnmatch(relative_str, pattern):
             return True  # pragma: no cover
+
+        # Slash-containing rules such as "drafts/old" name a directory by its path.
+        if "/" in pattern and any(fnmatch.fnmatch(ancestor, pattern) for ancestor in ancestors):
+            return True
 
     return False
 

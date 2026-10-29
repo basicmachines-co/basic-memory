@@ -235,6 +235,30 @@ def test_should_ignore_root_relative_patterns():
             assert result == should_be_ignored, f"Failed for {file_path}"
 
 
+def test_should_ignore_files_under_directory_named_by_path_rule(tmp_path):
+    """A rule without a trailing slash that names a directory covers its contents.
+
+    Scans prune the directory itself; file-level callers such as prune planning
+    must reach the same answer for the files beneath it.
+    """
+    patterns = {"/archive", "drafts/old", "/tmp/*.log"}
+
+    test_cases = [
+        (tmp_path / "archive" / "note.md", True),
+        (tmp_path / "archive" / "deep" / "note.md", True),
+        (tmp_path / "drafts" / "old" / "note.md", True),
+        (tmp_path / "tmp" / "run.log" / "note.md", True),
+        (tmp_path / "notes" / "archive" / "note.md", False),  # Anchored to the root
+        (tmp_path / "drafts" / "older" / "note.md", False),
+        (tmp_path / "drafts" / "note.md", False),
+        (tmp_path / "archived.md", False),
+    ]
+
+    for file_path, should_be_ignored in test_cases:
+        result = should_ignore_path(file_path, tmp_path, patterns, is_directory=False)
+        assert result == should_be_ignored, f"Failed for {file_path}"
+
+
 def test_should_ignore_invalid_relative_path():
     """Test handling of paths that cannot be made relative to base."""
     patterns = {"*.pyc"}

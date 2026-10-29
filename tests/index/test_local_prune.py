@@ -25,6 +25,10 @@ def test_plan_prune_matches_scan_ignore_semantics(tmp_path: Path):
     assert plan_prune(indexed, tmp_path, {"scratch/"}) == ("scratch/deep/x.md", "scratch/tmp.md")
     assert plan_prune(indexed, tmp_path, {"*.tmp.md"}) == ("notes/draft.tmp.md",)
     assert plan_prune(indexed, tmp_path, set()) == ()
+    # Rules naming a directory without a trailing slash cover its files too, as the
+    # scan prunes that directory before indexing anything inside it.
+    assert plan_prune(indexed, tmp_path, {"/scratch"}) == ("scratch/deep/x.md", "scratch/tmp.md")
+    assert plan_prune(indexed, tmp_path, {"scratch/deep"}) == ("scratch/deep/x.md",)
 
 
 async def _index_project(test_project, project_config, files: dict[str, str]) -> None:
