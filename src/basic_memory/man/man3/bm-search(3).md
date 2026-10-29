@@ -88,6 +88,11 @@ bm_search(query="launch", note_types=["plan"], compact=True, project="demo")
 # → Results for 'launch' in project 'demo':
 #   - plans/launch-plan.md | launch-plan | score 1.212
 
+bm_search(query="cache layer", valid_at="2026-07-28", project="demo")
+# → Results for 'cache layer' in project 'demo':
+#   - decisions/cache-layer.md | decision: The cache layer will use Memcached.... | score 1.000
+#       effective valid time: [2026-07-27,) (date)
+
 bm_search(query="launch", mode="text", projects=["demo", "team/research"])
 bm_search(query="launch", mode="text", all_projects=True)
 

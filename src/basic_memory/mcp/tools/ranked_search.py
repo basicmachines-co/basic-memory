@@ -657,6 +657,14 @@ def _format_results(
         if row.get("score") is not None:
             header += f" | score {row['score']:.3f}"
         lines.append(header)
+        # A valid-time hit says which authored time matched, and in which units: a
+        # bare date here would read as an edit date.
+        for assertion in row.get("temporal") or []:
+            valid_during = assertion["valid_during"]
+            lines.append(
+                f"    {assertion['kind']} valid time: {valid_during['literal']} "
+                f"({valid_during['axis']})"
+            )
         if "windows" in row:
             if row["match_count"] == 0:
                 lines.append("    No matching lines.")

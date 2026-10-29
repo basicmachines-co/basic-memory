@@ -246,6 +246,20 @@ async def test_results_carry_the_assertion_that_matched(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_text_output_labels_the_time_kind(client, test_project):
+    """Text output names the kind and units of the matched time, not a bare date."""
+    await _write_cache_layer_note(test_project.name)
+
+    rendered = await bm_search(
+        project=test_project.name, query="cache layer", valid_at="2026-07-28"
+    )
+
+    assert isinstance(rendered, str)
+    assert "    effective valid time: [2026-07-27,) (date)" in rendered
+    assert "[2026-06-10,2026-07-27)" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_kind_only_filter_finds_every_source_of_that_kind(client, test_project):
     """A kind with no point or range is a legal question: who asserts this kind?"""
     await _write_cache_layer_note(test_project.name)
