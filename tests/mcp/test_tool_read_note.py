@@ -288,15 +288,14 @@ async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
 
 
 @pytest.mark.asyncio
-async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
+async def test_read_note_title_fallback_finds_exact_title_past_fuzzy_titles(
     monkeypatch, app, test_project
 ):
-    """An exact title match is found even when it ranks beyond the first lookup page.
+    """An exact title match is found even when more fuzzy titles contain the phrase.
 
-    bm25 ranks titles that repeat the queried phrase above the exact title, so with
-    more than _TITLE_LOOKUP_PAGE_SIZE such decoys the exact match lands on page 2
-    of title results. A single-page lookup would fall through to suggestions even
-    though the note exists; the lookup must page until the exact title is found.
+    bm25 ranks titles that repeat the queried phrase above the exact title. Title
+    search now sorts an exact title first (#1956), so with more than
+    _TITLE_LOOKUP_PAGE_SIZE such decoys the exact match still leads page 1.
     """
     from basic_memory.mcp.tools.read_note import _TITLE_LOOKUP_PAGE_SIZE
     from basic_memory.mcp.tools.search import search_notes
@@ -315,8 +314,6 @@ async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
         content="deep page exact content",
     )
 
-    # Precondition: the exact title must rank beyond the first lookup page,
-    # otherwise this test would pass even with a single-page lookup.
     first_page = await search_notes(
         project=test_project.name,
         query="Deep Page Note",
@@ -327,7 +324,7 @@ async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
     )
     assert isinstance(first_page, dict)
     first_page_titles = [result["title"] for result in first_page["results"]]
-    assert "Deep Page Note" not in first_page_titles
+    assert first_page_titles[0] == "Deep Page Note"
     assert first_page["has_more"] is True
 
     import importlib

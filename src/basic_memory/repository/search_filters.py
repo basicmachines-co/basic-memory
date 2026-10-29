@@ -68,6 +68,9 @@ class CompiledFilter:
     params: dict[str, Any]
     order_by_clause: str
     score_expression: str
+    # Sort keys placed ahead of the score, each ending in ", ". Title search puts an
+    # exact title match here so it outranks titles that only contain the query.
+    leading_order_by: str = ""
     # Postgres only: the statement joins GIN text candidates, and every table it reads
     # has an index that serves it better than a sequential scan.
     prefer_index_scans: bool = False

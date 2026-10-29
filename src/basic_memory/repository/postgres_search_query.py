@@ -637,11 +637,16 @@ def compile_fts_filter(
     else:
         conditions = [*shared_conditions, *conditions]
 
+    leading_order_by = ""
     if query.title:
         params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)
         conditions.append(
             "to_tsvector('english', search_index.title) @@ to_tsquery('english', :title_text)"
         )
+        # A title-only search has no rank, so without this key matching notes come
+        # back in id order; an exact title match sorts first, as on SQLite (#1956).
+        params["title_exact"] = query.title.strip()
+        leading_order_by = "(lower(search_index.title) = lower(:title_exact)) DESC, "
 
     if query.permalink_match:
         permalink_text = query.permalink_match.lower().strip()
@@ -780,6 +785,7 @@ def compile_fts_filter(
         params=params,
         order_by_clause=AFTER_DATE_ORDER_BY if query.after_date else "",
         score_expression=score_expression,
+        leading_order_by=leading_order_by,
         prefer_index_scans=candidate_join,
     )
 
@@ -869,7 +875,8 @@ class PostgresFts:
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
-            ORDER BY score DESC {compiled.order_by_clause}, search_index.id ASC
+            ORDER BY {compiled.leading_order_by}score DESC {compiled.order_by_clause},
+                search_index.id ASC
             LIMIT :limit
             OFFSET :offset
         """
