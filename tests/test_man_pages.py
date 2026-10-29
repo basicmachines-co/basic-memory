@@ -101,16 +101,16 @@ def test_find_page_accepts_the_tool_name_as_an_alias() -> None:
     # chatgpt-search(3) documents the `search` tool; memory://man/search(3) must land there.
     by_alias = find_page(PageRef("search", 3))
     without_section = find_page(PageRef("fetch", None))
-    exact = find_page(PageRef("search-notes", 3))
+    exact = find_page(PageRef("bm-search", 3))
     assert by_alias is not None and by_alias.name == "chatgpt-search"
     assert without_section is not None and without_section.name == "chatgpt-fetch"
-    assert exact is not None and exact.name == "search-notes"
+    assert exact is not None and exact.name == "bm-search"
 
 
 def test_find_page_uses_named_section_or_lowest() -> None:
-    assert find_page(PageRef("search-notes", 3)) is not None
-    assert find_page(PageRef("search-notes", None)) is not None
-    assert find_page(PageRef("search-notes", 5)) is None
+    assert find_page(PageRef("bm-search", 3)) is not None
+    assert find_page(PageRef("bm-search", None)) is not None
+    assert find_page(PageRef("bm-search", 5)) is None
     assert find_page(PageRef("no-such-page", None)) is None
 
 
@@ -130,34 +130,32 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
     assert all(page.tool for page in pages if page.section == 3)
 
 
-# Public tools each have a page. Retired references and Cloud-only adapters stay
-# bundled so old manual links resolve, but are hand-owned rather than generated.
+# Public tools each have a page, and every section 3 page names a registered tool.
 TOOLS_WITHOUT_PAGES: set[str] = set()
 PAGES_WITHOUT_LOCAL_TOOLS = {
-    "fetch",
-    "schema_diff",
-    "schema_validate",
-    "list_memory_projects",
-    "cloud_info",
+    # Cloud registers these; core ships their pages so the manual is one corpus.
     "bm_agent",
-    "create_memory_project",
-    "delete_project",
-    "move_note",
-    "list_workspaces",
-    "list_directory",
-    "view_note",
+    "fetch",
     "search",
-    "write_note",
-    "schema_infer",
-    "read_content",
-    "read_note",
-    "basic_memory_diagnostics",
-    "recent_activity",
-    "build_context",
-    "search_notes",
-    "delete_note",
-    "edit_note",
 }
+
+
+def _markdown_table(text: str, header: str) -> str:
+    start = text.index(header)
+    end = text.find("\n\n", start)
+    return text[start : end if end != -1 else None].strip()
+
+
+@pytest.mark.parametrize(
+    "header", ["| Previous MCP tool | 1.0 replacement |", "| Previous CLI | 1.0 CLI |"]
+)
+def test_tools_migration_page_matches_the_migration_guide(header: str) -> None:
+    """tools-migration(7) ships the guide's tables; drift between them misleads migrations."""
+    page = find_page(PageRef("tools-migration", 7))
+    assert page is not None
+    guide = (Path(__file__).parents[1] / "docs" / "1.0.md").read_text(encoding="utf-8")
+
+    assert _markdown_table(page.read(), header) == _markdown_table(guide, header)
 
 
 def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
@@ -426,7 +424,7 @@ def test_pages_carry_no_release_pending_claims(stale: str) -> None:
 
 def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
     index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
-    hosted_only = find_page(PageRef("cloud-info", 3))
+    hosted_only = find_page(PageRef("bm-agent", 3))
     local = find_page(PageRef("bm-search", 3))
     assert hosted_only is not None and local is not None
 
@@ -766,18 +764,3 @@ def test_scaffold_page_renders_a_well_formed_registry_page() -> None:
     assert "## DESCRIPTION\n\nThen more detail." in text
     assert extract_parameters(text).startswith("- **query** (string, required)")
     assert text.rstrip().endswith("## SEE ALSO")
-
-
-def test_retired_mcp_pages_only_offer_current_replacements() -> None:
-    """Old manual URLs must never prescribe calls to removed MCP endpoints."""
-    from implementation_mcp import IMPLEMENTATION_NAMES
-
-    retired = set(IMPLEMENTATION_NAMES) - {"search", "fetch"}
-    for page in bundled_pages():
-        if page.section != 3 or page.tool not in retired:
-            continue
-        text = page.read()
-        assert "## RETIRED MCP TOOL" in text, page.title
-        assert "remains registered" not in text, page.title
-        assert "MCP:" not in text, page.title
-        assert f"{page.tool}(" not in text, page.title

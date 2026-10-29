@@ -25,15 +25,15 @@ async def test_manual_resources_are_listed_and_readable(mcp_server, app):
     async with Client(mcp_server) as client:
         listed = {str(resource.uri) for resource in await client.list_resources()}
         assert "memory://man" in listed
-        assert "memory://man/search-notes(3)" in listed
+        assert "memory://man/bm-search(3)" in listed
 
         index = await read_text(client, "memory://man")
         assert index.startswith("# Basic Memory manual")
 
         # Any common spelling of a page resolves through the template.
-        page = await read_text(client, "memory://man/search-notes(3)")
-        by_tool_name = await read_text(client, "memory://man/search_notes")
-        assert page.startswith("---\ntitle: search-notes(3)\n")
+        page = await read_text(client, "memory://man/bm-search(3)")
+        by_tool_name = await read_text(client, "memory://man/bm_search")
+        assert page.startswith("---\ntitle: bm-search(3)\n")
         assert by_tool_name == page
 
 

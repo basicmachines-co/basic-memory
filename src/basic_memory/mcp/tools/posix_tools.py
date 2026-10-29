@@ -917,11 +917,11 @@ async def man(
 
     Modes:
     - No arguments: the manual index (apropos view), as markdown.
-    - page: one bundled page by reference (e.g. "search-notes(3)").
+    - page: one bundled page by reference (e.g. "bm-search(3)").
     - query: the bundled pages that mention every word of the query.
 
     Args:
-        page: Page reference, e.g. "search-notes(3)". Any common spelling works.
+        page: Page reference, e.g. "bm-search(3)". Any common spelling works.
         query: Apropos search text. Mutually exclusive with `page`.
         project: Ignored; the manual is bundled with the package.
         project_id: Ignored; the manual is bundled with the package.

@@ -50,8 +50,8 @@ def parse_page_ref(text: str) -> PageRef:
     Parse, don't validate: the reference is whatever the caller reached for first,
     so every common spelling of the same page is accepted —
 
-        search-notes(3)    search-notes.3    search-notes-3    3/search-notes
-        man3/search-notes  search_notes      man3/search-notes(3).md
+        bm-search(3)       bm-search.3       bm-search-3       3/bm-search
+        man3/bm-search     bm_search         man3/bm-search(3).md
 
     — plus percent-encoded variants of the above. The section is optional. Tool
     names with underscores map to the hyphenated page name.

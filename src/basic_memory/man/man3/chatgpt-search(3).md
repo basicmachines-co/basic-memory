@@ -46,8 +46,8 @@ Verified:
 ```
 search("overwrite conflict")
 # → [{"type": "text", "text": "{\"results\": [{\"id\":
-#    \"manual/man3/write-note-3\", \"title\": \"write-note(3)\",
-#    \"url\": \"manual/man3/write-note-3\"}, ...],
+#    \"main/notes/overwrite-policy\", \"title\": \"Overwrite policy\",
+#    \"url\": \"main/notes/overwrite-policy\"}, ...],
 #    \"total_count\": 10, \"query\": \"overwrite conflict\"}"}]
 ```
 
