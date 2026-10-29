@@ -511,4 +511,34 @@ describe("BasicMemoryContextEngine", () => {
     ).resolves.toEqual({ status: "committed" })
     expect(mockClient.indexConversation).not.toHaveBeenCalled()
   })
+
+  it("skips heartbeat polls and silent replies on both capture paths", async () => {
+    const engine = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig(),
+    )
+    const heartbeat = [
+      { role: "user", content: "[OpenClaw heartbeat poll]" },
+      { role: "assistant", content: "NO_REPLY" },
+    ]
+
+    await expect(
+      engine.commitTurn({
+        ...makeCommitTurnParams("advance-hb", CURRENT_TURN),
+        isHeartbeat: true,
+      }),
+    ).resolves.toEqual({ status: "committed" })
+    await expect(
+      engine.commitTurn(makeCommitTurnParams("advance-silent", heartbeat)),
+    ).resolves.toEqual({ status: "committed" })
+    await engine.afterTurn({
+      sessionId: "session-hb",
+      sessionFile: "/tmp/session-hb.jsonl",
+      prePromptMessageCount: 0,
+      messages: makeMessages(CURRENT_TURN),
+      isHeartbeat: true,
+    })
+
+    expect(mockClient.indexConversation).not.toHaveBeenCalled()
+  })
 })

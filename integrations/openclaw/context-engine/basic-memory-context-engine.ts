@@ -17,6 +17,9 @@ export const MAX_ASSEMBLE_RECALL_CHARS = 1200
 const TRUNCATED_RECALL_SUFFIX = "\n\n[Basic Memory recall truncated]"
 const SUBAGENT_HANDOFF_FOLDER = "agent/subagents"
 const MAX_SUBAGENT_RECALL_CHARS = 800
+// OpenClaw's reply for "nothing to say", used by heartbeat polls and silent
+// maintenance turns.
+const SILENT_REPLY_TOKEN = "NO_REPLY"
 
 type BootstrapParams = Parameters<NonNullable<ContextEngine["bootstrap"]>>[0]
 type AssembleParams = Parameters<ContextEngine["assemble"]>[0]
@@ -53,6 +56,19 @@ function boundRecallContext(context: string): string {
     .trimEnd()
 
   return `${trimmed}${TRUNCATED_RECALL_SUFFIX}`
+}
+
+/**
+ * Heartbeat polls and silent replies are host housekeeping, not
+ * conversation, so they are acknowledged without being recorded.
+ */
+function isHousekeepingTurn(
+  isHeartbeat: boolean | undefined,
+  turn: { assistantText: string },
+): boolean {
+  return (
+    isHeartbeat === true || turn.assistantText.trim() === SILENT_REPLY_TOKEN
+  )
 }
 
 function slugifySessionKey(sessionKey: string): string {
@@ -198,7 +214,9 @@ export class BasicMemoryContextEngine implements ContextEngine {
     // messages spans exactly the admitted user entry through the terminal
     // entry, so the whole payload is the current turn.
     const turn = selectCaptureTurn(params.messages, this.cfg.captureMinChars)
-    if (!turn) return { status: "committed" }
+    if (!turn || isHousekeepingTurn(params.isHeartbeat, turn)) {
+      return { status: "committed" }
+    }
 
     log.debug(
       `context-engine commitTurn: session=${params.sessionId} user=${turn.userText.length} assistant=${turn.assistantText.length}`,
@@ -226,7 +244,7 @@ export class BasicMemoryContextEngine implements ContextEngine {
       selectCaptureTurn(newMessages, this.cfg.captureMinChars) ??
       selectCaptureTurn(params.messages, this.cfg.captureMinChars)
 
-    if (!turn) return
+    if (!turn || isHousekeepingTurn(params.isHeartbeat, turn)) return
 
     log.debug(
       `context-engine afterTurn: session=${params.sessionId} user=${turn.userText.length} assistant=${turn.assistantText.length}`,
