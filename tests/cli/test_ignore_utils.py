@@ -423,6 +423,13 @@ def test_rules_naming_a_directory_cover_the_files_beneath_it(tmp_path):
     assert not ignored("drafts/older/plan.md")
     assert not ignored("notes/drafts/old/plan.md")
 
+    # A wildcard never crosses "/", so an anchored glob cannot match a nested directory.
+    def ignored_by(rule: str, relative: str) -> bool:
+        return should_ignore_path(tmp_path / relative, tmp_path, {rule}, is_directory=False)
+
+    assert ignored_by("/*.cache", "foo.cache/bar.md")
+    assert not ignored_by("/*.cache", "notes/foo.cache/bar.md")
+
 
 def test_gitignore_with_a_utf8_bom_applies_its_first_rule(tmp_path, monkeypatch):
     """Notepad and PowerShell 5.1 write a BOM; Git skips it, so must we (#1946)."""
