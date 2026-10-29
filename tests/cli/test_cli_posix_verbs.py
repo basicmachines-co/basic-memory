@@ -31,7 +31,7 @@ from basic_memory.mcp.project_context import (
 runner = CliRunner()
 
 # ---------------------------------------------------------------------------
-# Shared mock payloads (shapes mirror tests/mcp/test_tool_posix.py)
+# Shared mock payloads (shapes mirror test-int/cli/test_posix_commands_integration.py)
 # ---------------------------------------------------------------------------
 
 # cat returns the read_note JSON shape; with the default --frontmatter the

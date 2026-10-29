@@ -23,6 +23,7 @@ import basic_memory.mcp.async_client as async_client
 import basic_memory.mcp.project_context as project_context
 from basic_memory.config import ConfigManager
 from basic_memory.config_models import ProjectEntry
+from basic_memory.mcp.directory_listing import project_mount_listing
 from basic_memory.mcp.project_context import (
     AddressableProject,
     DetectedProjectRoute,
@@ -759,7 +760,7 @@ async def test_out_of_band_project_becomes_addressable_when_the_snapshot_ages_ou
     context = ContextState()
     config = ConfigManager().config
 
-    advertised = await ls("/", context=ctx(context))
+    advertised = await project_mount_listing(page=1, page_size=10, context=ctx(context))
     assert {node["name"] for node in advertised["nodes"]} == {"research"}
 
     session.tenant.append(
@@ -782,7 +783,7 @@ async def test_out_of_band_project_becomes_addressable_when_the_snapshot_ages_ou
 
     await _age_out_session_project_list(context)
 
-    advertised = await ls("/", context=ctx(context))
+    advertised = await project_mount_listing(page=1, page_size=10, context=ctx(context))
     assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
     assert await detect_project_from_identifier_prefix(
         "new-project/notes/x", config, context=ctx(context)
@@ -842,7 +843,7 @@ async def test_project_created_mid_session_is_addressable_without_a_restart(clou
     context = ContextState()
     config = ConfigManager().config
 
-    advertised = await ls("/", context=ctx(context))
+    advertised = await project_mount_listing(page=1, page_size=10, context=ctx(context))
     assert {node["name"] for node in advertised["nodes"]} == {"research"}
 
     # What create_memory_project does: the tenant serves the new project, and
@@ -858,7 +859,7 @@ async def test_project_created_mid_session_is_addressable_without_a_restart(clou
     )
     await invalidate_project_caches(ctx(context))
 
-    advertised = await ls("/", context=ctx(context))
+    advertised = await project_mount_listing(page=1, page_size=10, context=ctx(context))
     assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
 
     route = await resolve_project_path_route(
@@ -901,7 +902,7 @@ async def test_project_deleted_mid_session_stops_resolving(cloud_session):
         await detect_project_from_identifier_prefix("doomed/notes/x", config, context=ctx(context))
         is None
     )
-    advertised = await ls("/", context=ctx(context))
+    advertised = await project_mount_listing(page=1, page_size=10, context=ctx(context))
     assert {node["name"] for node in advertised["nodes"]} == {"research"}
 
 

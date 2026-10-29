@@ -1,6 +1,7 @@
-"""Shared POSIX read implementations for the shell CLI and bm_* MCP tools.
+"""POSIX read implementations behind the `bm cat/grep/ls/find/tail/head/tree` verbs.
 
-These functions do not register MCP tools.
+These functions do not register MCP tools; the shell commands in
+``basic_memory.cli.commands.posix`` are their only callers.
 
 Projects are mount points (#1415): when no ``project``/``project_id`` param is
 given, a path or identifier whose first segment names an addressable project
@@ -28,11 +29,10 @@ import math
 import os
 import re
 from dataclasses import asdict
-from typing import Annotated, Any, Optional
+from typing import Any, Optional
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from pydantic import BeforeValidator
 
 from basic_memory.man import (
     bundled_pages,
@@ -63,13 +63,10 @@ from basic_memory.schemas.directory import (
 )
 from basic_memory.schemas.memory import EntitySummary
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
-from basic_memory.utils import coerce_list, generate_permalink
+from basic_memory.utils import generate_permalink
 
 # API bound on directory recursion (directory_router depth query: ge=1, le=10).
 _MAX_FIND_DEPTH = 10
-
-# recent_activity's page-size cap; tail's `lines` maps onto it.
-_MAX_TAIL_LINES = 100
 
 
 async def cat(
@@ -81,7 +78,6 @@ async def cat(
     include_frontmatter: bool = True,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
 ) -> dict[str, Any]:
     """Print a note's content, optionally sliced by line range, section, or token budget.
 
@@ -104,7 +100,6 @@ async def cat(
             therefore requires include_frontmatter=True.
         project: Project name. Optional - the server resolves the default.
         project_id: Project external_id (UUID); takes precedence over `project`.
-        context: Optional FastMCP context.
 
     Returns:
         The read_note JSON payload (title, permalink, file_path, content,
@@ -152,13 +147,11 @@ async def cat(
 
     # '<project>/path' identifiers route to their project; route.path is the
     # identifier unchanged when no prefix was recognized.
-    route = await resolve_project_path_route(
-        identifier, project=project, project_id=project_id, context=context
-    )
+    route = await resolve_project_path_route(identifier, project=project, project_id=project_id)
     if route.stripped and not route.path:
         raise ValueError(f"cat: '{identifier}' names a project, not a note")
 
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+    async with get_project_client(route.project, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -213,7 +206,6 @@ async def grep(
     page_size: int = 10,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
     context_lines: int | None = None,
     max_matches: int = 10,
 ) -> dict[str, Any]:
@@ -234,7 +226,6 @@ async def grep(
             or cat read. Edits between calls can shift line positions.
         project: Project name. Required when more than one project is addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
-        context: Optional FastMCP context.
 
     Returns:
         Normally the search response as JSON. With context_lines, only note identity,
@@ -263,16 +254,14 @@ async def grep(
     # grep's pattern is never parsed as a path — search text like "error/timeout"
     # must not be mistaken for a mount. Routing participates for the refusal rule
     # only: unqualified multi-project calls fail loudly instead of defaulting.
-    route = await resolve_project_path_route(
-        "", project=project, project_id=project_id, context=context
-    )
+    route = await resolve_project_path_route("", project=project, project_id=project_id)
 
     query = SearchQuery(
         text=pattern,
         retrieval_mode=_grep_retrieval_mode(semantic),
         entity_types=[SearchItemType.ENTITY],
     )
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+    async with get_project_client(route.project, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -322,7 +311,6 @@ async def ls(
     page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
 ) -> dict[str, Any]:
     """List the immediate contents of one directory.
 
@@ -336,7 +324,6 @@ async def ls(
             route themselves; other unqualified paths refuse when several
             projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
-        context: Optional FastMCP context.
 
     Returns:
         The directory listing as JSON: nodes, pagination, and totals.
@@ -358,14 +345,12 @@ async def ls(
         and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         and not path.strip().strip("/")
     ):
-        return await project_mount_listing(page=page, page_size=page_size, context=context)
+        return await project_mount_listing(page=page, page_size=page_size, context=None)
 
-    route = await resolve_project_path_route(
-        path, project=project, project_id=project_id, context=context
-    )
+    route = await resolve_project_path_route(path, project=project, project_id=project_id)
     list_path = f"/{route.path}" if route.stripped else path
 
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+    async with get_project_client(route.project, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -400,7 +385,6 @@ async def find_listing(
     page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
 ) -> tuple[dict[str, Any], str]:
     """find's body: the listing, plus the root its paths are relative to.
 
@@ -409,8 +393,6 @@ async def find_listing(
     trip on every cloud CLI call, since CLI calls carry no FastMCP context for
     the per-request cache to live in. One resolve now answers both.
     """
-    if depth < 1 or depth > _MAX_FIND_DEPTH:
-        raise ValueError(f"depth must be between 1 and {_MAX_FIND_DEPTH}, got {depth}")
     if page < 1:
         raise ValueError(f"page must be >= 1, got {page}")
     if page_size < 1:
@@ -421,12 +403,10 @@ async def find_listing(
     # The directory API is project-scoped, so cross-project find does not exist:
     # find "/" with no project in a multi-project config refuses, teaching the
     # per-project '<project>/path' form instead.
-    route = await resolve_project_path_route(
-        path, project=project, project_id=project_id, context=context
-    )
+    route = await resolve_project_path_route(path, project=project, project_id=project_id)
     list_path = f"/{route.path}" if route.stripped else path
 
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+    async with get_project_client(route.project, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -675,11 +655,10 @@ async def find(
     depth: int = _MAX_FIND_DEPTH,
     page: int = 1,
     page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
-    meta: Annotated[Optional[list[str]], BeforeValidator(coerce_list)] = None,
-    fields: Annotated[Optional[list[str]], BeforeValidator(coerce_list)] = None,
+    meta: Optional[list[str]] = None,
+    fields: Optional[list[str]] = None,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
 ) -> dict[str, Any]:
     """Recursively list files by name glob, or query notes by frontmatter metadata.
 
@@ -705,8 +684,8 @@ async def find(
         page: Page number (1-indexed).
         page_size: Nodes per page.
         meta: Frontmatter metadata predicates, repeatable; every predicate must
-            hold. One predicate per string, one predicate per key, at least one
-            predicate; omit `meta` entirely for the directory listing. Forms:
+            hold. One predicate per string, one predicate per key; omit `meta`
+            entirely for the directory listing. Forms:
               "status=active"              equality
               "confidence>0.6"             comparison: > >= < <=
               "priority in high,critical"  any of the listed values
@@ -734,7 +713,6 @@ async def find(
         project: Project name. Optional - qualified paths route themselves;
             unqualified paths refuse when several projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
-        context: Optional FastMCP context.
 
     Returns:
         Without `meta`: the directory listing as JSON (nodes, pagination,
@@ -749,17 +727,6 @@ async def find(
     # file-path subtree. `fields` is the SELECT to the predicates' WHERE;
     # without predicates the directory listing stays byte-identical to today.
     if meta is not None:
-        # Trigger: 'meta' present but carrying no predicates.
-        # Why: an empty list parses to an empty filters dict, which is not None
-        #      and would route into the metadata search with no predicate at
-        #      all — an unfiltered project-wide match where the caller asked for
-        #      a filtered set, and not the directory listing either.
-        # Outcome: refuse, exactly as 'fields' refuses an empty list.
-        if not meta:
-            raise ValueError(
-                "find: 'meta' must carry at least one predicate — omit 'meta' entirely "
-                "for the plain directory listing"
-            )
         if name is not None:
             raise ValueError(
                 "find: 'name' cannot combine with 'meta' — the metadata search has no "
@@ -808,16 +775,15 @@ async def find(
         # The search API is project-scoped too, so cross-project find does not
         # exist here either: an unqualified path in a multi-project config
         # refuses, teaching the per-project '<project>/path' form instead.
-        route = await resolve_project_path_route(
-            path, project=project, project_id=project_id, context=context
-        )
+        route = await resolve_project_path_route(path, project=project, project_id=project_id)
         # The whole route travels, not three fields pulled off it: the arm needs
         # the project and its id to open the client, route.path to scope the
         # search, and — the part #1435 missed — the same route again to
         # re-qualify the paths it answers with.
-        async with get_project_client(
-            route.project, context=context, project_id=route.project_id
-        ) as (client, active_project):
+        async with get_project_client(route.project, project_id=route.project_id) as (
+            client,
+            active_project,
+        ):
             return await find_by_metadata(
                 ProjectTarget(client=client, project=active_project, route=route),
                 metadata_filters=metadata_filters,
@@ -834,7 +800,6 @@ async def find(
         page_size=page_size,
         project=project,
         project_id=project_id,
-        context=context,
     )
     return listing
 
@@ -844,33 +809,24 @@ async def tail(
     lines: int = 10,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
-    context: Context | None = None,
 ) -> list[dict[str, Any]]:
     """Show the most recently changed notes in a project.
 
     Args:
         timeframe: Time window, e.g. "7d", "yesterday", "2 days ago".
-        lines: Maximum number of rows to return (1-100).
+        lines: Maximum number of rows to return.
         project: Project name. Required when more than one project is addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
-        context: Optional FastMCP context.
 
     Returns:
         Rows of {type, title, permalink, file_path, created_at, updated_at}, newest
         change first.
     """
-    if lines < 1:
-        raise ValueError(f"lines must be >= 1, got {lines}")
-    if lines > _MAX_TAIL_LINES:
-        raise ValueError(f"lines must be <= {_MAX_TAIL_LINES}, got {lines}")
-
     # tail has no path to carry a project prefix, so routing participates for
     # the refusal rule only: unqualified multi-project calls fail loudly.
-    route = await resolve_project_path_route(
-        "", project=project, project_id=project_id, context=context
-    )
+    route = await resolve_project_path_route("", project=project, project_id=project_id)
 
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+    async with get_project_client(route.project, project_id=route.project_id) as (
         client,
         active_project,
     ):
