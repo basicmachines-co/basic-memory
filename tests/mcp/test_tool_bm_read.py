@@ -58,6 +58,7 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
     (test_files["image"].parent / "palette.png").write_bytes(palette.getvalue())
     (test_files["image"].parent / "data.json").write_text('{"k": 1}')
     (test_files["image"].parent / "source.txt").write_text(SOURCE_TEXT)
+    (test_files["image"].parent / "empty.txt").write_text("")
     runner = LocalProjectIndexRunner(
         project_repository=project_repository, session_maker=session_maker
     )
@@ -69,6 +70,7 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
         "json": "data.json",
         "palette": "palette.png",
         "txt": "source.txt",
+        "empty": "empty.txt",
     }
 
 
@@ -246,6 +248,20 @@ async def test_a_text_file_reads_its_first_and_last_lines(client, test_project, 
     assert tail["content"] == "CHAPTER 2\nThe Carpet-Bag."
     assert tail["has_more"] is False
     assert tail["next_start_line"] is None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_text_file_reads_as_the_empty_range(client, test_project, non_note_files):
+    """No line 1 exists, so a range or a head read is 0-0 of 0, never 1-0."""
+    payload = await read_json(non_note_files["empty"], project=test_project.name, end_line=10)
+    text = await read_text(
+        non_note_files["empty"], project=test_project.name, start_line=1, end_line=10
+    )
+
+    assert payload["content"] == ""
+    assert (payload["start_line"], payload["end_line"], payload["total_lines"]) == (0, 0, 0)
+    assert payload["has_more"] is False
+    assert text == "Lines 0-0 of 0 (document, including frontmatter); EOF"
 
 
 @pytest.mark.asyncio

@@ -464,11 +464,20 @@ def test_slice_single_line_range():
     assert sliced.content == "# Auth"
 
 
-def test_slice_empty_document_yields_empty_slice():
-    sliced = _slice("", lines=LineRange(start=1, end=None))
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"lines": LineRange(start=1, end=None)},
+        {"lines": LineRange(start=1, end=5)},
+        {"max_tokens": 5},
+    ],
+)
+def test_slice_empty_document_yields_the_empty_range(arguments):
+    """An empty document has no line 1, so the slice is 0-0 of 0, never 1-0."""
+    sliced = _slice("", **arguments)
 
     assert sliced.content == ""
-    assert sliced.total_lines == 0
+    assert (sliced.start_line, sliced.end_line, sliced.total_lines) == (0, 0, 0)
 
 
 def test_slice_empty_document_rejects_ranges_past_line_one():

@@ -1,6 +1,8 @@
 """`bm tree` rebuilds a hierarchy from bm_find's flat listing."""
 
-from basic_memory.cli.commands.posix import _build_tree, _TreeEntry
+import pytest
+
+from basic_memory.cli.commands.posix import _build_tree, _listing_root, _TreeEntry
 
 
 def node(path: str, kind: str) -> dict[str, str]:
@@ -31,3 +33,20 @@ def test_the_root_is_not_its_own_child():
     tree = _build_tree([node("/specs", "directory"), node("/specs/intro.md", "file")], "/specs")
 
     assert tree == {"intro.md": _TreeEntry(False)}
+
+
+@pytest.mark.parametrize(
+    ("path", "project", "root"),
+    [
+        # A path that starts with the project's name answers in its permalink.
+        ("My Research/specs", "My Research", "my-research/specs"),
+        ("/My Research/specs/", "My Research", "my-research/specs"),
+        ("My Research", "My Research", "my-research"),
+        # Any other path, or no project, comes back as typed.
+        ("specs", "My Research", "specs"),
+        ("/", "My Research", "/"),
+        ("My Research/specs", None, "My Research/specs"),
+    ],
+)
+def test_listing_root_uses_the_spelling_bm_find_answers_in(path, project, root):
+    assert _listing_root(path, project) == root

@@ -29,6 +29,7 @@ from rich.tree import Tree
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.output import console
 from basic_memory.cli.commands.tool import call_tool, run_tool
+from basic_memory.config import ConfigManager
 
 # MCP tool functions are imported inside each command: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
@@ -398,6 +399,27 @@ def _build_tree(nodes: list[dict[str, Any]], root: str) -> dict[str, _TreeEntry]
     return top
 
 
+def _listing_root(path: str, project: str | None) -> str:
+    """The folder bm_find's node paths are relative to, in their own spelling.
+
+    A path that starts with the project's name ('My Research/specs') comes back
+    qualified with the project's permalink ('/my-research/specs/...'), so the root
+    stripped to rebuild the hierarchy must carry that spelling too, not the
+    caller's. Any other path comes back as typed.
+    """
+    # Deferred: the identifier helpers load the MCP routing stack (#886).
+    from basic_memory.mcp.project_context_identifiers import split_project_permalink_prefix
+    from basic_memory.utils import generate_permalink
+
+    if project is None:
+        return path
+    claimed = split_project_permalink_prefix(path.strip("/"), [generate_permalink(project)])
+    if claimed is None:
+        return path
+    permalink, remainder = claimed
+    return f"{permalink}/{remainder}" if remainder else permalink
+
+
 def _add_tree_branches(branch: Tree, entries: dict[str, _TreeEntry]) -> None:
     for segment, entry in entries.items():
         label = markup_escape(segment + ("/" if entry.is_dir else ""))
@@ -448,7 +470,10 @@ def tree(
         return
 
     drawn = Tree(f"[bold cyan]{markup_escape(path)}[/bold cyan]")
-    entries = _build_tree(listing["nodes"], path)
+    entries = _build_tree(
+        listing["nodes"],
+        _listing_root(path, project or ConfigManager().config.default_project),
+    )
     if not entries:
         drawn.add("[dim]empty[/dim]")
     _add_tree_branches(drawn, entries)

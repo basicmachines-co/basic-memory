@@ -27,7 +27,7 @@ from basic_memory.mcp.file_content import (
 )
 from basic_memory.mcp.note_reads import format_note_metadata, read_note_json_by_external_id
 from basic_memory.mcp.note_targets import PathQualifier, open_project_target, resolve_note
-from basic_memory.mcp.refusals import refusal
+from basic_memory.mcp.refusals import api_refusals, refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
@@ -156,7 +156,10 @@ async def bm_read(
                     try_instead="read a range with start_line/end_line, or the whole file",
                     output_format=output_format,
                 )
-            response = await resource_client.read(note.external_id)
+            # An indexed file whose bytes are gone is the API's 404; it reaches a
+            # JSON caller as a NOT_FOUND refusal rather than as plain text.
+            with api_refusals(output_format):
+                response = await resource_client.read(note.external_id)
             content = classify_file_response(response)
             if line_range:
                 if not isinstance(content, TextFile):

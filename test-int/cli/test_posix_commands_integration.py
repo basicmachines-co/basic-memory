@@ -615,6 +615,25 @@ def check_routed_cat_never_rewrites_note_frontmatter(second_project: Path) -> No
     assert payload["file_path"] == "second-project/notes/Imported Note.md"
 
 
-def test_verbs_with_two_projects(second_project, test_project):
+def check_tree_under_a_display_name_project(tmp_path_factory) -> None:
+    """A project named with a space and capitals answers in its permalink
+    spelling ('my-research/specs/...'); tree must strip that, not the caller's
+    'My Research/specs', or the project segment nests under the root."""
+    home = tmp_path_factory.mktemp("my-research-home")
+    added = bm("project", "add", "My Research", str(home))
+    assert added.exit_code == 0, added.output
+    write_note("Plan", "specs/auth", "# Plan", project="My Research")
+    research = ["--project", "My Research"]
+
+    qualified = bm_text("tree", "My Research/specs", *research)
+    relative = bm_text("tree", "specs", *research)
+
+    assert qualified.splitlines() == ["My Research/specs", "└── auth/", "    └── Plan.md"]
+    # Only the printed root differs between the two spellings of one folder.
+    assert qualified.splitlines()[1:] == relative.splitlines()[1:]
+
+
+def test_verbs_with_two_projects(second_project, test_project, tmp_path_factory):
     check_verbs_address_another_project(test_project)
     check_routed_cat_never_rewrites_note_frontmatter(second_project)
+    check_tree_under_a_display_name_project(tmp_path_factory)
