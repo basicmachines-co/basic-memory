@@ -598,6 +598,70 @@ async def test_embedding_status_reports_keyword_only_host(
     assert status.reindex_reason is None
 
 
+async def _drop_one_entity_search_projection(project_service: ProjectService, project_id: int):
+    """Leave one entity in place with no search_index rows (#1826)."""
+    result = await _execute(
+        project_service,
+        text("SELECT MIN(id) FROM entity WHERE project_id = :project_id"),
+        {"project_id": project_id},
+    )
+    entity_id = result.scalar_one()
+    assert entity_id is not None
+    await _execute(
+        project_service,
+        text("DELETE FROM search_index WHERE project_id = :project_id AND entity_id = :entity_id"),
+        {"project_id": project_id, "entity_id": entity_id},
+    )
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_reports_missing_search_rows_on_keyword_only_host(
+    project_service: ProjectService, test_graph, test_project, monkeypatch
+):
+    """A keyword-only host never reads vector counts, but an entity with no search
+    row is unsearchable there too, so status must still report it (#1826)."""
+    from basic_memory.services import project_service as project_service_module
+
+    monkeypatch.setattr(project_service_module, "semantic_runtime_available", lambda _c: False)
+    healthy = await project_service.get_embedding_status(test_project.id)
+    assert healthy.entities_missing_search_rows == 0
+    assert healthy.reindex_recommended is False
+
+    await _drop_one_entity_search_projection(project_service, test_project.id)
+    status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_runtime_available is False
+    assert status.entities_missing_search_rows == 1
+    assert status.reindex_recommended is True
+    assert status.reindex_reason == "1 entities missing from the search index — run: bm reindex"
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_reports_missing_search_rows_without_vector_tables(
+    project_service: ProjectService, test_graph, test_project
+):
+    """The missing-storage path returns early too; the search gap still leads (#1826)."""
+    drop_sql = (
+        "DROP TABLE IF EXISTS search_vector_chunks CASCADE"
+        if _is_postgres()
+        else "DROP TABLE IF EXISTS search_vector_chunks"
+    )
+    await _execute(project_service, text(drop_sql), {})
+    await _drop_one_entity_search_projection(project_service, test_project.id)
+
+    with patch.object(
+        type(project_service),
+        "config_manager",
+        new_callable=lambda: property(lambda self: _config_manager_with()),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_tables_exist is False
+    assert status.entities_missing_search_rows == 1
+    assert status.reindex_recommended is True
+    assert status.reindex_reason == "1 entities missing from the search index — run: bm reindex"
+
+
 def test_embedding_status_still_emits_the_deprecated_semantic_field():
     """CLIs released before the flag was removed require semantic_search_enabled
     when they read project info from an upgraded server."""

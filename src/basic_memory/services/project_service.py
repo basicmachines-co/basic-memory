@@ -1220,6 +1220,36 @@ class ProjectService:
 
         Reports config, counts, and whether a reindex is recommended.
         """
+        # Trigger: entities can exist with no search_index row at all (#1826).
+        # Why: every vector count starts from search_index, so such an entity is
+        #   missing from the indexed and embedded totals, and keyword-only or
+        #   missing-storage states never look at search rows at all.
+        # Outcome: count them against the entity table on every path; when any
+        #   exist, `bm reindex` (search pass + embeddings) is the first remedy.
+        async with db.scoped_session(self.session_maker) as session:
+            missing_search_result = await self.repository.execute_query(
+                session,
+                text(f"SELECT COUNT(*) FROM ({ENTITY_IDS_MISSING_SEARCH_ROWS_SQL}) AS missing"),
+                {"project_id": project_id},
+            )
+        entities_missing_search_rows = missing_search_result.scalar() or 0
+
+        status = await self._get_vector_embedding_status(project_id)
+        if not entities_missing_search_rows:
+            return status
+        return status.model_copy(
+            update={
+                "entities_missing_search_rows": entities_missing_search_rows,
+                "reindex_recommended": True,
+                "reindex_reason": (
+                    f"{entities_missing_search_rows} entities missing from the search index "
+                    "— run: bm reindex"
+                ),
+            }
+        )
+
+    async def _get_vector_embedding_status(self, project_id: int) -> EmbeddingStatus:
+        """Report vector config, counts, and the vector-side reindex recommendation."""
         config = self.config_manager.config
         provider = config.semantic_embedding_provider
         model = config.semantic_embedding_model
@@ -1338,18 +1368,6 @@ class ProjectService:
                 {"project_id": project_id},
             )
             total_indexed_entities = si_result.scalar() or 0
-
-            # Trigger: entities can exist with no search_index row at all (#1826).
-            # Why: every count below starts from search_index, so such an entity is
-            #   missing from both the indexed and the embedded totals and the gap
-            #   would read as full coverage.
-            # Outcome: count them against the entity table and report them.
-            missing_search_result = await self.repository.execute_query(
-                session,
-                text(f"SELECT COUNT(*) FROM ({ENTITY_IDS_MISSING_SEARCH_ROWS_SQL}) AS missing"),
-                {"project_id": project_id},
-            )
-            entities_missing_search_rows = missing_search_result.scalar() or 0
 
             manifest_params = {
                 "project_id": project_id,
@@ -1476,13 +1494,7 @@ class ProjectService:
             reindex_recommended = False
             reindex_reason = None
 
-            if entities_missing_search_rows > 0:
-                reindex_recommended = True
-                reindex_reason = (
-                    f"{entities_missing_search_rows} entities missing from the search index "
-                    "— run: bm reindex"
-                )
-            elif total_indexed_entities > 0 and total_chunks == 0:
+            if total_indexed_entities > 0 and total_chunks == 0:
                 reindex_recommended = True
                 reindex_reason = "Embeddings have never been built — run: bm reindex --embeddings"
             elif orphaned_chunks > 0:
@@ -1505,7 +1517,6 @@ class ProjectService:
                 embedding_document_prefix_set=document_prefix_set,
                 embedding_query_prefix_set=query_prefix_set,
                 total_indexed_entities=total_indexed_entities,
-                entities_missing_search_rows=entities_missing_search_rows,
                 total_entities_with_chunks=total_entities_with_chunks,
                 total_chunks=total_chunks,
                 total_embeddings=total_embeddings,
