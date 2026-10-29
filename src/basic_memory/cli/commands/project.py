@@ -1437,7 +1437,7 @@ async def _detach_local_project_row(app_config: BasicMemoryConfig, name: str) ->
     """Drop the project's row from the local index DB.
 
     Trigger: `bm project set-cloud` is making a project cloud-only.
-    Why: the local row is what causes `_merge_projects` to report
+    Why: the local row is what causes `_merge_workspace_projects` to report
          `source: "local+cloud"` after the toggle (#680). Removing it
          forces the merged listing to honor the user's chosen mode.
     Outcome: returns True if a row was deleted, False if there was

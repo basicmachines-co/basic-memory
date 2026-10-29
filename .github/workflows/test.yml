@@ -152,8 +152,9 @@ jobs:
           tests/cli/test_wiki_command.py
           tests/indexing/test_note_content_promotion_guard.py
           tests/mcp/test_tool_bm_delete.py
-          tests/mcp/test_tool_project_management.py
-          test-int/mcp/test_project_management_integration.py
+          tests/mcp/test_tool_bm_project.py
+          tests/mcp/test_tool_bm_project_cloud.py
+          test-int/mcp/test_bm_project_integration.py
           -q --no-cov --junitxml=windows-platform.xml
       - name: Upload test results
         if: always()

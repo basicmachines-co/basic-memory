@@ -158,14 +158,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "project",
         "project_id",
     ],
-    "create_memory_project": [
-        "project_name",
-        "project_path",
-        "set_default",
-        "workspace",
-        "output_format",
-    ],
-    "delete_project": ["project_name", "delete_notes", "workspace", "output_format"],
     "edit_note": [
         "identifier",
         "operation",
@@ -203,7 +195,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "context_lines",
         "max_matches",
     ],
-    "list_memory_projects": ["output_format"],
     "list_workspaces": ["output_format"],
     "ls": ["path", "page", "page_size", "project", "project_id"],
     "man": ["page", "query", "project", "project_id"],
@@ -278,7 +269,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
-    "list_memory_projects": {"readOnlyHint": True, "destructiveHint": False},
     "list_workspaces": {"readOnlyHint": True, "destructiveHint": False},
     "read_note": {"readOnlyHint": True, "destructiveHint": False},
     "recent_activity": {"readOnlyHint": True, "destructiveHint": False},
@@ -287,9 +277,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "schema_validate": {"readOnlyHint": True, "destructiveHint": False},
     "search": {"readOnlyHint": True, "destructiveHint": False},
     "search_notes": {"readOnlyHint": True, "destructiveHint": False},
-    # create_memory_project is purely additive: it creates a new project and errors
-    # if the target already exists.
-    "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
@@ -312,7 +299,6 @@ OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "tail": {"readOnlyHint": True, "destructiveHint": False},
     # Listed only when enable_project_delete is on.
     "bm_project_delete": {"readOnlyHint": False, "destructiveHint": True},
-    "delete_project": {"readOnlyHint": False, "destructiveHint": True},
 }
 
 EXPECTED_EDIT_NOTE_OPERATIONS = [
@@ -342,13 +328,10 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_man": tools.bm_man,
     "build_context": tools.build_context,
     "cat": tools.cat,
-    "create_memory_project": tools.create_memory_project,
-    "delete_project": tools.delete_project,
     "edit_note": tools.edit_note,
     "fetch": tools.fetch,
     "find": tools.find,
     "grep": tools.grep,
-    "list_memory_projects": tools.list_memory_projects,
     "list_workspaces": tools.list_workspaces,
     "ls": tools.ls,
     "man": tools.man,

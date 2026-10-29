@@ -1,7 +1,6 @@
-"""Project management tools for Basic Memory MCP server.
+"""Project listing, creation and deletion behind bm_project and bm_project_delete.
 
-These tools allow users to switch between projects, list available projects,
-and manage project context during conversations.
+list_memory_projects also serves search across all projects and the Cloud server.
 """
 
 import os
@@ -45,109 +44,6 @@ SYNC_SUPPORT_METADATA: dict[str, object] = {
     "sync_reason": None,
     "local_usage": "sync-supported",
 }
-
-
-def _merge_projects(
-    local_list: ProjectList | None,
-    cloud_list: ProjectList | None,
-    *,
-    cloud_workspace_name: str | None = None,
-    cloud_workspace_type: str | None = None,
-    cloud_workspace_tenant_id: str | None = None,
-    cloud_workspace_slug: str | None = None,
-    cloud_workspace_is_default: bool = False,
-) -> list[dict[str, Any]]:
-    """Merge local and cloud project lists by permalink.
-
-    Returns a sorted list of dicts with unified project metadata.
-    Same merge-by-permalink algorithm used by the CLI `bm project list`.
-    """
-    names_by_permalink: dict[str, str] = {}
-    local_by_permalink: dict[str, ProjectItem] = {}
-    cloud_by_permalink: dict[str, ProjectItem] = {}
-
-    if local_list:
-        for project in local_list.projects:
-            permalink = generate_permalink(project.name)
-            names_by_permalink[permalink] = project.name
-            local_by_permalink[permalink] = project
-
-    if cloud_list:
-        for project in cloud_list.projects:
-            permalink = generate_permalink(project.name)
-            names_by_permalink[permalink] = project.name
-            cloud_by_permalink[permalink] = project
-
-    merged: list[dict[str, Any]] = []
-    for permalink in sorted(names_by_permalink):
-        name = names_by_permalink[permalink]
-        local_proj = local_by_permalink.get(permalink)
-        cloud_proj = cloud_by_permalink.get(permalink)
-
-        # Determine source label
-        if local_proj and cloud_proj:
-            source = "local+cloud"
-        elif cloud_proj:
-            source = "cloud"
-        else:
-            source = "local"
-
-        # Prefer local path for backward compat; fall back to cloud path
-        local_path = local_proj.path if local_proj else None
-        cloud_path = cloud_proj.path if cloud_proj else None
-        path = local_path or cloud_path or ""
-
-        is_default = False
-        if local_proj and local_proj.is_default:
-            is_default = True
-        if cloud_proj and cloud_proj.is_default:
-            is_default = True
-
-        # Prefer cloud display_name / is_private (cloud injects these)
-        display_name = None
-        is_private = False
-        if cloud_proj:
-            display_name = cloud_proj.display_name
-            is_private = cloud_proj.is_private
-        elif local_proj:
-            display_name = local_proj.display_name
-            is_private = local_proj.is_private
-
-        # Attach workspace info for cloud-sourced projects
-        ws_name = cloud_workspace_name if cloud_proj else None
-        ws_type = cloud_workspace_type if cloud_proj else None
-        ws_tenant_id = cloud_workspace_tenant_id if cloud_proj else None
-
-        proj = cloud_proj or local_proj
-        external_id = proj.external_id if proj else None
-
-        merged.append(
-            {
-                "name": name,
-                "external_id": external_id,
-                "id": proj.id if proj else None,
-                "path": path,
-                "local_path": local_path,
-                "cloud_path": cloud_path,
-                "source": source,
-                "is_default": is_default,
-                "is_private": is_private,
-                "display_name": display_name,
-                "workspace_name": ws_name,
-                "workspace_type": ws_type,
-                "workspace_tenant_id": ws_tenant_id,
-                "workspace_slug": cloud_workspace_slug if cloud_proj else None,
-                "workspace_is_default": cloud_workspace_is_default if cloud_proj else False,
-                **SYNC_SUPPORT_METADATA,
-                "qualified_name": (
-                    f"{cloud_workspace_slug}/{permalink}"
-                    if cloud_proj and cloud_workspace_slug
-                    else None
-                ),
-            }
-        )
-
-    return merged
 
 
 def _workspace_entry_priority(entry: WorkspaceProjectEntry) -> tuple[bool, int, str, str]:
@@ -198,9 +94,6 @@ def _select_attached_cloud_entry(
         for entry in cloud_entries:
             if entry.workspace.tenant_id == workspace_id:
                 return entry
-
-    if len(cloud_entries) == 1:
-        return cloud_entries[0]
 
     return sorted(cloud_entries, key=_workspace_entry_priority)[0]
 
@@ -424,14 +317,8 @@ async def list_memory_projects(
         project_client = ProjectClient(client)
         local_list = await project_client.list_projects()
 
-    # Fetch cloud projects when credentials are available
-    cloud_list: ProjectList | None = None
+    # Fetch cloud projects from every accessible workspace when credentials are available
     cloud_entries: tuple[WorkspaceProjectEntry, ...] = ()
-    cloud_ws_name: str | None = None
-    cloud_ws_type: str | None = None
-    cloud_ws_tenant_id: str | None = None
-    cloud_ws_slug: str | None = None
-    cloud_ws_is_default = False
     config = ConfigManager().config
     if has_cloud_credentials(config):
         try:
@@ -448,18 +335,7 @@ async def list_memory_projects(
                     "showing local projects only"
                 )
 
-    if cloud_entries:
-        merged = _merge_workspace_projects(local_list, cloud_entries, config=config)
-    else:
-        merged = _merge_projects(
-            local_list,
-            cloud_list,
-            cloud_workspace_name=cloud_ws_name,
-            cloud_workspace_type=cloud_ws_type,
-            cloud_workspace_tenant_id=cloud_ws_tenant_id,
-            cloud_workspace_slug=cloud_ws_slug,
-            cloud_workspace_is_default=cloud_ws_is_default,
-        )
+    merged = _merge_workspace_projects(local_list, cloud_entries, config=config)
     default_project = local_list.default_project
 
     if output_format == "json":
@@ -572,7 +448,7 @@ async def create_memory_project(
         workspace: Optional cloud workspace selector to create the project in. Slug is
             preferred for AI callers, but tenant_id and unique name are also accepted.
             When omitted, the connection's default workspace is used. Discover values
-            via `list_workspaces`. A workspace selector implies cloud routing:
+            via `bm_project(command='list')`. A workspace selector implies cloud routing:
             without cloud credentials the call fails fast instead of silently
             creating a local project.
         output_format: "text" returns human-readable result text.
@@ -644,8 +520,8 @@ async def create_memory_project(
                     f"Project '{existing_match.name}' already exists at "
                     f"{existing_match.path}, not {project_path}.",
                     try_instead=(
-                        f"another name, or create_memory_project(project_name="
-                        f"'{existing_match.name}', project_path='{existing_match.path}')"
+                        f"another name, or bm_project(command='create', "
+                        f"name='{existing_match.name}', path='{existing_match.path}')"
                     ),
                     output_format=output_format,
                 )
@@ -921,8 +797,7 @@ async def delete_project(
         if status_response.old_project:
             result += "Removed project details:\n"
             result += f"• Name: {status_response.old_project.name}\n"
-            if hasattr(status_response.old_project, "path"):
-                result += f"• Path: {status_response.old_project.path}\n"
+            result += f"• Path: {status_response.old_project.path}\n"
 
         if status_response.deletion_status or status_response.job_id:
             result += "\nDeletion tracking:\n"
