@@ -225,6 +225,7 @@ def test_embedding_provider_factory_forwards_openai_api_configuration():
     ("api_base", "identity"),
     [
         (None, "text-embedding-3-small:1536"),
+        ("https://api.openai.com/v1", "text-embedding-3-small:1536"),
         ("https://ark.example/api/v3", "text-embedding-3-small:1536:unit-normalized"),
     ],
 )

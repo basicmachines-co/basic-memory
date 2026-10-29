@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+
+
+# api.openai.com returns unit vectors, so vectors it produced never need re-embedding.
+OFFICIAL_OPENAI_HOST = "api.openai.com"
 
 
 def effective_openai_base_url(api_base: str | None) -> str | None:
@@ -23,7 +28,7 @@ def openai_embedding_identity(*, model_name: str, dimensions: int, api_base: str
     may have stored unnormalized vectors that match nothing; a new identity makes
     the next index pass re-embed them.
     """
-    if not api_base:
+    if api_base is None or urlparse(api_base).hostname == OFFICIAL_OPENAI_HOST:
         return f"{model_name}:{dimensions}"
     return f"{model_name}:{dimensions}:unit-normalized"
 
