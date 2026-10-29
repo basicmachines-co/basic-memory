@@ -323,7 +323,7 @@ async def _move_directory(
             f"No files under '{target.paths.path(source)}' in project '{target.project.name}'.",
             try_instead=(
                 f"bm_list(path={target.paths.path(source.rpartition('/')[0]) or '/'!r}, "
-                f"project={target.project.external_id!r})"
+                f"project={target.project_ref!r})"
             ),
             output_format=output_format,
         )
@@ -356,7 +356,7 @@ async def _move_directory(
             f"'{result['path']}' to '{result['destination']}'; {moved.failed_moves} failed: "
             + "; ".join(f"{failure['path']}: {failure['error']}" for failure in result["failed"]),
             try_instead=(
-                f"bm_list(path={result['destination']!r}, project={target.project.external_id!r}) "
+                f"bm_list(path={result['destination']!r}, project={target.project_ref!r}) "
                 "to see what moved"
             ),
             output_format=output_format,

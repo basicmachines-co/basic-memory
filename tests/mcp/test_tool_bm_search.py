@@ -105,6 +105,41 @@ async def test_filters_alone_search_frontmatter(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_unranked_hits_show_no_score(client, test_project):
+    """Filters or a permalink pattern alone rank nothing, so every score is zero."""
+    await _seed(test_project.name)
+
+    by_filter = await search_text(filters={"status": "done"}, project=test_project.name)
+    by_blank_query = await search_text(
+        query="   ", filters={"status": "done"}, project=test_project.name
+    )
+    by_pattern = await search_text(query="tasks/*", mode="permalink", project=test_project.name)
+
+    assert "- notes/Deploy History.md | Deploy History" in by_filter
+    assert "- tasks/Deploy Plan.md | Deploy Plan" in by_pattern
+    assert "- notes/Deploy History.md | Deploy History" in by_blank_query
+    assert "score" not in by_filter + by_blank_query + by_pattern
+
+
+@pytest.mark.asyncio
+async def test_tag_shorthand_is_echoed_as_typed(client, test_project):
+    """A tag: token becomes a filter, but the heading repeats the caller's query."""
+    await bm_write(
+        title="Runbook",
+        directory="ops",
+        content="# Runbook\n\nRestart the worker.",
+        tags=["ops"],
+        project=test_project.name,
+    )
+
+    found = await search_text(query="tag:ops", project=test_project.name)
+    missing = await search_text(query="tag:nothing-tagged", project=test_project.name)
+
+    assert found.startswith(f"Results for 'tag:ops' in project '{test_project.name}':")
+    assert missing == f"No results for 'tag:nothing-tagged' in project '{test_project.name}'."
+
+
+@pytest.mark.asyncio
 async def test_items_and_categories_return_observations(client, test_project):
     await _seed(test_project.name)
 

@@ -57,11 +57,25 @@ class ProjectTarget:
     client: AsyncClient
     project: ProjectItem
     route: ProjectPathRoute
+    # The project try_instead hints name (see hint_project_ref).
+    project_ref: str
 
     @property
     def paths(self) -> "PathQualifier":
         """Re-qualifies response paths the way this target addressed its project."""
         return PathQualifier.for_route(self.route)
+
+
+def hint_project_ref(
+    project: str | None, route: ProjectPathRoute, active_project: ProjectItem
+) -> str:
+    """The `project` value to put in a try_instead hint so it reaches this project again.
+
+    The caller's own value comes first: it just resolved. Without one, the id that
+    routing pinned keeps a Cloud mount in the workspace that listed it, where its bare
+    name could resolve to another workspace's project of the same name.
+    """
+    return project or route.project_id or route.project or active_project.external_id
 
 
 @asynccontextmanager
@@ -120,7 +134,12 @@ async def open_project_target(
                 try_instead="a path relative to the project root, such as 'notes/plan.md'",
                 output_format=output_format,
             )
-        yield ProjectTarget(client=client, project=active_project, route=route)
+        yield ProjectTarget(
+            client=client,
+            project=active_project,
+            route=route,
+            project_ref=hint_project_ref(project, route, active_project),
+        )
 
 
 def _api_answer(error: ToolError) -> Response | None:
@@ -166,7 +185,7 @@ async def resolve_note(
         raise refusal(
             "INVALID_ARGUMENTS",
             f"'{identifier}' names a project, not a note.",
-            try_instead=f"bm_list(path='/', project={target.project.external_id!r})",
+            try_instead=f"bm_list(path='/', project={target.project_ref!r})",
             output_format=output_format,
         )
 
@@ -182,14 +201,14 @@ async def resolve_note(
                     None,
                     unchanged=unchanged,
                     output_format=output_format,
-                    project=target.project.external_id,
+                    project=target.project_ref,
                 ) from error
             case 404:
                 raise refusal(
                     "NOT_FOUND",
                     f"No note matches '{identifier}' in project '{target.project.name}'.",
                     try_instead=try_instead
-                    or f"bm_search(query={identifier!r}, project={target.project.external_id!r})",
+                    or f"bm_search(query={identifier!r}, project={target.project_ref!r})",
                     output_format=output_format,
                 ) from error
             # Several notes match exactly (two notes with one title); the API's

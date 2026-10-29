@@ -392,14 +392,14 @@ def _find_section(
     if not matches:
         available = ", ".join(_section_labels(sections)) or "(note has no headings)"
         return NoteSliceError(
-            f"Section '{selector.raw}' not found{note_label}. Available sections: {available}"
+            f"Section '{selector.raw}' not found{note_label}. Available sections: {available}."
         )
 
     distinct_paths = list(dict.fromkeys(section.heading_path for section in matches))
     if len(distinct_paths) > 1:
         return NoteSliceError(
             f"Section '{selector.raw}' is ambiguous{note_label}. "
-            f"Qualify it: {', '.join(distinct_paths)}"
+            f"Qualify it: {', '.join(distinct_paths)}."
         )
 
     # All matches share one full path; document order equals duplicate_index order.
