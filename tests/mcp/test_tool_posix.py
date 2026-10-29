@@ -1670,16 +1670,16 @@ async def test_man_index_renders_the_manual(client):
 
 @pytest.mark.asyncio
 async def test_man_bundled_page_by_reference():
-    result = await man(page="search-notes(3)")
+    result = await man(page="bm-search(3)")
 
     assert isinstance(result, str)
-    assert "# search-notes(3)" in result
+    assert "# bm-search(3)" in result
 
 
 @pytest.mark.asyncio
 async def test_man_page_and_query_mutually_exclusive():
     with pytest.raises(ValueError, match="not both"):
-        await man(page="search-notes(3)", query="search")
+        await man(page="bm-search(3)", query="search")
 
 
 @pytest.mark.asyncio

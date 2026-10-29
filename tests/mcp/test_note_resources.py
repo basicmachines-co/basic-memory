@@ -118,10 +118,10 @@ async def test_routing_errors_surface_their_cause(
 async def test_man_namespace_stays_the_manual(app) -> None:
     # Which template a server matches first is not guaranteed, so the notes
     # handler must answer memory://man/... exactly as the manual would.
-    direct = await note_resource(project="man", path="search-notes(3)")
-    served = await _read("memory://man/search-notes(3)")
+    direct = await note_resource(project="man", path="bm-search(3)")
+    served = await _read("memory://man/bm-search(3)")
 
-    assert direct.startswith("---\ntitle: search-notes(3)\n")
+    assert direct.startswith("---\ntitle: bm-search(3)\n")
     assert served == direct
 
 

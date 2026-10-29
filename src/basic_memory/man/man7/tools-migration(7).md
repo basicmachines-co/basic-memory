@@ -40,7 +40,7 @@ after the tool's parameters. The rest have their own commands or none: [[bm-man(
 | `recent_activity`, `tail` | [[bm-project(3)]] with `command="recent"` |
 | `list_memory_projects`, `list_workspaces` | [[bm-project(3)]] with `command="list"` |
 | `create_memory_project` | [[bm-project(3)]] with `command="create"` |
-| `cloud_info` | [[bm-project(3)]] with `command="info"` (Cloud) |
+| `cloud_info` | On Basic Memory Cloud, `bm_project(command="info")`; a local server has none |
 | `delete_project` | [[bm-project-delete(3)]], when enabled in config |
 | `schema_validate`, `schema_infer`, `schema_diff` | [[bm-schema(3)]] |
 | `man` | [[bm-man(3)]] |
