@@ -5,8 +5,32 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
+from urllib.parse import urlparse
 
+from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+
+
+# api.openai.com returns unit vectors, so vectors it produced never need re-embedding.
+OFFICIAL_OPENAI_HOST = "api.openai.com"
+
+
+def effective_openai_base_url(api_base: str | None) -> str | None:
+    """Return the endpoint the OpenAI SDK will call: the setting, else OPENAI_BASE_URL."""
+    return api_base or os.environ.get("OPENAI_BASE_URL") or None
+
+
+def openai_embedding_identity(*, model_name: str, dimensions: int, api_base: str | None) -> str:
+    """Return the stored-vector identity for an OpenAI-compatible embedding setup.
+
+    Vectors are unit-normalized since #1862. api.openai.com always returned unit
+    vectors, so its identity is unchanged and nothing re-embeds. A custom endpoint
+    may have stored unnormalized vectors that match nothing; a new identity makes
+    the next index pass re-embed them.
+    """
+    if api_base is None or urlparse(api_base).hostname == OFFICIAL_OPENAI_HOST:
+        return f"{model_name}:{dimensions}"
+    return f"{model_name}:{dimensions}:unit-normalized"
 
 
 class OpenAIEmbeddingProvider:
@@ -39,6 +63,14 @@ class OpenAIEmbeddingProvider:
             "provider_batch_size": self.batch_size,
             "request_concurrency": self.request_concurrency,
         }
+
+    def identity_key(self) -> str:
+        """Return the embedding semantics that should invalidate stored vectors."""
+        return openai_embedding_identity(
+            model_name=self.model_name,
+            dimensions=self.dimensions,
+            api_base=effective_openai_base_url(self._base_url),
+        )
 
     async def _get_client(self) -> Any:
         if self._client is not None:
@@ -96,7 +128,10 @@ class OpenAIEmbeddingProvider:
                     raise RuntimeError(
                         "OpenAI embedding response returned duplicate vector indexes."
                     )
-                vectors_by_index[response_index] = [float(value) for value in item.embedding]
+                # OpenAI returns unit vectors; other OpenAI-compatible endpoints may not (#1862).
+                vectors_by_index[response_index] = unit_normalized(
+                    [float(value) for value in item.embedding]
+                )
 
             ordered_vectors: list[list[float]] = []
             for index in range(len(batch)):

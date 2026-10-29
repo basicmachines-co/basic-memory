@@ -2,6 +2,7 @@
 
 import asyncio
 import builtins
+import math
 import sys
 from types import SimpleNamespace
 
@@ -11,8 +12,13 @@ from basic_memory.config import BasicMemoryConfig
 import basic_memory.repository.embedding_provider_factory as embedding_provider_factory_module
 from basic_memory.repository.embedding_provider_factory import (
     _provider_cache_key,
+    configured_embedding_provider_identity,
     create_embedding_provider,
     reset_embedding_provider_cache,
+)
+from basic_memory.repository.embedding_provider import (
+    embedding_provider_identity,
+    unit_normalized,
 )
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
@@ -101,6 +107,26 @@ async def test_openai_provider_lazy_loads_and_reuses_client(monkeypatch):
     assert len(first) == 3
     assert len(second) == 2
     assert len(second[0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_returns_unit_vectors(monkeypatch):
+    """OpenAI-compatible endpoints may return unnormalized vectors; search needs unit ones.
+
+    Reported against Volcengine Ark in #1862; fix first proposed by @MbappeWU in #1869.
+    """
+    module = type(sys)("openai")
+    setattr(module, "AsyncOpenAI", _StubAsyncOpenAI)
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    provider = OpenAIEmbeddingProvider(model_name="doubao-embedding", dimensions=3)
+
+    vectors = await provider.embed_documents(["three", "eleven chars"])
+
+    # The stub returns [n, n+1, n+2] for an n-character input: far from unit length.
+    for vector in vectors:
+        assert math.isclose(math.sqrt(sum(value * value for value in vector)), 1.0)
+    assert vectors[0][0] < vectors[0][1] < vectors[0][2]
 
 
 @pytest.mark.asyncio
@@ -193,6 +219,53 @@ def test_embedding_provider_factory_forwards_openai_api_configuration():
     assert isinstance(provider, OpenAIEmbeddingProvider)
     assert provider._base_url == "https://embedding.example/v1"
     assert provider._api_key == "test-key"
+
+
+@pytest.mark.parametrize(
+    ("api_base", "identity"),
+    [
+        (None, "text-embedding-3-small:1536"),
+        ("https://api.openai.com/v1", "text-embedding-3-small:1536"),
+        ("https://ark.example/api/v3", "text-embedding-3-small:1536:unit-normalized"),
+    ],
+)
+def test_openai_identity_changes_only_for_custom_endpoints(api_base, identity, monkeypatch):
+    """Custom endpoints may hold unnormalized vectors; a new identity re-embeds them (#1862).
+
+    api.openai.com always returned unit vectors, so its stored vectors keep their identity.
+    """
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_base=api_base,
+        semantic_embedding_api_key="test-key",
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert embedding_provider_identity(provider) == identity
+    assert configured_embedding_provider_identity(config) == (f"OpenAIEmbeddingProvider:{identity}")
+
+
+def test_openai_identity_follows_an_endpoint_set_by_environment(monkeypatch):
+    """The SDK reads OPENAI_BASE_URL when no api_base is configured; so must the identity."""
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ark.example/api/v3")
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_key="test-key",
+    )
+
+    provider = create_embedding_provider(config)
+
+    identity = "text-embedding-3-small:1536:unit-normalized"
+    assert embedding_provider_identity(provider) == identity
+    assert configured_embedding_provider_identity(config) == f"OpenAIEmbeddingProvider:{identity}"
 
 
 def test_embedding_provider_factory_separates_openai_api_cache_keys():
@@ -567,10 +640,10 @@ async def test_openai_provider_runs_batches_concurrently_and_preserves_output_or
 
     assert shared_api.max_in_flight >= 2
     assert vectors == [
-        [1.0, 2.0, 3.0],
-        [4.0, 5.0, 6.0],
-        [3.0, 4.0, 5.0],
-        [2.0, 3.0, 4.0],
+        unit_normalized([1.0, 2.0, 3.0]),
+        unit_normalized([4.0, 5.0, 6.0]),
+        unit_normalized([3.0, 4.0, 5.0]),
+        unit_normalized([2.0, 3.0, 4.0]),
     ]
 
 

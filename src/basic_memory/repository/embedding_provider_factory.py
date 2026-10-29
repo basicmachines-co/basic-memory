@@ -8,6 +8,10 @@ from loguru import logger
 
 from basic_memory.config import BasicMemoryConfig, default_fastembed_cache_dir
 from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.openai_provider import (
+    effective_openai_base_url,
+    openai_embedding_identity,
+)
 from basic_memory.repository.prefixing_provider import (
     PrefixingEmbeddingProvider,
     embedding_prefix_digest,
@@ -161,7 +165,11 @@ def configured_embedding_provider_identity(app_config: BasicMemoryConfig) -> str
         if model_name == "bge-small-en-v1.5":
             model_name = "text-embedding-3-small"
         dimensions = configured_dimensions or 1536
-        provider_identity = f"{model_name}:{dimensions}"
+        provider_identity = openai_embedding_identity(
+            model_name=model_name,
+            dimensions=dimensions,
+            api_base=effective_openai_base_url(app_config.semantic_embedding_api_base),
+        )
     elif provider_name == "litellm":
         from basic_memory.repository.litellm_provider import (
             _default_input_types,
