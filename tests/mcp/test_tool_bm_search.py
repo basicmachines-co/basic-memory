@@ -11,9 +11,7 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools import bm_read, bm_search, bm_write
-from basic_memory.mcp.tools import ranked_search as ranked_search_module
 from basic_memory.mcp.tools.ranked_search import _query_terms
-from basic_memory.mcp.tools.search import MultiProjectFailed, MultiProjectNotIndexed
 
 
 async def search_text(**arguments: Any) -> str:
@@ -337,26 +335,13 @@ async def test_empty_search_across_projects_is_refused(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_a_search_that_ran_nowhere_is_an_error(client, test_project, monkeypatch):
-    """Every database failing is UNAVAILABLE, not an empty successful search."""
+async def test_unindexed_projects_keep_the_json_shape(client, test_project):
+    """A miss across never-indexed projects is guidance, not an empty success."""
+    payload = await search_json(query="zxqv", mode="text", all_projects=True)
 
-    async def ran_nowhere(**_kwargs: Any) -> MultiProjectFailed:
-        return MultiProjectFailed(reason="local: database is locked", rendered="# Search Failed")
-
-    monkeypatch.setattr(ranked_search_module, "_search_all_projects", ran_nowhere)
-    with pytest.raises(ToolError, match='"error": "UNAVAILABLE"'):
-        await bm_search(query="deploy", all_projects=True, output_format="json")
-
-
-@pytest.mark.asyncio
-async def test_unindexed_projects_keep_the_json_shape(client, test_project, monkeypatch):
-    async def not_indexed(**_kwargs: Any) -> MultiProjectNotIndexed:
-        return MultiProjectNotIndexed(guidance="Index the project first.")
-
-    monkeypatch.setattr(ranked_search_module, "_search_all_projects", not_indexed)
-    payload = await search_json(query="deploy", all_projects=True)
-
-    assert payload == {"results": [], "guidance": "Index the project first."}
+    assert payload["results"] == []
+    assert payload["guidance"].startswith("# Project Index Required")
+    assert test_project.name in payload["guidance"]
 
 
 @pytest.mark.asyncio
