@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, searchResultText } from "../bm-client.ts"
 import type { BasicMemoryConfig } from "../config.ts"
 import { log } from "../logger.ts"
 
@@ -31,13 +31,12 @@ export function registerCli(
           }
 
           for (const r of results) {
-            const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : ""
+            const score = r.score ? ` (score ${r.score.toFixed(2)})` : ""
             console.log(`- ${r.title}${score}`)
-            if (r.content) {
+            const text = searchResultText(r)
+            if (text) {
               const preview =
-                r.content.length > 100
-                  ? `${r.content.slice(0, 100)}...`
-                  : r.content
+                text.length > 100 ? `${text.slice(0, 100)}...` : text
               console.log(`  ${preview}`)
             }
           }

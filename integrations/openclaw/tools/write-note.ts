@@ -1,7 +1,8 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
 import {
+  type BmClient,
+  describeToolError,
   NoteAlreadyExistsError,
   NoteRevisionConflictError,
 } from "../bm-client.ts"
@@ -123,7 +124,9 @@ export function registerWriteTool(
           const checksumSuffix = note.checksum
             ? `\nChecksum: ${note.checksum}`
             : ""
-          const msg = `Note saved: ${note.title} (${note.permalink})${checksumSuffix}`
+          // The description tells agents to cite permalink and file_path, so both
+          // must appear in the text the agent reads, not only in details.
+          const msg = `Note saved: ${note.title} (${note.permalink})\nFile: ${note.file_path}${checksumSuffix}`
           return {
             content: [
               {
@@ -183,7 +186,7 @@ export function registerWriteTool(
             content: [
               {
                 type: "text" as const,
-                text: "Failed to write note. Is Basic Memory running? Check logs for details.",
+                text: `Failed to write note: ${describeToolError(err)}`,
               },
             ],
             details: {

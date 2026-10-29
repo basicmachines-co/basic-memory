@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { setTimeout as delay } from "node:timers/promises"
 import { Client } from "@modelcontextprotocol/sdk/client"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
@@ -70,6 +71,17 @@ export interface SearchResult {
   content: string
   score?: number
   file_path: string
+  // The chunk of the note that matched, when the server ranked by chunk.
+  matched_chunk?: string | null
+}
+
+/**
+ * The text to preview for a search hit. `content` is the start of the note,
+ * so for a long note (a day of captured conversation) the matching part can
+ * sit far below any preview cut-off; the matched chunk is the part that hit.
+ */
+export function searchResultText(result: SearchResult): string {
+  return result.matched_chunk?.trim() || result.content || ""
 }
 
 export interface NoteResult {
@@ -86,7 +98,7 @@ export interface EditNoteResult {
   title: string
   permalink: string
   file_path: string
-  operation: "append" | "prepend" | "find_replace" | "replace_section"
+  operation: EditOperation
   checksum?: string | null
 }
 
@@ -105,6 +117,16 @@ interface WriteNoteOptions {
   /** Checksum of the revision read; overwrite only while it is still current. */
   expectedChecksum?: string
 }
+
+// bm_edit commands the plugin exposes. set_metadata is left out: edit_note
+// already merges `metadata` alongside any other operation.
+export type EditOperation =
+  | "append"
+  | "prepend"
+  | "find_replace"
+  | "replace_section"
+  | "insert_before_section"
+  | "insert_after_section"
 
 interface EditNoteOptions {
   find_text?: string
@@ -126,7 +148,10 @@ export interface ContextResult {
       permalink: string
       relation_type?: string
       from_entity?: string
-      to_entity?: string
+      // Null for a forward reference whose target note does not exist yet;
+      // to_name then carries the link text.
+      to_entity?: string | null
+      to_name?: string | null
     }>
   }>
 }
@@ -245,11 +270,24 @@ function isRecoverableConnectionError(err: unknown): boolean {
   )
 }
 
-function isNoteNotFoundError(err: unknown): boolean {
+export function isNoteNotFoundError(err: unknown): boolean {
   return (
     err instanceof BmToolError &&
     parseRefusalPayload(err.toolMessage)?.error === "NOT_FOUND"
   )
+}
+
+export type ConversationCaptureStatus = "committed" | "duplicate"
+
+function conversationDate(date: Date): string {
+  return date.toISOString().split("T")[0]
+}
+
+// Host advancement keys are opaque and may contain characters that would end
+// an HTML comment, so the note stores a fixed-length digest instead.
+function conversationTurnMarker(turnKey: string): string {
+  const digest = createHash("sha256").update(turnKey).digest("hex").slice(0, 32)
+  return `<!-- openclaw-turn:${digest} -->`
 }
 
 function asString(value: unknown): string | null {
@@ -267,6 +305,24 @@ function parseRefusalPayload(text: string): Record<string, unknown> | null {
     return null
   }
   return isRecord(parsed) && typeof parsed.error === "string" ? parsed : null
+}
+
+/**
+ * The server's own explanation of a failed tool call, for showing to an agent.
+ * A refusal payload becomes "CODE: message"; other tool text passes through.
+ */
+export function describeToolError(err: unknown): string {
+  if (!(err instanceof BmToolError)) return getErrorMessage(err)
+  const payload = parseRefusalPayload(err.toolMessage)
+  if (!payload) return err.toolMessage || err.message
+  const message = asString(payload.message)
+  return message ? `${payload.error}: ${message}` : String(payload.error)
+}
+
+/** describeToolError, but saying plainly when the note does not exist. */
+export function describeNoteError(err: unknown): string {
+  const reason = describeToolError(err)
+  return isNoteNotFoundError(err) ? `it does not exist. ${reason}` : reason
 }
 
 function projectMatchesWorkspace(
@@ -291,34 +347,103 @@ export class BmClient {
   private cwd?: string
   private env?: Record<string, string>
   private shouldRun = false
+  // True only between start() and stop(), i.e. while the plugin service owns
+  // the BM MCP session. A lazy connection opened by a tool or memory call in a
+  // one-shot CLI process leaves this false.
+  private serviceRunning = false
+  // Connect plus project creation, started by start(). Tool calls wait for
+  // it so none can reach a project that does not exist yet. Null when the
+  // client was never started (tests, one-shot CLI readers).
+  private startup: Promise<void> | null = null
+  private startupRetry: Promise<void> | null = null
+  private projectPath?: string
+  private prepare?: () => Promise<void>
 
   private client: Client | null = null
   private transport: StdioClientTransport | null = null
   private connectPromise: Promise<void> | null = null
   private retryDelaysMs = [...DEFAULT_RETRY_DELAYS_MS]
+  // Conversation captures run one at a time so a turn-key duplicate check
+  // and the append that follows it cannot interleave with another capture.
+  private conversationWrites: Promise<unknown> = Promise.resolve()
 
   constructor(bmPath: string, project: string) {
     this.bmPath = bmPath
     this.project = project
   }
 
-  async start(options?: {
+  /**
+   * Connect to BM and create the plugin's project.
+   *
+   * Returns the startup promise; callers that must not block (the plugin
+   * service, which OpenClaw gives only a few seconds) can leave it running.
+   * Tool calls made meanwhile wait for it. If it fails, the next tool call
+   * runs it again, so a transient failure does not leave the plugin dead.
+   */
+  start(options?: {
     cwd?: string
     env?: Record<string, string>
+    projectPath?: string
+    // Runs before each connect attempt, e.g. installing the bm CLI.
+    prepare?: () => Promise<void>
   }): Promise<void> {
     this.shouldRun = true
+    this.serviceRunning = true
     if (options?.cwd) {
       this.cwd = options.cwd
     }
     if (options?.env) {
       this.env = options.env
     }
+    if (options?.projectPath) {
+      this.projectPath = options.projectPath
+    }
+    if (options?.prepare) {
+      this.prepare = options.prepare
+    }
 
+    this.startup = this.runStartup()
+    return this.startup
+  }
+
+  private async runStartup(): Promise<void> {
+    await this.prepare?.()
     await this.connectWithRetries()
+    if (this.projectPath) await this.createProject(this.projectPath)
+  }
+
+  private async waitForStartup(): Promise<void> {
+    if (!this.startup) return
+    try {
+      await this.startup
+    } catch (err) {
+      // Trigger: the startup this call was waiting on failed.
+      // Why: the service no longer fails on a slow or failed start, so the
+      //   first tool call afterwards is the place to recover.
+      // Outcome: one fresh attempt, shared by concurrent callers; its error
+      //   reaches the tool if it fails too.
+      if (!this.serviceRunning) throw err
+      if (this.startupRetry === null) {
+        this.startupRetry = this.runStartup().finally(() => {
+          this.startupRetry = null
+        })
+        this.startup = this.startupRetry
+      }
+      await this.startupRetry
+    }
+  }
+
+  isServiceRunning(): boolean {
+    return this.serviceRunning
   }
 
   async stop(): Promise<void> {
     this.shouldRun = false
+    this.serviceRunning = false
+    // Let an in-flight startup settle first, so it cannot reconnect after
+    // the disconnect below.
+    await this.startup?.catch(() => undefined)
+    this.startup = null
     await this.disconnectCurrent(this.client, this.transport)
     this.client = null
     this.transport = null
@@ -520,6 +645,15 @@ export class BmClient {
     name: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
+    await this.waitForStartup()
+    return this.callStructured(name, args)
+  }
+
+  // Ungated: startup itself calls this to create the project.
+  private async callStructured(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
     const result = await this.callToolRaw(name, args)
 
     if (!isRecord(result) || result.structuredContent === undefined) {
@@ -545,7 +679,12 @@ export class BmClient {
   }
 
   async ensureProject(projectPath: string): Promise<void> {
-    const payload = await this.callTool("bm_project", {
+    await this.waitForStartup()
+    await this.createProject(projectPath)
+  }
+
+  private async createProject(projectPath: string): Promise<void> {
+    const payload = await this.callStructured("bm_project", {
       command: "create",
       name: this.project,
       path: projectPath,
@@ -784,7 +923,7 @@ export class BmClient {
 
   async editNote(
     identifier: string,
-    operation: "append" | "prepend" | "find_replace" | "replace_section",
+    operation: EditOperation,
     content: string,
     options: EditNoteOptions = {},
     project?: string,
@@ -949,17 +1088,61 @@ export class BmClient {
     return payload as unknown as SchemaDiffResult
   }
 
+  /**
+   * Append one user/assistant exchange to today's conversation note.
+   *
+   * With a turnKey the capture is idempotent: the entry carries a marker
+   * derived from the key, and a key already present in today's or
+   * yesterday's note is reported as a duplicate instead of written again.
+   * Yesterday is checked because a host retry can cross midnight.
+   */
   async indexConversation(
     userMessage: string,
     assistantResponse: string,
-  ): Promise<void> {
+    options: { turnKey?: string } = {},
+  ): Promise<ConversationCaptureStatus> {
+    const write = this.conversationWrites.then(() =>
+      this.writeConversationEntry(
+        userMessage,
+        assistantResponse,
+        options.turnKey,
+      ),
+    )
+    this.conversationWrites = write.catch(() => undefined)
+    return write
+  }
+
+  private async writeConversationEntry(
+    userMessage: string,
+    assistantResponse: string,
+    turnKey: string | undefined,
+  ): Promise<ConversationCaptureStatus> {
     const now = new Date()
-    const dateStr = now.toISOString().split("T")[0]
+    const dateStr = conversationDate(now)
     const timeStr = now.toTimeString().slice(0, 5)
     const title = `conversations-${dateStr}`
+    const marker = turnKey ? conversationTurnMarker(turnKey) : null
+
+    // Trigger: the host supplied an advancement key for this turn.
+    // Why: hosts retry commits after a crash, and a second append would
+    //   duplicate the exchange in the note.
+    // Outcome: an already-recorded key short-circuits before any write.
+    if (marker) {
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      for (const candidate of [
+        title,
+        `conversations-${conversationDate(yesterday)}`,
+      ]) {
+        if (await this.noteContains(candidate, marker)) {
+          log.debug(`conversation turn already recorded in: ${candidate}`)
+          return "duplicate"
+        }
+      }
+    }
 
     const entry = [
       `### ${timeStr}`,
+      ...(marker ? [marker] : []),
       "",
       "**User:**",
       userMessage,
@@ -973,7 +1156,7 @@ export class BmClient {
     try {
       await this.editNote(title, "append", entry)
       log.debug(`appended conversation to: ${title}`)
-      return
+      return "committed"
     } catch (err) {
       if (!isNoteNotFoundError(err)) {
         log.error(`conversation append failed: ${getErrorMessage(err)}`, err)
@@ -998,11 +1181,21 @@ export class BmClient {
       entry,
     ].join("\n")
 
+    await this.writeNote(title, content, "conversations")
+    log.debug(`created conversation note: ${title}`)
+    return "committed"
+  }
+
+  private async noteContains(
+    identifier: string,
+    text: string,
+  ): Promise<boolean> {
     try {
-      await this.writeNote(title, content, "conversations")
-      log.debug(`created conversation note: ${title}`)
+      const note = await this.readNote(identifier)
+      return note.content.includes(text)
     } catch (err) {
-      log.error("conversation index failed", err)
+      if (isNoteNotFoundError(err)) return false
+      throw err
     }
   }
 

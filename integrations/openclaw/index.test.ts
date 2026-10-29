@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, jest } from "bun:test"
-import { existsSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { BmClient } from "./bm-client.ts"
 import plugin, { isCommandAvailable } from "./index.ts"
 
@@ -9,12 +11,13 @@ describe("plugin service lifecycle", () => {
   })
 
   it("starts MCP client, ensures project path, and stops cleanly", async () => {
-    const startSpy = jest
-      .spyOn(BmClient.prototype, "start")
-      .mockResolvedValue(undefined)
-    const ensureProjectSpy = jest
-      .spyOn(BmClient.prototype, "ensureProject")
-      .mockResolvedValue(undefined)
+    // Held open so the test can show service start does not wait for it.
+    let finishStartup = () => {}
+    const startSpy = jest.spyOn(BmClient.prototype, "start").mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishStartup = resolve
+      }),
+    )
     const readNoteSpy = jest
       .spyOn(BmClient.prototype, "readNote")
       .mockRejectedValue(new Error("Entity not found"))
@@ -47,6 +50,7 @@ describe("plugin service lifecycle", () => {
       registerCommand: jest.fn(),
       registerCli: jest.fn(),
       registerContextEngine: jest.fn(),
+      registerMemoryCapability: jest.fn(),
       registerService: jest.fn((service: any) => {
         services.push(service)
       }),
@@ -62,10 +66,38 @@ describe("plugin service lifecycle", () => {
     )
     expect(api.on).not.toHaveBeenCalled()
 
-    await services[0].start({ workspaceDir: "/tmp/workspace" })
+    // memory-core owns memory_search and memory_get on OpenClaw 2026.10, so
+    // the plugin serves the host through its memory capability instead.
+    expect(api.registerMemoryCapability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerRuntime: expect.any(Object),
+        recallToolNames: ["search_notes", "read_note", "build_context"],
+      }),
+    )
+    const toolNames = api.registerTool.mock.calls.map(
+      ([tool]) => (tool as { name: string }).name,
+    )
+    expect(toolNames).not.toContain("memory_search")
+    expect(toolNames).not.toContain("memory_get")
 
-    expect(startSpy).toHaveBeenCalledWith({ cwd: "/tmp/workspace" })
-    expect(ensureProjectSpy).toHaveBeenCalledWith("/tmp/workspace/memory")
+    // A fresh OpenClaw install has no workspace directory yet.
+    const root = mkdtempSync(join(tmpdir(), "openclaw-bm-"))
+    const workspace = join(root, "workspace")
+
+    await services[0].start({ workspaceDir: workspace })
+
+    // Startup runs in the background: service start returned while the BM
+    // connection is still pending, with the workspace already created.
+    expect(existsSync(workspace)).toBe(true)
+    expect(startSpy).toHaveBeenCalledWith({
+      cwd: workspace,
+      projectPath: join(workspace, "memory"),
+      prepare: expect.any(Function),
+    })
+    expect(readNoteSpy).not.toHaveBeenCalled()
+
+    finishStartup()
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Schema seed: readNote throws "not found" → writeNote called
     expect(readNoteSpy).toHaveBeenCalledWith("schema/Task")
@@ -78,13 +110,14 @@ describe("plugin service lifecycle", () => {
     await services[0].stop()
 
     expect(stopSpy).toHaveBeenCalledTimes(1)
+    rmSync(root, { recursive: true, force: true })
   })
 
-  it("checks configured bmPath without invoking a shell", () => {
+  it("checks configured bmPath without invoking a shell", async () => {
     const marker = `/tmp/openclaw-bm-shell-${process.pid}`
     rmSync(marker, { force: true })
 
-    expect(isCommandAvailable(`bm; touch ${marker}`)).toBe(false)
+    expect(await isCommandAvailable(`bm; touch ${marker}`)).toBe(false)
     expect(existsSync(marker)).toBe(false)
   })
 })

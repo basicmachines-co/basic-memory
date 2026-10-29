@@ -198,7 +198,7 @@ describe("project list tool", () => {
       content: [
         {
           type: "text",
-          text: "Failed to list Basic Memory projects. Is Basic Memory running? Check logs for details.",
+          text: "Failed to list Basic Memory projects: boom",
         },
       ],
       details: {

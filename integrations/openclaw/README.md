@@ -33,7 +33,7 @@ This plugin connects Basic Memory to OpenClaw so your agent can:
 - **Remember across sessions** — search and recall past conversations, decisions, and context
 - **Track work in progress** — structured tasks that survive context compaction
 - **Build knowledge over time** — notes, observations, and relations that grow into a connected graph
-- **Search intelligently** — composited search across working memory, the knowledge graph, and active tasks in parallel
+- **Search intelligently** — hybrid full-text and vector search across the knowledge graph
 
 All data stays on your machine as Markdown files indexed locally with SQLite. Cloud sync is available but entirely optional.
 
@@ -53,9 +53,17 @@ Then install the plugin:
 
 ```bash
 openclaw plugins install @basicmemory/openclaw-basic-memory
-openclaw plugins enable openclaw-basic-memory --slot memory
+openclaw config set plugins.slots.memory openclaw-basic-memory
+openclaw config set plugins.slots.contextEngine openclaw-basic-memory
 openclaw gateway restart
 ```
+
+The plugin fills two OpenClaw slots, and each one does a different job:
+
+- **`memory`** registers Basic Memory as OpenClaw's memory provider: gateway memory search and status, `openclaw doctor` health, Active Memory recall, and the pre-compaction memory flush.
+- **`contextEngine`** runs automatic recall at session start and automatic conversation capture after each turn. **Without this slot, nothing is captured or recalled automatically**; the agent only remembers what it saves with an explicit tool call.
+
+Tested with OpenClaw 2026.10.9. OpenClaw 2026.10 and later require context engines to commit turns through `commitTurn`, which this plugin implements; older plugin versions are degraded to OpenClaw's legacy engine on those hosts and capture nothing.
 
 That's it. The plugin auto-installs the `bm` CLI on first startup if it's not already on your PATH. See [SECURITY.md](./SECURITY.md) for details on how this works.
 
@@ -80,7 +88,8 @@ openclaw plugins doctor
       }
     },
     slots: {
-      memory: "openclaw-basic-memory"
+      memory: "openclaw-basic-memory",
+      contextEngine: "openclaw-basic-memory"
     }
   }
 }
@@ -108,7 +117,8 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
       }
     },
     slots: {
-      memory: "openclaw-basic-memory"
+      memory: "openclaw-basic-memory",
+      contextEngine: "openclaw-basic-memory"
     }
   }
 }
@@ -131,13 +141,17 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
 
 ### Memory search
 
-When your agent calls `memory_search`, three sources are queried in parallel:
+Agents search Basic Memory with `search_notes` and read results with `read_note`. The plugin adds a short system-prompt section that points the agent at these tools.
 
-1. **MEMORY.md** — text search with surrounding context
-2. **Knowledge Graph** — hybrid full-text + vector search across all indexed notes
-3. **Active Tasks** — scans `memory/tasks/` for in-progress work
+OpenClaw's built-in `memory_search` and `memory_get` tools belong to its bundled Memory Core plugin, which OpenClaw keeps loaded even when this plugin holds the memory slot. Those tools search only the workspace `MEMORY.md` and `memory/` files, not Basic Memory.
 
-Results come back in clear sections so the agent knows where each piece of context came from.
+As the memory slot owner, the plugin also serves OpenClaw's own memory consumers:
+
+- **Gateway memory search, get and status, and `openclaw doctor`** read Basic Memory through the plugin's provider runtime.
+- **Active Memory deep recall** uses `search_notes`, `read_note` and `build_context`.
+- **Pre-compaction flush** saves durable context with `write_note` and `edit_note` instead of appending to a workspace file.
+
+Search scores are shown as raw numbers. A score above 1 means the note matched on both keywords and meaning.
 
 ### Auto-recall
 
@@ -145,7 +159,7 @@ On each session start, the plugin loads active tasks and recently modified notes
 
 ### Auto-capture
 
-After each conversation turn, the plugin records the exchange as a timestamped entry in a daily note. This builds a searchable history of everything your agent has discussed.
+After each conversation turn, the plugin records the exchange as a timestamped entry in a daily note. This builds a searchable history of everything your agent has discussed. Capture requires the `contextEngine` slot. Each entry carries a hidden `<!-- openclaw-turn:... -->` marker so a turn OpenClaw retries after a crash is recorded only once.
 
 ### Persistent connection
 
@@ -157,8 +171,6 @@ All tools accept an optional `project` parameter for cross-project operations.
 
 | Tool | Description |
 |------|-------------|
-| `memory_search` | Composited search across all memory sources |
-| `memory_get` | Read a specific note by title or path |
 | `search_notes` | Search the knowledge graph directly |
 | `read_note` | Read a note by title, permalink, or `memory://` URL |
 | `write_note` | Create or overwrite a note with optional tags, note type, and custom frontmatter metadata |

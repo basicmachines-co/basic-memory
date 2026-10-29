@@ -2,6 +2,8 @@
 
 This document explains how `openclaw-basic-memory` manages short-term memory, long-term memory, and active tasks during normal agent usage.
 
+> **Superseded on OpenClaw 2026.10 and later.** The combined `memory_search` described below no longer runs. OpenClaw's bundled Memory Core plugin owns the `memory_search` and `memory_get` tool names, so this plugin now registers an OpenClaw memory capability instead (`memory/basic-memory-capability.ts`). Agents search Basic Memory with `search_notes` and read notes with `read_note`; see the README's "Memory search" section. The note and task conventions below still apply.
+
 ## Mental Model
 
 The plugin composes memory from three places:

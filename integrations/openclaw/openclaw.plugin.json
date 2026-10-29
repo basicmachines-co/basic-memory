@@ -8,8 +8,6 @@
       "edit_note",
       "list_memory_projects",
       "list_workspaces",
-      "memory_get",
-      "memory_search",
       "move_note",
       "read_note",
       "schema_diff",

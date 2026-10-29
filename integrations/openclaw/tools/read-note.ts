@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeNoteError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerReadTool(
@@ -86,7 +86,7 @@ export function registerReadTool(
             content: [
               {
                 type: "text" as const,
-                text: `Could not read note "${params.identifier}". It may not exist yet.`,
+                text: `Could not read note "${params.identifier}": ${describeNoteError(err)}`,
               },
             ],
             details: {

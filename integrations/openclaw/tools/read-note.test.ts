@@ -199,7 +199,7 @@ describe("read tool", () => {
         content: [
           {
             type: "text",
-            text: 'Could not read note "missing-note". It may not exist yet.',
+            text: 'Could not read note "missing-note": not found',
           },
         ],
         details: {

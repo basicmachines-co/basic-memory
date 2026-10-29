@@ -1,6 +1,10 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient, WorkspaceResult } from "../bm-client.ts"
+import {
+  type BmClient,
+  describeToolError,
+  type WorkspaceResult,
+} from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 function formatWorkspace(ws: WorkspaceResult, idx: number): string {
@@ -64,7 +68,7 @@ export function registerWorkspaceListTool(
             content: [
               {
                 type: "text" as const,
-                text: "Failed to list workspaces. Is Basic Memory running? Check logs for details.",
+                text: `Failed to list workspaces: ${describeToolError(err)}`,
               },
             ],
             details: {

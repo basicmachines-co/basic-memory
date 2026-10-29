@@ -15,6 +15,8 @@
     "index.ts",
     "bm-client.ts",
     "context-engine/basic-memory-context-engine.ts",
+    "context-engine/types.ts",
+    "memory/basic-memory-capability.ts",
     "config.ts",
     "logger.ts",
     "commands/cli.ts",
@@ -27,7 +29,6 @@
     "tools/edit-note.ts",
     "tools/list-memory-projects.ts",
     "tools/list-workspaces.ts",
-    "tools/memory-provider.ts",
     "tools/move-note.ts",
     "tools/read-note.ts",
     "tools/schema-diff.ts",
@@ -80,8 +81,8 @@
       "minGatewayVersion": "2026.5.2"
     },
     "build": {
-      "openclawVersion": "2026.5.4",
-      "pluginSdkVersion": "2026.5.4"
+      "openclawVersion": "2026.10.9",
+      "pluginSdkVersion": "2026.10.9"
     },
     "install": {
       "minHostVersion": ">=2026.5.2"
@@ -90,7 +91,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
     "@types/node": "^20.0.0",
-    "openclaw": "^2026.5.4",
+    "openclaw": "^2026.10.6",
     "typescript": "^5.9.3"
   }
 }

@@ -190,6 +190,71 @@ describe("context tool", () => {
       expect(result.content[0].text).toContain("No context found")
     })
 
+    // Regression: the note body was printed, then its observations again.
+    it("does not repeat observations already in the note body", async () => {
+      ;(mockClient.buildContext as jest.MockedFunction<any>).mockResolvedValue({
+        results: [
+          {
+            primary_result: {
+              title: "ctx-probe",
+              permalink: "tests/ctx-probe",
+              content:
+                "# ctx-probe\n\n## Observations\n- [test] alpha fact\n\n## Relations\n- relates_to [[Quillfeather]]",
+              file_path: "tests/ctx-probe.md",
+            },
+            observations: [
+              { category: "test", content: "alpha fact" },
+              { category: "idea", content: "only in the index" },
+            ],
+            related_results: [],
+          },
+        ],
+      })
+
+      const result = await executeFunction("tool-call-id", {
+        url: "memory://tests/ctx-probe",
+      })
+
+      const text = result.content[0].text
+      expect(text.match(/\[test\] alpha fact/g)).toHaveLength(1)
+      expect(text).toContain("### Observations\n- [idea] only in the index")
+    })
+
+    // Regression: an unresolved [[link]] rendered as "relates_to → **null**".
+    it("names the target of a link whose note does not exist yet", async () => {
+      ;(mockClient.buildContext as jest.MockedFunction<any>).mockResolvedValue({
+        results: [
+          {
+            primary_result: {
+              title: "ctx-smoke",
+              permalink: "tests/ctx-smoke",
+              content: "# ctx-smoke",
+              file_path: "tests/ctx-smoke.md",
+            },
+            observations: [],
+            related_results: [
+              {
+                type: "relation",
+                permalink: "tests/ctx-smoke",
+                relation_type: "relates_to",
+                to_entity: null,
+                to_name: "Quillfeather",
+              },
+            ],
+          },
+        ],
+      })
+
+      const result = await executeFunction("tool-call-id", {
+        url: "memory://tests/ctx-smoke",
+      })
+
+      expect(result.content[0].text).toContain(
+        "- relates_to → **Quillfeather** (no note yet)",
+      )
+      expect(result.content[0].text).not.toContain("null")
+    })
+
     it("should handle multiple results", async () => {
       const mockContext = {
         results: [
@@ -426,7 +491,7 @@ describe("context tool", () => {
         content: [
           {
             type: "text",
-            text: 'Failed to build context for "memory://error/test". Check logs for details.',
+            text: 'Failed to build context for "memory://error/test": Failed to build context',
           },
         ],
         details: {

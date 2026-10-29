@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, BmToolError } from "../bm-client.ts"
 import { registerEditTool } from "./edit-note.ts"
 
 describe("edit tool", () => {
@@ -96,6 +96,10 @@ describe("edit tool", () => {
           metadata: undefined,
         },
         undefined,
+      )
+      // The description tells agents to cite file_path, so it must be in the text.
+      expect(result.content[0].text).toBe(
+        "Note updated: Test Note (test-note)\nFile: notes/test-note.md",
       )
       expect(result.details).toEqual({
         title: "Test Note",
@@ -230,9 +234,76 @@ describe("edit tool", () => {
       )
     })
 
-    it("returns friendly error when edit fails", async () => {
+    it("passes insert_after_section and its heading through to bm_edit", async () => {
+      ;(mockClient.editNote as jest.MockedFunction<any>).mockResolvedValue({
+        title: "Test Note",
+        permalink: "test-note",
+        file_path: "notes/test-note.md",
+        operation: "insert_after_section",
+      })
+
+      await executeFunction("tool-call-id", {
+        identifier: "test-note",
+        operation: "insert_after_section",
+        content: "- [test] a new observation",
+        section: "Observations",
+      })
+
+      expect(mockClient.editNote).toHaveBeenCalledWith(
+        "test-note",
+        "insert_after_section",
+        "- [test] a new observation",
+        {
+          find_text: undefined,
+          section: "Observations",
+          expected_replacements: undefined,
+          metadata: undefined,
+        },
+        undefined,
+      )
+    })
+
+    // Regression: every failure used to read "It may not exist", which hid
+    // the server's actual reason (here, `section` passed with append).
+    it("shows the server's reason when bm_edit refuses the arguments", async () => {
       ;(mockClient.editNote as jest.MockedFunction<any>).mockRejectedValue(
-        new Error("edit failed"),
+        new BmToolError(
+          "bm_edit",
+          JSON.stringify({
+            error: "INVALID_ARGUMENTS",
+            message: "`section` is only for section commands, not append.",
+          }),
+        ),
+      )
+
+      const result = await executeFunction("tool-call-id", {
+        identifier: "test-note",
+        operation: "append",
+        content: "new",
+        section: "Observations",
+      })
+
+      expect(result).toEqual({
+        content: [
+          {
+            type: "text",
+            text: 'Failed to edit note "test-note": INVALID_ARGUMENTS: `section` is only for section commands, not append.',
+          },
+        ],
+        details: {
+          identifier: "test-note",
+          operation: "append",
+          error: "edit_note_failed",
+        },
+      })
+    })
+
+    it("says a missing note does not exist", async () => {
+      ;(mockClient.editNote as jest.MockedFunction<any>).mockRejectedValue(
+        new BmToolError(
+          "bm_edit",
+          JSON.stringify({ error: "NOT_FOUND", message: "Note not found" }),
+        ),
       )
 
       const result = await executeFunction("tool-call-id", {
@@ -241,19 +312,25 @@ describe("edit tool", () => {
         content: "new",
       })
 
-      expect(result).toEqual({
-        content: [
-          {
-            type: "text",
-            text: 'Failed to edit note "missing-note". It may not exist.',
-          },
-        ],
-        details: {
-          identifier: "missing-note",
-          operation: "append",
-          error: "edit_note_failed",
-        },
+      expect(result.content[0].text).toBe(
+        'Failed to edit note "missing-note": it does not exist. NOT_FOUND: Note not found',
+      )
+    })
+
+    it("passes through a non-tool error message", async () => {
+      ;(mockClient.editNote as jest.MockedFunction<any>).mockRejectedValue(
+        new Error("BM MCP unavailable: connection closed"),
+      )
+
+      const result = await executeFunction("tool-call-id", {
+        identifier: "test-note",
+        operation: "append",
+        content: "new",
       })
+
+      expect(result.content[0].text).toBe(
+        'Failed to edit note "test-note": BM MCP unavailable: connection closed',
+      )
     })
   })
 })

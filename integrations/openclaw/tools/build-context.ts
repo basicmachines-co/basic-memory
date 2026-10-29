@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeToolError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerContextTool(
@@ -67,8 +67,15 @@ export function registerContextTool(
             const primary = result.primary_result
             sections.push(`## ${primary.title}\n${primary.content}`)
 
-            if (result.observations?.length > 0) {
-              const obs = result.observations
+            // The note body already contains its observations as
+            // "- [category] text" lines, so listing them again doubled the
+            // output. Only observations missing from the shown body (for
+            // example when the server truncates a long note) are listed.
+            const unseen = (result.observations ?? []).filter(
+              (o) => !primary.content?.includes(`[${o.category}] ${o.content}`),
+            )
+            if (unseen.length > 0) {
+              const obs = unseen
                 .map((o) => `- [${o.category}] ${o.content}`)
                 .join("\n")
               sections.push(`### Observations\n${obs}`)
@@ -78,7 +85,9 @@ export function registerContextTool(
               const rels = result.related_results
                 .map((r) => {
                   if (r.type === "relation") {
-                    return `- ${r.relation_type} → **${r.to_entity}**`
+                    return r.to_entity
+                      ? `- ${r.relation_type} → **${r.to_entity}**`
+                      : `- ${r.relation_type} → **${r.to_name ?? "unknown"}** (no note yet)`
                   }
                   const label = r.relation_type
                     ? `${r.relation_type} → **${r.title}**`
@@ -111,7 +120,7 @@ export function registerContextTool(
             content: [
               {
                 type: "text" as const,
-                text: `Failed to build context for "${params.url}". Check logs for details.`,
+                text: `Failed to build context for "${params.url}": ${describeToolError(err)}`,
               },
             ],
             details: {
