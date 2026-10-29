@@ -15,6 +15,7 @@ from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, Optional
 
 import typer
+from pydantic import BaseModel
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
@@ -108,6 +109,10 @@ def run_tool(
         raise typer.Exit(1)
 
     if json_output:
+        # bm_read returns image and document content as MCP content models; dump them
+        # with their wire names (mimeType), as an MCP client sees them.
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json", by_alias=True)
         print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
     else:
         print(result)
@@ -597,8 +602,8 @@ def project_(
         page=page,
         page_size=page_size,
         project=project,
-        # recent without --project covers every project.
-        default_to_config_project=False,
+        # list and create take no project; recent reads one, the default unless named.
+        default_to_config_project=command == "recent",
         json_output=json_output,
         local=local,
         cloud=cloud,

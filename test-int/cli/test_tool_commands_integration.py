@@ -1,6 +1,8 @@
 """`bm tool` against a real project: each command calls its bm_* tool end to end."""
 
+import base64
 import json
+from pathlib import Path
 from typing import Any
 
 from typer.testing import CliRunner
@@ -76,3 +78,31 @@ def test_missing_default_project_asks_for_one(app, test_project, config_manager)
 
     assert result.exit_code == 1
     assert "pass --project" in result.stderr
+
+
+def test_project_recent_uses_the_default_project(app, test_project, config_manager) -> None:
+    bm_tool(
+        "write", "--identifier", "recent.md", "--content", "fresh", "--project", test_project.name
+    )
+
+    recent = CliRunner().invoke(cli_app, ["tool", "project", "recent", "--json"])
+
+    assert recent.exit_code == 0, recent.output
+    assert "recent.md" in recent.stdout
+
+
+def test_read_json_returns_image_content_as_an_object(app, test_project, config_manager) -> None:
+    # A valid 1x1 PNG; indexing decodes images, so the bytes must be a real image.
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
+    (Path(test_project.path) / "pixel.png").write_bytes(png)
+    indexed = CliRunner().invoke(cli_app, ["reindex", "--search", "-p", test_project.name])
+    assert indexed.exit_code == 0, indexed.output
+
+    image = bm_tool("read", "pixel.png", "--project", test_project.name)
+
+    # An object with MCP's wire names, not a quoted model repr (bm_read may re-encode).
+    assert image["type"] == "image"
+    assert image["mimeType"].startswith("image/")
+    assert image["data"]
