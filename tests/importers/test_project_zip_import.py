@@ -140,3 +140,17 @@ def test_project_zip_import_plan_enforces_ignore_pattern_limit(monkeypatch) -> N
         build_project_zip_import_plan(
             zip_bytes({".bmignore": b"one.md\n", ".gitignore": b"two.md\nthree.md\n"})
         )
+
+
+def test_project_zip_import_plan_reads_an_ignore_file_with_a_utf8_bom() -> None:
+    plan = build_project_zip_import_plan(
+        zip_bytes(
+            {
+                ".gitignore": b"\xef\xbb\xbfprivate/\n",
+                "private/a.md": b"secret",
+                "notes/b.md": b"B",
+            }
+        )
+    )
+
+    assert [entry.path for entry in plan.entries] == ["notes/b.md"]

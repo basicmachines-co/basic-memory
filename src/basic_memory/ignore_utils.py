@@ -194,7 +194,7 @@ def load_bmignore_patterns() -> Set[str]:
     patterns = set()
 
     try:
-        with bmignore_path.open("r", encoding="utf-8") as f:
+        with bmignore_path.open("r", encoding="utf-8-sig") as f:
             for line in f:
                 pattern = _parse_ignore_pattern_line(line)
                 if pattern:
@@ -235,7 +235,7 @@ def load_gitignore_patterns(
         paths = [bmignore_path, base_path / ".gitignore"] if use_gitignore else [bmignore_path]
         for path in paths:
             try:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_text(encoding="utf-8-sig")
             except FileNotFoundError:
                 content = ""
             patterns.update(
@@ -254,7 +254,7 @@ def load_gitignore_patterns(
         gitignore_file = base_path / ".gitignore"
         if gitignore_file.exists():
             try:
-                with gitignore_file.open("r", encoding="utf-8") as f:
+                with gitignore_file.open("r", encoding="utf-8-sig") as f:
                     for line in f:
                         pattern = _parse_ignore_pattern_line(line)
                         if pattern:
@@ -267,16 +267,19 @@ def load_gitignore_patterns(
 
 
 @lru_cache(maxsize=32)
-def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
-    """Compile an ignore set once so large sets cannot churn a per-rule cache."""
+def _gitignore_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
+    """Compile an ignore set with Git's semantics, once, so large sets cannot churn a cache."""
     compiled_patterns: list[GitIgnoreSpecPattern] = []
     for pattern in patterns:
         components = pattern.split("/")
+        # A trailing-slash rule's last real component sits before the empty final one.
+        terminal_directory_index = len(components) - 2 if pattern.endswith("/") else None
         for index, component in enumerate(components):
             if len(component) >= 2 and not component.strip("*"):
                 # Git accepts longer all-star components. A terminal directory globstar
                 # must consume a directory; pathspec otherwise also matches direct files.
-                components[index] = "*" if index == len(components) - 2 else "**"
+                # An interior globstar ("foo/**/bar") keeps matching zero or more segments.
+                components[index] = "*" if index == terminal_directory_index else "**"
         normalized = "/".join(components)
         # Rule collections are unordered exclusion sets; adding ordered negation is a
         # separate compatibility change. Preserve literal leading ! and decoded # names.
@@ -288,6 +291,17 @@ def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
             # Git tolerates unusable lines; one must not disable valid exclusions.
             continue
     return GitIgnoreSpec(compiled_patterns, backend="simple")
+
+
+def _gitignore_escaped(decoded_pattern: str) -> str:
+    r"""Re-escape a decoded rule so pathspec reads its backslashes and spaces literally.
+
+    The line parser decodes `\\`, `\ ` and `\#` for fnmatch, which has no escapes;
+    pathspec does, so a literal backslash or trailing space must be escaped again.
+    """
+    escaped = decoded_pattern.replace("\\", "\\\\")
+    stripped = escaped.rstrip(" ")
+    return stripped + "\\ " * (len(escaped) - len(stripped))
 
 
 def should_ignore_path(
@@ -323,8 +337,22 @@ def should_ignore_path(
         if is_directory is None:
             is_directory = file_path.is_dir()
         directory_match_path = relative_posix + ("/" if is_directory else "")
-        if _directory_rules(directory_patterns).match_file(directory_match_path):
+        if _gitignore_rules(directory_patterns).match_file(directory_match_path):
             return True
+
+    # Trigger: a rule with a slash but no trailing slash ("/archive", "drafts/old").
+    # Why: such a rule can name a directory, which excludes everything beneath it, as
+    #      in Git. Scans prune the directory before reaching its files; file-level
+    #      callers (prune planning, single-file indexing, ZIP import) must agree.
+    # Outcome: Git's own semantics decide, so a wildcard never crosses a "/" and an
+    #          anchored rule never matches a nested directory.
+    path_rules = frozenset(
+        _gitignore_escaped(pattern)
+        for pattern in ignore_patterns
+        if "/" in pattern and not pattern.endswith("/")
+    )
+    if path_rules and _gitignore_rules(path_rules).match_file(relative_posix):
+        return True
 
     # Non-directory patterns retain their existing matching behavior.
     for pattern in ignore_patterns:

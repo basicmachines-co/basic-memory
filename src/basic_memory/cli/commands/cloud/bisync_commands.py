@@ -142,7 +142,7 @@ def convert_bmignore_to_rclone_filters(
     # Read .bmignore patterns
     patterns = []
     try:
-        with bmignore_path.open("r", encoding="utf-8") as f:
+        with bmignore_path.open("r", encoding="utf-8-sig") as f:
             for line in f:
                 line = line.strip()
                 # Keep comments and empty lines
@@ -187,7 +187,7 @@ def convert_bmignore_to_rclone_prune_filters() -> Path:
     prune_filter_path = bmignore_path.parent / f"{bmignore_path.name}.rclone-prune"
 
     patterns = []
-    with bmignore_path.open("r", encoding="utf-8") as f:
+    with bmignore_path.open("r", encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             # Keep comments and empty lines
