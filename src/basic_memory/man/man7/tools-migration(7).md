@@ -15,8 +15,9 @@ generated: hand
 
 ## DESCRIPTION
 
-Basic Memory 1.0 has one MCP tool per job, named `bm_*`. The pre-1.0 tools are removed with no
-aliases. Section 3 documents each tool.
+Basic Memory 1.0 has one MCP tool per job, named `bm_*`. The pre-1.0 tools in the table below
+are removed with no aliases. The ChatGPT connector's `search` and `fetch` tools are not retired:
+Basic Memory Cloud still registers them. Section 3 documents each tool.
 
 `bm tool` mirrors the local note, search, project and schema tools: `read`, `write`, `edit`,
 `move`, `delete`, `list`, `find`, `search`, `context`, `project` and `schema`, with flags named
@@ -33,7 +34,7 @@ after the tool's parameters. The rest have their own commands or none: [[bm-man(
 | `edit_note` | [[bm-edit(3)]] |
 | `move_note` | [[bm-move(3)]] |
 | `delete_note` | [[bm-delete(3)]] |
-| `list_directory`, `ls` | [[bm-list(3)]] for one folder |
+| `list_directory`, `ls` | [[bm-list(3)]] for one folder; [[bm-find(3)]] for `depth` > 1 or a name glob over a subtree |
 | `find` | [[bm-find(3)]] |
 | `search_notes`, `grep` | [[bm-search(3)]] |
 | `build_context` | [[bm-context(3)]] |

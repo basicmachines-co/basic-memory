@@ -37,10 +37,10 @@ An empty result is a successful search (exit 0), not an error.
 ```
 bm man apropos "frontmatter filters"
 # → apropos(1)                   search the Basic Memory manual
+#   bm-agent(3)                  run Basic Memory agents, follow their runs, and review what they changed (hosted server only)
 #   bm-find(3)                   find files by name or notes by frontmatter, recursively
 #   bm-man(3)                    read the Basic Memory manual
 #   bm-search(3)                 search a project's notes, ranked by relevance
-#   search-notes(3)              search the knowledge base by text, similarity, or metadata
 bm man apropos checksum --json
 bm man list            # index of the bundled pages
 bm man bm_search       # read one page
