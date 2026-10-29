@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import EntitySummary, ObservationSummary, RelationSummary
+from basic_memory.schemas.search import MAX_SEARCH_TEXT_CHARS
 
 
 class PromptContextItem(BaseModel):
@@ -21,7 +22,10 @@ class ContinueConversationRequest(BaseModel):
     or with recent activity from a given timeframe.
     """
 
-    topic: Optional[str] = Field(None, description="Topic or keyword to search for")
+    # Both prompt fields become SearchQuery.text; validate here so oversize is a 422.
+    topic: Optional[str] = Field(
+        None, description="Topic or keyword to search for", max_length=MAX_SEARCH_TEXT_CHARS
+    )
     timeframe: Optional[TimeFrame] = Field(
         None, description="How far back to look for activity (e.g. '1d', '1 week')"
     )
@@ -50,7 +54,7 @@ class SearchPromptRequest(BaseModel):
     Used to format search results into a prompt with context and suggestions.
     """
 
-    query: str = Field(..., description="The search query text")
+    query: str = Field(..., description="The search query text", max_length=MAX_SEARCH_TEXT_CHARS)
     timeframe: Optional[TimeFrame] = Field(
         None, description="Optional timeframe to limit results (e.g. '1d', '1 week')"
     )
