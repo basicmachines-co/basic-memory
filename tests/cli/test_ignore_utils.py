@@ -367,6 +367,23 @@ def test_gitignore_escaped_hash_pattern_loads(tmp_path, monkeypatch):
     assert should_ignore_path(tmp_path / "#note.md#", tmp_path, patterns) is True
 
 
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("ignore_file", [".bmignore", ".gitignore"])
+def test_ignore_file_utf8_bom_is_not_part_of_first_pattern(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ignore_file: str, strict: bool
+) -> None:
+    """Git skips a UTF-8 BOM, which Windows editors and PowerShell commonly write."""
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path))
+    (tmp_path / ignore_file).write_bytes(b"\xef\xbb\xbfprivate/\r\n*.secret.md\r\n")
+
+    patterns = load_gitignore_patterns(tmp_path, strict=strict)
+
+    assert "private/" in patterns
+    assert "*.secret.md" in patterns
+    assert not any("private" in pattern and pattern != "private/" for pattern in patterns)
+    assert should_ignore_path(tmp_path / "private" / "a.md", tmp_path, patterns, is_directory=False)
+
+
 @pytest.mark.parametrize("ignore_file", [".bmignore", ".gitignore"])
 @pytest.mark.parametrize(
     ("raw_pattern", "matching_name", "nonmatching_name"),

@@ -194,7 +194,7 @@ def load_bmignore_patterns() -> Set[str]:
     patterns = set()
 
     try:
-        with bmignore_path.open("r", encoding="utf-8") as f:
+        with bmignore_path.open("r", encoding="utf-8-sig") as f:
             for line in f:
                 pattern = _parse_ignore_pattern_line(line)
                 if pattern:
@@ -235,7 +235,7 @@ def load_gitignore_patterns(
         paths = [bmignore_path, base_path / ".gitignore"] if use_gitignore else [bmignore_path]
         for path in paths:
             try:
-                content = path.read_text(encoding="utf-8")
+                content = path.read_text(encoding="utf-8-sig")
             except FileNotFoundError:
                 content = ""
             patterns.update(
@@ -254,7 +254,7 @@ def load_gitignore_patterns(
         gitignore_file = base_path / ".gitignore"
         if gitignore_file.exists():
             try:
-                with gitignore_file.open("r", encoding="utf-8") as f:
+                with gitignore_file.open("r", encoding="utf-8-sig") as f:
                     for line in f:
                         pattern = _parse_ignore_pattern_line(line)
                         if pattern:

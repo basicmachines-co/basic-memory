@@ -73,6 +73,21 @@ def test_project_zip_import_plan_ignores_binary_root_ignore_file() -> None:
     assert plan.ignored_files == 1
 
 
+def test_project_zip_import_plan_skips_bom_prefixed_root_ignore_rule() -> None:
+    plan = build_project_zip_import_plan(
+        zip_bytes(
+            {
+                ".gitignore": b"\xef\xbb\xbfprivate.md\r\n",
+                "notes/a.md": b"# A",
+                "private.md": b"secret",
+            }
+        )
+    )
+
+    assert plan.entries == (ProjectZipEntry(path="notes/a.md", content=b"# A"),)
+    assert plan.ignored_files == 2
+
+
 def test_project_zip_import_plan_handles_empty_archives() -> None:
     assert build_project_zip_import_plan(zip_bytes({})) == ProjectZipImportPlan(
         entries=(),
