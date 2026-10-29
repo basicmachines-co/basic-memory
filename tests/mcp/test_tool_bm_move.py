@@ -398,6 +398,7 @@ def test_workspace_qualified_destination_drops_the_whole_prefix(destination, rel
         client=httpx.AsyncClient(),
         project=ProjectItem(id=1, external_id="p-1", name="research", path="/research"),
         route=ProjectPathRoute(project="team/research", path="notes/a.md", stripped=True),
+        project_ref="team/research",
     )
 
     assert move_module._project_relative_destination(target, destination, "text") == relative

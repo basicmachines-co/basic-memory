@@ -358,6 +358,8 @@ async def bm_search(
         )
 
     # --- Shared query shape ---
+    # The caller's query, tag: tokens included, is what result headings echo.
+    query_text = query
     query, tags = split_tag_shorthand(query)
     normalized_note_types = [normalize_note_type(note_type) for note_type in note_types or []]
     entity_types = [item.value for item in search_item_types(items) or []]
@@ -400,7 +402,13 @@ async def bm_search(
                     return payload
                 scope = f"projects {', '.join(projects)}" if projects else "all projects"
                 next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
-                return _format_results(payload, query, scope, next_call=next_call)
+                return _format_results(
+                    payload,
+                    query_text,
+                    scope,
+                    next_call=next_call,
+                    ranked=bool(query) and mode != "permalink",
+                )
             case MultiProjectNotIndexed(guidance=guidance):
                 return (
                     {"results": [], "guidance": guidance} if output_format == "json" else guidance
@@ -503,7 +511,13 @@ async def bm_search(
     if output_format == "json":
         return payload
     next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
-    return _format_results(payload, query, f"project '{target.project.name}'", next_call=next_call)
+    return _format_results(
+        payload,
+        query_text,
+        f"project '{target.project.name}'",
+        next_call=next_call,
+        ranked=bool(query) and search_mode != "permalink",
+    )
 
 
 def _nothing_to_search(output_format: OutputFormat) -> ToolError:
@@ -623,18 +637,27 @@ async def _search_one_note(
     if output_format == "json":
         return payload["results"][0]
     # One note is one result: there is no next page.
-    return _format_results(payload, query, f"project '{target.project.name}'", next_call=None)
+    return _format_results(
+        payload, query, f"project '{target.project.name}'", next_call=None, ranked=False
+    )
 
 
 # --- Text output ---
 
 
 def _format_results(
-    payload: dict[str, Any], query: str | None, scope: str, *, next_call: str | None
+    payload: dict[str, Any],
+    query: str | None,
+    scope: str,
+    *,
+    next_call: str | None,
+    ranked: bool,
 ) -> str:
     """Render hits as a compact list: path, title, score, then excerpt or matching lines.
 
     `next_call` is the exact call for the next page (Pagination.next_call), or None.
+    `ranked` is False when nothing ranked the hits (filters, tags or a permalink
+    pattern alone); their scores are all zero, so they are left out.
     """
     results = payload["results"]
     heading = f"Results for '{query}'" if query else "Results"
@@ -646,7 +669,8 @@ def _format_results(
     if not results:
         page_hint = " on this page" if next_call is not None else ""
         return (
-            f"No results for '{query or ''}'{page_hint} in {scope}."
+            (f"No results for '{query}'" if query else "No results")
+            + f"{page_hint} in {scope}."
             + (f"\n\n{payload['query_hint']}" if payload.get("query_hint") else "")
             + continuation
         )
@@ -654,7 +678,7 @@ def _format_results(
     lines = [f"{heading} in {scope}:", ""]
     for row in results:
         header = f"- {row['file_path']} | {row['title']}"
-        if row.get("score") is not None:
+        if ranked and row.get("score") is not None:
             header += f" | score {row['score']:.3f}"
         lines.append(header)
         # A valid-time hit says which authored time matched, and in which units: a

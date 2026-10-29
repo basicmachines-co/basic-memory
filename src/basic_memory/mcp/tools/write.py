@@ -350,7 +350,7 @@ def _place_note(
             f"'{identifier}' names a folder or project, not a note file.",
             try_instead=(
                 f"bm_write(identifier='{identifier.rstrip('/')}/<file>.md', "
-                f"project={target.project.external_id!r}, ...)"
+                f"project={target.project_ref!r}, ...)"
             ),
             output_format=output_format,
         )
@@ -368,7 +368,7 @@ def _place_note(
                 try_instead=(
                     "bm_write(identifier="
                     f"'{target.paths.path(str(path.with_name(path.name + MARKDOWN_SUFFIX)))}', "
-                    f"project={target.project.external_id!r}, content='...')"
+                    f"project={target.project_ref!r}, content='...')"
                 ),
                 output_format=output_format,
             )

@@ -57,6 +57,9 @@ class ProjectTarget:
     client: AsyncClient
     project: ProjectItem
     route: ProjectPathRoute
+    # The `project` value the caller passed, echoed in try_instead hints: it just
+    # resolved, so it works again, and it reads as the caller wrote it.
+    project_ref: str
 
     @property
     def paths(self) -> "PathQualifier":
@@ -120,7 +123,12 @@ async def open_project_target(
                 try_instead="a path relative to the project root, such as 'notes/plan.md'",
                 output_format=output_format,
             )
-        yield ProjectTarget(client=client, project=active_project, route=route)
+        yield ProjectTarget(
+            client=client,
+            project=active_project,
+            route=route,
+            project_ref=project or route.project or active_project.external_id,
+        )
 
 
 def _api_answer(error: ToolError) -> Response | None:
@@ -166,7 +174,7 @@ async def resolve_note(
         raise refusal(
             "INVALID_ARGUMENTS",
             f"'{identifier}' names a project, not a note.",
-            try_instead=f"bm_list(path='/', project={target.project.external_id!r})",
+            try_instead=f"bm_list(path='/', project={target.project_ref!r})",
             output_format=output_format,
         )
 
@@ -182,14 +190,14 @@ async def resolve_note(
                     None,
                     unchanged=unchanged,
                     output_format=output_format,
-                    project=target.project.external_id,
+                    project=target.project_ref,
                 ) from error
             case 404:
                 raise refusal(
                     "NOT_FOUND",
                     f"No note matches '{identifier}' in project '{target.project.name}'.",
                     try_instead=try_instead
-                    or f"bm_search(query={identifier!r}, project={target.project.external_id!r})",
+                    or f"bm_search(query={identifier!r}, project={target.project_ref!r})",
                     output_format=output_format,
                 ) from error
             # Several notes match exactly (two notes with one title); the API's

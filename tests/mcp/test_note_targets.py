@@ -67,7 +67,7 @@ async def test_a_missing_note_is_a_not_found_refusal(client, test_project):
 
     message = str(refused.value)
     assert message.startswith("NOT_FOUND: No note matches 'notes/Nope.md'")
-    assert f"bm_search(query='notes/Nope.md', project='{test_project.external_id}')" in message
+    assert f"bm_search(query='notes/Nope.md', project='{test_project.name}')" in message
 
 
 @pytest.mark.asyncio
@@ -79,7 +79,7 @@ async def test_a_missing_note_refusal_in_json(client, test_project):
     payload = json.loads(str(refused.value))
     assert payload["error"] == "NOT_FOUND"
     assert payload["try_instead"] == (
-        f"bm_search(query='notes/Nope.md', project='{test_project.external_id}')"
+        f"bm_search(query='notes/Nope.md', project='{test_project.name}')"
     )
 
 
@@ -92,7 +92,7 @@ async def test_a_bare_project_name_is_not_a_note(client, test_project):
 
     message = str(refused.value)
     assert message.startswith("INVALID_ARGUMENTS:")
-    assert f"bm_list(path='/', project='{test_project.external_id}')" in message
+    assert f"bm_list(path='/', project='{test_project.name}')" in message
 
 
 @pytest.mark.asyncio

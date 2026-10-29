@@ -191,7 +191,7 @@ async def _delete_directory(
             f"'{shown}' is a directory with {listing.total} entries at its top level. "
             "Deleting it removes everything under it.",
             try_instead=(
-                f"bm_delete(path={shown!r}, recursive=true, project={target.project.external_id!r})"
+                f"bm_delete(path={shown!r}, recursive=true, project={target.project_ref!r})"
             ),
             output_format=output_format,
         )
@@ -225,7 +225,7 @@ async def _delete_directory(
                 f"{target.paths.path(failure.path)}: {failure.error}" for failure in deleted.errors
             ),
             try_instead=(
-                f"bm_list(path={shown!r}, project={target.project.external_id!r}) to see what is left"
+                f"bm_list(path={shown!r}, project={target.project_ref!r}) to see what is left"
             ),
             output_format=output_format,
         )
