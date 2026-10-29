@@ -5,6 +5,7 @@ import pytest
 from basic_memory.mcp.container import (
     McpContainer,
     get_container,
+    installed_container,
     set_container,
 )
 from basic_memory.runtime.mode import RuntimeMode
@@ -92,3 +93,37 @@ class TestContainerAccessors:
 
         set_container(container)
         assert get_container() is container
+
+    def test_overlapping_lifespans_exit_out_of_order(self, app_config, monkeypatch):
+        """Each lifespan withdraws only its own container, whatever the exit order."""
+        import basic_memory.mcp.container as container_module
+
+        monkeypatch.setattr(container_module, "_container", None)
+        first = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
+        second = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
+
+        first_lifespan = installed_container(first)
+        second_lifespan = installed_container(second)
+        first_lifespan.__enter__()
+        second_lifespan.__enter__()
+        assert get_container() is second
+
+        first_lifespan.__exit__(None, None, None)
+        assert get_container() is second
+
+        second_lifespan.__exit__(None, None, None)
+        with pytest.raises(RuntimeError, match="MCP container not initialized"):
+            get_container()
+
+    def test_lifespan_container_wins_over_the_host_container_while_it_runs(
+        self, app_config, monkeypatch
+    ):
+        import basic_memory.mcp.container as container_module
+
+        host = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
+        lifespan = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
+        monkeypatch.setattr(container_module, "_container", host)
+
+        with installed_container(lifespan):
+            assert get_container() is lifespan
+        assert get_container() is host
