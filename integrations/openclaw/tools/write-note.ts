@@ -123,7 +123,9 @@ export function registerWriteTool(
           const checksumSuffix = note.checksum
             ? `\nChecksum: ${note.checksum}`
             : ""
-          const msg = `Note saved: ${note.title} (${note.permalink})${checksumSuffix}`
+          // The description tells agents to cite permalink and file_path, so both
+          // must appear in the text the agent reads, not only in details.
+          const msg = `Note saved: ${note.title} (${note.permalink})\nFile: ${note.file_path}${checksumSuffix}`
           return {
             content: [
               {

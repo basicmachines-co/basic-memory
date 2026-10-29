@@ -97,6 +97,10 @@ describe("edit tool", () => {
         },
         undefined,
       )
+      // The description tells agents to cite file_path, so it must be in the text.
+      expect(result.content[0].text).toBe(
+        "Note updated: Test Note (test-note)\nFile: notes/test-note.md",
+      )
       expect(result.details).toEqual({
         title: "Test Note",
         permalink: "test-note",

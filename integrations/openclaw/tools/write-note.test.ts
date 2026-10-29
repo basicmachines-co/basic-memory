@@ -123,7 +123,7 @@ describe("write tool", () => {
         content: [
           {
             type: "text",
-            text: "Note saved: Test Note (test-note)",
+            text: "Note saved: Test Note (test-note)\nFile: notes/test-note.md",
           },
         ],
         details: {

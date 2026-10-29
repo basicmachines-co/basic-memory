@@ -103,7 +103,7 @@ export function registerEditTool(
             content: [
               {
                 type: "text" as const,
-                text: `Note updated: ${note.title} (${note.permalink})`,
+                text: `Note updated: ${note.title} (${note.permalink})\nFile: ${note.file_path}`,
               },
             ],
             details: {
