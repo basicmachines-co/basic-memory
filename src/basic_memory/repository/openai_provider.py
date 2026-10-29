@@ -10,6 +10,11 @@ from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
+def effective_openai_base_url(api_base: str | None) -> str | None:
+    """Return the endpoint the OpenAI SDK will call: the setting, else OPENAI_BASE_URL."""
+    return api_base or os.environ.get("OPENAI_BASE_URL") or None
+
+
 def openai_embedding_identity(*, model_name: str, dimensions: int, api_base: str | None) -> str:
     """Return the stored-vector identity for an OpenAI-compatible embedding setup.
 
@@ -57,7 +62,9 @@ class OpenAIEmbeddingProvider:
     def identity_key(self) -> str:
         """Return the embedding semantics that should invalidate stored vectors."""
         return openai_embedding_identity(
-            model_name=self.model_name, dimensions=self.dimensions, api_base=self._base_url
+            model_name=self.model_name,
+            dimensions=self.dimensions,
+            api_base=effective_openai_base_url(self._base_url),
         )
 
     async def _get_client(self) -> Any:

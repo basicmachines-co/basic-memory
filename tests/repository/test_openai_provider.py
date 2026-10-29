@@ -228,11 +228,12 @@ def test_embedding_provider_factory_forwards_openai_api_configuration():
         ("https://ark.example/api/v3", "text-embedding-3-small:1536:unit-normalized"),
     ],
 )
-def test_openai_identity_changes_only_for_custom_endpoints(api_base, identity):
+def test_openai_identity_changes_only_for_custom_endpoints(api_base, identity, monkeypatch):
     """Custom endpoints may hold unnormalized vectors; a new identity re-embeds them (#1862).
 
     api.openai.com always returned unit vectors, so its stored vectors keep their identity.
     """
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     config = BasicMemoryConfig(
         env="test",
         projects={"test-project": "/tmp/basic-memory-test"},
@@ -246,6 +247,24 @@ def test_openai_identity_changes_only_for_custom_endpoints(api_base, identity):
 
     assert embedding_provider_identity(provider) == identity
     assert configured_embedding_provider_identity(config) == (f"OpenAIEmbeddingProvider:{identity}")
+
+
+def test_openai_identity_follows_an_endpoint_set_by_environment(monkeypatch):
+    """The SDK reads OPENAI_BASE_URL when no api_base is configured; so must the identity."""
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://ark.example/api/v3")
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_key="test-key",
+    )
+
+    provider = create_embedding_provider(config)
+
+    identity = "text-embedding-3-small:1536:unit-normalized"
+    assert embedding_provider_identity(provider) == identity
+    assert configured_embedding_provider_identity(config) == f"OpenAIEmbeddingProvider:{identity}"
 
 
 def test_embedding_provider_factory_separates_openai_api_cache_keys():
