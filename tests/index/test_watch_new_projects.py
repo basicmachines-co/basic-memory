@@ -68,6 +68,42 @@ async def test_watch_selection_rereads_added_and_removed_project_config(
 
 
 @pytest.mark.asyncio
+async def test_a_missing_project_directory_does_not_stop_watching_the_others(
+    app_config, config_manager, project_repository, session_maker, test_project, tmp_path_factory
+):
+    # watchfiles refuses the whole path list when one path is missing, so a project
+    # whose directory is gone must drop out of the selection, not stop the watch.
+    # Loading config recreates missing config paths, so the stale path here is the
+    # project row's, as when the row and the config drift apart.
+    gone = await _register_project(
+        "gone-project",
+        tmp_path_factory.mktemp("gone-watch-root"),
+        config_manager,
+        project_repository,
+        session_maker,
+    )
+    gone_root = tmp_path_factory.mktemp("gone-row-root")
+    gone_root.rmdir()
+    async with db.scoped_session(session_maker) as session:
+        await project_repository.update(session, gone.id, {"path": str(gone_root)})
+    watcher = WatchService(app_config.model_copy(deep=True), project_repository, session_maker)
+
+    selected = await watcher._select_projects_to_watch()
+    assert [project.id for project in selected] == [test_project.id]
+
+    stop_event = asyncio.Event()
+    stop_event.set()
+    async for _ in watch_module.awatch(
+        *(project.path for project in selected), stop_event=stop_event
+    ):
+        pass
+
+    gone_root.mkdir()
+    selected = await watcher._select_projects_to_watch()
+    assert {project.id for project in selected} == {test_project.id, gone.id}
+
+
+@pytest.mark.asyncio
 async def test_new_project_backfill_runs_after_attach(
     app_config,
     config_manager,
