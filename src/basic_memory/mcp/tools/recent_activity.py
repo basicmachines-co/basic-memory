@@ -1,168 +1,37 @@
-"""Recent activity tool for Basic Memory MCP server."""
+"""Recent activity for bm_project(command="recent").
+
+One project's recently changed notes, observations and relations, rendered as text
+or returned as rows with paging for JSON callers.
+"""
 
 from dataclasses import dataclass
-from datetime import timezone
 from pathlib import PurePosixPath
-from typing import Any, Annotated, List, Union, Optional, Literal
+from typing import Any, Literal
 
-from loguru import logger
 from fastmcp import Context
-from pydantic import AliasChoices, Field
+from loguru import logger
 
-from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.index_readiness import project_index_required
-from basic_memory.mcp.project_context import (
-    get_project_client,
-    resolve_project_parameter,
-)
+from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.tool_params import ItemKind, search_item_types
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.memory import (
-    GraphContext,
-    MAX_CONTEXT_DEPTH,
-    MAX_RECENT_ACTIVITY_PAGE_SIZE,
-    ProjectActivity,
-    ActivityStats,
-)
-from basic_memory.schemas.project_info import ProjectList, ProjectItem
+from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchItemType
-
-
-async def recent_activity(
-    type: Annotated[
-        Union[str, List[str]],
-        Field(default="", validation_alias=AliasChoices("type", "types", "kind")),
-    ] = "",
-    depth: int = 1,
-    timeframe: Annotated[
-        TimeFrame,
-        Field(
-            default="7d",
-            validation_alias=AliasChoices("timeframe", "since", "time_range", "lookback"),
-        ),
-    ] = "7d",
-    # `offset` is intentionally NOT aliased: it has different semantics
-    # (item-indexed vs. 1-indexed page-number).
-    page: Annotated[
-        int,
-        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
-    ] = 1,
-    page_size: Annotated[
-        int,
-        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
-    ] = 10,
-    project: Optional[str] = None,
-    project_id: Optional[str] = None,
-    output_format: Literal["text", "json"] = "text",
-    context: Context | None = None,
-) -> str | list[dict[str, Any]]:
-    """Get recent activity for one project.
-
-    Project Resolution:
-    The server resolves projects in this order:
-    1. Single Project Mode - server constrained to one project, parameter ignored
-    2. Explicit project parameter - specify which project to query
-    3. Default project - server configured default if no project specified
-
-    Discovery Mode:
-    When no specific project can be resolved, returns activity across all projects
-    to help discover available projects and their recent activity.
-
-    Project Discovery (when project is unknown):
-    1. Call list_memory_projects() to see available projects
-    2. Ask the user which project to focus on
-    3. Pass that project to this tool
-    4. Remember their choice for the conversation
-
-    Args:
-        type: Filter by content type(s). Can be a string or list of strings.
-            Valid options:
-            - "entity" or ["entity"] for knowledge entities
-            - "relation" or ["relation"] for connections between entities
-            - "observation" or ["observation"] for notes and observations
-            Multiple types can be combined: ["entity", "relation"]
-            Case-insensitive: "ENTITY" and "entity" are treated the same.
-            Default is entity-only. Specify other types explicitly to include
-            observations and relations.
-        depth: How many relation hops to traverse (1-3 recommended, maximum: 5)
-        page: Page number for pagination (default 1)
-        page_size: Number of items per page (default 10, maximum: 100)
-        timeframe: Time window to search. Supports natural language:
-            - Relative: "2 days ago", "last week", "yesterday"
-            - Points in time: "2024-01-01", "January 1st"
-            - Standard format: "7d", "24h"
-            Aliases: since, time_range, lookback.
-        project: Project name to query. Optional - when omitted, the server uses the
-                configured default project, and discovery mode across all projects
-                applies only when there is no default.
-                If unknown, use list_memory_projects() to discover available projects.
-        project_id: Project external_id (UUID). Prefer this over `project` when known —
-                it routes to the exact project regardless of name collisions across cloud
-                workspaces. Takes precedence over `project`. Get from list_memory_projects().
-        output_format: "text" returns human-readable summary text. "json" returns
-            a flat list of recent items.
-        context: Optional FastMCP context for performance caching.
-
-    Returns:
-        Human-readable summary of recent activity. When no specific project is
-        resolved, returns cross-project discovery information. When a specific
-        project is resolved, returns detailed activity for that project.
-
-    Examples:
-        # The active or default project; every project only when neither is set
-        recent_activity()
-        recent_activity(timeframe="yesterday")
-
-        # Project-specific activity
-        recent_activity(project="work-docs", type="entity", timeframe="yesterday")
-        recent_activity(project="research", type=["entity", "relation"], timeframe="today")
-        recent_activity(project="notes", type="entity", depth=2, timeframe="2 weeks ago")
-
-    Raises:
-        ToolError: If project doesn't exist or type parameter contains invalid values
-
-    Notes:
-        - Higher depth values (>3) may impact performance with large result sets
-        - For focused queries, consider using build_context with a specific URI
-        - Max timeframe is 1 year in the past
-    """
-    page_result = await recent_activity_page(
-        type=type,
-        depth=depth,
-        timeframe=timeframe,
-        page=page,
-        page_size=page_size,
-        project=project,
-        project_id=project_id,
-        output_format=output_format,
-        context=context,
-    )
-    match page_result:
-        case RecentRows(rows=rows):
-            return rows
-        case str() as text:
-            return text
 
 
 @dataclass(frozen=True, slots=True)
 class RecentRows:
-    """One page of recent activity as rows, and whether another page follows.
-
-    In discovery mode `has_more` is true when any project has another page.
-    """
+    """One page of recent activity as rows, and whether another page follows."""
 
     rows: list[dict[str, Any]]
     page: int
     page_size: int
     has_more: bool
-    # Indexing guidance for projects that were never indexed (discovery mode).
-    guidance: tuple[str, ...] = ()
 
 
 async def recent_activity_page(
     *,
-    type: str | list[str],
-    depth: int,
+    items: list[ItemKind] | None,
     timeframe: str,
     page: int,
     page_size: int,
@@ -171,379 +40,96 @@ async def recent_activity_page(
     output_format: Literal["text", "json"],
     context: Context | None,
 ) -> str | RecentRows:
-    """Recent activity as text, or as rows with paging for JSON callers."""
-    # Validate pagination arguments before they reach the API layer,
-    # where negative offset would cause a database error.
-    if page < 1:
-        raise ValueError(f"page must be >= 1, got {page}")
-    if page_size < 1:
-        raise ValueError(f"page_size must be >= 1, got {page_size}")
-    if page_size > MAX_RECENT_ACTIVITY_PAGE_SIZE:
-        raise ValueError(f"page_size must be <= {MAX_RECENT_ACTIVITY_PAGE_SIZE}, got {page_size}")
-    # Zero keeps meaning "use the default depth"; the API rejects the rest with a 422.
-    if depth < 0 or depth > MAX_CONTEXT_DEPTH:
-        raise ValueError(f"depth must be between 1 and {MAX_CONTEXT_DEPTH}, got {depth}")
+    """Recent activity as text, or as rows with paging for JSON callers.
 
-    # Build common parameters for API calls
+    A str is either the rendered text or, for a project that was never indexed,
+    the indexing guidance in place of an empty result.
+    """
+    # Trigger: the caller named no item kinds.
+    # Why: one well-connected note would otherwise fill the page with its own
+    #      observations and relations.
+    # Outcome: whole notes only.
+    item_types = search_item_types(items) or [SearchItemType.ENTITY]
     params: dict[str, Any] = {
         "page": page,
         "page_size": page_size,
         "max_related": 10,
+        "depth": 1,
+        "timeframe": timeframe,
+        "type": [item_type.value for item_type in item_types],
     }
-    if depth:
-        params["depth"] = depth
-    if timeframe:
-        params["timeframe"] = timeframe  # pyright: ignore
 
-    # Validate and convert type parameter
-    if type:
-        # Convert single string to list
-        if isinstance(type, str):
-            type_list = [type]
-        else:
-            type_list = type
-
-        # Validate each type against SearchItemType enum
-        validated_types = []
-        for t in type_list:
-            try:
-                # Try to convert string to enum
-                if isinstance(t, str):
-                    validated_types.append(SearchItemType(t.lower()))
-            except ValueError:
-                valid_types = [t.value for t in SearchItemType]
-                raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
-
-        # Add validated types to params
-        params["type"] = [t.value for t in validated_types]  # pyright: ignore
-
-    # Default to entity-only when no explicit type was provided.
-    # This prevents a single well-connected entity from filling the page
-    # with its observations and relations.
-    if "type" not in params:
-        params["type"] = [SearchItemType.ENTITY.value]
-
-    # Resolve project parameter using the three-tier hierarchy.
-    # allow_discovery=True enables Discovery Mode, so a project is not required.
-    # project_id (UUID) takes precedence over project name — without this fallback,
-    # callers passing only project_id would fall into Discovery Mode.
-    effective_identifier = project_id if project_id else project
-    resolved_project = await resolve_project_parameter(
-        effective_identifier, allow_discovery=True, context=context
-    )
-
-    if resolved_project is None:
-        # Discovery Mode: Get activity across all projects
-        # Uses plain get_client() since we iterate across all projects (no single project routing)
-        logger.debug(
-            f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
-        )
-
-        async with get_client() as client:
-            # Get list of all projects
-            response = await call_get(client, "/v2/projects/")
-            project_list = ProjectList.model_validate(response.json())
-
-            projects_activity = {}
-            total_items = 0
-            total_entities = 0
-            total_relations = 0
-            total_observations = 0
-            most_active_project = None
-            most_active_count = 0
-            active_projects = 0
-
-            # Guidance for each project that was never indexed, kept beside the
-            # activity of the projects that were, so neither hides the other.
-            unindexed: list[str] = []
-
-            # Query each project's activity
-            for project_info in project_list.projects:
-                project_activity = await _get_project_activity(client, project_info, params, depth)
-                if not project_activity.item_count:
-                    guidance = await project_index_required(client, project_info)
-                    if guidance is not None:
-                        unindexed.append(guidance)
-                projects_activity[project_info.name] = project_activity
-
-                # Aggregate stats
-                item_count = project_activity.item_count
-                if item_count > 0:
-                    active_projects += 1
-                    total_items += item_count
-
-                    # Count by type
-                    for result in project_activity.activity.results:
-                        if result.primary_result.type == "entity":
-                            total_entities += 1
-                        elif result.primary_result.type == "relation":
-                            total_relations += 1
-                        elif result.primary_result.type == "observation":
-                            total_observations += 1
-
-                    # Track most active project
-                    if item_count > most_active_count:
-                        most_active_count = item_count
-                        most_active_project = project_info.name
-
-        # Trigger: no project has activity and some were never indexed.
-        # Why: an empty summary would read as "nothing happened" when the
-        #      unindexed projects were never searched.
-        # Outcome: the indexing guidance alone, as before.
-        if unindexed and active_projects == 0:
-            return "\n\n".join(unindexed)
-
-        if output_format == "json":
-            rows: list[dict[str, Any]] = []
-            for project_name, project_activity in projects_activity.items():
-                rows.extend(_extract_recent_rows(project_activity.activity, project_name))
-            return RecentRows(
-                guidance=tuple(unindexed),
-                rows=rows,
-                page=page,
-                page_size=page_size,
-                has_more=any(activity.activity.has_more for activity in projects_activity.values()),
-            )
-
-        # Build summary stats
-        summary = ActivityStats(
-            total_projects=len(project_list.projects),
-            active_projects=active_projects,
-            most_active_project=most_active_project,
-            total_items=total_items,
-            total_entities=total_entities,
-            total_relations=total_relations,
-            total_observations=total_observations,
-        )
-
-        # Summarize where activity is; which project to use stays the caller's call.
-        guidance_lines = ["\n" + "─" * 40]
-
-        if active_projects == 0:
-            guidance_lines.append("No recent activity found in any project.")
-        else:
-            # At least one project has activity: name the most active project.
-            suggested_project = most_active_project or next(
-                (name for name, activity in projects_activity.items() if activity.item_count > 0),
-                None,
-            )
-            if suggested_project:
-                suffix = (
-                    f"(most active with {most_active_count} items)" if most_active_count > 0 else ""
-                )
-                guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
-
-        # Projects never indexed are named after the activity found elsewhere.
-        for project_guidance in unindexed:
-            guidance_lines.extend(["", project_guidance])
-        guidance = "\n".join(guidance_lines)
-
-        # Format discovery mode output
-        return _format_discovery_output(projects_activity, summary, timeframe, guidance)
-
-    else:
-        # Project-Specific Mode: Get activity for specific project
-        # Uses get_project_client() for per-project routing (local vs cloud)
-        async with get_project_client(resolved_project, context=context, project_id=project_id) as (
-            client,
-            active_project,
-        ):
-            # Trigger: caller routed by project_id (a UUID), so resolved_project holds the
-            #          raw UUID rather than a human-readable name.
-            # Why: active_project.name is the canonical, display-safe project name regardless
-            #      of whether routing was by name or by external_id.
-            # Outcome: logs and the formatted text header always show the project name.
-            logger.debug(
-                f"Getting recent activity from project {active_project.name}: "
-                f"type={type}, depth={depth}, timeframe={timeframe}"
-            )
-
-            response = await call_get(
-                client,
-                f"/v2/projects/{active_project.external_id}/memory/recent",
-                params=params,
-            )
-            activity_data = GraphContext.model_validate(response.json())
-
-            # Do not offer first-note onboarding before the project was indexed.
-            if not activity_data.results:
-                guidance = await project_index_required(client, active_project)
-                if guidance is not None:
-                    return guidance
-
-            if output_format == "json":
-                return RecentRows(
-                    rows=_extract_recent_rows(activity_data),
-                    page=page,
-                    page_size=page_size,
-                    has_more=activity_data.has_more,
-                )
-
-            # Format project-specific mode output. Pass the external id so onboarding examples
-            # route by id, not by a name that can collide across cloud workspaces.
-            return _format_project_output(
-                active_project.name,
-                activity_data,
-                timeframe,
-                page=page,
-                project_id=active_project.external_id,
-                type_filter_applied=bool(type),
-            )
-
-
-async def _get_project_activity(
-    client, project_info: ProjectItem, params: dict[str, Any], depth: int
-) -> ProjectActivity:
-    """Get activity data for a single project.
-
-    Args:
-        client: HTTP client for API calls
-        project_info: Project information
-        params: Query parameters for the activity request
-        depth: Graph traversal depth
-
-    Returns:
-        ProjectActivity with activity data or empty activity on error
-    """
-    activity_response = await call_get(
+    async with get_project_client(project, context=context, project_id=project_id) as (
         client,
-        f"/v2/projects/{project_info.external_id}/memory/recent",
-        params=params,
+        active_project,
+    ):
+        logger.debug(
+            f"Getting recent activity from project {active_project.name}: "
+            f"items={items}, timeframe={timeframe}"
+        )
+        response = await call_get(
+            client,
+            f"/v2/projects/{active_project.external_id}/memory/recent",
+            params=params,
+        )
+        activity_data = GraphContext.model_validate(response.json())
+
+        # Do not offer first-note onboarding before the project was indexed.
+        if not activity_data.results:
+            guidance = await project_index_required(client, active_project)
+            if guidance is not None:
+                return guidance
+
+    if output_format == "json":
+        return RecentRows(
+            rows=_extract_recent_rows(activity_data),
+            page=page,
+            page_size=page_size,
+            has_more=activity_data.has_more,
+        )
+
+    # Pass the external id so onboarding examples route by id, not by a name that
+    # can collide across cloud workspaces.
+    return _format_project_output(
+        active_project.name,
+        activity_data,
+        timeframe,
+        page=page,
+        project_id=active_project.external_id,
+        type_filter_applied=bool(items),
     )
-    activity = GraphContext.model_validate(activity_response.json())
-
-    # Extract last activity timestamp and active folders
-    last_activity = None
-    active_folders = set()
-
-    for result in activity.results:
-        if result.primary_result.created_at:
-            current_time = result.primary_result.created_at
-            if current_time.tzinfo is None:
-                current_time = current_time.replace(tzinfo=timezone.utc)
-
-            if last_activity is None:
-                last_activity = current_time
-            else:
-                if current_time > last_activity:
-                    last_activity = current_time
-
-        # Extract folder from file_path
-        if result.primary_result.file_path:
-            folder = str(PurePosixPath(result.primary_result.file_path).parent)
-            if folder and folder != ".":
-                active_folders.add(folder)
-
-    return ProjectActivity(
-        project_name=project_info.name,
-        project_path=project_info.path,
-        activity=activity,
-        item_count=len(activity.results),
-        last_activity=last_activity,
-        active_folders=list(active_folders)[:5],  # Limit to top 5 folders
-    )
 
 
-def _extract_recent_rows(
-    activity_data: GraphContext, project_name: Optional[str] = None
-) -> list[dict[str, Any]]:
+def _extract_recent_rows(activity_data: GraphContext) -> list[dict[str, Any]]:
     """Flatten GraphContext into a list of recent rows."""
     rows: list[dict[str, Any]] = []
     for result in activity_data.results:
         primary = result.primary_result
-        row = {
-            "type": primary.type,
-            "title": primary.title,
-            "permalink": primary.permalink,
-            "file_path": primary.file_path,
-            "created_at": primary.created_at.isoformat() if primary.created_at else None,
-        }
-        if project_name is not None:
-            row["project"] = project_name
-        rows.append(row)
-    return rows
-
-
-def _format_discovery_output(
-    projects_activity: dict[str, Any], summary: ActivityStats, timeframe: str, guidance: str
-) -> str:
-    """Format discovery mode output as human-readable text."""
-    lines = [f"## Recent Activity Summary ({timeframe})"]
-
-    # Most active project section
-    if summary.most_active_project and summary.total_items > 0:
-        most_active = projects_activity[summary.most_active_project]
-        lines.append(
-            f"\n**Most Active Project:** {summary.most_active_project} ({most_active.item_count} items)"
+        rows.append(
+            {
+                "type": primary.type,
+                "title": primary.title,
+                "permalink": primary.permalink,
+                "file_path": primary.file_path,
+                "created_at": primary.created_at.isoformat() if primary.created_at else None,
+            }
         )
-
-        # Get latest activity from most active project
-        if most_active.activity.results:
-            latest = most_active.activity.results[0].primary_result
-            title = latest.title or "Recent activity"
-            # Format relative time
-            time_str = (
-                _format_relative_time(latest.created_at) if latest.created_at else "unknown time"
-            )
-            lines.append(f"- 🔧 **Latest:** {title} ({time_str})")
-
-        # Active folders
-        if most_active.active_folders:
-            folders = ", ".join(most_active.active_folders[:3])
-            lines.append(f"- 📋 **Focus areas:** {folders}")
-
-    # Other active projects
-    other_active = [
-        (name, activity)
-        for name, activity in projects_activity.items()
-        if activity.item_count > 0 and name != summary.most_active_project
-    ]
-
-    if other_active:
-        lines.append("\n**Other Active Projects:**")
-        for name, activity in sorted(other_active, key=lambda x: x[1].item_count, reverse=True)[:4]:
-            lines.append(f"- **{name}** ({activity.item_count} items)")
-
-    # Key developments - extract from recent entities
-    key_items = []
-    for name, activity in projects_activity.items():
-        if activity.item_count > 0:
-            for result in activity.activity.results[:3]:  # Top 3 from each active project
-                if result.primary_result.type == "entity":
-                    title = result.primary_result.title
-                    # Look for status indicators in titles
-                    if any(word in title.lower() for word in ["complete", "fix", "test", "spec"]):
-                        key_items.append(title)
-
-    if key_items:
-        lines.append("\n**Key Developments:**")
-        for item in key_items[:5]:  # Show top 5
-            status = "✅" if any(word in item.lower() for word in ["complete", "fix"]) else "🧪"
-            lines.append(f"- {status} **{item}**")
-
-    # Add summary stats
-    lines.append(
-        f"\n**Summary:** {summary.active_projects} active projects, {summary.total_items} recent items"
-    )
-
-    # Add guidance
-    lines.append(guidance)
-
-    return "\n".join(lines)
+    return rows
 
 
 def _format_project_output(
     project_name: str,
     activity_data: GraphContext,
     timeframe: str,
-    page: int = 1,
-    project_id: str | None = None,
-    type_filter_applied: bool = False,
+    *,
+    page: int,
+    project_id: str,
+    type_filter_applied: bool,
 ) -> str:
-    """Format project-specific mode output as human-readable text.
+    """Format one project's recent activity as human-readable text.
 
-    `project_id` is the project's route-safe external id. When present, onboarding examples use
-    it instead of the display name so a model following them cannot land in a different
+    `project_id` is the project's route-safe external id. Onboarding examples use it
+    instead of the display name so a model following them cannot land in a different
     same-named project in another cloud workspace.
     """
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
@@ -569,12 +155,11 @@ def _format_project_output(
             return "\n".join(lines)
 
         lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
-        # recent_activity is the orientation call a model makes at session start, so an empty
+        # Recent activity is the orientation call a model makes at session start, so an empty
         # result is the natural moment to help. Stay offer-not-act, and cover both a brand-new
         # (empty) knowledge base and an established one that is merely quiet in this window.
-        # Prefer the external id in examples: names collide across cloud workspaces, project_id
-        # does not.
-        route = f'project="{project_id}"' if project_id else f'project="{project_name}"'
+        # Examples name the external id: names collide across cloud workspaces, ids do not.
+        route = f'project="{project_id}"'
         lines.append("")
         lines.append(
             "If the user is just getting started and has no notes yet, briefly explain that "
@@ -667,47 +252,6 @@ def _format_project_output(
         lines.append(f"\n**Activity Summary:** {total} items found.")
 
     return "\n".join(lines)
-
-
-def _format_relative_time(timestamp) -> str:
-    """Format timestamp as relative time like '2 hours ago'."""
-    try:
-        from datetime import datetime, timezone
-        from dateutil.relativedelta import relativedelta
-
-        if isinstance(timestamp, str):
-            # Parse ISO format timestamp
-            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        else:
-            dt = timestamp
-
-        now = datetime.now(timezone.utc)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-
-        # Use relativedelta for accurate time differences
-        diff = relativedelta(now, dt)
-
-        if diff.years > 0:
-            return f"{diff.years} year{'s' if diff.years > 1 else ''} ago"
-        elif diff.months > 0:
-            return f"{diff.months} month{'s' if diff.months > 1 else ''} ago"
-        elif diff.days > 0:
-            if diff.days == 1:
-                return "yesterday"
-            elif diff.days < 7:
-                return f"{diff.days} days ago"
-            else:
-                weeks = diff.days // 7
-                return f"{weeks} week{'s' if weeks > 1 else ''} ago"
-        elif diff.hours > 0:
-            return f"{diff.hours} hour{'s' if diff.hours > 1 else ''} ago"
-        elif diff.minutes > 0:
-            return f"{diff.minutes} minute{'s' if diff.minutes > 1 else ''} ago"
-        else:
-            return "just now"
-    except Exception:
-        return "recently"
 
 
 def _truncate_at_word(text: str, max_length: int) -> str:

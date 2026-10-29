@@ -41,8 +41,8 @@ class TestProjectResolver:
         assert result.project == "my-default"
         assert result.mode == ResolutionMode.DEFAULT
 
-    def test_no_resolution_when_no_default_and_no_discovery(self):
-        """Without explicit/default/discovery, resolution should return NONE."""
+    def test_no_resolution_when_no_default(self):
+        """Without explicit/default, resolution should return NONE."""
         resolver = ProjectResolver(default_project=None)
 
         result = resolver.resolve(project=None)
@@ -50,16 +50,6 @@ class TestProjectResolver:
         assert result.project is None
         assert result.mode == ResolutionMode.NONE
         assert result.is_resolved is False
-
-    def test_discovery_resolution_when_allowed(self):
-        """Discovery mode should return DISCOVERY when allowed."""
-        resolver = ProjectResolver(default_project=None)
-
-        result = resolver.resolve(project=None, allow_discovery=True)
-
-        assert result.project is None
-        assert result.mode == ResolutionMode.DISCOVERY
-        assert result.is_discovery_mode is True
 
     def test_require_project_success(self):
         """require_project returns result when project resolves."""
@@ -121,33 +111,6 @@ class TestResolvedProject:
             reason="test",
         )
         assert result.is_resolved is False
-
-    def test_is_discovery_mode_discovery(self):
-        """is_discovery_mode is True for DISCOVERY."""
-        result = ResolvedProject(
-            project=None,
-            mode=ResolutionMode.DISCOVERY,
-            reason="test",
-        )
-        assert result.is_discovery_mode is True
-
-    def test_is_discovery_mode_none(self):
-        """is_discovery_mode is True for NONE with no project."""
-        result = ResolvedProject(
-            project=None,
-            mode=ResolutionMode.NONE,
-            reason="test",
-        )
-        assert result.is_discovery_mode is True
-
-    def test_is_discovery_mode_false(self):
-        """is_discovery_mode is False when project is resolved."""
-        result = ResolvedProject(
-            project="test",
-            mode=ResolutionMode.EXPLICIT,
-            reason="test",
-        )
-        assert result.is_discovery_mode is False
 
     def test_frozen_dataclass(self):
         """ResolvedProject is immutable."""

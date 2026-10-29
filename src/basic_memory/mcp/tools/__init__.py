@@ -6,8 +6,6 @@ all tools with the MCP server.
 """
 
 # Shared implementations used by the CLI and the bm_* tools; these do not register MCP tools.
-from basic_memory.mcp.tools.build_context import build_context as build_context
-from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity
 from basic_memory.mcp.tools.read_note import read_note as read_note
 
 from basic_memory.mcp.tools.search import search_notes as search_notes

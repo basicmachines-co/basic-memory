@@ -19,16 +19,159 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat, Page, Pagination, ProjectParam, Since
 from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
-from basic_memory.mcp.tools.build_context import (
-    _compact_context_labels,
-    _format_context_markdown,
-)
 from basic_memory.schemas.memory import (
     MAX_CONTEXT_DEPTH,
     MAX_CONTEXT_PAGE_SIZE,
     MAX_CONTEXT_RELATED_RESULTS,
+    ContextResult,
+    EntitySummary,
+    GraphContext,
+    ObservationSummary,
+    RelationSummary,
     memory_url_path,
 )
+
+
+# --- Formatting ---
+
+
+def _compact_observation(observation: ObservationSummary) -> ObservationSummary:
+    """Navigate to the owning file without repeating content-derived labels."""
+    return observation.model_copy(
+        update={"title": observation.category, "permalink": observation.file_path}
+    )
+
+
+def _compact_context_labels(graph: GraphContext) -> GraphContext:
+    # Observation titles and permalinks embed source prose. Use the category and
+    # owning file for discovery; keep numeric and external IDs unchanged.
+    # Compact requests skip entity observation lists, so only observations that
+    # surface as primary or related results need relabeling.
+    return graph.model_copy(
+        update={
+            "results": [
+                result.model_copy(
+                    update={
+                        "primary_result": _compact_observation(result.primary_result)
+                        if isinstance(result.primary_result, ObservationSummary)
+                        else result.primary_result,
+                        "related_results": [
+                            _compact_observation(item)
+                            if isinstance(item, ObservationSummary)
+                            else item
+                            for item in result.related_results
+                        ],
+                    }
+                )
+                for result in graph.results
+            ]
+        }
+    )
+
+
+def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str:
+    """Format a single context result as a markdown block.
+
+    Each note carries its file path beside its permalink: a permalink need not
+    carry the project prefix, and the path is the address bm_read takes in any session.
+    """
+    primary = result.primary_result
+    lines = []
+
+    # --- Header ---
+    lines.append(f"## {primary.title}")
+    if primary.permalink:
+        lines.append(f"permalink: {primary.permalink}")
+    lines.append(f"path: {primary.file_path}")
+    # RelationSummary has no content field; Entity/Observation do
+    if not compact and not isinstance(primary, RelationSummary) and primary.content:
+        lines.append("")
+        lines.append(primary.content)
+
+    # --- Observations ---
+    if result.observations and not compact:
+        lines.append("")
+        lines.append("### Observations")
+        for obs in result.observations:
+            lines.append(f"- [{obs.category}] {obs.content}")
+
+    # --- Relations (from primary's related_results that are RelationSummary) ---
+    relation_items: list[RelationSummary] = [
+        r for r in result.related_results if isinstance(r, RelationSummary)
+    ]
+    if relation_items:
+        lines.append("")
+        lines.append("### Relations")
+        primary_external_id = primary.external_id if isinstance(primary, EntitySummary) else None
+        for rel in relation_items:
+            # Unresolved forward references have no resolved entity yet; fall back
+            # to the literal target text instead of rendering [[None]] (#955)
+            target = rel.to_entity or rel.to_name
+            # Trigger: the relation is incoming, or belongs to a neighbor at depth > 1.
+            # Why: listed bare under this note, `relates_to [[This Note]]` reads as a
+            #   self-link (#1717).
+            # Outcome: relations this note owns stay bare; others name their source.
+            is_outgoing = (
+                primary_external_id is not None
+                and rel.from_entity_external_id == primary_external_id
+            )
+            if is_outgoing or rel.from_entity is None:
+                lines.append(f"- {rel.relation_type} [[{target}]]")
+            else:
+                lines.append(f"- [[{rel.from_entity}]] {rel.relation_type} [[{target}]]")
+
+    # --- Related entities (non-relation related results) ---
+    related_entities: list[EntitySummary | ObservationSummary] = [
+        r for r in result.related_results if not isinstance(r, RelationSummary)
+    ]
+    if related_entities:
+        lines.append("")
+        lines.append("### Related")
+        for item in related_entities:
+            lines.append(f"- [[{item.title}]] ({item.file_path})")
+
+    return "\n".join(lines)
+
+
+def _format_context_markdown(graph: GraphContext, project: str, *, compact: bool = False) -> str:
+    """Format GraphContext as compact markdown text.
+
+    Produces a human-readable markdown representation that is much smaller
+    than the equivalent JSON, suitable for LLM consumption when structured
+    data isn't needed.
+    """
+    if not graph.results:
+        uri = graph.metadata.uri or ""
+        return f"No results found for '{uri}' in project '{project}'."
+
+    parts = []
+
+    # --- Title from first primary result ---
+    first_title = graph.results[0].primary_result.title
+    if len(graph.results) == 1:
+        parts.append(f"# Context: {first_title}")
+    else:
+        uri = graph.metadata.uri or ""
+        parts.append(f"# Context: {uri}")
+
+    parts.append("")
+
+    # --- Entity blocks separated by --- ---
+    entity_blocks = [_format_entity_block(result, compact=compact) for result in graph.results]
+    parts.append("\n\n---\n\n".join(entity_blocks))
+
+    # --- Footer ---
+    meta = graph.metadata
+    primary_count = meta.primary_count or 0
+    related_count = meta.related_count or 0
+    parts.append("")
+    parts.append("---")
+    parts.append(
+        f"*{primary_count} primary, {related_count} related"
+        f" | depth={meta.depth} | project: {project}*"
+    )
+
+    return "\n".join(parts)
 
 
 @mcp.tool(
@@ -134,11 +277,7 @@ async def bm_context(
     if compact:
         graph = _compact_context_labels(graph)
     if output_format == "text":
-        # A permalink need not carry the project prefix, so the text names each
-        # note's qualified file path too: the address bm_read takes in any session.
-        text = _format_context_markdown(
-            graph, target.project.name, compact=compact, with_paths=True
-        )
+        text = _format_context_markdown(graph, target.project.name, compact=compact)
         next_call = Pagination(page=page, page_size=page_size, has_more=graph.has_more).next_call(
             "bm_context",
             {

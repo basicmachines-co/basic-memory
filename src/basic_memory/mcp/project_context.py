@@ -141,8 +141,6 @@ async def _resolve_default_project_from_api() -> Optional[str]:
 
 async def resolve_project_parameter(
     project: Optional[str] = None,
-    allow_discovery: bool = False,
-    default_project: Optional[str] = None,
     context: Optional[Context] = None,
 ) -> Optional[str]:
     """Resolve project parameter using unified linear priority chain.
@@ -155,22 +153,16 @@ async def resolve_project_parameter(
     1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
     2. EXPLICIT: project parameter passed directly
     3. DEFAULT: default_project from config (if set)
-    4. Fallback: discovery (if allowed) → NONE
+    4. Fallback: NONE
 
     Args:
         project: Optional explicit project parameter
-        allow_discovery: If True, allows returning None for discovery mode
-            (used by tools like recent_activity that can operate across all projects)
-        default_project: Optional explicit default project. If not provided, reads from ConfigManager.
+        context: Optional FastMCP context that caches the active and default project
 
     Returns:
         Resolved project name or None if no resolution possible
     """
-    with logfire.span(
-        "routing.resolve_project",
-        requested_project=project,
-        allow_discovery=allow_discovery,
-    ):
+    with logfire.span("routing.resolve_project", requested_project=project):
         config = ConfigManager().config
 
         # Trigger: project already resolved earlier in the same MCP request
@@ -186,8 +178,8 @@ async def resolve_project_parameter(
         # Why: default-project discovery is only needed as a fallback; doing it
         #   for explicit requests adds an avoidable /v2/projects/ round-trip
         # Outcome: skip default lookup when the active project is already known
-        if default_project is None and project is None:
-            # Load config for any values not explicitly provided.
+        default_project: Optional[str] = None
+        if project is None:
             # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
             # When it returns None, fall back to querying the projects API for the is_default flag.
             default_project = config.default_project
@@ -204,7 +196,7 @@ async def resolve_project_parameter(
         resolver = ProjectResolver.from_env(
             default_project=default_project,
         )
-        result = resolver.resolve(project=project, allow_discovery=allow_discovery)
+        result = resolver.resolve(project=project)
         return _canonicalize_project_name(result.project, config)
 
 

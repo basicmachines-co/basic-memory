@@ -14,7 +14,6 @@ class ResolutionMode(Enum):
     ENV_CONSTRAINT = auto()  # BASIC_MEMORY_MCP_PROJECT env var
     EXPLICIT = auto()  # Explicit project parameter
     DEFAULT = auto()  # default_project from config
-    DISCOVERY = auto()  # Discovery mode allowed (no project)
     NONE = auto()  # No resolution possible
 
 
@@ -29,10 +28,6 @@ class ResolvedProject:
     @property
     def is_resolved(self) -> bool:
         return self.project is not None
-
-    @property
-    def is_discovery_mode(self) -> bool:
-        return self.mode in {ResolutionMode.DISCOVERY, ResolutionMode.NONE} and self.project is None
 
 
 @dataclass
@@ -53,11 +48,7 @@ class ProjectResolver:
             constrained_project=os.environ.get("BASIC_MEMORY_MCP_PROJECT"),
         )
 
-    def resolve(
-        self,
-        project: Optional[str] = None,
-        allow_discovery: bool = False,
-    ) -> ResolvedProject:
+    def resolve(self, project: Optional[str] = None) -> ResolvedProject:
         """Resolve project using a unified linear priority chain."""
         if self.constrained_project:
             logger.debug(f"Using constrained project from env: {self.constrained_project}")
@@ -83,14 +74,6 @@ class ProjectResolver:
                 reason=f"Default project: {self.default_project}",
             )
 
-        if allow_discovery:
-            logger.debug("No project resolved, using discovery mode")
-            return ResolvedProject(
-                project=None,
-                mode=ResolutionMode.DISCOVERY,
-                reason="Discovery mode enabled",
-            )
-
         logger.debug("No project resolution possible")
         return ResolvedProject(
             project=None,
@@ -104,7 +87,7 @@ class ProjectResolver:
         error_message: Optional[str] = None,
     ) -> ResolvedProject:
         """Resolve project, raising an error if not resolved."""
-        result = self.resolve(project, allow_discovery=False)
+        result = self.resolve(project)
         if not result.is_resolved:
             msg = error_message or (
                 "No project specified. Either set 'default_project' in config, "

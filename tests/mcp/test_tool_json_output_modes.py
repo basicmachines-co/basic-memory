@@ -9,10 +9,8 @@ import pytest
 from basic_memory.mcp.tools import (
     bm_project,
     bm_write,
-    build_context,
     edit_note,
     read_note,
-    recent_activity,
 )
 
 
@@ -119,78 +117,6 @@ async def test_edit_note_text_and_json_modes(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_text_and_json_modes(app, test_project):
-    await bm_write(
-        project=test_project.name,
-        title="Mode Activity Note",
-        directory="mode-tests",
-        content="# Mode Activity Note\n\nactivity",
-    )
-
-    text_result = await recent_activity(
-        project=test_project.name,
-        timeframe="7d",
-        output_format="text",
-    )
-    assert isinstance(text_result, str)
-    assert "Recent Activity" in text_result
-
-    json_result = await recent_activity(
-        project=test_project.name,
-        timeframe="7d",
-        output_format="json",
-    )
-    assert isinstance(json_result, list)
-    assert any(item.get("title") == "Mode Activity Note" for item in json_result)
-    for item in json_result:
-        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_json_preserves_relation_and_observation_types(app, test_project):
-    await bm_write(
-        project=test_project.name,
-        title="Activity Type Source",
-        directory="mode-tests",
-        content=(
-            "# Activity Type Source\n\n"
-            "- [note] observation from source\n"
-            "- links_to [[Activity Type Target]]"
-        ),
-    )
-    await bm_write(
-        project=test_project.name,
-        title="Activity Type Target",
-        directory="mode-tests",
-        content="# Activity Type Target",
-    )
-
-    relation_json = await recent_activity(
-        project=test_project.name,
-        type="relation",
-        timeframe="7d",
-        output_format="json",
-    )
-    assert isinstance(relation_json, list)
-    assert relation_json
-    assert all(item.get("type") == "relation" for item in relation_json)
-    for item in relation_json:
-        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
-
-    observation_json = await recent_activity(
-        project=test_project.name,
-        type="observation",
-        timeframe="7d",
-        output_format="json",
-    )
-    assert isinstance(observation_json, list)
-    assert observation_json
-    assert all(item.get("type") == "observation" for item in observation_json)
-    for item in observation_json:
-        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
-
-
-@pytest.mark.asyncio
 async def test_list_and_create_project_text_and_json_modes(app, test_project, tmp_path):
     list_text = await bm_project(command="list", output_format="text")
     assert isinstance(list_text, str)
@@ -268,21 +194,3 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     )
     assert "Set as default project\\n" not in default_text_again
     assert "Set as default project\n" in default_text_again
-
-
-@pytest.mark.asyncio
-async def test_build_context_json_default_and_text_mode(client, test_graph, test_project):
-    json_result = await build_context(
-        project=test_project.name,
-        url="memory://test/root",
-    )
-    assert isinstance(json_result, dict)
-    assert "results" in json_result
-
-    text_result = await build_context(
-        project=test_project.name,
-        url="memory://test/root",
-        output_format="text",
-    )
-    assert isinstance(text_result, str)
-    assert "# Context:" in text_result
