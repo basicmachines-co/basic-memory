@@ -7,6 +7,17 @@ description: "Resume prior work by rebuilding context from the Basic Memory grap
 
 Resume previous work by reconstructing context from the Basic Memory knowledge graph, so the assistant can pick up across sessions instead of starting cold.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - Starting a new session and you need to pick up where you left off
@@ -33,19 +44,20 @@ bm_context(
     identifier="memory://topic-or-note-name",
     depth=2,           # how many relation hops to follow
     since="7d",        # only include changes in this window
+    project="<project>",
 )
 ```
 
-**No clear starting point — use `bm_project(command="recent")`.** See what's changed and let it surface the thread:
+**No clear starting point — use `bm_project(command="recent", project="<project>")`.** See what's changed and let it surface the thread:
 
 ```python
-bm_project(command="recent", since="3d")
+bm_project(command="recent", since="3d", project="<project>")
 ```
 
 **Looking for something specific — use `bm_search`.** Find candidate notes by keyword:
 
 ```python
-bm_search(query="async client refactor", page_size=10)
+bm_search(query="async client refactor", page_size=10, project="<project>")
 ```
 
 ### 3. Read the Key Notes
@@ -53,7 +65,7 @@ bm_search(query="async client refactor", page_size=10)
 Once you've identified the relevant notes, read them in full:
 
 ```python
-bm_read(identifier="note-title-or-permalink")
+bm_read(identifier="note-title-or-permalink", project="<project>")
 ```
 
 For long notes, pick before you pay for bodies. `compact=True` drops bodies from
@@ -61,9 +73,9 @@ search results (and observations from `bm_context`), and a line range or a
 section reads only the part you need:
 
 ```python
-bm_search(query="async client refactor", compact=True)
-bm_read(identifier="note-title-or-permalink", start_line=120, end_line=180)
-bm_read(identifier="note-title-or-permalink", section="Status")
+bm_search(query="async client refactor", compact=True, project="<project>")
+bm_read(identifier="note-title-or-permalink", start_line=120, end_line=180, project="<project>")
+bm_read(identifier="note-title-or-permalink", section="Status", project="<project>")
 ```
 
 ### 4. Present Context to the User
@@ -89,7 +101,7 @@ Use a specific note URL to anchor on one starting point; use a wildcard to pull 
 
 ## Timeframe Reference
 
-`bm_context` and `bm_project(command="recent")` accept natural-language timeframes:
+`bm_context` and `bm_project(command="recent", project="<project>")` accept natural-language timeframes:
 
 | Timeframe | Meaning |
 |-----------|---------|
@@ -106,10 +118,10 @@ Use a specific note URL to anchor on one starting point; use a wildcard to pull 
 
 ```python
 # 1. Read the spec / project note
-bm_read(identifier="SPEC-24: Postgres Database Migration")
+bm_read(identifier="SPEC-24: Postgres Database Migration", project="<project>")
 
 # 2. Pull in related context and recent changes via the graph
-bm_context(identifier="memory://SPEC-24*", since="7d")
+bm_context(identifier="memory://SPEC-24*", since="7d", project="<project>")
 ```
 
 Then summarize: the goals, what's completed, what's pending, and any blockers or open decisions.
@@ -118,10 +130,10 @@ Then summarize: the goals, what's completed, what's pending, and any blockers or
 
 ```python
 # 1. Check recent activity
-bm_project(command="recent", since="3d")
+bm_project(command="recent", since="3d", project="<project>")
 
 # 2. Read notes from the recent sessions it surfaces
-bm_read(identifier="relevant-note")
+bm_read(identifier="relevant-note", project="<project>")
 ```
 
 Then list the modified notes with brief descriptions and ask which thread to dive into.
@@ -130,10 +142,10 @@ Then list the modified notes with brief descriptions and ask which thread to div
 
 ```python
 # 1. Find the topic
-bm_search(query="topic keywords")
+bm_search(query="topic keywords", project="<project>")
 
 # 2. Build context from the best match, following its relations
-bm_context(identifier="memory://found-note-permalink", depth=2)
+bm_context(identifier="memory://found-note-permalink", depth=2, project="<project>")
 ```
 
 Then present the full picture — the note plus its connected context.
@@ -146,11 +158,19 @@ Project names are user-specific. To discover what's available before scoping a s
 bm_project(command="list")
 ```
 
-In multi-project setups, prefix a `memory://` URL with the project name (e.g. `memory://research/papers/crdt`) to scope it.
+A qualified `memory://` URL (e.g. `memory://research/papers/crdt`) must agree
+with `project`; the prefix does not replace that required parameter.
+
+For an explicitly broader search, use one of these scopes instead:
+
+```python
+bm_search(query="topic keywords", projects=["research", "team/engineering"])
+bm_search(query="topic keywords", all_projects=True)
+```
 
 ## Guidelines
 
-1. **Start broad, then narrow.** Get an overview with `bm_project(command="recent")` or a wildcard `bm_context`, then drill into specific notes.
+1. **Start broad, then narrow.** Get an overview with `bm_project(command="recent", project="<project>")` or a wildcard `bm_context`, then drill into specific notes.
 2. **Present incrementally.** Share what you find as you go rather than holding everything until the end.
 3. **Follow relations.** The graph's connections are the point — `bm_context` with `depth` surfaces context you wouldn't find by reading one note.
 4. **Check multiple projects.** Specs may live separately from implementation notes; discover projects with `bm_project(command="list")`.

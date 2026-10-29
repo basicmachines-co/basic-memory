@@ -14,6 +14,17 @@ description: "How to write well-structured Basic Memory notes: frontmatter, cate
 
 Write well-structured notes that Basic Memory can parse into a searchable knowledge graph. Every note is a markdown file with three key sections: frontmatter, observations, and relations.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## Note Anatomy
 
 ```markdown
@@ -106,7 +117,7 @@ A few examples to illustrate the range:
 - **One fact per observation.** Don't pack multiple ideas into one line.
 - **Be specific.** `[decision] Use JWT` is less useful than `[decision] Use JWT with 15-minute expiry for API auth`.
 - **Use tags for cross-cutting concerns.** `[risk] Rate limiting needed #api #security` makes this findable under both topics.
-- **Categories are queryable.** `bm_search(items=["observation"], categories=["decision"])` returns every decision observation across your knowledge base.
+- **Categories are queryable.** `bm_search(items=["observation"], categories=["decision"], project="<project>")` returns every decision observation across your knowledge base.
 
 ### When a Claim Holds
 
@@ -135,8 +146,8 @@ An observation can say when it is true. Put a qualifier after the category:
 Search by what notes say was true, rather than by when they were edited:
 
 ```python
-bm_search(valid_at="2026-07-01")                              # true on that date
-bm_search(time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")  # due this week
+bm_search(valid_at="2026-07-01", project="<project>")                              # true on that date
+bm_search(time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)", project="<project>")  # due this week
 ```
 
 A valid-time filter returns only dated observations; drop it to search
@@ -188,7 +199,7 @@ These create `references` relations automatically. Use the Relations section for
 
 - **Link liberally.** Relations are what turn isolated notes into a knowledge graph. When in doubt, add the link.
 - **Create target notes if they don't exist yet.** `[[Future Topic]]` is valid — BM will resolve it when that note is created.
-- **Use `bm_context` to traverse.** `bm_context(identifier="memory://note-title")` follows relations to gather connected knowledge.
+- **Use `bm_context` to traverse.** `bm_context(identifier="memory://note-title", project="<project>")` follows relations to gather connected knowledge.
 - **Custom relation types are fine.** `taught_by`, `blocks`, `tested_in` — use whatever is descriptive.
 
 ## Memory URLs
@@ -215,7 +226,10 @@ memory://main/specs/api-design         # "main" project, "specs/api-design" path
 memory://research/papers/crdt          # "research" project
 ```
 
-The first path segment is matched against known project names. If it matches, it's used as the project scope. Otherwise pass `project` explicitly when several projects are addressable; unqualified calls are refused.
+Always pass `project` explicitly, even with a project-qualified URL or one
+configured project. A recognized project prefix must agree with that parameter;
+it does not replace it. Use a project external ID or `workspace/project` when
+names collide across workspaces.
 
 ### Using Memory URLs
 
@@ -223,13 +237,13 @@ Memory URLs work with `bm_context` to assemble related knowledge by traversing r
 
 ```python
 # Get a note and its connected context
-bm_context(identifier="memory://api-design-decisions")
+bm_context(identifier="memory://api-design-decisions", project="<project>")
 
 # Wildcard — gather all docs
-bm_context(identifier="memory://docs/*")
+bm_context(identifier="memory://docs/*", project="<project>")
 
 # Direct read by permalink
-bm_read(identifier="memory://api-design-decisions")
+bm_read(identifier="memory://api-design-decisions", project="<project>")
 ```
 
 ## Before Creating a Note
@@ -242,9 +256,9 @@ A single search often misses. Try the full name, abbreviations, acronyms, and ke
 
 ```python
 # Searching for an entity that might already exist
-bm_search(query="Kubernetes Migration")
-bm_search(query="k8s migration")
-bm_search(query="container migration")
+bm_search(query="Kubernetes Migration", project="<project>")
+bm_search(query="k8s migration", project="<project>")
+bm_search(query="container migration", project="<project>")
 ```
 
 For people, try full name and last name. For organizations, try the full name and common abbreviations.
@@ -265,7 +279,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="insert_after_section",
   section="Observations",
-  content="- [decision] Switched to OpenAPI 3.1 for spec generation #api"
+  content="- [decision] Switched to OpenAPI 3.1 for spec generation #api",
+  project="<project>",
 )
 
 # Fix outdated information
@@ -273,7 +288,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="find_replace",
   find_text="- [status] draft",
-  content="- [status] approved"
+  content="- [status] approved",
+  project="<project>",
 )
 
 # Add a new relation
@@ -281,7 +297,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="insert_after_section",
   section="Relations",
-  content="- depends_on [[Rate Limiter]]"
+  content="- depends_on [[Rate Limiter]]",
+  project="<project>",
 )
 ```
 
@@ -310,7 +327,8 @@ flexibility matters more.
 
 ## Relations
 - implements [[API Specification]]
-- relates_to [[Backend Architecture]]"""
+- relates_to [[Backend Architecture]]""",
+  project="<project>",
 )
 ```
 
@@ -328,7 +346,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="insert_after_section",
   section="Observations",
-  content="- [decision] Use OpenAPI 3.1 for spec generation #api"
+  content="- [decision] Use OpenAPI 3.1 for spec generation #api",
+  project="<project>",
 )
 
 # append / prepend — add to the end of the note or the start of the body
@@ -336,7 +355,8 @@ bm_edit(
 bm_edit(
   identifier="API Design Decisions",
   command="prepend",
-  content="> Updated 2026-05-28: auth approach finalized.\n"
+  content="> Updated 2026-05-28: auth approach finalized.\n",
+  project="<project>",
 )
 
 # replace_section — rewrite a named section (use for living content that stays current)
@@ -344,7 +364,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="replace_section",
   section="Summary",
-  content="Concise, current summary of the decision and its rationale."
+  content="Concise, current summary of the decision and its rationale.",
+  project="<project>",
 )
 
 # find_replace — swap specific text
@@ -352,7 +373,8 @@ bm_edit(
   identifier="API Design Decisions",
   command="find_replace",
   find_text="OpenAPI 3.0",
-  content="OpenAPI 3.1"
+  content="OpenAPI 3.1",
+  project="<project>",
 )
 ```
 
@@ -360,18 +382,19 @@ When an edit is destructive (`replace_section`, `find_replace`), read the note f
 and pass its checksum, so the edit applies only to the revision you read:
 
 ```python
-note = bm_read(identifier="API Design Decisions", output_format="json")
+note = bm_read(identifier="API Design Decisions", output_format="json", project="<project>")
 bm_edit(
   identifier="API Design Decisions",
   command="replace_section",
   section="Summary",
   content="Concise, current summary of the decision and its rationale.",
-  expected_checksum=note["checksum"]
+  expected_checksum=note["checksum"],
+  project="<project>",
 )
 ```
 
 A checksum conflict means someone changed the note after you read it. Read it
-again and redo the edit against the new text. `bm_write(overwrite=True)` takes
+again and redo the edit against the new text. `bm_write(overwrite=True, project="<project>")` takes
 `expected_checksum` the same way.
 
 ### Moving a Note
@@ -381,7 +404,8 @@ Use `bm_move` to reorganize notes into different directories:
 ```python
 bm_move(
   identifier="API Design Decisions",
-  destination="archive/api-design-decisions.md"
+  destination="archive/api-design-decisions.md",
+  project="<project>",
 )
 ```
 

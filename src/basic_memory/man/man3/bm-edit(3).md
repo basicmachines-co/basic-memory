@@ -18,9 +18,9 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_edit(identifier, command, content=None, section=None, find_text=None,
-        expected_replacements=1, replace_subsections=True, metadata=None,
-        expected_checksum=None, output_format="text", project=None)
+bm_edit(identifier, command, project, content=None, section=None,
+        find_text=None, expected_replacements=1, replace_subsections=True,
+        metadata=None, expected_checksum=None, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -46,6 +46,7 @@ missing note is an error; create notes with bm_write.
 
 - **identifier** (string, required) — The note or file: a file path ('notes/plan.md'), permalink, memory:// URL, exact title, external id, or '<project>/path'.
 - **command** (required) — The edit.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **content** (string | null, optional, default: None) — The text to add or the replacement. Not used by set_metadata.
 - **section** (string | null, optional, default: None) — The heading for section commands: "Decisions", "Auth/Decisions" for one under "Auth", or "Decisions[1]" for the second of two.
 - **find_text** (string | null, optional, default: None) — For find_replace: the exact, case-sensitive text to replace.
@@ -54,7 +55,6 @@ missing note is an error; create notes with bm_write.
 - **metadata** (object | null, optional, default: None) — Frontmatter fields to set; other fields are kept.
 - **expected_checksum** (string | null, optional, default: None) — Edit only while the note is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 
@@ -75,7 +75,7 @@ bm_edit(identifier="plans/launch-plan.md", command="append", content="x",
         expected_checksum="stale", project="demo")
 # → error: REVISION_CONFLICT: 'plans/launch-plan.md' changed since you read it
 #   (current checksum 77a457af…). Nothing was changed.
-#   Try instead: bm_read(identifier='plans/launch-plan.md'), then retry with
+#   Try instead: bm_read(identifier='plans/launch-plan.md', project='demo'), then retry with
 #   expected_checksum='77a457af…'
 ```
 

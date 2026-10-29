@@ -1,20 +1,17 @@
 """bm_list: list one directory level.
 
-`bm_list("/")` with no project lists the projects this session can address, so
-listing doubles as project discovery; any other path lists one level of a project.
-Recursive listing is bm_find's job.
+Every listing names its project explicitly. Project discovery is bm_project's job;
+recursive listing is bm_find's job.
 """
 
-import os
 from typing import Annotated, Any
 
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.clients import DirectoryClient
-from basic_memory.mcp.directory_listing import format_listing_text, project_mount_listing
+from basic_memory.mcp.directory_listing import format_listing_text
 from basic_memory.mcp.note_targets import open_project_target
-from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import (
     Pagination,
@@ -32,8 +29,8 @@ from basic_memory.schemas.directory import DirectoryListResponse, DirectorySortO
     title="List folder",
     description=(
         "List one folder of a Basic Memory project: its subfolders, then its files with "
-        "title, date and id. `bm_list('/')` with no project lists the projects you can "
-        "address; '<project>/path' lists inside another project. Filter files with `glob` "
+        "title, date and id. `project` is required; '/' lists its root. Discover projects "
+        "with bm_project(command='list'). Filter files with `glob` "
         "and order them with `sort`. For a recursive search by name or frontmatter, use "
         "bm_find."
     ),
@@ -62,39 +59,11 @@ async def bm_list(
     page: Page = 1,
     page_size: PageSize = 10,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
-    """List one directory level, or the addressable projects at '/'."""
-    # Trigger: the project root with no project named, by parameter or by the
-    #          BASIC_MEMORY_MCP_PROJECT constraint.
-    # Why: projects are mount points (#1415); listing them in-band makes discovery
-    #      the same call as browsing.
-    # Outcome: the projects as directory entries, each a routable '/<project>' path.
-    if (
-        project is None
-        and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-        and not path.strip().strip("/")
-    ):
-        # The projects are folders, which `glob` and `sort` never apply to.
-        if glob is not None or sort is not None:
-            raise refusal(
-                "INVALID_ARGUMENTS",
-                "'/' lists projects; `glob` and `sort` apply to files in a folder.",
-                try_instead="bm_list(path='<project>', glob=...), or bm_find to search by name",
-                output_format=output_format,
-            )
-        mounts = await project_mount_listing(page=page, page_size=page_size, context=context)
-        if output_format == "json":
-            return mounts
-        text = format_listing_text(
-            DirectoryListResponse.model_validate(mounts),
-            heading="Projects:",
-            next_call=Pagination.of(mounts).next_call("bm_list", {"path": "/"}),
-        )
-        note = mounts.get("note")
-        return f"{text}\n\nNote: {note}" if note else text
-
+    """List one directory level within the required project."""
     async with open_project_target(path, project, context, output_format=output_format) as target:
         list_path = f"/{target.route.path}" if target.route.stripped else path
         listing = await DirectoryClient(target.client, target.project.external_id).list(

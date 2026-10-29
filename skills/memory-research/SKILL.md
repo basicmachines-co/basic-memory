@@ -7,6 +7,17 @@ description: "Research an external subject on the web and synthesize it into a s
 
 Research an external subject, synthesize what you find, and create a structured Basic Memory entity — with the user's approval.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## Workflow
 
 ### Step 1: Web Research
@@ -36,8 +47,8 @@ Search for current information across multiple sources. Aim for 3-5 searches to 
 Before proposing a new entity, search Basic Memory:
 
 ```python
-bm_search(query="Acme Corp")
-bm_search(query="acme")
+bm_search(query="Acme Corp", project="<project>")
+bm_search(query="acme", project="<project>")
 ```
 
 Try name variations — full name, abbreviation, acronym, domain name.
@@ -135,7 +146,8 @@ bm_write(
 - [additional observations from research findings]
 
 ## Relations
-- [Link to related entities already in the knowledge graph]"""
+- [Link to related entities already in the knowledge graph]""",
+  project="<project>",
 )
 ```
 
@@ -163,7 +175,8 @@ bm_write(
 - [source] Researched on YYYY-MM-DD
 
 ## Relations
-- works_at [[Organization]]"""
+- works_at [[Organization]]""",
+  project="<project>",
 )
 ```
 
@@ -192,7 +205,8 @@ bm_write(
 - [source] Researched on YYYY-MM-DD
 
 ## Relations
-- [Link to related concepts, tools, or projects in the knowledge graph]"""
+- [Link to related concepts, tools, or projects in the knowledge graph]""",
+  project="<project>",
 )
 ```
 
@@ -211,7 +225,8 @@ bm_edit(
   identifier="Acme Corp",
   command="insert_after_section",
   section="Observations",
-  content="- [context] Saw their demo at conference, week of 2026-02-17"
+  content="- [context] Saw their demo at conference, week of 2026-02-17",
+  project="<project>",
 )
 ```
 

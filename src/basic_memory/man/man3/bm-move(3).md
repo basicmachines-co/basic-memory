@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_move(destination, identifier=None, path=None, expected_checksum=None,
-        output_format="text", project=None)
+bm_move(destination, project, identifier=None, path=None,
+        expected_checksum=None, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -40,11 +40,11 @@ bm_write it there, then bm_delete the original.
 ## PARAMETERS
 
 - **destination** (string, required) — New path, e.g. 'archive/plan.md'. A trailing '/' ('archive/') moves the note or directory into that folder under its current name.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — The note to move: a path, permalink, memory:// URL or exact title.
 - **path** (string | null, optional, default: None) — The directory to move, with everything in it, e.g. 'drafts/2025'.
 - **expected_checksum** (string | null, optional, default: None) — Move the note only while it is still this revision (from bm_read).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 

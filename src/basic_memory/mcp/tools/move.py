@@ -87,7 +87,8 @@ async def bm_move(
         ),
     ] = None,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Move one note or one directory."""
@@ -213,6 +214,7 @@ async def _move_note(
             address=target.paths.path(note.file_path),
             unchanged="Nothing was moved.",
             occupied=target.paths.path(str(destination_path)),
+            project=target.project.external_id,
             output_format=output_format,
         ) from error
 
@@ -312,13 +314,17 @@ async def _move_directory(
             occupied=target.paths.path(destination),
             output_format=output_format,
             subject="directory",
+            project=target.project.external_id,
         ) from error
 
     if moved.total_files == 0:
         raise refusal(
             "NOT_FOUND",
             f"No files under '{target.paths.path(source)}' in project '{target.project.name}'.",
-            try_instead=f"bm_list(path='{target.paths.path(source.rpartition('/')[0]) or '/'}')",
+            try_instead=(
+                f"bm_list(path={target.paths.path(source.rpartition('/')[0]) or '/'!r}, "
+                f"project={target.project.external_id!r})"
+            ),
             output_format=output_format,
         )
     # The server may have kept an existing folder's spelling ('Archive' for
@@ -349,7 +355,10 @@ async def _move_directory(
             f"Moved {moved.successful_moves} of {moved.total_files} files from "
             f"'{result['path']}' to '{result['destination']}'; {moved.failed_moves} failed: "
             + "; ".join(f"{failure['path']}: {failure['error']}" for failure in result["failed"]),
-            try_instead=f"bm_list(path='{result['destination']}') to see what moved",
+            try_instead=(
+                f"bm_list(path={result['destination']!r}, project={target.project.external_id!r}) "
+                "to see what moved"
+            ),
             output_format=output_format,
         )
     if output_format == "json":

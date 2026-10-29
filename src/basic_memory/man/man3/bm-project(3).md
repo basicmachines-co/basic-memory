@@ -30,8 +30,7 @@ bm_project(command, name=None, path=None, set_default=False, workspace=None,
 - `list` — the projects you can address, grouped by workspace.
 - `create` — add a project: `name`, `path`, optional `set_default` and
   `workspace`.
-- `recent` — what changed lately: `since`, `items`, paging. `project` picks the
-  project, else the default project; with no default, every project. JSON
+- `recent` — what changed lately in the required `project`: `since`, `items`, paging. JSON
   output carries `page`, `page_size` and `has_more`, plus `guidance` for any
   project that was never indexed.
 
@@ -56,7 +55,7 @@ The shell counterpart for `recent` is tail(1).
 - **page** (integer, optional, default: 1) — Page number.
 - **page_size** (integer, optional, default: 10) — Results per page (1-100).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
+- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or external id. Required for one-project operations; search may instead use `projects` or `all_projects=true`. Project discovery needs no scope.
 
 ## EXAMPLES
 
@@ -71,7 +70,7 @@ bm_project(command="list")
 #   - demo (local) [b2a21302…]
 #   - main (local) [9b4d5944…]
 
-bm_project(command="recent", since="1d")
+bm_project(command="recent", since="1d", project="demo")
 # → ## Recent Activity: demo (1d)
 #   **📄 Recent Notes & Documents (1):**
 #     • launch-plan (plans) [id: 686e696d…]

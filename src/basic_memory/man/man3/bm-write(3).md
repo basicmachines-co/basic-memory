@@ -18,9 +18,9 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_write(content, identifier=None, title=None, directory=None,
+bm_write(content, project, identifier=None, title=None, directory=None,
          note_type="note", tags=None, metadata=None, overwrite=None,
-         expected_checksum=None, output_format="text", project=None)
+         expected_checksum=None, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -46,6 +46,7 @@ observations and relations with bm_context.
 ## PARAMETERS
 
 - **content** (string, required) — The note's Markdown. Saved as given; it may start with frontmatter.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — File path for the note, e.g. 'notes/plan.md'; '.md' is added when missing. '<project>/path' writes into another project. Use instead of title + directory.
 - **title** (string | null, optional, default: None) — Note title. With `directory`, it also names the file. With `identifier`, it is used when the content has no frontmatter title.
 - **directory** (string | null, optional, default: None) — Folder for a note addressed by title, e.g. 'meetings'; '/' is the root.
@@ -55,7 +56,6 @@ observations and relations with bm_context.
 - **overwrite** (boolean | null, optional, default: None) — Replace a note that already exists. Default: the write_note_overwrite_default setting (false unless changed).
 - **expected_checksum** (string | null, optional, default: None) — Replace the note only while it is still this revision (the checksum from bm_read). Implies overwrite=true.
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 
@@ -75,8 +75,8 @@ bm_write(title="Release Checklist", directory="plans",
 
 bm_write(identifier="plans/launch-plan.md", content="# again", project="demo")
 # → error: ALREADY_EXISTS: A note already exists at 'plans/launch-plan.md'. Nothing was written.
-#   Try instead: bm_edit(identifier='plans/launch-plan.md', command='append', content='...')
-#   to add to it, or bm_write(..., overwrite=true) to replace it
+#   Try instead: bm_edit(identifier='plans/launch-plan.md', command='append', content='...', project='demo')
+#   to add to it, or bm_write(..., project='demo', overwrite=true) to replace it
 ```
 
 ## GOTCHAS

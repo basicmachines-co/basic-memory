@@ -89,7 +89,8 @@ async def bm_context(
         ),
     ] = 10,
     output_format: OutputFormat = "json",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Build graph context from a starting note or pattern."""

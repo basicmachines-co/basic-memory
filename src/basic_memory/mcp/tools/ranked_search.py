@@ -42,7 +42,7 @@ from basic_memory.mcp.tool_params import (
     OutputFormat,
     Page,
     PageSize,
-    ProjectParam,
+    OptionalProjectParam,
     search_item_types,
 )
 from basic_memory.mcp.workspace_project_index import get_cached_active_workspace
@@ -92,7 +92,8 @@ DEFAULT_MAX_MATCHES = 10
         "with `filters` (frontmatter), `note_types`, `items` (notes, observations, "
         "relations) and `since`. `lines` returns the matching lines of each hit with that "
         "many lines of context, like grep. `path` limits the search to a folder; "
-        "`identifier` searches one note. Read full notes with bm_read."
+        "`identifier` searches one note. Scope every search with `project` (one project), "
+        "`projects` (a list), or `all_projects=true`. Read full notes with bm_read."
     ),
     tags={"search"},
     annotations={
@@ -187,7 +188,7 @@ async def bm_search(
     page: Page = 1,
     page_size: PageSize = 10,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    project: OptionalProjectParam = None,
     context: Context | None = None,
 ) -> str | dict[str, Any]:
     """Search notes, observations and relations."""
@@ -264,6 +265,13 @@ async def bm_search(
         raise refusal(
             "INVALID_ARGUMENTS",
             "`project` names one project; `projects` and `all_projects` name several. Give one.",
+            output_format=output_format,
+        )
+    if not several_projects and project is None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "Search needs an explicit scope: `project`, `projects`, or `all_projects=true`.",
+            try_instead="bm_project(command='list') to discover projects",
             output_format=output_format,
         )
     # max_matches bounds a line scan; ranked results have no matching lines to bound.
@@ -610,7 +618,7 @@ async def _search_one_note(
         raise refusal(
             "UNSUPPORTED",
             f"'{note.file_path}' is not a Markdown note, so it has no lines to search.",
-            try_instead=f"bm_read(identifier='{note.file_path}')",
+            try_instead=f"bm_read(identifier={note.file_path!r}, project={project!r})",
             output_format=output_format,
         )
     scan = scan_lines(

@@ -18,9 +18,9 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_read(identifier, section=None, start_line=None, end_line=None,
+bm_read(identifier, project, section=None, start_line=None, end_line=None,
         max_tokens=None, include_frontmatter=True, include_content=True,
-        output_format="text", project=None)
+        output_format="text")
 ```
 
 Cloud additionally supports the following hosted signature. These options are not
@@ -56,6 +56,7 @@ The shell counterpart is cat(1).
 ## PARAMETERS
 
 - **identifier** (string, required) — The note or file: a file path ('notes/plan.md'), permalink, memory:// URL, exact title, external id, or '<project>/path'.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **section** (string | null, optional, default: None) — A heading to read: "Decisions", "Auth/Decisions" for a heading under "Auth", or "Decisions[1]" for the second "Decisions" heading.
 - **start_line** (integer | null, optional, default: None)
 - **end_line** (integer | null, optional, default: None)
@@ -63,7 +64,6 @@ The shell counterpart is cat(1).
 - **include_frontmatter** (boolean, optional, default: True) — Include the YAML frontmatter in a whole-note read.
 - **include_content** (boolean, optional, default: True) — False returns only title, paths, checksum and updated_at.
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## CLOUD PARAMETERS
 
@@ -106,7 +106,7 @@ bm_read(identifier="plans/launch-plan.md", include_content=False,
 #    "file_path": "plans/launch-plan.md", "checksum": "13e0d14c…",
 #    "updated_at": "2026-10-23T14:47:04.550062-05:00"}
 
-bm_read(identifier="demo/plans/launch-plan.md", start_line=1, end_line=4)
+bm_read(identifier="demo/plans/launch-plan.md", start_line=1, end_line=4, project="demo")
 # → Lines 1-4 of 21 (document, including frontmatter); next: start_line=5, end_line=8
 #   1: ---
 #   2: title: launch-plan
@@ -114,13 +114,13 @@ bm_read(identifier="demo/plans/launch-plan.md", start_line=1, end_line=4)
 
 bm_read(identifier="plans/missing.md", project="demo")
 # → error: NOT_FOUND: No note matches 'plans/missing.md' in project 'demo'.
-#   Try instead: bm_search(query='plans/missing.md')
+#   Try instead: bm_search(query='plans/missing.md', project='<project external id>')
 ```
 
 ## GOTCHAS
 
-- With more than one project, an unqualified identifier is refused even when a
-  default project is set. Pass `project`, or qualify the path (`demo/plans/...`).
+- `project` is required even with one configured project, a server project
+  constraint, or a qualified identifier. A qualified path must agree with it.
 - A section read returns numbered lines, like `start_line`/`end_line`; a whole
   note comes back without line numbers.
 - The token budget is approximate. The first nonblank line is returned whole

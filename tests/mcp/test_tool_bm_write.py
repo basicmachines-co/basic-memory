@@ -87,10 +87,14 @@ async def test_title_and_directory_derive_the_file_name(client, test_project):
 
 @pytest.mark.asyncio
 async def test_project_qualified_path_returns_a_qualified_path(client, test_project):
-    result = await write_json(identifier=f"{test_project.permalink}/plans/q4.md", content="Body")
+    result = await write_json(
+        identifier=f"{test_project.permalink}/plans/q4.md",
+        content="Body",
+        project=test_project.name,
+    )
 
     assert result["file_path"] == f"{test_project.permalink}/plans/q4.md"
-    note = await bm_read(result["file_path"])
+    note = await bm_read(result["file_path"], project=test_project.name)
     assert isinstance(note, str) and "Body" in note
 
 
@@ -115,7 +119,9 @@ async def test_requested_path_is_qualified_like_the_request(client, test_project
     await bm_write(identifier="Plans/seed.md", content="Seed", project=test_project.name)
     prefix = test_project.permalink
 
-    result = await write_json(identifier=f"{prefix}/plans/q4.md", content="Body")
+    result = await write_json(
+        identifier=f"{prefix}/plans/q4.md", content="Body", project=test_project.name
+    )
 
     assert result["file_path"] == f"{prefix}/Plans/q4.md"
     assert result["requested_file_path"] == f"{prefix}/plans/q4.md"
@@ -266,7 +272,7 @@ async def test_unanswered_write_is_an_unknown_outcome(client, test_project, monk
             NoteTargetMoved(
                 external_id="abc", title="A", file_path="moved/a.md", permalink="moved/a"
             ),
-            r"^ALREADY_EXISTS: .*moved to 'moved/a.md'.*\nTry instead: bm_read\(identifier='moved/a.md'\)",
+            r"^ALREADY_EXISTS: .*moved to 'moved/a.md'.*\nTry instead: bm_read\(identifier='moved/a.md', project=",
         ),
         (NoteLocked(message="Note is locked for review."), "^LOCKED: Note is locked"),
     ],
@@ -298,7 +304,7 @@ async def test_similar_notes_are_listed_with_bm_verbs(client, test_project, monk
 
     assert "## Similar existing notes" in text
     assert "bm_edit(identifier='notes/o.md'" in text
-    assert "bm_delete(identifier='notes/new.md')" in text
+    assert f"bm_delete(identifier='notes/new.md', project='{test_project.name}')" in text
     assert payload["similar_notes"][0]["title"] == "Old Plan"
 
 
@@ -309,11 +315,15 @@ async def test_similar_note_calls_reach_the_routed_project(client, test_project,
 
     monkeypatch.setattr(write_module, "find_similar_notes", neighbors)
     prefix = test_project.permalink
-    text = await write_text(identifier=f"{prefix}/notes/new.md", content="Body")
-    payload = await write_json(identifier=f"{prefix}/notes/newer.md", content="Body")
+    text = await write_text(
+        identifier=f"{prefix}/notes/new.md", content="Body", project=test_project.name
+    )
+    payload = await write_json(
+        identifier=f"{prefix}/notes/newer.md", content="Body", project=test_project.name
+    )
 
     assert f"bm_edit(identifier='{prefix}/notes/o.md'" in text
-    assert f"bm_delete(identifier='{prefix}/notes/new.md')" in text
+    assert f"bm_delete(identifier='{prefix}/notes/new.md', project='{test_project.name}')" in text
     assert payload["similar_notes"][0]["file_path"] == f"{prefix}/notes/o.md"
 
 
@@ -369,10 +379,15 @@ async def test_markdown_suffix_is_kept(client, test_project):
 @pytest.mark.asyncio
 async def test_existing_note_hint_names_the_qualified_path(client, test_project):
     prefix = test_project.permalink
-    await bm_write(identifier=f"{prefix}/notes/a.md", content="One")
+    await bm_write(identifier=f"{prefix}/notes/a.md", content="One", project=test_project.name)
 
     with pytest.raises(ToolError, match=f"bm_edit\\(identifier='{prefix}/notes/a.md'"):
-        await bm_write(identifier=f"{prefix}/notes/a.md", content="Two", overwrite=False)
+        await bm_write(
+            identifier=f"{prefix}/notes/a.md",
+            content="Two",
+            overwrite=False,
+            project=test_project.name,
+        )
 
 
 @pytest.mark.asyncio

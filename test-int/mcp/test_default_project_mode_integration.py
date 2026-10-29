@@ -1,9 +1,8 @@
 """
-Integration tests for default project resolution.
+Integration tests for explicit MCP scope with configured project defaults.
 
-Tests the default_project configuration that allows tools to automatically
-use the default_project when no project parameter is specified, covering
-parameter resolution hierarchy and fallback behavior.
+Defaults and server constraints still route scoped requests. They cannot supply
+a missing required tool argument.
 """
 
 import os
@@ -20,8 +19,8 @@ from basic_memory.repository.project_repository import ProjectRepository
 
 
 @pytest.mark.asyncio
-async def test_default_project_write_note(mcp_server, app, test_project):
-    """Test that write_note uses default project when no project specified."""
+async def test_explicit_write_in_default_project(mcp_server, app, test_project):
+    """Explicit scope selects the configured default project."""
 
     mock_config = BasicMemoryConfig(
         default_project=test_project.name,
@@ -30,12 +29,18 @@ async def test_default_project_write_note(mcp_server, app, test_project):
 
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
+            with pytest.raises(ToolError, match="Missing required keyword only argument"):
+                await client.call_tool(
+                    "bm_write",
+                    {"title": "Unscoped write", "content": "Must select the default explicitly."},
+                )
             result = await client.call_tool(
                 "bm_write",
                 {
+                    "project": test_project.name,
                     "title": "Default Mode Test",
                     "directory": "test",
-                    "content": "# Default Mode Test\n\nThis should use the default project automatically.",
+                    "content": "# Default Mode Test\n\nThis explicitly selects the configured default project.",
                     "tags": "default,mode,test",
                 },
             )
@@ -94,24 +99,23 @@ async def test_explicit_project_overrides_default(
 
 
 @pytest.mark.asyncio
-async def test_no_config_default_falls_back_to_db(mcp_server, app, test_project):
-    """When ConfigManager has no default_project, tools fall back to the database is_default flag."""
+async def test_explicit_write_without_config_default(mcp_server, app, test_project):
+    """Explicit scope works without a configured default."""
 
     mock_config = BasicMemoryConfig(
         default_project=None,  # No config default
         projects={test_project.name: test_project.path},
     )
 
-    # test_project has is_default=True in the database, so write_note should
-    # resolve to it via the API fallback in resolve_project_parameter.
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
             result = await client.call_tool(
                 "bm_write",
                 {
+                    "project": test_project.name,
                     "title": "DB Fallback Test",
                     "directory": "test",
-                    "content": "# DB Fallback Test\n\nShould resolve to the database default project.",
+                    "content": "# DB Fallback Test\n\nSelect the database default project explicitly.",
                 },
             )
 
@@ -156,6 +160,7 @@ async def test_cli_constraint_overrides_default_project(
                 result = await client.call_tool(
                     "bm_write",
                     {
+                        "project": other_project.name,
                         "title": "CLI Constraint Test",
                         "directory": "test",
                         "content": "# CLI Constraint Test\n\nThis should use CLI constrained project.",
@@ -174,8 +179,8 @@ async def test_cli_constraint_overrides_default_project(
 
 
 @pytest.mark.asyncio
-async def test_default_project_read_note(mcp_server, app, test_project):
-    """Test that read_note works with default_project."""
+async def test_explicit_read_in_default_project(mcp_server, app, test_project):
+    """Explicit scope supports read-after-write in the default project."""
 
     mock_config = BasicMemoryConfig(
         default_project=test_project.name,
@@ -187,6 +192,7 @@ async def test_default_project_read_note(mcp_server, app, test_project):
             await client.call_tool(
                 "bm_write",
                 {
+                    "project": test_project.name,
                     "title": "Read Test Note",
                     "directory": "test",
                     "content": "# Read Test Note\n\nThis note will be read back.",
@@ -195,7 +201,11 @@ async def test_default_project_read_note(mcp_server, app, test_project):
 
             result = await client.call_tool(
                 "bm_read",
-                {"identifier": "Read Test Note", "include_frontmatter": False},
+                {
+                    "identifier": "Read Test Note",
+                    "include_frontmatter": False,
+                    "project": test_project.name,
+                },
             )
 
             assert len(result.content) == 1
@@ -206,8 +216,8 @@ async def test_default_project_read_note(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_default_project_edit_note(mcp_server, app, test_project):
-    """Test that edit_note works with default_project."""
+async def test_explicit_edit_in_default_project(mcp_server, app, test_project):
+    """Explicit scope supports edits in the default project."""
 
     mock_config = BasicMemoryConfig(
         default_project=test_project.name,
@@ -219,6 +229,7 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
             await client.call_tool(
                 "bm_write",
                 {
+                    "project": test_project.name,
                     "title": "Edit Test Note",
                     "directory": "test",
                     "content": "# Edit Test Note\n\nOriginal content.",
@@ -228,6 +239,7 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
             result = await client.call_tool(
                 "bm_edit",
                 {
+                    "project": test_project.name,
                     "identifier": "Edit Test Note",
                     "command": "append",
                     "content": "\n\n## Added Content\n\nThis was added via edit_note.",
@@ -245,7 +257,7 @@ async def test_default_project_edit_note(mcp_server, app, test_project):
 async def test_project_resolution_hierarchy(
     mcp_server, app, test_project, config_home, engine_factory
 ):
-    """Test the complete three-tier project resolution hierarchy."""
+    """Explicit scope is required while server constraints retain routing priority."""
 
     engine, session_maker = engine_factory
 
@@ -322,7 +334,7 @@ async def test_project_resolution_hierarchy(
     # Multiple addressable projects require an explicit scope even with a default.
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
-            with pytest.raises(ToolError, match="no project specified"):
+            with pytest.raises(ToolError, match="Missing required keyword only argument"):
                 await client.call_tool(
                     "bm_write",
                     {

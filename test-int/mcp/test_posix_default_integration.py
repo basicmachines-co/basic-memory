@@ -44,7 +44,7 @@ async def test_posix_registration_over_mcp(mcp_server, config_manager, setting, 
 
 @pytest.mark.asyncio
 async def test_posix_default_navigation_workflow(mcp_server, app, test_project) -> None:
-    """Follow advertised mount and result paths, then scan a bounded note window."""
+    """Discover projects, follow scoped result paths, and scan a bounded note window."""
     async with Client(mcp_server) as client:
         await client.call_tool(
             "bm_write",
@@ -56,22 +56,38 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
                 "project": test_project.name,
             },
         )
-        mounts = await client.call_tool("bm_list", {"path": "/", "output_format": "json"})
-        mount = next(row for row in mounts.data["nodes"] if row["name"] == test_project.name)
-        note_dir = f"{mount['directory_path']}/notes"
-        listing = await client.call_tool("bm_list", {"path": note_dir, "output_format": "json"})
+        projects = await client.call_tool("bm_project", {"command": "list"})
+        assert test_project.name in str(projects.data)
+        root = await client.call_tool(
+            "bm_list", {"path": "/", "project": test_project.name, "output_format": "json"}
+        )
+        assert any(row["name"] == "notes" for row in root.data["nodes"])
+        note_dir = "notes"
+        listing = await client.call_tool(
+            "bm_list", {"path": note_dir, "project": test_project.name, "output_format": "json"}
+        )
         note_path = listing.data["nodes"][0]["file_path"]
-        full = await client.call_tool("bm_read", {"identifier": note_path, "output_format": "json"})
+        full = await client.call_tool(
+            "bm_read",
+            {"identifier": note_path, "project": test_project.name, "output_format": "json"},
+        )
         assert "retry the task" in full.data["content"]
 
         found = await client.call_tool(
-            "bm_find", {"path": note_dir, "name": "*.md", "output_format": "json"}
+            "bm_find",
+            {
+                "path": note_dir,
+                "name": "*.md",
+                "project": test_project.name,
+                "output_format": "json",
+            },
         )
         assert found.data["nodes"][0]["file_path"] == note_path
         projected = await client.call_tool(
             "bm_find",
             {
                 "path": note_dir,
+                "project": test_project.name,
                 "filters": {"status": "active"},
                 "fields": ["priority"],
                 "output_format": "json",
@@ -96,6 +112,7 @@ async def test_posix_default_navigation_workflow(mcp_server, app, test_project) 
             "bm_read",
             {
                 "identifier": note_path,
+                "project": test_project.name,
                 "start_line": window["start_line"],
                 "end_line": window["end_line"],
                 "output_format": "json",

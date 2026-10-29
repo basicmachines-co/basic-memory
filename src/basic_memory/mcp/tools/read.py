@@ -86,7 +86,8 @@ async def bm_read(
         Field(description="False returns only title, paths, checksum and updated_at."),
     ] = True,
     output_format: OutputFormat = "text",
-    project: ProjectParam = None,
+    *,
+    project: ProjectParam,
     context: Context | None = None,
 ) -> str | dict[str, Any] | ImageContent | EmbeddedResource:
     """Read one note or file."""
@@ -145,7 +146,7 @@ async def bm_read(
                     "UNSUPPORTED",
                     f"'{note.file_path}' is not a Markdown note; section, lines and "
                     "max_tokens apply only to notes.",
-                    try_instead=f"bm_read(identifier='{identifier}')",
+                    try_instead=f"bm_read(identifier={identifier!r}, project={project!r})",
                     output_format=output_format,
                 )
             response = await resource_client.read(note.external_id)

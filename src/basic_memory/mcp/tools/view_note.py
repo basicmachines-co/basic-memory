@@ -7,6 +7,8 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.tools.read import bm_read
+from basic_memory.mcp.project_context import resolve_project_parameter
+from basic_memory.mcp.refusals import refusal
 
 
 async def view_note(
@@ -49,11 +51,19 @@ async def view_note(
     """
     logger.debug(f"Viewing note: {identifier} in project: {project}")
 
+    resolved_project = project_id or await resolve_project_parameter(project, context=context)
+    if resolved_project is None:
+        raise refusal(
+            "INVALID_ARGUMENTS",
+            "View needs a project name or external id.",
+            try_instead="bm_project(command='list') to discover projects",
+        )
+
     # Call the existing bm_read logic (default output_format="text" returns str)
     content = str(
         await bm_read(
             identifier=identifier,
-            project=project_id or project,
+            project=resolved_project,
             context=context,
         )
     )

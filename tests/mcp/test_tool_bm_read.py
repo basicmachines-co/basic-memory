@@ -244,7 +244,9 @@ async def test_metadata_text_carries_the_qualified_path(client, test_project):
     await _write(test_project.name, "Plan", "# Plan")
     prefix = test_project.permalink
 
-    text = await read_text(f"{prefix}/notes/Plan.md", include_content=False)
+    text = await read_text(
+        f"{prefix}/notes/Plan.md", include_content=False, project=test_project.name
+    )
 
     assert f"file_path: {prefix}/notes/Plan.md" in text
 

@@ -225,7 +225,7 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "Basic Memory is the user's personal knowledge base: Markdown notes that persist "
     "across conversations and that both the user and their AI assistants can read and write.\n\n"
     "When a request may draw on the user's notes, use bm_search or "
-    'bm_project(command="recent") before answering from memory. No recent activity does not '
+    'bm_project(command="recent", project="...") before answering from memory. No recent activity does not '
     "prove a project is empty. If the knowledge base is empty, explain the shared-memory loop "
     "and offer a useful first note with bm_write; wait for agreement before writing. Do not write unprompted.\n\n"
     "Use bm_list for one folder, bm_find for recursive names or frontmatter inventories, "
@@ -235,9 +235,9 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "bm_write creates notes and explicitly overwrites them; bm_edit never creates missing notes. "
     "Use returned paths for subsequent reads and writes.\n\n"
     'bm_project(command="list") discovers projects, grouped by workspace. Pass a project name, '
-    "workspace/project, or external UUID through project. With multiple projects, qualify "
-    "paths or pass project; an explicit project must agree with a path prefix. "
-    'bm_list(path="/") without a project constraint lists project mount points. '
+    "workspace/project, or external UUID through the required project parameter on note, "
+    "folder, context and schema calls. A qualified path must agree with project. "
+    "Search requires project, projects, or all_projects=true. "
     "Calls do not remember a previous project selection.\n\n"
     "The installed tool schemas are authoritative. Most tools default to text; bm_context "
     'defaults to JSON. Use output_format="json" when consuming structured fields. Failures '

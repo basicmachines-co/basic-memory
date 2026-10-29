@@ -122,7 +122,9 @@ async def test_project_qualified_destination(client, test_project):
     prefix = test_project.permalink
 
     result = await move_json(
-        identifier=f"{prefix}/notes/plan.md", destination=f"{prefix}/archive/plan.md"
+        identifier=f"{prefix}/notes/plan.md",
+        destination=f"{prefix}/archive/plan.md",
+        project=test_project.name,
     )
 
     assert result["file_path"] == f"{prefix}/archive/plan.md"
@@ -136,7 +138,9 @@ async def test_destination_prefix_matches_any_spelling_of_the_project(client, te
     prefix = test_project.permalink
 
     result = await move_json(
-        identifier=f"{prefix}/notes/plan.md", destination=f"{prefix.upper()}/archive/"
+        identifier=f"{prefix}/notes/plan.md",
+        destination=f"{prefix.upper()}/archive/",
+        project=test_project.name,
     )
 
     assert result["file_path"] == f"{prefix}/archive/plan.md"
@@ -149,8 +153,12 @@ async def test_project_root_destination(client, test_project):
     await _note(test_project.name, "archive/drafts/a.md")
     prefix = test_project.permalink
 
-    note = await move_json(identifier=f"{prefix}/notes/plan.md", destination=f"{prefix}/")
-    directory = await move_json(path=f"{prefix}/archive/drafts", destination=f"{prefix}/")
+    note = await move_json(
+        identifier=f"{prefix}/notes/plan.md", destination=f"{prefix}/", project=test_project.name
+    )
+    directory = await move_json(
+        path=f"{prefix}/archive/drafts", destination=f"{prefix}/", project=test_project.name
+    )
 
     assert note["file_path"] == f"{prefix}/plan.md"
     assert directory["moved_files"] == [f"{prefix}/drafts/a.md"]
@@ -209,7 +217,9 @@ async def test_unanswered_directory_move_points_at_bm_list(client, test_project,
         raise error
 
     monkeypatch.setattr(KnowledgeClient, "move_directory", lost)
-    with pytest.raises(ToolError, match=r"(?s)^OUTCOME_UNKNOWN: .*bm_list\(path='archive'\)"):
+    with pytest.raises(
+        ToolError, match=r"(?s)^OUTCOME_UNKNOWN: .*bm_list\(path='archive', project="
+    ):
         await bm_move(path="drafts", destination="archive", project=test_project.name)
 
 
@@ -367,8 +377,10 @@ async def test_guarded_move_of_a_deleted_note(client, test_project, monkeypatch)
 async def test_missing_directory_hint_is_qualified(client, test_project):
     prefix = test_project.permalink
 
-    with pytest.raises(ToolError, match=f"bm_list\\(path='{prefix}'\\)"):
-        await bm_move(path=f"{prefix}/nope", destination=f"{prefix}/archive")
+    with pytest.raises(ToolError, match=f"bm_list\\(path='{prefix}', project="):
+        await bm_move(
+            path=f"{prefix}/nope", destination=f"{prefix}/archive", project=test_project.name
+        )
 
 
 @pytest.mark.parametrize(

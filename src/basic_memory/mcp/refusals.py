@@ -181,6 +181,7 @@ def revision_conflict(
     unchanged: str,
     output_format: OutputFormat,
     if_deleted: str = "bm_search to find where its content went",
+    project: str | None = None,
 ) -> ToolError:
     """A failed expected_checksum: the note changed since it was read, or it is gone.
 
@@ -198,7 +199,9 @@ def revision_conflict(
         "REVISION_CONFLICT",
         f"'{address}' changed since you read it (current checksum {current_checksum}). {unchanged}",
         try_instead=(
-            f"bm_read(identifier='{address}'), then retry with "
+            f"bm_read(identifier={address!r}"
+            + (f", project={project!r}" if project is not None else "")
+            + "), then retry with "
             f"expected_checksum='{current_checksum}'"
         ),
         output_format=output_format,
@@ -214,6 +217,7 @@ def note_change_failure(
     output_format: OutputFormat,
     occupied: str | None = None,
     subject: Literal["note", "directory"] = "note",
+    project: str | None = None,
 ) -> ToolError:
     """Explain a note change the API refused, or one whose outcome is unknown.
 
@@ -223,11 +227,12 @@ def note_change_failure(
     """
 
     def look_at(path: str) -> str:
+        scope = f", project={project!r}" if project is not None else ""
         match subject:
             case "note":
-                return f"bm_read(identifier='{path}')"
+                return f"bm_read(identifier={path!r}{scope})"
             case "directory":
-                return f"bm_list(path='{path}')"
+                return f"bm_list(path={path!r}{scope})"
 
     refused = api_refusal(error)
     if refused is None:
@@ -242,7 +247,11 @@ def note_change_failure(
         )
     if refused.revision_conflict:
         return revision_conflict(
-            address, refused.current_checksum, unchanged=unchanged, output_format=output_format
+            address,
+            refused.current_checksum,
+            unchanged=unchanged,
+            output_format=output_format,
+            project=project,
         )
     if occupied is not None and refused.code == "REVISION_CONFLICT":
         return refusal(

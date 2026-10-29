@@ -19,17 +19,21 @@ These skills target the Basic Memory 1.0 MCP surface. Use `bm_man(page="bm_searc
 - `bm_write` creates or replaces a note; use its exact `identifier` path when replacing it.
 - `bm_edit` uses `command`, including `set_metadata` for frontmatter-only updates.
 - `bm_move` takes `destination`; `bm_delete` removes a note or directory.
-- `bm_list` lists one folder level. At `/` without `project`, it lists projects.
+- `bm_list` lists one folder level within its required project; `/` is that project's root.
   `bm_find` recurses and supports `filters` plus `fields` for metadata discovery.
 - `bm_search` takes `mode`, `filters`, `items`, and `since`; `lines` requests matching lines.
 - `bm_context` takes `identifier`, graph `depth`, and `since`.
-- `bm_project(command="list"|"create"|"recent")` handles project discovery and activity.
-- `bm_schema(command="validate"|"infer"|"diff")` handles schemas.
+- `bm_project(command="list")` discovers projects without scope; `create` creates one.
+  `bm_project(command="recent", project="<project>")` shows scoped activity.
+- `bm_schema(command="validate"|"infer"|"diff", project="<project>")` handles schemas.
 - Cloud adds `bm_agent` and Cloud-only read options. Check that the connected server
   exposes them before using those workflows.
 
 `project` accepts a name, `workspace/project`, or external ID. Pass it explicitly
-when working across projects. Page list/find/search results until `has_more` is
+on every note, folder, context and schema call, even with one project or a qualified
+target. Recent activity also requires it. Search needs `project`, `projects`, or
+`all_projects=True`; discovery and bundled manuals need no project.
+Page list/find/search results until `has_more` is
 false (maximum `page_size=100`); context pages currently cap at 50. For revision-guarded
 changes, read as JSON and pass `checksum` as `expected_checksum`.
 The CLI examples retain their `bm cat`, `bm find`, and other CLI command shapes.

@@ -18,8 +18,8 @@ verified: 0.24.1 mcp
 ## SYNOPSIS
 
 ```
-bm_find(path="/", name=None, filters=None, fields=None, depth=10, page=1,
-        page_size=10, output_format="text", project=None)
+bm_find(project, path="/", name=None, filters=None, fields=None, depth=10,
+        page=1, page_size=10, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -28,7 +28,7 @@ Searches a folder and everything under it. With `name`, matches file names
 against a glob (`*meeting*`). With `filters`, matches notes by frontmatter,
 e.g. `{"status": "active"}` or `{"priority": {"$in": ["high"]}}`; `fields`
 returns just those frontmatter values per note. `path` limits the search to a
-folder, and `<project>/` searches another project.
+folder within the required `project`. A qualified path must agree with it.
 
 For ranked text or meaning search, use bm_search.
 
@@ -36,6 +36,7 @@ The shell counterpart is find(1).
 
 ## PARAMETERS
 
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
 - **path** (string, optional, default: "/") — A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the project root; '<project>/path' addresses another project.
 - **name** (string | null, optional, default: None) — File-name glob, e.g. '*.md'. Not with `filters`.
 - **filters** (object | null, optional, default: None) — Frontmatter filters as {field: condition}. Nested fields use dot notation ("schema.confidence"). A condition is a value for equality ({"status": "draft"}), null for absent-or-null ({"owner": null}), a list for contains-all ({"tags": ["a", "b"]}), or an operator object with $gt, $gte, $lt, $lte, $in, $between, $contains or $exists, e.g. {"priority": {"$in": ["high"]}}. Several operators on one field AND together.
@@ -44,17 +45,16 @@ The shell counterpart is find(1).
 - **page** (integer, optional, default: 1) — Page number.
 - **page_size** (integer, optional, default: 10) — Results per page (1-100).
 - **output_format** (optional, default: "text")
-- **project** (string | null, optional, default: None) — Project name, 'workspace/project', or project external id. With multiple addressable projects, scope note and search calls explicitly with this parameter or a project-qualified target.
 
 ## EXAMPLES
 
 ```
-bm_find(path="demo/", name="*plan*")
+bm_find(path="demo/", name="*plan*", project="demo")
 # → Files under 'demo/' matching '*plan*':
 #   📁 plans                          /demo/plans
 #   📄 launch-plan.md                 demo/plans/launch-plan.md | launch-plan | …
 
-bm_find(path="demo/", filters={"status": "active"}, fields=["status"])
+bm_find(path="demo/", filters={"status": "active"}, fields=["status"], project="demo")
 # → 1 notes under 'demo/' match:
 #   - demo/plans/launch-plan.md | launch-plan | status='active'
 ```

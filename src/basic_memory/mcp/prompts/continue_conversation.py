@@ -48,17 +48,23 @@ async def continue_conversation(
     """
     logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
 
+    # Prompts choose their default at the entrypoint; tool calls always name it.
+    project = await resolve_project_parameter(project=project, context=context)
+    if project is None:
+        return (
+            "Choose a project with bm_project(command='list'), then continue this "
+            "conversation with an explicit project name or external id."
+        )
+
     if topic:
         # Use json format to get structured data for result counting and branching
-        # Choose the prompt's default explicitly before using the stricter search tool.
-        project = await resolve_project_parameter(project=project, context=context)
         result = await bm_search(
             query=topic, since=timeframe, project=project, context=context, output_format="json"
         )
 
         if isinstance(result, dict):
             results = result.get("results", [])
-            context_text = _format_continuation_results(results, topic)
+            context_text = _format_continuation_results(results, topic, project=project)
             result_count = len(results)
         else:
             # Error string
@@ -90,16 +96,15 @@ async def continue_conversation(
         ## Next Steps
     """)
 
-    if project is not None:
-        prompt += f"\nPass `project={project!r}` on follow-up note and search calls.\n"
+    prompt += f"\nPass `project={project!r}` on follow-up note and search calls.\n"
 
     if topic and result_count > 0:
         prompt += dedent(f"""
             Found {result_count} results related to '{topic}'.
 
-            1. **Read full content** - Use `bm_read("permalink")` to dive into specific notes
-            2. **Build context** - Use `bm_context("memory://path")` to see relationships
-            3. **Search deeper** - Use `bm_search("{topic}")` with different filters
+            1. **Read full content** - Use `bm_read("permalink", project={project!r})` to dive into specific notes
+            2. **Build context** - Use `bm_context("memory://path", project={project!r})` to see relationships
+            3. **Search deeper** - Use `bm_search({topic!r}, project={project!r})` with different filters
 
             If this conversation produces a decision or insight worth keeping, offer to save it
             with `bm_write`.
@@ -108,20 +113,20 @@ async def continue_conversation(
         prompt += dedent(f"""
             No previous context found for '{topic}'.
 
-            Try `bm_search` with related terms or check `bm_project(command="recent")`. If the user wants this
+            Try `bm_search` with related terms or check `bm_project(command="recent", project={project!r})`. If the user wants this
             topic tracked, offer to start a note with `bm_write`.
         """)
     else:
-        prompt += dedent("""
-            1. **Explore specific items** - Use `bm_read("permalink")` to dive deeper
-            2. **Search for topics** - Use `bm_search("topic")` to find specific content
-            3. **Build context** - Use `bm_context("memory://path")` to see relationships
+        prompt += dedent(f"""
+            1. **Explore specific items** - Use `bm_read("permalink", project={project!r})` to dive deeper
+            2. **Search for topics** - Use `bm_search("topic", project={project!r})` to find specific content
+            3. **Build context** - Use `bm_context("memory://path", project={project!r})` to see relationships
         """)
 
     return prompt
 
 
-def _format_continuation_results(results: list[dict[str, Any]], topic: str) -> str:
+def _format_continuation_results(results: list[dict[str, Any]], topic: str, *, project: str) -> str:
     """Format search result dicts for conversation continuation context."""
     if not results:
         return f"No previous context found for '{topic}'."
@@ -135,7 +140,7 @@ def _format_continuation_results(results: list[dict[str, Any]], topic: str) -> s
         lines.append(f"### {title}")
         if permalink:
             lines.append(f"permalink: {permalink}")
-            lines.append(f'Read with: `bm_read("{permalink}")`')
+            lines.append(f"Read with: `bm_read({permalink!r}, project={project!r})`")
         content = item.get("content")
         if content:
             content = content[:300] + "..." if len(content) > 300 else content

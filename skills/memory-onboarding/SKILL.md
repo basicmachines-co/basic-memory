@@ -9,6 +9,17 @@ You are guiding a person who is new to Basic Memory through building a knowledge
 
 This skill works with any LLM or assistant platform. Where platform-specific setup is needed (system prompts, project instructions), identify what YOUR environment supports and adapt the generic patterns in `references/assistant-setup.md`.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## Why this approach
 
 Basic Memory is markdown files parsed into a knowledge graph. A pile of unstructured notes is barely better than a folder of text files. The compounding value comes from four things this skill installs from day one:
@@ -46,7 +57,7 @@ Do not skip the approval gate between Phase 2 and Phase 3. Building the wrong st
 
 Before asking the user anything:
 
-1. Confirm Basic Memory tools are available (`bm_write`, `bm_read`, `bm_search`, `bm_list`, and ideally `bm_schema(command="infer")`/`bm_schema(command="validate")`). If they aren't, stop and help the user connect Basic Memory first.
+1. Confirm Basic Memory tools are available (`bm_write`, `bm_read`, `bm_search`, `bm_list`, and ideally `bm_schema(command="infer", project="<project>")`/`bm_schema(command="validate", project="<project>")`). If they aren't, stop and help the user connect Basic Memory first.
 2. List their projects (`bm_project(command="list")`). Ask which project to build in, or whether to create a fresh one. **Every subsequent call must pass this project explicitly** — mixed-project writes are one of the most common and painful setup errors.
 3. Check for existing content (`bm_find(path="/", depth=2, project="<project>")`). Three situations:
    - **Empty** — greenfield, proceed normally.
@@ -97,7 +108,7 @@ Build in this order — later items reference earlier ones:
 4. **Index notes** → one per domain that needs one (tables of contents; not every domain does).
 5. **Migrate existing notes** *(restructure path)* → execute the approved old→new mapping from Phase 2 before seeding anything: move each existing note to its new home, set its note type, add the observations its schema requires, and update indexes as notes land. Archive what doesn't fit — never delete. Phase 3 is not done while anything still sits unorganized at the root.
 6. **Seed notes** → 2–3 REAL notes per domain using the examples collected in Phase 1. Never seed with placeholder data — real notes teach the format and are immediately useful; fake ones are noise the user must delete.
-7. **Validate** → run `bm_schema(command="validate")` on the seed notes AND any migrated notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
+7. **Validate** → run `bm_schema(command="validate", project="<project>")` on the seed notes AND any migrated notes; fix anything it flags. Read back the router and one instruction note to confirm links resolve.
 
 Follow the write discipline in `references/conventions.md` throughout — most importantly: search before creating anything, use exact folder casing, and watch write results for duplicate-suffixed permalinks (`-1`, `-2`).
 
@@ -125,7 +136,7 @@ Then write a **cheat-sheet note** into their KB (`Instructions/` folder): the ph
 Close the onboarding by opening doors:
 
 - **Suggest 2–3 specific expansions** drawn from their deferred Phase 1 domains or natural neighbors of what they built (built tasks → suggest meetings; built finances → suggest renewals calendar; built research → suggest a reading log). Frame each as "when you're ready" — never build unrequested.
-- **Maintenance cadence** — suggest a periodic (weekly/monthly) review: `bm_schema(command="diff")` for drift, scan for duplicate or orphaned notes, prune stale statuses. If their platform supports scheduled/recurring tasks, offer to set this up.
+- **Maintenance cadence** — suggest a periodic (weekly/monthly) review: `bm_schema(command="diff", project="<project>")` for drift, scan for duplicate or orphaned notes, prune stale statuses. If their platform supports scheduled/recurring tasks, offer to set this up.
 - **Evolution rule** — when a convention starts to chafe, change the instruction note (with a changelog row), don't silently deviate. The system stays self-describing only if the rules in it stay true.
 
 ## Reference files

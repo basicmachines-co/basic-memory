@@ -9,6 +9,17 @@ Memory Quest's last mission checks that this assistant is set up to use Basic Me
 
 The note write *is* the verification. There is no other endpoint to call and nothing to report afterwards.
 
+## Project scope
+
+Discover projects in step 1, then use the cloud project selected in step 5.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - The user runs `/memory-quest` (or `$memory-quest`, or picks it from a skill menu)

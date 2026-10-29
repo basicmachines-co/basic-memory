@@ -7,6 +7,17 @@ description: "Turn meeting transcripts, conversation logs, or pasted documents i
 
 Turn raw, unstructured input into structured Basic Memory entities. Meeting transcripts, conversation logs, pasted documents, email threads — anything with information worth preserving gets parsed, cross-referenced against existing knowledge, and written as proper notes.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - User pastes a meeting transcript or conversation log
@@ -70,16 +81,16 @@ For each extracted entity, search Basic Memory with multiple query variations:
 
 ```python
 # Person — try full name, last name
-bm_search(query="Sarah Chen")
-bm_search(query="Chen")
+bm_search(query="Sarah Chen", project="<project>")
+bm_search(query="Chen", project="<project>")
 
 # Organization — try full name, abbreviation, acronym
-bm_search(query="National Renewable Energy Laboratory")
-bm_search(query="NREL")
+bm_search(query="National Renewable Energy Laboratory", project="<project>")
+bm_search(query="NREL", project="<project>")
 
 # Topic — try the full term and keywords
-bm_search(query="edge computing")
-bm_search(query="edge inference")
+bm_search(query="edge computing", project="<project>")
+bm_search(query="edge inference", project="<project>")
 ```
 
 Classify each entity as:
@@ -150,7 +161,8 @@ Brief one-sentence summary of what this meeting was about.
 - with [[NovaTech]]
 - discussed [[Federated Learning]]
 - follow_up [[Send NovaTech Technical Spec]]
-"""
+""",
+  project="<project>",
 )
 ```
 
@@ -177,7 +189,8 @@ bm_write(
 ## Relations
 - relates_to [[Edge Computing]]
 - relates_to [[Model Optimization]]
-"""
+""",
+  project="<project>",
 )
 ```
 
@@ -232,7 +245,8 @@ VP of Engineering at NovaTech. Met during integration partnership discussion.
 ## Relations
 - works_at [[NovaTech]]
 - discussed_in [[NovaTech Meeting - Jordan Rivera - Feb 22, 2026]]
-"""
+""",
+  project="<project>",
 )
 ```
 
@@ -262,7 +276,8 @@ SaaS platform company. Series B stage.
 ## Relations
 - employs [[Jordan Rivera]]
 - discussed_in [[NovaTech Meeting - Jordan Rivera - Feb 22, 2026]]
-"""
+""",
+  project="<project>",
 )
 ```
 
@@ -286,7 +301,8 @@ bm_write(
 
 ## Relations
 - discussed_in [[NovaTech Meeting - Jordan Rivera - Feb 22, 2026]]
-"""
+""",
+  project="<project>",
 )
 ```
 

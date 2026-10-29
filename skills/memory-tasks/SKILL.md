@@ -7,6 +7,17 @@ description: "Task management via Basic Memory schemas: create, track, and resum
 
 Manage work-in-progress using Basic Memory's schema system. Tasks are just notes with `type: Task` — they live in the knowledge graph, validate against a schema, and survive context compaction.
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - **Starting multi-step work** (3+ steps, or anything that might outlast the context window)
@@ -75,18 +86,19 @@ What future-you needs to pick up this work. Include:
 - Key file paths and repos involved
 - Decisions already made and why
 - What was tried and what worked/didn't
-- Where to look for related context"""
+- Where to look for related context""",
+  project="<project>",
 )
 ```
 
-**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema(command="validate")`. Include queryable fields in both places for full coverage.
+**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema(command="validate", project="<project>")`. Include queryable fields in both places for full coverage.
 
 ### Key Principles
 
 - **Steps are concrete and checkable** — "Implement X in file Y", not "figure out stuff"
 - **Context is for post-amnesia resumption** — Write it as if explaining to a smart person who knows nothing about what you've been doing
 - **Relations link to other entities** — `parent_task [[Other Task]]`, `related_to [[Some Note]]`
-- **Note types are normalized to snake_case** — `bm_write(note_type="Task")` stores `type: task`, and `note_types=["Task"]` or `note_types=["task"]` both match it.
+- **Note types are normalized to snake_case** — `bm_write(note_type="Task", project="<project>")` stores `type: task`, and `note_types=["Task"]` or `note_types=["task"]` both match it.
 
 ## Resuming After Compaction
 
@@ -94,7 +106,7 @@ On session start or after compaction:
 
 1. **Search for active tasks:**
    ```python
-   bm_search(note_types=["task"], filters={"status": "active"})
+   bm_search(note_types=["task"], filters={"status": "active"}, project="<project>")
    ```
 
 2. **Read the task note** to get full context
@@ -124,12 +136,13 @@ writing.
 
 Update frontmatter too, with `command="set_metadata"` and the `metadata` parameter (the body stays unchanged):
 ```python
-task = bm_read(identifier="tasks/descriptive-task-name", output_format="json")
+task = bm_read(identifier="tasks/descriptive-task-name", output_format="json", project="<project>")
 bm_edit(
   identifier="tasks/descriptive-task-name",
   command="set_metadata",
   metadata={"current_step": 3},
-  expected_checksum=task["checksum"]
+  expected_checksum=task["checksum"],
+  project="<project>",
 )
 ```
 
@@ -147,7 +160,7 @@ Add a brief summary of what was accomplished and any follow-up needed.
 
 When a compaction event is imminent:
 
-1. Find all active tasks: `bm_search(note_types=["task"], filters={"status": "active"})`
+1. Find all active tasks: `bm_search(note_types=["task"], filters={"status": "active"}, project="<project>")`
 2. For each, update:
    - `current_step` to reflect actual progress
    - `context` with everything needed to resume
@@ -160,14 +173,14 @@ With BM's schema system, tasks are fully queryable:
 
 | Query | What it finds |
 |-------|--------------|
-| `bm_search(note_types=["task"])` | All tasks |
-| `bm_search(note_types=["task"], filters={"status": "active"})` | Active tasks |
-| `bm_search(note_types=["task"], filters={"status": "blocked"})` | Blocked tasks |
-| `bm_search(note_types=["task"], filters={"assigned_to": "claude"})` | My tasks |
-| `bm_search("blockers", note_types=["task"])` | Tasks with blockers |
-| `bm_search(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)")` | Tasks with a step due this week |
-| `bm_schema(command="validate", note_type="Task")` | Validate all tasks against schema |
-| `bm_schema(command="diff", note_type="Task")` | Detect drift between schema and actual task notes |
+| `bm_search(note_types=["task"], project="<project>")` | All tasks |
+| `bm_search(note_types=["task"], filters={"status": "active"}, project="<project>")` | Active tasks |
+| `bm_search(note_types=["task"], filters={"status": "blocked"}, project="<project>")` | Blocked tasks |
+| `bm_search(note_types=["task"], filters={"assigned_to": "claude"}, project="<project>")` | My tasks |
+| `bm_search("blockers", note_types=["task"], project="<project>")` | Tasks with blockers |
+| `bm_search(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)", project="<project>")` | Tasks with a step due this week |
+| `bm_schema(command="validate", note_type="Task", project="<project>")` | Validate all tasks against schema |
+| `bm_schema(command="diff", note_type="Task", project="<project>")` | Detect drift between schema and actual task notes |
 
 ### Due Dates
 
@@ -188,4 +201,4 @@ also returns overdue items.
 - **Context > steps** — Steps tell you what to do; context tells you why and how
 - **Close finished tasks** — Don't leave completed work as `active`
 - **Link related tasks** — Use `parent_task [[X]]` or relations to connect related work
-- **Schema validation is your friend** — Run `bm_schema(command="validate", note_type="Task")` periodically to catch incomplete tasks
+- **Schema validation is your friend** — Run `bm_schema(command="validate", note_type="Task", project="<project>")` periodically to catch incomplete tasks

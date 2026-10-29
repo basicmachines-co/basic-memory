@@ -9,6 +9,17 @@ Maintain a healthy, well-connected knowledge graph. As notes accumulate, it pays
 
 This skill curates the **knowledge graph** — the notes, relations, and tags that make up the knowledge base. (For the notes' content — splitting bloated notes, consolidating scattered facts, retiring stale entries — see **memory-defrag**.)
 
+## Project scope
+
+If the project is unknown, discover it with `bm_project(command="list")`.
+Pass a nonempty `project` on every note, folder, context and schema call, even
+with one project or a qualified `memory://` URL. Use the chosen project's name,
+`workspace/project`, or external ID; `<project>` below is a placeholder for it.
+Recent activity also requires `project`. Search accepts `project` for one
+project, `projects` for selected projects, or `all_projects=True` explicitly.
+Discovery and bundled manuals need no project. Keep the same scope when following
+returned paths, paginating, or recovering from a refusal.
+
 ## When to Use
 
 - Asked to organize, clean up, or improve the knowledge base
@@ -26,8 +37,8 @@ Orphans have no relations to other notes — they're islands in the graph.
 
 ```python
 # List notes, then read each to inspect its Relations section
-bm_search(query="*", mode="text", page_size=50)
-bm_read(identifier="note-to-check")
+bm_search(query="*", mode="text", page_size=50, project="<project>")
+bm_read(identifier="note-to-check", project="<project>")
 # Orphans have an empty (or missing) Relations section
 ```
 
@@ -47,9 +58,9 @@ If the `bm` CLI is available, `bm orphans` lists notes with no relations in one 
 Analyze a note's content and propose meaningful connections.
 
 ```python
-bm_read(identifier="note-to-analyze")
+bm_read(identifier="note-to-analyze", project="<project>")
 # Pull out key terms, then search for related notes
-bm_search(query="key terms from the note")
+bm_search(query="key terms from the note", project="<project>")
 ```
 
 Suggest relations based on shared topics, complementary content (problem/solution,
@@ -75,6 +86,7 @@ bm_edit(
     command="insert_after_section",
     section="Relations",
     content="- depends_on [[Rate Limiter]]",
+    project="<project>",
 )
 ```
 
@@ -86,6 +98,7 @@ bm_edit(
     identifier="API Design Decisions",
     command="append",
     content="\n## Relations\n- depends_on [[Rate Limiter]]",
+    project="<project>",
 )
 ```
 
@@ -94,7 +107,7 @@ bm_edit(
 Find notes that may cover the same ground.
 
 ```python
-bm_search(query="topic keywords")
+bm_search(query="topic keywords", project="<project>")
 # Compare results for: similar titles, overlapping observations,
 # shared tags, close-together timestamps
 ```
@@ -112,6 +125,7 @@ bm_edit(
     command="insert_after_section",
     section="Relations",
     content="- updates [[DB Schema v2]]",
+    project="<project>",
 )
 ```
 
@@ -130,13 +144,14 @@ notes with `bm_move`. By default the permalink stays the same after a move, so l
 bm_move(
     identifier="API Design Decisions",
     destination="architecture/api-design-decisions.md",
+    project="<project>",
 )
 ```
 
 ### 5. Tag Consistency
 
 ```python
-bm_search(query="*", mode="text", page_size=100)
+bm_search(query="*", mode="text", page_size=100, project="<project>")
 # Inspect tag patterns across results
 ```
 
@@ -174,6 +189,7 @@ A hub linking architecture-related decisions and patterns.
 
 ## Relations
 - indexes [[Architecture]]""",
+    project="<project>",
 )
 ```
 
@@ -182,7 +198,7 @@ A hub linking architecture-related decisions and patterns.
 Find notes lacking structure and fill them in.
 
 ```python
-bm_read(identifier="sparse-note")
+bm_read(identifier="sparse-note", project="<project>")
 ```
 
 If the note is missing an Observations section, suggest categories. If it has no
@@ -192,7 +208,7 @@ context, suggest adding background. Apply with `bm_edit`.
 ## Curation Workflows
 
 Scale the pass to the request. A health check reports orphans, likely duplicates,
-recent activity (`bm_project(command="recent")`), and folder distribution. A deep session works
+recent activity (`bm_project(command="recent", project="<project>")`), and folder distribution. A deep session works
 through the capabilities above in whatever order the findings suggest. A topic pass
 maps one subject with `bm_search` and `bm_context`, fills the gaps it finds, and
 ends with a hub note.

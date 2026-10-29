@@ -6,10 +6,13 @@ plans, preferences, and connected reference material.
 
 ## Start usefully
 
-1. Call `bm_project(command="recent")` to orient in the user's existing notes.
-2. If no project is resolved, call `bm_project(command="list")` and ask which project to use.
+1. Call `bm_project(command="list")` to discover projects; ask which to use if the user's
+   request does not identify one.
+2. Call `bm_project(command="recent", project="<project name or external id>")` to orient.
 3. Preserve the selected route in later calls. Pass a returned `external_id` UUID as `project`, or use a
    workspace-qualified name (`workspace/project`), because names can collide across cloud workspaces.
+   Note, folder, context and schema tools always require `project`. Search requires `project`,
+   `projects`, or `all_projects=True`; project discovery and the bundled manual need no scope.
 4. No recent activity does not prove the knowledge base is empty. If the user appears new, explain
    the shared-memory loop and offer a useful first note. Wait for agreement before creating it.
 

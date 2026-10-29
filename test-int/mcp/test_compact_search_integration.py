@@ -59,7 +59,7 @@ async def test_compact_search_can_discover_then_read_notes(
         selected = compact["results"][0]
         read = await client.call_tool(
             "bm_read",
-            {"identifier": selected["permalink"]}
+            {"identifier": selected["permalink"], "project": test_project.name}
             if all_projects and observations
             else {"identifier": selected["external_id"], "project": test_project.name},
         )
