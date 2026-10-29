@@ -430,6 +430,11 @@ def test_rules_naming_a_directory_cover_the_files_beneath_it(tmp_path):
     assert ignored_by("/*.cache", "foo.cache/bar.md")
     assert not ignored_by("/*.cache", "notes/foo.cache/bar.md")
 
+    # An interior globstar matches zero, one, or several directories, as in Git.
+    assert ignored_by("foo/**/bar", "foo/bar/file.md")
+    assert ignored_by("foo/**/bar", "foo/x/bar/file.md")
+    assert ignored_by("foo/**/bar", "foo/x/y/bar/file.md")
+
 
 def test_gitignore_with_a_utf8_bom_applies_its_first_rule(tmp_path, monkeypatch):
     """Notepad and PowerShell 5.1 write a BOM; Git skips it, so must we (#1946)."""

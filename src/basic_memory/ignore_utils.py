@@ -267,16 +267,19 @@ def load_gitignore_patterns(
 
 
 @lru_cache(maxsize=32)
-def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
+def _gitignore_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
     """Compile an ignore set with Git's semantics, once, so large sets cannot churn a cache."""
     compiled_patterns: list[GitIgnoreSpecPattern] = []
     for pattern in patterns:
         components = pattern.split("/")
+        # A trailing-slash rule's last real component sits before the empty final one.
+        terminal_directory_index = len(components) - 2 if pattern.endswith("/") else None
         for index, component in enumerate(components):
             if len(component) >= 2 and not component.strip("*"):
                 # Git accepts longer all-star components. A terminal directory globstar
                 # must consume a directory; pathspec otherwise also matches direct files.
-                components[index] = "*" if index == len(components) - 2 else "**"
+                # An interior globstar ("foo/**/bar") keeps matching zero or more segments.
+                components[index] = "*" if index == terminal_directory_index else "**"
         normalized = "/".join(components)
         # Rule collections are unordered exclusion sets; adding ordered negation is a
         # separate compatibility change. Preserve literal leading ! and decoded # names.
@@ -323,7 +326,7 @@ def should_ignore_path(
         if is_directory is None:
             is_directory = file_path.is_dir()
         directory_match_path = relative_posix + ("/" if is_directory else "")
-        if _directory_rules(directory_patterns).match_file(directory_match_path):
+        if _gitignore_rules(directory_patterns).match_file(directory_match_path):
             return True
 
     # Trigger: a rule with a slash but no trailing slash ("/archive", "drafts/old").
@@ -335,7 +338,7 @@ def should_ignore_path(
     path_rules = frozenset(
         pattern for pattern in ignore_patterns if "/" in pattern and not pattern.endswith("/")
     )
-    if path_rules and _directory_rules(path_rules).match_file(relative_posix):
+    if path_rules and _gitignore_rules(path_rules).match_file(relative_posix):
         return True
 
     # Non-directory patterns retain their existing matching behavior.
