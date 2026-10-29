@@ -1,4 +1,7 @@
-"""Files written before a new project's watch is attached must be indexed (#1817)."""
+"""Files written before a project's watch is attached must be indexed.
+
+Covers a newly added project (#1817) and a project watched across a reload (#1852).
+"""
 
 from __future__ import annotations
 
@@ -65,7 +68,7 @@ async def test_watch_selection_rereads_added_and_removed_project_config(
 
 
 @pytest.mark.asyncio
-async def test_new_project_backfill_runs_after_attach_and_only_once(
+async def test_new_project_backfill_runs_after_attach(
     app_config,
     config_manager,
     project_repository,
@@ -117,8 +120,9 @@ async def test_new_project_backfill_runs_after_attach_and_only_once(
         assert await repository.get_by_file_path(session, "during-attach.md") is not None
         assert await repository.get_by_file_path(session, "ignored/skip.md") is None
         assert await repository.get_by_file_path(session, ".hidden.md") is None
-    await watcher._watch_projects_cycle([test_project, added], asyncio.Event())
-    assert indexed == [added.id]
+    # test_project was watched by the previous cycle at the same root, so the
+    # restart catches it up too (#1852).
+    assert Counter(indexed) == {test_project.id: 1, added.id: 1}
     assert timeout_yields[0] is True
 
 
@@ -195,7 +199,8 @@ async def test_failed_backfill_is_isolated_and_retried_on_the_next_cycle(
         assert await EntityRepository(healthy.id).get_by_file_path(session, "note.md") is not None
     fail = False
     await watcher._watch_projects_cycle(projects, asyncio.Event())
-    assert Counter(attempts) == {broken.id: 2, healthy.id: 1}
+    # The retry cycle is a restart, so the projects it already watched catch up too.
+    assert Counter(attempts) == {broken.id: 2, healthy.id: 2, test_project.id: 1}
     async with db.scoped_session(session_maker) as session:
         assert await EntityRepository(broken.id).get_by_file_path(session, "note.md") is not None
 
@@ -278,7 +283,8 @@ async def test_a_restart_during_backfill_keeps_the_project_pending(
     await watcher._watch_projects_cycle([test_project, added], asyncio.Event())
     async with db.scoped_session(session_maker) as session:
         assert await EntityRepository(added.id).get_by_file_path(session, "late.md") is not None
-    assert attempts == 2
+    # Cycle one scans the new project; the restart scans it again plus test_project.
+    assert attempts == 3
 
 
 @pytest.mark.asyncio
@@ -405,6 +411,13 @@ async def test_changing_a_project_root_does_not_run_a_full_scan(
     watcher = WatchService(
         app_config, project_repository, session_maker, initial_projects=[test_project]
     )
+
+    async def ready_watch(*_paths, **_kwargs):
+        yield set()
+
+    monkeypatch.setattr(watch_module, "awatch", ready_watch)
+    # Watch the old root first, so the move below is a restart, not a first cycle.
+    await watcher._watch_projects_cycle([test_project], asyncio.Event())
     root = tmp_path_factory.mktemp("changed-project-root")
     (root / "relocated.md").write_text("# Relocated\n", encoding="utf-8")
     async with db.scoped_session(session_maker) as session:
@@ -417,18 +430,14 @@ async def test_changing_a_project_root_does_not_run_a_full_scan(
     async def unexpected_scan(*_args, **_kwargs):
         raise AssertionError("a path change must not rescan the new root")
 
-    async def ready_watch(*_paths, **_kwargs):
-        yield set()
-
     monkeypatch.setattr(watch_module, "run_local_project_index_for_project", unexpected_scan)
-    monkeypatch.setattr(watch_module, "awatch", ready_watch)
     await watcher._watch_projects_cycle([moved], asyncio.Event())
     assert watcher.state.error_count == 0
 
 
 @pytest.mark.asyncio
 async def test_reload_waits_for_catch_up_and_buffered_changes(
-    app_config, project_repository, session_maker
+    app_config, project_repository, session_maker, test_project
 ):
     """A reload must not stop the watcher while the catch-up scan blocks the consumer.
 
@@ -440,7 +449,8 @@ async def test_reload_waits_for_catch_up_and_buffered_changes(
     stop_event = asyncio.Event()
     watcher._catch_up_in_progress = True
 
-    timer = asyncio.create_task(watcher._schedule_restart(stop_event))
+    # An empty watched set differs from the selected test_project, so a reload is due.
+    timer = asyncio.create_task(watcher._schedule_restart(stop_event, []))
     try:
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=1.2)
@@ -472,3 +482,95 @@ async def test_current_config_selection_preserves_project_constraint(
         session_maker,
     )
     assert [project.id for project in await watcher._select_projects_to_watch()] == [added.id]
+
+
+async def _stop_timer(timer: asyncio.Task[None]) -> None:
+    timer.cancel()
+    try:
+        await timer
+    except asyncio.CancelledError:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_reload_keeps_the_watcher_until_the_project_set_changes(
+    app_config,
+    config_manager,
+    project_repository,
+    session_maker,
+    test_project,
+    tmp_path_factory,
+):
+    """A reload that would watch the same projects must not close the watcher (#1852)."""
+    config = app_config.model_copy(update={"watch_project_reload_interval": 1})
+    watcher = WatchService(config, project_repository, session_maker)
+    stop_event = asyncio.Event()
+    watcher._ignore_patterns_cache[Path(test_project.path)] = {"stale"}
+
+    timer = asyncio.create_task(watcher._schedule_restart(stop_event, [test_project]))
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(stop_event.wait(), timeout=2.5)
+        # .gitignore edits still apply while the watcher keeps running.
+        assert watcher._ignore_patterns_cache == {}
+        await _register_project(
+            "joined-later",
+            tmp_path_factory.mktemp("joined-later-root"),
+            config_manager,
+            project_repository,
+            session_maker,
+        )
+        await asyncio.wait_for(stop_event.wait(), timeout=2)
+    finally:
+        await _stop_timer(timer)
+
+
+@pytest.mark.asyncio
+async def test_reload_selection_failure_stops_the_cycle(
+    app_config, project_repository, session_maker, test_project, monkeypatch
+):
+    config = app_config.model_copy(update={"watch_project_reload_interval": 1})
+    watcher = WatchService(config, project_repository, session_maker)
+    stop_event = asyncio.Event()
+
+    async def broken_selection():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(watcher, "_select_projects_to_watch", broken_selection)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await asyncio.wait_for(watcher._schedule_restart(stop_event, [test_project]), timeout=3)
+    assert stop_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_restart_indexes_files_written_while_no_watcher_was_attached(
+    app_config, project_repository, session_maker, test_project, monkeypatch
+):
+    """A project watched across a restart must not lose writes from the gap (#1852).
+
+    The note is written after the first watcher closed and before the second
+    attached. The watcher stand-in reports no event for it, as the native watcher
+    does when the write lands in that gap; indexing and the database are real, so
+    only the post-restart catch-up can index it.
+    """
+    watcher = WatchService(
+        app_config, project_repository, session_maker, initial_projects=[test_project]
+    )
+
+    async def quiet_watch(*_paths, stop_event, **_kwargs):
+        yield set()
+        stop_event.set()
+
+    monkeypatch.setattr(watch_module, "awatch", quiet_watch)
+    await watcher._watch_projects_cycle([test_project], asyncio.Event())
+    (Path(test_project.path) / "written-during-restart.md").write_text(
+        "# Written During Restart\n", encoding="utf-8"
+    )
+    await watcher._watch_projects_cycle([test_project], asyncio.Event())
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await EntityRepository(test_project.id).get_by_file_path(
+            session, "written-during-restart.md"
+        )
+    assert entity is not None
+    assert watcher.state.error_count == 0

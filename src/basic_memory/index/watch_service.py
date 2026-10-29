@@ -92,6 +92,18 @@ class WatchServiceState(BaseModel):
         self.add_event(path="", action="index", status="error", error=error)
 
 
+type ProjectWatchKey = frozenset[tuple[str, str, str]]
+
+
+def project_watch_key(projects: Sequence[Project]) -> ProjectWatchKey:
+    """Return the project fields a watch cycle is built from.
+
+    Event routing and the deleted-project check read each project's identity,
+    name and root, so a change to any of them needs a new cycle.
+    """
+    return frozenset((project.external_id, project.name, project.path) for project in projects)
+
+
 class WatchEventIndexRuntimeFactory(Protocol):
     """Build event-index runtime dependencies for one watched project."""
 
@@ -126,22 +138,44 @@ class WatchService:
         self._project_index_runtime_factory = (
             project_index_runtime_factory or LocalProjectIndexRuntimeFactory()
         )
-        # Startup already schedules these projects' initial scans. Only projects
-        # added later need a catch-up pass after their filesystem watch is attached.
+        # Startup already schedules these projects' initial scans, so the first
+        # cycle catches up only projects added later, after their watch is attached.
         # Track by project identity, not root: a path change rewrites config before
         # the files move, so rescanning the new root would index every old path as
         # deleted (`bm project move`).
         self._indexed_project_ids = {project.external_id for project in initial_projects}
+        # Roots watched by the previous cycle, so a restart can catch up the
+        # projects whose events the closed watcher may have dropped (#1852).
+        self._watched_project_paths: dict[str, str] = {}
         self._catch_up_in_progress = False
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
 
-    async def _schedule_restart(self, stop_event: asyncio.Event) -> None:
-        """Schedule a watch cycle restart so project config changes are observed."""
+    async def _schedule_restart(
+        self, stop_event: asyncio.Event, watched_projects: Sequence[Project]
+    ) -> None:
+        """Restart the watch cycle once the selected projects differ from the watched ones."""
+        watched_key = project_watch_key(watched_projects)
         waited_for_catch_up = False
         while True:
             await asyncio.sleep(self.app_config.watch_project_reload_interval)
-            # Trigger: a newly watched project is still being indexed or draining
+            # .gitignore edits apply to the next batch without a new cycle.
+            self._ignore_patterns_cache.clear()
+            try:
+                selected = await self._select_projects_to_watch()
+            except Exception:
+                # Let run() reselect, so a failure here surfaces the same way as at
+                # cycle start instead of silently ending config reloads.
+                stop_event.set()
+                raise
+            # Trigger: the selected projects match the ones this cycle watches.
+            # Why: stopping closes the native watcher, which discards events it has
+            #      not yielded yet, and the new watcher misses writes made before it
+            #      attaches (#1852). Nothing in the project config needs a restart.
+            # Outcome: keep the current watcher and check again next interval.
+            if project_watch_key(selected) == watched_key:
+                continue
+            # Trigger: a catch-up scan is still running or draining
             #   the batches collected while it was scanned.
             # Why: watchfiles discards its pending batches when stop is set, and
             #      the catch-up scan is the only consumer step long enough to
@@ -169,13 +203,25 @@ class WatchService:
         project_paths = [project.path for project in projects]
         projects_by_id = {project.external_id: project for project in projects}
         self._indexed_project_ids.intersection_update(projects_by_id)
-        new_projects = {
+        previous_project_paths = self._watched_project_paths
+        self._watched_project_paths = {project.external_id: project.path for project in projects}
+        # Trigger: this watcher never indexed the project, or the previous cycle
+        #   watched it at the same root.
+        # Why: files under a new project produced no events before its watch, and
+        #      a restart drops the events pending in the closed watcher and the
+        #      writes made before this one attaches (#1852). Startup owns the first
+        #      scan, and a changed root must not be scanned: `bm project move`
+        #      rewrites the path before the files move, so a scan would delete the
+        #      project's index.
+        # Outcome: one incremental, checksum-planned scan per project after attach.
+        catch_up_projects = {
             external_id: project
             for external_id, project in projects_by_id.items()
             if external_id not in self._indexed_project_ids
+            or previous_project_paths.get(external_id) == project.path
         }
-        catch_up_needs_drain = bool(new_projects)
-        watch_unfiltered = bool(new_projects)
+        catch_up_needs_drain = bool(catch_up_projects)
+        watch_unfiltered = bool(catch_up_projects)
         self._catch_up_in_progress = catch_up_needs_drain
         previous_filter_roots = self._sorted_watch_filter_roots
         self._sorted_watch_filter_roots = local_watch_filter_roots(projects)
@@ -189,10 +235,10 @@ class WatchService:
             watch_filter=None if watch_unfiltered else self.filter_changes,
             recursive=True,
             stop_event=stop_event,
-            yield_on_timeout=bool(new_projects),
+            yield_on_timeout=bool(catch_up_projects),
             rust_timeout=(
                 min(1000, max(1, self.app_config.watch_project_reload_interval * 500))
-                if new_projects
+                if catch_up_projects
                 else None
             ),
         )
@@ -208,8 +254,8 @@ class WatchService:
                 # awatch installs its watches before yielding changes or a timeout.
                 # Scanning earlier leaves the same gap between a scan and attach.
                 # Stay in this consumer so catch-up cannot overlap a watch batch.
-                caught_up_now = bool(new_projects)
-                for external_id, project in new_projects.items():
+                caught_up_now = bool(catch_up_projects)
+                for external_id, project in catch_up_projects.items():
                     if not ConfigManager().config.is_locally_syncable(project.name, project.path):
                         continue
                     try:
@@ -220,15 +266,15 @@ class WatchService:
                             self._indexed_project_ids.add(external_id)
                         self.state.last_scan = datetime.now()
                         logger.info(
-                            "Indexed a newly watched project",
+                            "Caught up a watched project",
                             project=project.name,
                             enqueued_files=result.enqueued_files,
                         )
                     except Exception as exc:
-                        logger.exception(f"New project index failed for {project.name}: {exc}")
+                        logger.exception(f"Catch-up index failed for {project.name}: {exc}")
                         self.state.record_error(str(exc))
                     await self.write_status()
-                new_projects.clear()
+                catch_up_projects.clear()
                 if not changes:
                     # Trigger: the timeout that released the catch-up arrived before
                     #   the scan started, so it proves nothing about files queued
@@ -318,7 +364,7 @@ class WatchService:
                     f"{[project.path for project in projects]}"
                 )
                 stop_event = asyncio.Event()
-                timer_task = asyncio.create_task(self._schedule_restart(stop_event))
+                timer_task = asyncio.create_task(self._schedule_restart(stop_event, projects))
 
                 try:
                     await self._watch_projects_cycle(projects, stop_event)
