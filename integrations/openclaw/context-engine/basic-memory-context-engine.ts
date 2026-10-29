@@ -1,16 +1,17 @@
-import type {
-  AssembleResult,
-  BootstrapResult,
-  CompactResult,
-  ContextEngine,
-  SubagentSpawnPreparation,
-} from "openclaw/plugin-sdk"
 import { delegateCompactionToRuntime } from "openclaw/plugin-sdk/core"
 import type { BmClient } from "../bm-client.ts"
 import type { BasicMemoryConfig } from "../config.ts"
 import { selectCaptureTurn } from "../hooks/capture.ts"
 import { loadRecallState } from "../hooks/recall.ts"
 import { log } from "../logger.ts"
+import type {
+  AssembleResult,
+  BootstrapResult,
+  CommitTurnResult,
+  CompactResult,
+  ContextEngine,
+  SubagentSpawnPreparation,
+} from "./types.ts"
 
 export const MAX_ASSEMBLE_RECALL_CHARS = 1200
 const TRUNCATED_RECALL_SUFFIX = "\n\n[Basic Memory recall truncated]"
@@ -20,6 +21,7 @@ const MAX_SUBAGENT_RECALL_CHARS = 800
 type BootstrapParams = Parameters<NonNullable<ContextEngine["bootstrap"]>>[0]
 type AssembleParams = Parameters<ContextEngine["assemble"]>[0]
 type AfterTurnParams = Parameters<NonNullable<ContextEngine["afterTurn"]>>[0]
+type CommitTurnParams = Parameters<NonNullable<ContextEngine["commitTurn"]>>[0]
 type CompactParams = Parameters<ContextEngine["compact"]>[0]
 type PrepareSubagentSpawnParams = Parameters<
   NonNullable<ContextEngine["prepareSubagentSpawn"]>
@@ -98,7 +100,7 @@ function buildSubagentCompletionUpdate(params: {
 }): string {
   const statusLine =
     params.reason === "completed"
-      ? "Child run completed. Durable conversation capture continues through the normal afterTurn path."
+      ? "Child run completed. Durable conversation capture continues through the normal turn commit path."
       : `Child run ended with reason: ${params.reason}.`
 
   return [
@@ -118,6 +120,18 @@ export class BasicMemoryContextEngine implements ContextEngine {
     name: "Basic Memory Context Engine",
     version: "0.1.5",
     ownsCompaction: false,
+    // OpenClaw 2026.10+ runs an engine for durable turns only when it
+    // declares both semantics; otherwise the turn degrades to "legacy" and
+    // nothing is captured (#1880).
+    // - The fence holds because assemble() passes the host's messages through
+    //   unchanged and the engine keeps no transcript of its own, so it never
+    //   reads past the admitted user entry.
+    // - Advancement is idempotent because commitTurn() records the
+    //   advancement key in the conversation note and skips keys it has seen.
+    transcriptSemantics: {
+      currentTurnFence: "before-current-turn-entry-v1",
+      turnAdvancementIdempotency: "atomic-idempotent-v1",
+    },
   } as const
 
   private readonly sessionState = new Map<string, SessionMemoryState>()
@@ -171,6 +185,39 @@ export class BasicMemoryContextEngine implements ContextEngine {
     }
   }
 
+  /**
+   * Capture one accepted turn on hosts with durable turn advancement.
+   *
+   * The host calls this instead of afterTurn() for admitted turns, and may
+   * call it again with the same advancement key after a crash. Errors
+   * propagate so the host keeps the turn queued and retries it.
+   */
+  async commitTurn(params: CommitTurnParams): Promise<CommitTurnResult> {
+    if (!this.cfg.autoCapture) return { status: "committed" }
+
+    // messages spans exactly the admitted user entry through the terminal
+    // entry, so the whole payload is the current turn.
+    const turn = selectCaptureTurn(params.messages, this.cfg.captureMinChars)
+    if (!turn) return { status: "committed" }
+
+    log.debug(
+      `context-engine commitTurn: session=${params.sessionId} user=${turn.userText.length} assistant=${turn.assistantText.length}`,
+    )
+
+    const status = await this.client.indexConversation(
+      turn.userText,
+      turn.assistantText,
+      { turnKey: params.advancementKey },
+    )
+    return { status }
+  }
+
+  /**
+   * Capture fallback for hosts that predate commitTurn().
+   *
+   * Hosts that route a turn through commitTurn() skip afterTurn() for that
+   * turn, so the two paths never record the same exchange.
+   */
   async afterTurn(params: AfterTurnParams): Promise<void> {
     if (!this.cfg.autoCapture) return
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { setTimeout as delay } from "node:timers/promises"
 import { Client } from "@modelcontextprotocol/sdk/client"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
@@ -252,6 +253,19 @@ function isNoteNotFoundError(err: unknown): boolean {
   )
 }
 
+export type ConversationCaptureStatus = "committed" | "duplicate"
+
+function conversationDate(date: Date): string {
+  return date.toISOString().split("T")[0]
+}
+
+// Host advancement keys are opaque and may contain characters that would end
+// an HTML comment, so the note stores a fixed-length digest instead.
+function conversationTurnMarker(turnKey: string): string {
+  const digest = createHash("sha256").update(turnKey).digest("hex").slice(0, 32)
+  return `<!-- openclaw-turn:${digest} -->`
+}
+
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null
 }
@@ -296,6 +310,9 @@ export class BmClient {
   private transport: StdioClientTransport | null = null
   private connectPromise: Promise<void> | null = null
   private retryDelaysMs = [...DEFAULT_RETRY_DELAYS_MS]
+  // Conversation captures run one at a time so a turn-key duplicate check
+  // and the append that follows it cannot interleave with another capture.
+  private conversationWrites: Promise<unknown> = Promise.resolve()
 
   constructor(bmPath: string, project: string) {
     this.bmPath = bmPath
@@ -949,17 +966,61 @@ export class BmClient {
     return payload as unknown as SchemaDiffResult
   }
 
+  /**
+   * Append one user/assistant exchange to today's conversation note.
+   *
+   * With a turnKey the capture is idempotent: the entry carries a marker
+   * derived from the key, and a key already present in today's or
+   * yesterday's note is reported as a duplicate instead of written again.
+   * Yesterday is checked because a host retry can cross midnight.
+   */
   async indexConversation(
     userMessage: string,
     assistantResponse: string,
-  ): Promise<void> {
+    options: { turnKey?: string } = {},
+  ): Promise<ConversationCaptureStatus> {
+    const write = this.conversationWrites.then(() =>
+      this.writeConversationEntry(
+        userMessage,
+        assistantResponse,
+        options.turnKey,
+      ),
+    )
+    this.conversationWrites = write.catch(() => undefined)
+    return write
+  }
+
+  private async writeConversationEntry(
+    userMessage: string,
+    assistantResponse: string,
+    turnKey: string | undefined,
+  ): Promise<ConversationCaptureStatus> {
     const now = new Date()
-    const dateStr = now.toISOString().split("T")[0]
+    const dateStr = conversationDate(now)
     const timeStr = now.toTimeString().slice(0, 5)
     const title = `conversations-${dateStr}`
+    const marker = turnKey ? conversationTurnMarker(turnKey) : null
+
+    // Trigger: the host supplied an advancement key for this turn.
+    // Why: hosts retry commits after a crash, and a second append would
+    //   duplicate the exchange in the note.
+    // Outcome: an already-recorded key short-circuits before any write.
+    if (marker) {
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+      for (const candidate of [
+        title,
+        `conversations-${conversationDate(yesterday)}`,
+      ]) {
+        if (await this.noteContains(candidate, marker)) {
+          log.debug(`conversation turn already recorded in: ${candidate}`)
+          return "duplicate"
+        }
+      }
+    }
 
     const entry = [
       `### ${timeStr}`,
+      ...(marker ? [marker] : []),
       "",
       "**User:**",
       userMessage,
@@ -973,7 +1034,7 @@ export class BmClient {
     try {
       await this.editNote(title, "append", entry)
       log.debug(`appended conversation to: ${title}`)
-      return
+      return "committed"
     } catch (err) {
       if (!isNoteNotFoundError(err)) {
         log.error(`conversation append failed: ${getErrorMessage(err)}`, err)
@@ -998,11 +1059,21 @@ export class BmClient {
       entry,
     ].join("\n")
 
+    await this.writeNote(title, content, "conversations")
+    log.debug(`created conversation note: ${title}`)
+    return "committed"
+  }
+
+  private async noteContains(
+    identifier: string,
+    text: string,
+  ): Promise<boolean> {
     try {
-      await this.writeNote(title, content, "conversations")
-      log.debug(`created conversation note: ${title}`)
+      const note = await this.readNote(identifier)
+      return note.content.includes(text)
     } catch (err) {
-      log.error("conversation index failed", err)
+      if (isNoteNotFoundError(err)) return false
+      throw err
     }
   }
 

@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
-import type { ContextEngine } from "openclaw/plugin-sdk"
 import type { BmClient } from "../bm-client.ts"
 import type { BasicMemoryConfig } from "../config.ts"
 import {
   BasicMemoryContextEngine,
   MAX_ASSEMBLE_RECALL_CHARS,
 } from "./basic-memory-context-engine.ts"
+import type { ContextEngine } from "./types.ts"
 
 type AgentMessage = Parameters<ContextEngine["assemble"]>[0]["messages"][number]
+type CommitTurnParams = Parameters<NonNullable<ContextEngine["commitTurn"]>>[0]
 
 function makeConfig(overrides?: Partial<BasicMemoryConfig>): BasicMemoryConfig {
   return {
@@ -31,6 +32,39 @@ function makeMessages(
 ): AgentMessage[] {
   return messages as AgentMessage[]
 }
+
+function makeCommitTurnParams(
+  advancementKey: string,
+  messages: Array<Record<string, unknown>>,
+): CommitTurnParams {
+  const anchor = {
+    agentId: "main",
+    sessionId: "session-commit",
+    sessionKey: "agent:main:main",
+    storePath: "/tmp/sessions",
+    generation: "g1",
+    rawSeq: 1,
+    effectiveParentId: null,
+    activeMessagePosition: 0,
+  }
+  return {
+    advancementKey,
+    admission: {
+      ...anchor,
+      entryId: "user-entry",
+      logicalTurnId: "turn-1",
+      role: "user",
+    },
+    terminal: { ...anchor, entryId: "assistant-entry", rawSeq: 2 },
+    messages: makeMessages(messages),
+    sessionId: "session-commit",
+  }
+}
+
+const CURRENT_TURN = [
+  { role: "user", content: "Current question with enough detail" },
+  { role: "assistant", content: "Current answer with enough detail" },
+]
 
 describe("BasicMemoryContextEngine", () => {
   let mockClient: {
@@ -305,7 +339,7 @@ describe("BasicMemoryContextEngine", () => {
       "agent/subagents/subagent-handoff-agent-test-subagent-child-1",
       "append",
       expect.stringContaining(
-        "Durable conversation capture continues through the normal afterTurn path.",
+        "Durable conversation capture continues through the normal turn commit path.",
       ),
     )
   })
@@ -396,5 +430,85 @@ describe("BasicMemoryContextEngine", () => {
         ]),
       }),
     ).resolves.toBeUndefined()
+  })
+
+  // OpenClaw 2026.10+ degrades an engine to "legacy" for durable turns unless
+  // it declares both semantics and implements commitTurn (#1880). The host's
+  // check is internal to OpenClaw, so this asserts the same two conditions.
+  it("declares the transcript semantics OpenClaw requires for durable turns", () => {
+    const engine = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig(),
+    )
+
+    expect(engine.info.transcriptSemantics).toEqual({
+      currentTurnFence: "before-current-turn-entry-v1",
+      turnAdvancementIdempotency: "atomic-idempotent-v1",
+    })
+    expect(typeof engine.commitTurn).toBe("function")
+  })
+
+  it("captures the committed turn keyed by its advancement key", async () => {
+    mockClient.indexConversation.mockResolvedValue("committed")
+    const engine = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig(),
+    )
+
+    const result = await engine.commitTurn(
+      makeCommitTurnParams("advance-1", CURRENT_TURN),
+    )
+
+    expect(result).toEqual({ status: "committed" })
+    expect(mockClient.indexConversation).toHaveBeenCalledWith(
+      "Current question with enough detail",
+      "Current answer with enough detail",
+      { turnKey: "advance-1" },
+    )
+  })
+
+  it("reports a retried advancement key as a duplicate", async () => {
+    mockClient.indexConversation.mockResolvedValue("duplicate")
+    const engine = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig(),
+    )
+
+    const result = await engine.commitTurn(
+      makeCommitTurnParams("advance-1", CURRENT_TURN),
+    )
+
+    expect(result).toEqual({ status: "duplicate" })
+  })
+
+  it("propagates commitTurn capture failures so the host retries", async () => {
+    mockClient.indexConversation.mockRejectedValue(new Error("BM down"))
+    const engine = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig(),
+    )
+
+    await expect(
+      engine.commitTurn(makeCommitTurnParams("advance-2", CURRENT_TURN)),
+    ).rejects.toThrow("BM down")
+  })
+
+  it("acknowledges commitTurn without writing when there is nothing to capture", async () => {
+    const disabled = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig({ autoCapture: false }),
+    )
+    const strict = new BasicMemoryContextEngine(
+      mockClient as unknown as BmClient,
+      makeConfig({ captureMinChars: 500 }),
+    )
+
+    await expect(
+      disabled.commitTurn(makeCommitTurnParams("advance-3", CURRENT_TURN)),
+    ).resolves.toEqual({ status: "committed" })
+    await expect(
+      strict.commitTurn(makeCommitTurnParams("advance-4", CURRENT_TURN)),
+    ).resolves.toEqual({ status: "committed" })
+    expect(mockClient.indexConversation).not.toHaveBeenCalled()
   })
 })

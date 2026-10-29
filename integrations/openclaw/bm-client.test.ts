@@ -943,6 +943,146 @@ describe("BmClient MCP behavior", () => {
     expect(args[4]).toBeUndefined() // overwrite
   })
 
+  describe("indexConversation with a turn key", () => {
+    // In-memory stand-in for the conversation notes so the duplicate check,
+    // append, and create paths run against shared state.
+    let notes: Map<string, string>
+    const notFound = () =>
+      new BmToolError(
+        "bm_read",
+        JSON.stringify({ error: "NOT_FOUND", message: "Missing note" }),
+      )
+    const today = () =>
+      `conversations-${new Date().toISOString().split("T")[0]}`
+
+    beforeEach(() => {
+      notes = new Map()
+      ;(client as any).readNote = jest.fn(async (identifier: string) => {
+        const content = notes.get(identifier)
+        if (content === undefined) throw notFound()
+        return { title: identifier, permalink: identifier, content }
+      })
+      ;(client as any).editNote = jest.fn(
+        async (identifier: string, _op: string, entry: string) => {
+          const content = notes.get(identifier)
+          if (content === undefined) throw notFound()
+          notes.set(identifier, `${content}\n${entry}`)
+        },
+      )
+      ;(client as any).writeNote = jest.fn(
+        async (title: string, content: string) => {
+          notes.set(title, content)
+        },
+      )
+    })
+
+    it("records a marker and reports the first write as committed", async () => {
+      const status = await client.indexConversation(
+        "user message long enough",
+        "assistant reply long enough",
+        { turnKey: "advance-1" },
+      )
+
+      expect(status).toBe("committed")
+      expect(notes.get(today())).toMatch(/<!-- openclaw-turn:[0-9a-f]{32} -->/)
+    })
+
+    it("reports a retried key as a duplicate without writing again", async () => {
+      await client.indexConversation("first user", "first reply", {
+        turnKey: "advance-1",
+      })
+      const status = await client.indexConversation(
+        "first user",
+        "first reply",
+        { turnKey: "advance-1" },
+      )
+
+      expect(status).toBe("duplicate")
+      expect(notes.get(today())?.match(/openclaw-turn:/g)).toHaveLength(1)
+    })
+
+    it("finds a key recorded in yesterday's note after midnight", async () => {
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split("T")[0]
+      await client.indexConversation("late user", "late reply", {
+        turnKey: "advance-1",
+      })
+      notes.set(`conversations-${yesterday}`, notes.get(today()) ?? "")
+      notes.delete(today())
+
+      const status = await client.indexConversation("late user", "late reply", {
+        turnKey: "advance-1",
+      })
+
+      expect(status).toBe("duplicate")
+      expect(notes.has(today())).toBe(false)
+    })
+
+    it("writes concurrent retries of one key exactly once", async () => {
+      const statuses = await Promise.all([
+        client.indexConversation("same user", "same reply", {
+          turnKey: "advance-1",
+        }),
+        client.indexConversation("same user", "same reply", {
+          turnKey: "advance-1",
+        }),
+      ])
+
+      expect(statuses.sort()).toEqual(["committed", "duplicate"])
+      expect(notes.get(today())?.match(/openclaw-turn:/g)).toHaveLength(1)
+    })
+
+    it("keeps different keys as separate entries", async () => {
+      await client.indexConversation("user one", "reply one", {
+        turnKey: "advance-1",
+      })
+      const status = await client.indexConversation("user two", "reply two", {
+        turnKey: "advance-2",
+      })
+
+      expect(status).toBe("committed")
+      expect(notes.get(today())?.match(/openclaw-turn:/g)).toHaveLength(2)
+    })
+
+    it("propagates a failed duplicate check instead of writing blind", async () => {
+      ;(client as any).readNote = jest
+        .fn()
+        .mockRejectedValue(new Error("BM MCP unavailable"))
+
+      await expect(
+        client.indexConversation("user", "reply", { turnKey: "advance-1" }),
+      ).rejects.toThrow("BM MCP unavailable")
+      expect((client as any).editNote).not.toHaveBeenCalled()
+    })
+
+    it("propagates a failed note create so the host can retry", async () => {
+      ;(client as any).writeNote = jest
+        .fn()
+        .mockRejectedValue(new Error("disk full"))
+
+      await expect(
+        client.indexConversation("user", "reply", { turnKey: "advance-1" }),
+      ).rejects.toThrow("disk full")
+    })
+
+    it("keeps capturing after an earlier capture failed", async () => {
+      ;(client as any).writeNote = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("disk full"))
+        .mockImplementation(async (title: string, content: string) => {
+          notes.set(title, content)
+        })
+
+      await expect(
+        client.indexConversation("user", "reply", { turnKey: "advance-1" }),
+      ).rejects.toThrow("disk full")
+      await expect(
+        client.indexConversation("user", "reply", { turnKey: "advance-1" }),
+      ).resolves.toBe("committed")
+    })
+  })
+
   it("retries recoverable MCP failures with bounded attempts", async () => {
     ;(client as any).retryDelaysMs = [0, 0, 0]
 

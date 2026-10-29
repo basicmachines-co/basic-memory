@@ -53,9 +53,17 @@ Then install the plugin:
 
 ```bash
 openclaw plugins install @basicmemory/openclaw-basic-memory
-openclaw plugins enable openclaw-basic-memory --slot memory
+openclaw config set plugins.slots.memory openclaw-basic-memory
+openclaw config set plugins.slots.contextEngine openclaw-basic-memory
 openclaw gateway restart
 ```
+
+The plugin fills two OpenClaw slots, and each one does a different job:
+
+- **`memory`** provides the `memory_search` and `memory_get` tools.
+- **`contextEngine`** runs automatic recall at session start and automatic conversation capture after each turn. **Without this slot, nothing is captured or recalled automatically**; the agent only remembers what it saves with an explicit tool call.
+
+Tested with OpenClaw 2026.10.9. OpenClaw 2026.10 and later require context engines to commit turns through `commitTurn`, which this plugin implements; older plugin versions are degraded to OpenClaw's legacy engine on those hosts and capture nothing.
 
 That's it. The plugin auto-installs the `bm` CLI on first startup if it's not already on your PATH. See [SECURITY.md](./SECURITY.md) for details on how this works.
 
@@ -80,7 +88,8 @@ openclaw plugins doctor
       }
     },
     slots: {
-      memory: "openclaw-basic-memory"
+      memory: "openclaw-basic-memory",
+      contextEngine: "openclaw-basic-memory"
     }
   }
 }
@@ -108,7 +117,8 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
       }
     },
     slots: {
-      memory: "openclaw-basic-memory"
+      memory: "openclaw-basic-memory",
+      contextEngine: "openclaw-basic-memory"
     }
   }
 }
@@ -145,7 +155,7 @@ On each session start, the plugin loads active tasks and recently modified notes
 
 ### Auto-capture
 
-After each conversation turn, the plugin records the exchange as a timestamped entry in a daily note. This builds a searchable history of everything your agent has discussed.
+After each conversation turn, the plugin records the exchange as a timestamped entry in a daily note. This builds a searchable history of everything your agent has discussed. Capture requires the `contextEngine` slot. Each entry carries a hidden `<!-- openclaw-turn:... -->` marker so a turn OpenClaw retries after a crash is recorded only once.
 
 ### Persistent connection
 
