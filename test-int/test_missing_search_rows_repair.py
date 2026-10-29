@@ -198,10 +198,10 @@ async def test_restore_missing_search_rows_loads_entities_in_bounded_batches(
 
     monkeypatch.setattr(entity_repository, "find_by_ids", recording_find_by_ids)
 
-    restored = await search_service.restore_missing_search_rows(batch_size=2)
+    repair = await search_service.restore_missing_search_rows(batch_size=2)
 
     assert loaded_batch_sizes == [2, 2, 1]
-    assert len(restored) == 5
+    assert len(repair.restored) == 5
     missing = await _count(
         session_maker,
         "SELECT COUNT(*) FROM entity WHERE project_id = :project_id AND id NOT IN "
@@ -329,9 +329,17 @@ async def test_one_unreadable_file_does_not_stop_the_repair(
     search_service = dependencies.search_service
     assert isinstance(search_service, SearchService)
 
-    restored = await search_service.restore_missing_search_rows()
+    repair = await search_service.restore_missing_search_rows()
 
-    assert len(restored) == 1
+    assert len(repair.restored) == 1
+    assert len(repair.failed_entity_ids) == 1
+    assert "bad.md" in repair.sample_errors[0]
+
+    # reindex --embeddings reports the failed repair as an error instead of
+    # embedding the entity with no source rows and reporting success.
+    stats = await search_service.reindex_vectors(force_full=True)
+    assert stats["errors"] >= 1
+    assert any("bad.md" in error for error in stats["sample_errors"])
     good_rows = await _count(
         session_maker,
         "SELECT COUNT(*) FROM search_index s JOIN entity e ON e.id = s.id "

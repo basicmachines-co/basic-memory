@@ -1855,7 +1855,9 @@ def display_project_info(
                 # Embedding coverage bar. Entities with no search row have no
                 # vectors either, so they count against coverage (#1826).
                 coverage_total = es.total_indexed_entities + es.entities_missing_search_rows
-                if coverage_total > 0:
+                # Without a vector runtime there is no coverage to show; the
+                # search-index gap is reported in the status line instead.
+                if es.vector_runtime_available and coverage_total > 0:
                     coverage_bar = make_bar(
                         es.total_entities_with_chunks,
                         coverage_total,

@@ -57,6 +57,16 @@ class RestoredSearchEntity:
     checksum: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class SearchRowRepair:
+    """What a missing-search-row repair restored, and which entities it could not."""
+
+    restored: tuple[RestoredSearchEntity, ...]
+    # Entities whose file could not be read or parsed; they stay unsearchable.
+    failed_entity_ids: tuple[int, ...]
+    sample_errors: tuple[str, ...]
+
+
 def entity_embeddings_enabled(entity: Entity) -> bool:
     """Return whether semantic embeddings should be generated for this entity.
 
@@ -707,8 +717,8 @@ class SearchService:
         self,
         *,
         batch_size: int = VECTOR_SYNC_CHUNK_SIZE,
-    ) -> list[RestoredSearchEntity]:
-        """Rebuild search rows for entities that have none; return the entities restored.
+    ) -> SearchRowRepair:
+        """Rebuild search rows for entities that have none; report what was restored.
 
         Vectors are cut from search rows, and change detection skips unchanged
         files, so an entity whose rows are gone is invisible to search and to every
@@ -723,7 +733,8 @@ class SearchService:
         )
         restored: list[RestoredSearchEntity] = []
         unreadable = 0
-        failed = 0
+        failed_entity_ids: list[int] = []
+        sample_errors: list[str] = []
         # A migration that recreated search_index can leave every entity without
         # rows. Each batch loads entities with their observations and relations,
         # so batches are loaded, indexed, and dropped one at a time to keep memory
@@ -737,13 +748,14 @@ class SearchService:
                 except FileNotFoundError:
                     unreadable += 1
                     continue
-                except Exception:
+                except Exception as error:
                     # Trigger: one file cannot be read or parsed (e.g. invalid UTF-8).
                     # Why: file batches already isolate per-file failures; aborting here
                     #      would stop every later entity from converging on each pass.
                     # Outcome: log it, leave it out of the restored and vector targets,
                     #          and keep repairing the rest. Cancellation still propagates.
-                    failed += 1
+                    failed_entity_ids.append(entity.id)
+                    sample_errors.append(f"{entity.file_path}: {error}")
                     logger.exception(
                         "Could not restore search rows for entity",
                         project_id=self.repository.project_id,
@@ -758,9 +770,13 @@ class SearchService:
                 project_id=self.repository.project_id,
                 restored=len(restored),
                 unreadable=unreadable,
-                failed=failed,
+                failed=len(failed_entity_ids),
             )
-        return restored
+        return SearchRowRepair(
+            restored=tuple(restored),
+            failed_entity_ids=tuple(failed_entity_ids),
+            sample_errors=tuple(sample_errors[:5]),
+        )
 
     async def semantic_effectively_enabled(self) -> bool:
         """Return whether this runtime can embed, honoring the keyword-only fallback."""
@@ -926,12 +942,15 @@ class SearchService:
         # Trigger: an entity has no search_index rows (#1826).
         # Why: vectors are cut from search rows, so the sync below would skip it
         #   and still count it as done; `--embeddings` runs no search pass.
-        # Outcome: its search rows are rebuilt first, and it embeds in this run.
-        search_rows_restored = len(await self.restore_missing_search_rows())
+        # Outcome: its search rows are rebuilt first, and it embeds in this run. An
+        #   entity whose repair failed is reported as an error, not embedded empty.
+        repair = await self.restore_missing_search_rows()
+        search_rows_restored = len(repair.restored)
+        repair_failed = set(repair.failed_entity_ids)
 
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
-        entity_ids = [entity.id for entity in entities]
+        entity_ids = [entity.id for entity in entities if entity.id not in repair_failed]
 
         # A host that cannot load sqlite-vec runs keyword-only (#711); its vector
         # tables cannot even be opened, so the whole rebuild is a no-op there.
@@ -941,9 +960,9 @@ class SearchService:
                 "total_entities": len(entity_ids),
                 "embedded": 0,
                 "skipped": len(entity_ids),
-                "errors": 0,
+                "errors": len(repair.failed_entity_ids),
                 "deferred": 0,
-                "sample_errors": (),
+                "sample_errors": repair.sample_errors,
                 "vector_index": None,
                 "embedding_model": None,
                 "search_rows_restored": search_rows_restored,
@@ -961,9 +980,9 @@ class SearchService:
         )
         embedded = batch_result.entities_synced
         skipped = batch_result.entities_skipped
-        errors = batch_result.entities_failed
-        failed_entity_ids = list(batch_result.failed_entity_ids)
-        sample_errors = list(batch_result.sample_errors)
+        errors = batch_result.entities_failed + len(repair.failed_entity_ids)
+        failed_entity_ids = [*repair.failed_entity_ids, *batch_result.failed_entity_ids]
+        sample_errors = [*repair.sample_errors, *batch_result.sample_errors]
         deferred_entity_ids = list(batch_result.deferred_entity_ids)
 
         # --- Drain deferred shards ---

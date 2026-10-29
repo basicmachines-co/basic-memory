@@ -110,7 +110,7 @@ from basic_memory.schemas.v2.project_index import (
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
-from basic_memory.services.search_service import RestoredSearchEntity
+from basic_memory.services.search_service import SearchRowRepair
 from basic_memory.utils import nfc_path
 
 type LocalProjectIndexIgnorePatterns = set[str]
@@ -607,9 +607,7 @@ class LocalDeferredEmbeddingTargetSource:
 class MissingSearchRowRestorer(Protocol):
     """Search capability that rebuilds projections for entities that have none."""
 
-    async def restore_missing_search_rows(
-        self, *, batch_size: int
-    ) -> list[RestoredSearchEntity]: ...
+    async def restore_missing_search_rows(self, *, batch_size: int) -> SearchRowRepair: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,12 +619,12 @@ class LocalSearchRowRepairer:
     batch_size: int
 
     async def restore_missing_search_rows(self) -> tuple[EmbeddingIndexTarget, ...]:
-        restored = await self.search_service.restore_missing_search_rows(batch_size=self.batch_size)
+        repair = await self.search_service.restore_missing_search_rows(batch_size=self.batch_size)
         # An entity without a checksum has not finished file indexing; the pass
         # that sets its checksum emits its own vector target.
         return tuple(
             EmbeddingIndexTarget(entity_id=entity.entity_id, entity_checksum=entity.checksum)
-            for entity in restored
+            for entity in repair.restored
             if entity.checksum is not None
         )
 
