@@ -16,19 +16,20 @@ from basic_memory.repository.metadata_filters import parse_metadata_path
 # find's `--meta` strings translate onto the search API's metadata_filters dict —
 # a subset of the grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte,
 # $in, array-contains-all, $between), nothing more. Word ops need whitespace around
-# them and symbol ops exclude the key character class, so exactly one regex can
-# match any given predicate. Two-char symbols sit first in the alternation so
-# ">=" never parses as ">" plus a value starting with "=".
-# The key capture admits '.' anywhere on purpose — it is looser than a dot path.
+# them and symbol ops are characters the key cannot contain, so a predicate has
+# exactly one reading: the word form, or a split at its first operator character.
+# The key admits '.' anywhere on purpose — it is looser than a dot path.
 # parse_metadata_path, which owns the frontmatter path grammar, is what decides
 # a well-formed one, applied in parse_meta_predicates once the predicate has
-# split. Tightening the capture instead would make '.owner=null' match no regex
-# at all and be reported as a missing operator rather than as the bad key it is.
+# split. Tightening the key instead would make '.owner=null' split no way at all
+# and be reported as a missing operator rather than as the bad key it is.
+_PREDICATE_KEY_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _PREDICATE_WORD_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s+(in|has|between)\s+(.+)$")
-_PREDICATE_SYMBOL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*(>=|<=|=|>|<)\s*(.*)$")
+_SYMBOL_OPERATOR_CHARS = frozenset("<>=")
+_TWO_CHARACTER_OPERATORS = (">=", "<=")
 _SYMBOL_OPERATORS = {">": "$gt", ">=": "$gte", "<": "$lt", "<=": "$lte"}
 _SUPPORTED_PREDICATE_OPS = "= > >= < <= in has between"
-# The symbol regex consumes the first operator it recognizes, so an operator
+# The symbol split consumes the first operator it recognizes, so an operator
 # spelling outside the supported set ("==", "=>", ">>", ">=>") leaves its
 # second character at the head of the value. These are the characters that can
 # be left behind that way. A set, not a string: "" is a substring of any string
@@ -67,7 +68,7 @@ def _predicate_scalar(token: str, predicate: str) -> Any:
     text = token.strip()
     # Trigger: an unquoted value opens with one of the operator characters.
     # Why: only the operators in _SUPPORTED_PREDICATE_OPS are real, but the
-    #      regexes match the longest supported one and hand the rest to the
+    #      split takes the longest supported one and hands the rest to the
     #      value — 'status==active' would filter for the string "=active" and
     #      'count>>3' for ">3", so a typo'd operator answered as an empty (or
     #      worse, a non-empty but wrong) result set instead of the refusal the
@@ -172,25 +173,47 @@ def _refuse_null_outside_equality(values: list[Any], op: str, predicate: str) ->
         )
 
 
+def _split_symbol_predicate(predicate: str) -> tuple[str, str, str] | None:
+    """Split 'key OP value' at its first operator character, or None.
+
+    A two-character operator (>=, <=) wins over its first character, so ">="
+    never reads as ">" plus a value starting with "=". Whitespace around the
+    operator is not part of the key or the value. A plain scan rather than a
+    regex: the operator characters are '<', '>' and '=', and a regex over them
+    reads to static analysis like an HTML comment filter, which this is not.
+    """
+    index = next(
+        (position for position, char in enumerate(predicate) if char in _SYMBOL_OPERATOR_CHARS),
+        None,
+    )
+    if index is None:
+        return None
+    key = predicate[:index].rstrip()
+    if _PREDICATE_KEY_RE.fullmatch(key) is None:
+        return None
+    pair = predicate[index : index + 2]
+    op = pair if pair in _TWO_CHARACTER_OPERATORS else predicate[index]
+    return key, op, predicate[index + len(op) :].lstrip()
+
+
 def parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
     """Translate POSIX-style predicate strings into the search API metadata_filters dict.
 
     One predicate per string; predicates AND together. Exactly one predicate
     per key — the API admits one operator per key, so a repeated key fails fast
-    instead of last-wins. Raises ValueError on any operator outside the supported set, and on any key outside
-    the search API's dot-path grammar.
+    instead of last-wins. Raises ValueError on any operator outside the
+    supported set, and on any key outside the search API's dot-path grammar.
     """
     filters: dict[str, Any] = {}
     for predicate in predicates:
-        match = _PREDICATE_WORD_RE.match(predicate.strip()) or _PREDICATE_SYMBOL_RE.match(
-            predicate.strip()
-        )
-        if match is None:
+        word = _PREDICATE_WORD_RE.match(predicate.strip())
+        parts = word.groups() if word else _split_symbol_predicate(predicate.strip())
+        if parts is None:
             raise ValueError(
                 f"find: unsupported predicate operator in '{predicate}'; "
                 f"supported: {_SUPPORTED_PREDICATE_OPS}"
             )
-        raw_key, op, raw_value = match.groups()
+        raw_key, op, raw_value = parts
         key = _METADATA_KEY_ALIASES.get(raw_key, raw_key)
         # Trigger: the key capture accepted something that is not a dot path —
         #          a doubled, leading or trailing dot ('review..approved',

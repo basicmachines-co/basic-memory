@@ -135,6 +135,9 @@ def test_tail_is_gone():
         (["priority gte 3"], "unsupported predicate operator"),
         (["priority in"], "unsupported predicate operator"),
         (["nothing"], "unsupported predicate operator"),
+        # A key cannot hold whitespace or be empty, so these have no reading.
+        (["my key=x"], "unsupported predicate operator"),
+        (["=x"], "unsupported predicate operator"),
         ([""], "unsupported predicate operator"),
         (["status matches active"], "supported: = > >= < <= in has between"),
         (["score between 0.3"], "'between' needs exactly min,max"),

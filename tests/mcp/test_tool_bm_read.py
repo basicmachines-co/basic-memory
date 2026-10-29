@@ -27,6 +27,10 @@ LONG_NOTE = "\n".join(
 )
 
 
+# A source text kept verbatim beside the notes, read a range at a time.
+SOURCE_TEXT = "CHAPTER 1\nLoomings.\nCall me Ishmael.\nCHAPTER 2\nThe Carpet-Bag.\n"
+
+
 async def read_text(identifier: str, **arguments: Any) -> str:
     result = await bm_read(identifier, **arguments)
     assert isinstance(result, str)
@@ -45,7 +49,7 @@ async def _write(project_name: str, title: str, content: str, directory: str = "
 
 @pytest_asyncio.fixture
 async def non_note_files(project_repository, session_maker, test_project, test_files):
-    """A PNG, a PDF, a GIF and a JSON file, indexed into the test project."""
+    """A PNG, a PDF, a GIF, a JSON and a plain-text file, indexed into the test project."""
     gif = io.BytesIO()
     PILImage.new("RGB", (4, 4), "red").save(gif, format="GIF")
     (test_files["image"].parent / "anim.gif").write_bytes(gif.getvalue())
@@ -53,6 +57,7 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
     PILImage.new("RGB", (4, 4), "blue").convert("P").save(palette, format="PNG")
     (test_files["image"].parent / "palette.png").write_bytes(palette.getvalue())
     (test_files["image"].parent / "data.json").write_text('{"k": 1}')
+    (test_files["image"].parent / "source.txt").write_text(SOURCE_TEXT)
     runner = LocalProjectIndexRunner(
         project_repository=project_repository, session_maker=session_maker
     )
@@ -63,6 +68,7 @@ async def non_note_files(project_repository, session_maker, test_project, test_f
         "gif": "anim.gif",
         "json": "data.json",
         "palette": "palette.png",
+        "txt": "source.txt",
     }
 
 
@@ -211,9 +217,54 @@ async def test_gif_is_refused_as_unsupported(client, test_project, non_note_file
 
 
 @pytest.mark.asyncio
-async def test_slicing_a_non_note_file_is_refused(client, test_project, non_note_files):
-    with pytest.raises(ToolError, match="^UNSUPPORTED:.*not a Markdown note"):
-        await bm_read(non_note_files["json"], project=test_project.name, end_line=1)
+async def test_a_text_file_reads_a_line_range(client, test_project, non_note_files):
+    """A .txt source slices by line like a note: same coordinates, same continuation."""
+    payload = await read_json(
+        non_note_files["txt"], project=test_project.name, start_line=2, end_line=3
+    )
+    text = await read_text(
+        non_note_files["txt"], project=test_project.name, start_line=2, end_line=3
+    )
+
+    assert payload["content"] == "Loomings.\nCall me Ishmael."
+    assert (payload["start_line"], payload["end_line"], payload["total_lines"]) == (2, 3, 5)
+    assert payload["has_more"] is True
+    assert (payload["next_start_line"], payload["next_end_line"]) == (4, 5)
+    assert payload["file_path"] == "source.txt"
+    assert payload["content_type"].startswith("text/plain")
+    assert text.startswith("Lines 2-3 of 5")
+    assert "3: Call me Ishmael." in text
+
+
+@pytest.mark.asyncio
+async def test_a_text_file_reads_its_first_and_last_lines(client, test_project, non_note_files):
+    head = await read_text(non_note_files["txt"], project=test_project.name, end_line=2)
+    tail = await read_json(non_note_files["txt"], project=test_project.name, start_line=4)
+
+    assert head.startswith("Lines 1-2 of 5")
+    assert "1: CHAPTER 1" in head
+    assert tail["content"] == "CHAPTER 2\nThe Carpet-Bag."
+    assert tail["has_more"] is False
+    assert tail["next_start_line"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_text_file_range_past_the_end_is_refused(client, test_project, non_note_files):
+    with pytest.raises(ToolError, match="start_line 9 is past the end of the document"):
+        await bm_read(non_note_files["txt"], project=test_project.name, start_line=9)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", [{"section": "CHAPTER 1"}, {"max_tokens": 10}])
+async def test_sections_and_budgets_stay_note_only(client, test_project, non_note_files, arguments):
+    with pytest.raises(ToolError, match="^UNSUPPORTED:.*section and max_tokens apply only"):
+        await bm_read(non_note_files["txt"], project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+async def test_a_line_range_on_a_binary_file_is_refused(client, test_project, non_note_files):
+    with pytest.raises(ToolError, match="^UNSUPPORTED:.*not a text file"):
+        await bm_read(non_note_files["pdf"], project=test_project.name, end_line=1)
 
 
 # --- Refusals ---

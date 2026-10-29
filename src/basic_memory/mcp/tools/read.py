@@ -14,6 +14,7 @@ from mcp.types import EmbeddedResource, ImageContent
 from pydantic import Field
 
 from basic_memory.markdown.line_scanning import format_line_read
+from basic_memory.markdown.sections import LineRange, NoteSliceError, slice_note_content
 from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
 from basic_memory.mcp.file_content import (
     DocumentFile,
@@ -25,7 +26,7 @@ from basic_memory.mcp.file_content import (
     classify_file_response,
 )
 from basic_memory.mcp.note_reads import format_note_metadata, read_note_json_by_external_id
-from basic_memory.mcp.note_targets import open_project_target, resolve_note
+from basic_memory.mcp.note_targets import PathQualifier, open_project_target, resolve_note
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
@@ -40,7 +41,8 @@ LineNumber = Annotated[int | None, Field(ge=1)]
     description=(
         "Read a Basic Memory note or file by path, permalink, memory:// URL or exact title. "
         "Slice a long note with `section` (a heading), `start_line`/`end_line` or "
-        "`max_tokens`; line numbers count the whole file, frontmatter included. "
+        "`max_tokens`; line numbers count the whole file, frontmatter included. A text "
+        "file such as .txt takes start_line/end_line too. "
         "`include_content=false` returns only the metadata and the checksum that "
         "bm_write and bm_edit take as expected_checksum. Images come back as images and "
         "other binary files as documents. A missing note is an error: find notes with "
@@ -137,22 +139,43 @@ async def bm_read(
         resource_client = ResourceClient(target.client, target.project.external_id)
 
         # --- Files that are not Markdown notes ---
-        # Trigger: the resolved file is an image, PDF, JSON or other non-note file.
-        # Why: slicing is defined over Markdown lines and headings only.
-        # Outcome: the file is returned whole, in the form the client can display.
+        # Trigger: the resolved file is an image, PDF, JSON, plain text or other
+        #   non-note file.
+        # Why: sections and token budgets are defined over Markdown headings and
+        #   paragraphs, but lines are not: a long .txt source (a book being
+        #   analyzed) is read a range at a time, like a note.
+        # Outcome: a text file honors start_line/end_line; any other slice, or
+        #   a line range on a binary file, is refused; otherwise the file comes
+        #   back whole, in the form the client can display.
         if not runtime_file_path_is_markdown_note(note.file_path):
-            if sliced:
+            if section is not None or max_tokens is not None:
                 raise refusal(
                     "UNSUPPORTED",
-                    f"'{note.file_path}' is not a Markdown note; section, lines and "
-                    "max_tokens apply only to notes.",
-                    try_instead=f"bm_read(identifier={identifier!r}, project={project!r})",
+                    f"'{note.file_path}' is not a Markdown note; section and max_tokens "
+                    "apply only to notes.",
+                    try_instead="read a range with start_line/end_line, or the whole file",
                     output_format=output_format,
                 )
             response = await resource_client.read(note.external_id)
-            presented = _present_file(
-                classify_file_response(response), note.file_path, note.title, output_format
-            )
+            content = classify_file_response(response)
+            if line_range:
+                if not isinstance(content, TextFile):
+                    raise refusal(
+                        "UNSUPPORTED",
+                        f"'{note.file_path}' is not a text file; start_line and end_line "
+                        "apply only to notes and text files.",
+                        try_instead=f"bm_read(identifier={identifier!r}, project={project!r})",
+                        output_format=output_format,
+                    )
+                return _text_file_lines(
+                    content,
+                    note.file_path,
+                    note.title,
+                    LineRange(start=start_line or 1, end=end_line),
+                    output_format,
+                    target.paths,
+                )
+            presented = _present_file(content, note.file_path, note.title, output_format)
             if isinstance(presented, dict):
                 return target.paths.note(presented)
             return presented
@@ -176,11 +199,7 @@ async def bm_read(
 
     first, last, total = payload["start_line"], payload["end_line"], payload["total_lines"]
     if output_format == "json":
-        width = last - first + 1
-        payload["has_more"] = last < total
-        payload["next_start_line"] = last + 1 if last < total else None
-        payload["next_end_line"] = min(total, last + width) if last < total else None
-        return target.paths.note(payload)
+        return target.paths.note({**payload, **_continuation(first, last, total)})
     # Trigger: max_tokens cut the content.
     # Why: the cut content ends with an ellipsis marker, so its lines no longer match
     #      the coordinates one for one and cannot be numbered.
@@ -192,6 +211,47 @@ async def bm_read(
             f"(Continue with start_line={payload['continue_line']}.)"
         )
     return format_line_read(payload["content"], start_line=first, end_line=last, total_lines=total)
+
+
+def _continuation(first: int, last: int, total: int) -> dict[str, Any]:
+    """Where a slice ends relative to the document, and the next range of its width."""
+    if last >= total:
+        return {"has_more": False, "next_start_line": None, "next_end_line": None}
+    width = last - first + 1
+    return {
+        "has_more": True,
+        "next_start_line": last + 1,
+        "next_end_line": min(total, last + width),
+    }
+
+
+def _text_file_lines(
+    text_file: TextFile,
+    file_path: str,
+    title: str,
+    lines: LineRange,
+    output_format: OutputFormat,
+    paths: PathQualifier,
+) -> str | dict[str, Any]:
+    """One line range of a text file, with the coordinates a note slice carries."""
+    sliced = slice_note_content(text_file.text, lines=lines)
+    if isinstance(sliced, NoteSliceError):
+        raise refusal("INVALID_ARGUMENTS", sliced.message, output_format=output_format)
+    first, last, total = sliced.start_line, sliced.end_line, sliced.total_lines
+    if output_format == "json":
+        return paths.note(
+            {
+                "title": title,
+                "file_path": file_path,
+                "content_type": text_file.content_type,
+                "content": sliced.content,
+                "start_line": first,
+                "end_line": last,
+                "total_lines": total,
+                **_continuation(first, last, total),
+            }
+        )
+    return format_line_read(sliced.content, start_line=first, end_line=last, total_lines=total)
 
 
 def _present_file(

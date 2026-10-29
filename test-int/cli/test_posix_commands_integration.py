@@ -21,9 +21,11 @@ from typer.testing import CliRunner, Result
 
 from basic_memory import db
 from basic_memory.cli.main import app as cli_app
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.clients import SearchClient
 from basic_memory.models import Entity
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 
 pytestmark = pytest.mark.usefixtures("app")
@@ -215,10 +217,40 @@ def check_head_prints_the_first_lines() -> None:
     assert f"1: {lines[0]}" in bm_text("head", "Head Note", "-n", "3")
 
 
-def test_cat_and_head():
+@pytest_asyncio.fixture
+async def text_source(engine_factory, test_project) -> None:
+    """A .txt source kept verbatim in the project and indexed, as the
+    literary-analysis skill sets up its book."""
+    books = Path(test_project.path) / "books"
+    books.mkdir()
+    (books / "source.txt").write_text(
+        "CHAPTER 1\nLoomings.\nCall me Ishmael.\nCHAPTER 2\nThe Carpet-Bag.\n"
+    )
+    _, session_maker = engine_factory
+    runner = LocalProjectIndexRunner(
+        project_repository=ProjectRepository(), session_maker=session_maker
+    )
+    await runner.index_project(test_project.id, force_full=True)
+
+
+def check_text_source_reads_by_line() -> None:
+    """An indexed .txt source reads a range at a time through cat and head."""
+    chapter = bm_json("cat", "books/source.txt", "--lines", "2-3")
+    assert chapter["content"] == "Loomings.\nCall me Ishmael."
+    assert (chapter["start_line"], chapter["end_line"], chapter["total_lines"]) == (2, 3, 5)
+    assert "3: Call me Ishmael." in bm_text("cat", "books/source.txt", "--lines", "2-3")
+    assert bm_text("head", "books/source.txt", "-n", "1").startswith("Lines 1-1 of 5")
+    # Sections are headings, which a text file does not have.
+    assert "section and max_tokens apply only to notes" in refusal(
+        "cat", "books/source.txt", "--section", "CHAPTER 1"
+    )
+
+
+def test_cat_and_head(text_source):
     check_cat_whole_notes_and_slices()
     check_cat_sections_and_token_budget()
     check_head_prints_the_first_lines()
+    check_text_source_reads_by_line()
 
 
 # --- grep ---

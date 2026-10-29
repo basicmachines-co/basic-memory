@@ -677,13 +677,27 @@ orphans behind has made the graph worse.
 With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
 
 ```bash
-bm grep "features [[" --page-size 100 --project <work> --json   # every chapter's cast, one call
 bm find --meta 'note_type=theme' --fields prevalence --page-size 100  # thematic weight
 bm grep "doubloon" --page-size 100 --project <work>                # every mention of a symbol
 ```
 
-"Which characters share the most chapters" is the first line plus a local parse of each
-row's `content` for `features [[...]]` — one call instead of a read per chapter. Do not
+"Which characters share the most chapters" is a search for `features [[` plus a local parse
+of each row's `content` for `features [[...]]` — one call per 100 chapters instead of a read
+per chapter. Page until `has_more` is false, as the coverage check does; a 138-chapter work
+needs two pages:
+
+```bash
+page=1; rows='[]'
+while :; do
+  resp=$(bm grep "features [[" --page-size 100 --page $page --project <work> --json)
+  rows=$(jq -n --argjson acc "$rows" --argjson r "$resp" '$acc + $r.results')
+  [ "$(jq -r '.has_more' <<<"$resp")" = "true" ] || break
+  page=$((page + 1))
+done
+jq 'length' <<<"$rows"   # one row per chapter that lists its cast
+```
+
+Do not
 reach for `bm tool context 'memory://characters/major/*'` here: a
 wildcard context is capped at 100 related rows across all primaries and returns one primary
 row per indexed observation, so it neither enumerates the cast nor walks the web.
@@ -697,14 +711,15 @@ the default page would have dropped. `--semantic` ranks by meaning instead, whic
 "what is this about?" rather than "where does this word appear?".
 
 Two more facts about `grep` rows. Matching is case-insensitive and note-level: a hit is a
-note, not a line, and there is no `-n` or context. And each row's `content` is capped at
+note, not a line, unless you pass `-C N` for matching lines with context. And each row's
+`content` is capped at
 4000 characters; `content_truncated: true` marks a cut row, so a long note's tail (such as a
 final chapter's `follows`/`precedes` relations) may be missing from a grep-driven scan.
 When a parse depends on the end of a note, `cat` that note.
 
 `--page-size` raises the ceiling, it does not remove it. A symbol in a long work can exceed
-even 100, so check whether the last page was full and walk `--page 2`, `--page 3` until it is
-not. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
+even 100, so walk `--page 2`, `--page 3` until `has_more` is false, as in the cast loop
+above. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
 answer, exit 0, and no sign that the tail is missing.
 
 And `grep` searches **your notes, not the source**. The `<work>.txt` is indexed as an entity,
