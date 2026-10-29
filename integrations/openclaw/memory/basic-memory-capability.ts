@@ -105,6 +105,13 @@ export function openBasicMemoryReader(
     return result
   }
 
+  // Trigger: the reader opens while the plugin service is not running, as in
+  //   one-shot CLI commands like `openclaw memory status`.
+  // Why: the first BM call then spawns a `bm mcp` child that nothing else
+  //   will stop, and its open pipes keep the CLI process from exiting.
+  // Outcome: this reader owns that connection and stops it on close().
+  const ownsConnection = !client.isServiceRunning()
+
   return {
     capabilities: {
       sources: ["memory"],
@@ -171,9 +178,11 @@ export function openBasicMemoryReader(
       }
     },
 
-    // The BM MCP session is shared by the whole plugin and owned by its
-    // service lifecycle, so closing one caller's reader releases nothing.
-    async close(): Promise<void> {},
+    // In the gateway the BM MCP session is shared by the whole plugin and
+    // owned by its service, so closing one caller's reader releases nothing.
+    async close(): Promise<void> {
+      if (ownsConnection) await client.stop()
+    },
   }
 }
 
