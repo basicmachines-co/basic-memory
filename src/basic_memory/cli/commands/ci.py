@@ -35,6 +35,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.cli.markup import literal
+from basic_memory.config import ConfigManager
 
 # MCP tool functions are imported inside the async helpers below: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
@@ -256,19 +257,17 @@ async def seed_project_update_schemas(
 ) -> list[str]:
     """Seed Auto BM schema notes without overwriting customized schemas."""
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import search_notes as mcp_search_notes
-    from basic_memory.mcp.tools import write_note as mcp_write_note
+    from basic_memory.mcp.tools import bm_search, bm_write
 
     seeded: list[str] = []
     routed_project = _routed_project(project=project, project_id=project_id, workspace=workspace)
     for spec in schema_seed_specs():
-        existing = await mcp_search_notes(
-            query=None,
-            project=routed_project,
-            project_id=project_id,
-            metadata_filters={"type": "schema", "entity": spec.entity},
-            output_format="json",
+        existing = await bm_search(
+            filters={"type": "schema", "entity": spec.entity},
             page_size=1,
+            output_format="json",
+            project=routed_project,
+            context=None,
         )
         existing_results = _search_results(existing)
         if existing_results and not refresh:
@@ -280,16 +279,16 @@ async def seed_project_update_schemas(
             default_directory="schemas",
         )
 
-        await mcp_write_note(
-            title=title,
+        await bm_write(
             content=spec.content,
+            title=title,
             directory=directory,
-            project=routed_project,
-            project_id=project_id,
             note_type="schema",
             metadata=spec.metadata,
             overwrite=bool(existing_results) and refresh,
             output_format="json",
+            project=routed_project,
+            context=None,
         )
         seeded.append(spec.entity)
     return seeded
@@ -303,36 +302,34 @@ async def publish_project_update_note(
 ) -> dict[str, Any]:
     """Search by idempotency key and then upsert the deterministic note path."""
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import search_notes as mcp_search_notes
-    from basic_memory.mcp.tools import write_note as mcp_write_note
+    from basic_memory.mcp.tools import bm_search, bm_write
 
     routed_project = _routed_project(
         project=config.project,
         project_id=config.project_id,
         workspace=config.workspace,
     )
-    existing = await mcp_search_notes(
-        query=None,
-        project=routed_project,
-        project_id=config.project_id,
-        metadata_filters={"type": "project_update", "idempotency_key": context.idempotency_key},
-        output_format="json",
+    existing = await bm_search(
+        filters={"type": "project_update", "idempotency_key": context.idempotency_key},
         page_size=1,
+        output_format="json",
+        project=routed_project,
+        context=None,
     )
     title, directory = _note_write_target(
         existing, default_title=note.title, default_directory=note.directory
     )
-    result = await mcp_write_note(
-        title=title,
+    result = await bm_write(
         content=note.content,
+        title=title,
         directory=directory,
-        project=routed_project,
-        project_id=config.project_id,
-        tags=note.tags,
         note_type="project_update",
+        tags=note.tags,
         metadata=note.metadata,
         overwrite=True,
         output_format="json",
+        project=routed_project,
+        context=None,
     )
     if isinstance(result, dict):
         return result
@@ -429,11 +426,16 @@ def _routed_project(
     project: str | None,
     project_id: str | None,
     workspace: str | None,
-) -> str | None:
-    """Return a workspace-qualified project route when the config can enforce one."""
-    if project_id or not project or not workspace or "/" in project:
-        return project
-    return f"{workspace.strip('/')}/{project}"
+) -> str:
+    """Return the one project route the bm_* tools take: id, workspace/project, or name."""
+    if project_id:
+        return project_id
+    if project and workspace and "/" not in project:
+        return f"{workspace.strip('/')}/{project}"
+    route = project or ConfigManager().config.default_project
+    if route is None:
+        raise ValueError("No project is configured; set `project` in the CI config.")
+    return route
 
 
 def _search_results(payload: object) -> list[Any]:

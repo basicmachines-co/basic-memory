@@ -4,7 +4,6 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import bm_delete, bm_read, bm_write, edit_note
-from basic_memory.mcp.tools.delete_note import _format_delete_error_response
 from basic_memory.mcp.tools.edit_note import _unknown_outcome_guidance
 
 
@@ -53,13 +52,6 @@ async def test_refused_delete_points_to_bm_read(client, test_project, output_for
     assert "bm_read(identifier=" in str(refused.value)
     assert "read_note(" not in str(refused.value)
     assert "Keep this note" in str(await bm_read("notes/guarded.md", project=test_project.name))
-
-
-@pytest.mark.parametrize("error", ["filesystem error", "database error", "server error"])
-def test_legacy_delete_failure_points_to_bm_read(error: str) -> None:
-    guidance = _format_delete_error_response("work", error, "notes/guarded.md")
-    assert 'bm_read(identifier="notes/guarded.md", project="work")' in guidance
-    assert "read_note(" not in guidance
 
 
 def test_unknown_edit_outcome_points_to_bm_read_by_project_id() -> None:

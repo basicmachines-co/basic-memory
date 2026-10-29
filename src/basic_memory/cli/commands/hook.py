@@ -55,6 +55,7 @@ import basic_memory
 from basic_memory.cli.app import app
 from basic_memory.utils import shell_command
 from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.config import ConfigManager
 from basic_memory.hooks.adapters import NormalizedHookEvent, for_harness
 
 # Envelope event names, duplicated as literals would invite drift; the
@@ -575,26 +576,23 @@ def _capture_envelope(
 # --- Structured queries for the session brief ---
 
 
-def _project_query_kwargs(project_ref: str) -> dict[str, str]:
-    from basic_memory.hooks.project_ref import split_project_ref
-
-    project, project_id = split_project_ref(project_ref)
-    return {"project_id": project_id} if project_id else {"project": project or project_ref}
-
-
-async def _query(project_ref: str | None, **filters: Any) -> dict[str, Any] | None:
-    """One best-effort structured search; any failure reads as 'no data'."""
+async def _query(project_ref: str | None, **search: Any) -> dict[str, Any] | None:
+    """One best-effort structured bm_search; any failure reads as 'no data'."""
     # Deferred: importing basic_memory.mcp.tools loads the whole tool stack (#886).
-    from basic_memory.mcp.tools import search_notes
+    from basic_memory.mcp.tools import bm_search
 
-    kwargs: dict[str, Any] = {"page_size": 5, "output_format": "json", **filters}
-    if project_ref:
-        kwargs.update(_project_query_kwargs(project_ref))
+    # bm_search takes a project name or id; an unmapped directory reads the default.
+    project = project_ref or ConfigManager().config.default_project
+    if project is None:
+        return None
     try:
-        result = await asyncio.wait_for(search_notes(**kwargs), timeout=QUERY_TIMEOUT_SECONDS)
+        result = await asyncio.wait_for(
+            bm_search(page_size=5, output_format="json", project=project, context=None, **search),
+            timeout=QUERY_TIMEOUT_SECONDS,
+        )
     except Exception:
         return None
-    if not isinstance(result, dict) or result.get("error"):
+    if not isinstance(result, dict):
         return None
     return result
 
@@ -626,20 +624,20 @@ async def _gather_context(
             _query(
                 project,
                 note_types=[profile.coding_session_note_type],
-                metadata_filters={"repository": repository},
-                after_date=timeframe,
+                filters={"repository": repository},
+                since=timeframe,
             )
         )
     # General checkpoints are a lower-priority path because coding_session
     # results carry repository identity and are therefore merged first.
     session_queries.append(
-        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe)
+        _query(project, note_types=list(profile.recall_session_types), since=timeframe)
     )
     results = await asyncio.gather(
-        _query(project, note_types=["task"], status="active"),
-        _query(project, note_types=["decision"], status="open"),
+        _query(project, note_types=["task"], filters={"status": "active"}),
+        _query(project, note_types=["decision"], filters={"status": "open"}),
         *session_queries,
-        *[_query(ref, note_types=["decision"], status="open") for ref in shared_refs],
+        *[_query(ref, note_types=["decision"], filters={"status": "open"}) for ref in shared_refs],
     )
     session_end = 2 + len(session_queries)
     return _BriefContext(
@@ -1272,31 +1270,33 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
         coding_context,
     )
 
-    # Deferred import (#886); same internal write path the legacy write tool uses.
-    from basic_memory.hooks.project_ref import split_project_ref
-    from basic_memory.mcp.tools import write_note
+    # Deferred import (#886).
+    from fastmcp.exceptions import ToolError
 
-    project, project_id = split_project_ref(primary)
-    result = run_with_cleanup(
-        write_note(
-            title=title,
-            content=content,
-            directory=capture_folder,
-            project=project,
-            project_id=project_id,
-            tags=list(profile.checkpoint_tags),
-            note_type=note_type,
-            # Frontmatter as metadata: write_note serializes/quotes it, so a
-            # YAML-special value (e.g. a cwd with a colon) can't break parsing.
-            metadata=metadata,
-            overwrite=True if harness is Harness.pi else None,
-            output_format="json",
+    from basic_memory.mcp.tools import bm_write
+
+    try:
+        run_with_cleanup(
+            bm_write(
+                content=content,
+                title=title,
+                directory=capture_folder,
+                note_type=note_type,
+                tags=list(profile.checkpoint_tags),
+                # Frontmatter as metadata: bm_write serializes/quotes it, so a
+                # YAML-special value (e.g. a cwd with a colon) can't break parsing.
+                metadata=metadata,
+                overwrite=True if harness is Harness.pi else None,
+                output_format="json",
+                project=primary,
+                context=None,
+            )
         )
-    )
-    if isinstance(result, dict) and result.get("error"):
+    except ToolError as error:
         # Best-effort write: surface the failure without disrupting compaction.
-        print(f"bm hook pre-compact: checkpoint write failed: {result['error']}", file=sys.stderr)
-    elif harness is Harness.pi:
+        print(f"bm hook pre-compact: checkpoint write failed: {error}", file=sys.stderr)
+        return
+    if harness is Harness.pi:
         print(f"Captured checkpoint: {title}")
 
 

@@ -12,7 +12,7 @@ from httpx import AsyncClient, MockTransport, Request, Response
 from basic_memory.schemas.project_info import ProjectItem
 
 
-@pytest.mark.parametrize("tool", ["read_note", "read_content", "write_note", "move_note"])
+@pytest.mark.parametrize("tool", ["read_note", "write_note"])
 async def test_remote_tool_reaches_api_despite_host_symlink(
     tool: str,
     tmp_path: Path,
@@ -52,20 +52,9 @@ async def test_remote_tool_reaches_api_despite_host_symlink(
                 "escape/note.md", project="project", output_format="json"
             )
             assert result["error"] == "NOTE_NOT_FOUND"
-        elif tool == "read_content":
-            with pytest.raises(ToolError, match="Resource not found"):
-                await module.read_content("escape/note.md", project="project")
-        elif tool == "write_note":
+        else:
             with pytest.raises(ToolError, match="not found in object storage"):
                 await module.write_note(
                     "Note", "body", "escape", project="project", overwrite=False
-                )
-        else:
-            with pytest.raises(ToolError, match="not found in object storage"):
-                await module.move_note(
-                    "source",
-                    destination_path="escape/note.md",
-                    project="project",
-                    output_format="json",
                 )
     assert requests, "validation must reach the selected API instead of probing local symlinks"

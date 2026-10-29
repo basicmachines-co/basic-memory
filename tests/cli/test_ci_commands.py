@@ -3,7 +3,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from basic_memory.cli.commands.ci import seed_project_update_schemas
+from basic_memory.cli.commands.ci import _routed_project, seed_project_update_schemas
+from basic_memory.mcp.tools import bm_write
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
@@ -219,45 +220,35 @@ def test_setup_does_not_partially_write_generated_files_when_target_exists(
     mock_seed.assert_not_awaited()
 
 
-@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
-@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
 async def test_seed_project_update_schemas_skips_existing_notes_by_default(
-    mock_write: AsyncMock,
-    mock_search: AsyncMock,
+    client, test_project
 ) -> None:
-    mock_search.return_value = {
-        "results": [{"title": "ProjectUpdate", "file_path": "schemas/ProjectUpdate.md"}]
-    }
+    first = await seed_project_update_schemas(project=test_project.name)
+    second = await seed_project_update_schemas(project=test_project.name)
 
-    seeded = await seed_project_update_schemas(project="team-memory")
-
-    assert seeded == []
-    mock_write.assert_not_awaited()
+    assert first == ["ProjectUpdate", "GitHubPullRequestUpdate", "GitHubProductionDeployUpdate"]
+    assert second == []
 
 
-@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
-@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
-async def test_seed_project_update_schemas_refreshes_existing_notes(
-    mock_write: AsyncMock,
-    mock_search: AsyncMock,
+async def test_seed_project_update_schemas_refreshes_existing_notes_in_place(
+    client, test_project
 ) -> None:
-    mock_search.return_value = {
-        "results": [{"title": "Custom ProjectUpdate", "file_path": "custom/schemas/update.md"}]
-    }
-    mock_write.return_value = {"action": "updated"}
+    """A refresh rewrites a customized schema where it lives, not at the default path."""
+    await bm_write(
+        content="Customized.",
+        identifier="custom/schemas/update.md",
+        note_type="schema",
+        metadata={"entity": "ProjectUpdate"},
+        project=test_project.name,
+        context=None,
+    )
 
-    seeded = await seed_project_update_schemas(project="team-memory", refresh=True)
+    seeded = await seed_project_update_schemas(project=test_project.name, refresh=True)
 
-    assert seeded == [
-        "ProjectUpdate",
-        "GitHubPullRequestUpdate",
-        "GitHubProductionDeployUpdate",
-    ]
-    assert mock_write.await_count == 3
-    first_call = mock_write.await_args_list[0].kwargs
-    assert first_call["title"] == "Custom ProjectUpdate"
-    assert first_call["directory"] == "custom/schemas"
-    assert first_call["overwrite"] is True
+    assert seeded == ["ProjectUpdate", "GitHubPullRequestUpdate", "GitHubProductionDeployUpdate"]
+    project_root = Path(test_project.path)
+    assert "Customized." not in (project_root / "custom/schemas/update.md").read_text()
+    assert not (project_root / "schemas/ProjectUpdate.md").exists()
 
 
 def test_setup_rejects_non_github_repo(tmp_path: Path) -> None:
@@ -327,198 +318,11 @@ def test_agent_schema_command_writes_schema(tmp_path: Path) -> None:
     assert schema["title"] == "AgentSynthesis"
 
 
-@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
-@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
-def test_publish_command_upserts_project_update_note(
-    mock_write: AsyncMock,
-    mock_search: AsyncMock,
-    tmp_path: Path,
-) -> None:
-    mock_search.return_value = {"results": []}
-    mock_write.return_value = {
-        "title": "PR #7: Add project update capture",
-        "permalink": "project-updates/github/basicmachines-co/demo/pr-7-add-project-update-capture",
-        "action": "created",
-    }
-    event_path = _write_pr_event(tmp_path / "event.json")
-    context_path = tmp_path / "context.json"
-    config_path = tmp_path / "config.yml"
-    synthesis_path = tmp_path / "synthesis.json"
-    config_path.write_text("project: team-memory\nworkspace: product\n", encoding="utf-8")
-
-    collect_result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "collect",
-            "--event-name",
-            "pull_request",
-            "--event-path",
-            str(event_path),
-            "--config",
-            str(config_path),
-            "--output",
-            str(context_path),
-        ],
-    )
-    assert collect_result.exit_code == 0, collect_result.output
-    synthesis_path.write_text(
-        json.dumps(
-            _synthesis_payload(
-                repo="evil/repo",
-            )
-        ),
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "publish",
-            "--config",
-            str(config_path),
-            "--context",
-            str(context_path),
-            "--synthesis",
-            str(synthesis_path),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    mock_search.assert_awaited_once()
-    mock_write.assert_awaited_once()
-    assert mock_search.call_args.kwargs["project"] == "product/team-memory"
-    kwargs = mock_write.call_args.kwargs
-    assert kwargs["project"] == "product/team-memory"
-    assert kwargs["note_type"] == "project_update"
-    assert kwargs["overwrite"] is True
-    assert kwargs["metadata"]["repo"] == "basicmachines-co/demo"
-    assert kwargs["metadata"]["source_event"] == "pull_request_merged"
-    assert (
-        kwargs["metadata"]["idempotency_key"]
-        == "github:basicmachines-co/demo:pull_request_merged:7"
-    )
+def test_routed_project_prefers_project_id() -> None:
+    assert _routed_project(project="team-memory", project_id="uuid", workspace="product") == "uuid"
 
 
-@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
-@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
-def test_publish_command_preserves_existing_note_path_for_idempotency_match(
-    mock_write: AsyncMock,
-    mock_search: AsyncMock,
-    tmp_path: Path,
-) -> None:
-    mock_search.return_value = {
-        "results": [
-            {
-                "title": "Existing PR update",
-                "file_path": "custom/project-updates/existing-pr-update.md",
-            }
-        ]
-    }
-    mock_write.return_value = {"title": "Existing PR update", "action": "updated"}
-    event_path = _write_pr_event(tmp_path / "event.json")
-    context_path = tmp_path / "context.json"
-    config_path = tmp_path / "config.yml"
-    synthesis_path = tmp_path / "synthesis.json"
-    config_path.write_text("project: team-memory\n", encoding="utf-8")
+def test_routed_project_qualifies_a_bare_name_with_the_workspace() -> None:
+    routed = _routed_project(project="team-memory", project_id=None, workspace="product")
 
-    collect_result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "collect",
-            "--event-name",
-            "pull_request",
-            "--event-path",
-            str(event_path),
-            "--config",
-            str(config_path),
-            "--output",
-            str(context_path),
-        ],
-    )
-    assert collect_result.exit_code == 0, collect_result.output
-    synthesis_path.write_text(
-        json.dumps(_synthesis_payload()),
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "publish",
-            "--config",
-            str(config_path),
-            "--context",
-            str(context_path),
-            "--synthesis",
-            str(synthesis_path),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    kwargs = mock_write.call_args.kwargs
-    assert kwargs["title"] == "Existing PR update"
-    assert kwargs["directory"] == "custom/project-updates"
-
-
-@patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock)
-@patch("basic_memory.mcp.tools.write_note", new_callable=AsyncMock)
-def test_publish_command_uses_project_id_without_workspace_qualifying_project(
-    mock_write: AsyncMock,
-    mock_search: AsyncMock,
-    tmp_path: Path,
-) -> None:
-    mock_search.return_value = {"results": []}
-    mock_write.return_value = {"title": "Project update", "action": "created"}
-    event_path = _write_pr_event(tmp_path / "event.json")
-    context_path = tmp_path / "context.json"
-    config_path = tmp_path / "config.yml"
-    synthesis_path = tmp_path / "synthesis.json"
-    config_path.write_text(
-        "project: team-memory\nproject_id: project-uuid\nworkspace: product\n",
-        encoding="utf-8",
-    )
-
-    collect_result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "collect",
-            "--event-name",
-            "pull_request",
-            "--event-path",
-            str(event_path),
-            "--config",
-            str(config_path),
-            "--output",
-            str(context_path),
-        ],
-    )
-    assert collect_result.exit_code == 0, collect_result.output
-    synthesis_path.write_text(
-        json.dumps(_synthesis_payload()),
-        encoding="utf-8",
-    )
-
-    result = runner.invoke(
-        cli_app,
-        [
-            "ci",
-            "publish",
-            "--config",
-            str(config_path),
-            "--context",
-            str(context_path),
-            "--synthesis",
-            str(synthesis_path),
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert mock_search.call_args.kwargs["project"] == "team-memory"
-    assert mock_search.call_args.kwargs["project_id"] == "project-uuid"
-    assert mock_write.call_args.kwargs["project"] == "team-memory"
-    assert mock_write.call_args.kwargs["project_id"] == "project-uuid"
+    assert routed == "product/team-memory"

@@ -13,7 +13,6 @@ from basic_memory.mcp.server import mcp
 
 
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
-    "basic_memory_diagnostics": [],
     "bm_context": [
         "identifier",
         "depth",
@@ -166,7 +165,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "workspace",
         "output_format",
     ],
-    "delete_note": ["identifier", "is_directory", "project", "project_id", "output_format"],
     "delete_project": ["project_name", "delete_notes", "workspace", "output_format"],
     "edit_note": [
         "identifier",
@@ -205,31 +203,10 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "context_lines",
         "max_matches",
     ],
-    "list_directory": [
-        "dir_name",
-        "depth",
-        "file_name_glob",
-        "sort",
-        "page",
-        "page_size",
-        "output_format",
-        "project",
-        "project_id",
-    ],
     "list_memory_projects": ["output_format"],
     "list_workspaces": ["output_format"],
     "ls": ["path", "page", "page_size", "project", "project_id"],
     "man": ["page", "query", "project", "project_id"],
-    "move_note": [
-        "identifier",
-        "destination_path",
-        "destination_folder",
-        "is_directory",
-        "project",
-        "project_id",
-        "output_format",
-    ],
-    "read_content": ["path", "project", "project_id"],
     "read_note": [
         "identifier",
         "project",
@@ -280,7 +257,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "compact",
     ],
     "tail": ["timeframe", "lines", "project", "project_id"],
-    "view_note": ["identifier", "project", "project_id"],
     "write_note": [
         "title",
         "content",
@@ -302,7 +278,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 # every tool must set annotations.title and explicit readOnlyHint, destructiveHint, and
 # openWorldHint values.
 EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
-    "basic_memory_diagnostics": {"readOnlyHint": True, "destructiveHint": False},
     "bm_context": {"readOnlyHint": True, "destructiveHint": False},
     "bm_find": {"readOnlyHint": True, "destructiveHint": False},
     "bm_list": {"readOnlyHint": True, "destructiveHint": False},
@@ -317,10 +292,8 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
     "build_context": {"readOnlyHint": True, "destructiveHint": False},
     "fetch": {"readOnlyHint": True, "destructiveHint": False},
-    "list_directory": {"readOnlyHint": True, "destructiveHint": False},
     "list_memory_projects": {"readOnlyHint": True, "destructiveHint": False},
     "list_workspaces": {"readOnlyHint": True, "destructiveHint": False},
-    "read_content": {"readOnlyHint": True, "destructiveHint": False},
     "read_note": {"readOnlyHint": True, "destructiveHint": False},
     "recent_activity": {"readOnlyHint": True, "destructiveHint": False},
     "schema_diff": {"readOnlyHint": True, "destructiveHint": False},
@@ -328,18 +301,12 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "schema_validate": {"readOnlyHint": True, "destructiveHint": False},
     "search": {"readOnlyHint": True, "destructiveHint": False},
     "search_notes": {"readOnlyHint": True, "destructiveHint": False},
-    "view_note": {"readOnlyHint": True, "destructiveHint": False},
     # create_memory_project is purely additive: it creates a new project and errors
     # if the target already exists.
     "create_memory_project": {"readOnlyHint": False, "destructiveHint": False},
-    "delete_note": {"readOnlyHint": False, "destructiveHint": True},
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
-    # move_note refuses to overwrite an existing destination and preserves all
-    # content — it relocates and propagates links, so no data can be lost. Keeping
-    # it non-destructive lets clients allowlist bulk lifecycle moves.
-    "move_note": {"readOnlyHint": False, "destructiveHint": False},
     "write_note": {"readOnlyHint": False, "destructiveHint": True},
 }
 
@@ -388,23 +355,18 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_project_delete": tools.bm_project_delete,
     "bm_schema": tools.bm_schema,
     "bm_man": tools.bm_man,
-    "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
     "cat": tools.cat,
     "create_memory_project": tools.create_memory_project,
-    "delete_note": tools.delete_note,
     "delete_project": tools.delete_project,
     "edit_note": tools.edit_note,
     "fetch": tools.fetch,
     "find": tools.find,
     "grep": tools.grep,
-    "list_directory": tools.list_directory,
     "list_memory_projects": tools.list_memory_projects,
     "list_workspaces": tools.list_workspaces,
     "ls": tools.ls,
     "man": tools.man,
-    "move_note": tools.move_note,
-    "read_content": tools.read_content,
     "read_note": tools.read_note,
     "recent_activity": tools.recent_activity,
     "schema_diff": tools.schema_diff,
@@ -413,7 +375,6 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "search": tools.search,
     "search_notes": tools.search_notes,
     "tail": tools.tail,
-    "view_note": tools.view_note,
     "write_note": tools.write_note,
 }
 

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 from basic_memory.hooks import inbox
 from basic_memory.hooks.archive import flush
 from basic_memory.hooks.envelope import SESSION_STARTED, create_envelope
-from basic_memory.hooks.project_ref import split_project_ref
 
 
 def _capture(
@@ -28,20 +27,12 @@ def _capture(
     )
 
 
-def test_split_project_ref_routes_uuids_via_project_id() -> None:
-    assert split_project_ref("0198f2b4-77aa-7bbf-9c2d-51e60a92d3c4") == (
-        None,
-        "0198f2b4-77aa-7bbf-9c2d-51e60a92d3c4",
-    )
-    assert split_project_ref("my-team/notes") == ("my-team/notes", None)
-
-
 async def test_flush_archives_trace_without_writing_graph_notes(bm_home: Path) -> None:
     _capture(project_hint="")
     _capture(session_id="s-2", project_hint="demo", ts="2026-07-15T10:01:00+00:00")
     mock_write = AsyncMock()
 
-    with patch("basic_memory.mcp.tools.write_note", mock_write):
+    with patch("basic_memory.mcp.tools.bm_write", mock_write):
         result = await flush()
 
     assert result.swept == 2

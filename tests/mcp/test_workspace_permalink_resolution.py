@@ -2,7 +2,7 @@
 
 import pytest
 
-from basic_memory.mcp.tools.delete_note import delete_note
+from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit_note import edit_note
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -91,12 +91,13 @@ async def test_delete_note_workspace_qualified_url_deletes_legacy_project_permal
     )
 
     with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
-        delete_result = await delete_note(
+        delete_result = await bm_delete(
             identifier=f"memory://{qualified_permalink}",
             project=test_project.name,
             output_format="json",
+            context=None,
         )
 
     assert isinstance(delete_result, dict)
-    assert delete_result["deleted"] is True
-    assert delete_result["permalink"] == legacy_permalink
+    assert delete_result["action"] == "deleted"
+    assert delete_result["file_path"] == "personal/Delete Legacy Workspace Note.md"
