@@ -13,7 +13,7 @@ from rich.text import Text
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.cli.commands.tool import _resolve_output_mode, _validate_output_flags
+from basic_memory.cli.commands.output import resolve_output_mode, validate_output_flags
 from basic_memory.mcp.clients.inspect import InspectClient
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.schemas.inspect import (
@@ -585,7 +585,7 @@ def inspect_query(
     }[mode]
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
         with force_routing(local=local, cloud=cloud):
             response = run_with_cleanup(
                 run_inspect_query(
@@ -597,7 +597,7 @@ def inspect_query(
                 )
             )
 
-        output_mode = _resolve_output_mode(json_output, plain)
+        output_mode = resolve_output_mode(json_output, plain)
         if output_mode == "json":
             print(response.model_dump_json(indent=2))
         elif output_mode == "plain":
@@ -642,7 +642,7 @@ def inspect_chunks(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
         with force_routing(local=local, cloud=cloud):
             response = run_with_cleanup(
                 run_inspect_chunks(
@@ -652,7 +652,7 @@ def inspect_chunks(
                 )
             )
 
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
             print(response.model_dump_json(indent=2))
         elif mode == "plain":

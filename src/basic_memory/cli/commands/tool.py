@@ -1,1653 +1,641 @@
-"""CLI tool commands for Basic Memory.
+"""`bm tool`: the 1.0 MCP tools from the shell.
 
-Every command calls its MCP tool with output_format="json" and prints the result.
-Commands that benefit from human-readable output (search-notes, read-note,
-build-context, recent-activity) support three output modes:
+Each subcommand calls one `bm_*` tool. Flags are the tool's parameter names in kebab
+case, and arguments pass through `pydantic.validate_call`, so the shell gets the same
+validation and coercion an MCP client gets: `--filters` takes the same JSON object,
+`--mode` the same choices, and a bad value fails with the same message.
 
-- **JSON** — raw machine-readable JSON.  Used when ``--json`` is passed, or
-  automatically when stdout is not a TTY (piped/redirected), so scripts stay
-  parseable.  This follows the same bm status / bm project list precedent.
-- **Rich** — colored Panel/Table/Tree/Markdown output.  The default interactive
-  experience when stdout is a TTY.
-- **Plain** — undecorated, greppable text (no ANSI colors, no box-drawing, no
-  markup).  Forced with ``--plain`` even when piped.
-
-Precedence, highest first: ``--json`` > ``--plain`` > non-TTY (JSON) > TTY
-(config ``cli_output_style``, ``rich`` by default).  Passing both ``--json`` and
-``--plain`` is an error.  The interactive default for a TTY is controlled by the
-``cli_output_style`` config option (``rich``/``plain``; env
-``BASIC_MEMORY_CLI_OUTPUT_STYLE``).
+Output is the tool's own text result, or its JSON result with `--json`. A refusal or
+an invalid argument prints to stderr and exits 1.
 """
 
 import json
 import sys
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from collections.abc import Callable, Coroutine
+from typing import Annotated, Any, Optional
 
 import typer
-from loguru import logger
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.markup import escape as markup_escape
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-from rich.tree import Tree
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_schema_tool, run_with_cleanup
-from basic_memory.config import ConfigManager
-from basic_memory.file_utils import has_frontmatter, remove_frontmatter
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
+from basic_memory.config import ConfigManager
 
 # MCP tool functions are imported inside each command: importing
 # basic_memory.mcp.tools loads the entire tool stack (fastmcp, mcp SDK,
 # SQLAlchemy), which would slow every CLI invocation, including --help (#886).
 
-tool_app = typer.Typer()
-app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
+tool_app = typer.Typer(no_args_is_help=True)
+app.add_typer(tool_app, name="tool", help="Call the bm_* MCP tools from the shell")
 
-# Shared Rich console (stderr=False so output goes to stdout, matching _print_json).
-console = Console()
 
+# --- Shared options ---
 
-# --- Shared helpers ---
-
-OutputMode = Literal["json", "rich", "plain"]
-
-
-def _use_rich() -> bool:
-    """Return True when stdout is an interactive TTY.
-
-    Why: piped output (scripts, jq, etc.) must stay machine-parseable; the
-         interactive (Rich/plain) renderers are only the default in a terminal.
-    Outcome: a formatted renderer in a terminal; raw JSON when piped or redirected.
-
-    Note: tests patch this to simulate a TTY, so the precedence logic in
-    ``_resolve_output_mode`` routes its terminal check through here.
-    """
-    return sys.stdout.isatty()
-
-
-def _validate_output_flags(json_output: bool, plain: bool) -> None:
-    """Reject the contradictory --json/--plain combination.
-
-    Trigger: both --json and --plain were passed.
-    Why: they request mutually exclusive output modes (raw JSON vs undecorated
-         human text); silently picking one would hide a user mistake.
-    Outcome: a clear typer error with a non-zero exit.
-    """
-    if json_output and plain:
-        typer.echo("Error: --json and --plain are mutually exclusive.", err=True)
-        raise typer.Exit(1)
-
-
-def _resolve_output_mode(json_output: bool, plain: bool) -> OutputMode:
-    """Resolve the effective output mode from flags, TTY state, and config.
-
-    Precedence, highest first:
-      1. --json            → raw JSON (wins over everything else)
-      2. --plain           → undecorated plain text (even when piped)
-      3. non-TTY stdout    → raw JSON (script compatibility, unchanged)
-      4. TTY               → config ``cli_output_style`` (rich by default)
-
-    Callers must invoke ``_validate_output_flags`` first; this helper assumes the
-    --json/--plain combination has already been rejected.
-    """
-    if json_output:
-        return "json"
-    if plain:
-        return "plain"
-    if not _use_rich():
-        return "json"
-    # Trigger: interactive TTY with no explicit mode flag.
-    # Why: let users choose their default terminal experience without a flag.
-    # Outcome: honor cli_output_style (rich out of the box, plain if configured).
-    return ConfigManager().config.cli_output_style
-
-
-def _print_json(result: Any) -> None:
-    """Print a result as formatted JSON."""
-    print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
-
-
-def _search_result_summary(result: dict[str, Any]) -> str:
-    """Describe search count and pagination without inventing a final page."""
-    results = result.get("results", [])
-    raw_total = result.get("total")
-    raw_total_is_exact = result.get("total_is_exact")
-    if isinstance(raw_total_is_exact, bool):
-        total_is_known = raw_total_is_exact and isinstance(raw_total, int)
-    else:
-        # Older payloads used a positive total for exact counts and zero as the
-        # unknown-total sentinel, so retain that fallback during compatibility.
-        total_is_known = isinstance(raw_total, int) and raw_total > 0
-    total = raw_total if total_is_known else len(results)
-    page = result.get("current_page") or result.get("page", 1)
-    page_size = result.get("page_size", len(results)) or 1
-
-    summary = f"{total} result(s)  •  page {page}"
-    if total_is_known:
-        summary += f" of {max(1, -(-total // page_size))}"
-    if result.get("has_more") is True:
-        summary += "  •  more results available"
-    return summary
-
-
-# --- Rich formatters ---
-
-
-def _display_search_results(result: dict[str, Any], query: str = "") -> None:
-    """Render search-notes results as a Rich table.
-
-    Real SearchResponse.model_dump() shape:
-      results: list of SearchResult dicts (title, type, permalink, score, matched_chunk, content)
-      current_page: int   (NOT "page")
-      page_size: int
-      total: int
-      total_is_exact: bool
-      has_more: bool
-    """
-    results = result.get("results", [])
-    # Trigger: query is user-supplied text that may contain Rich markup characters.
-    # Why: interpolating it directly into a markup string causes brackets to be
-    #      parsed as style tags, swallowing or restyling bracketed content.
-    # Outcome: escape the query so its literal characters are always displayed.
-    escaped_query = markup_escape(query) if query else query
-    title = f"Search: [bold cyan]{escaped_query}[/bold cyan]" if query else "Search results"
-    subtitle = _search_result_summary(result)
-
-    if not results:
-        console.print(Panel(Text("No results found.", style="dim"), title=title, expand=False))
-        return
-
-    table = Table(show_header=True, header_style="bold", expand=False)
-    table.add_column("Type", style="dim", width=12)
-    table.add_column("Title", style="bold cyan")
-    table.add_column("Score", style="yellow", width=7)
-    table.add_column("Permalink", style="green")
-    table.add_column("Snippet", style="dim", max_width=60)
-
-    for item in results:
-        item_type = item.get("type", "")
-        # Trigger: user-sourced title/permalink may contain bracketed text.
-        # Why: Rich table cells with a style column interpret markup in cell values,
-        #      swallowing brackets (e.g. "Spec [draft] v2" → "Spec  v2").
-        # Outcome: escape every user-sourced cell value before adding to the table.
-        item_title = markup_escape(item.get("title") or item.get("permalink", ""))
-        permalink = markup_escape(item.get("permalink", ""))
-        score = item.get("score")
-        score_str = f"{score:.2f}" if score is not None else ""
-        # Prefer matched_chunk as the most relevant snippet; fall back to content.
-        raw_snippet = item.get("matched_chunk") or item.get("content") or ""
-        # Truncate to ~200 chars so the table stays readable.
-        snippet = markup_escape(raw_snippet[:200].replace("\n", " ")) if raw_snippet else ""
-        table.add_row(item_type, item_title, score_str, permalink, snippet)
-
-    console.print(Panel(table, title=title, subtitle=subtitle, expand=False))
-
-
-def _display_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
-    """Render read-note result: header panel + optional frontmatter + rendered Markdown content."""
-    title = str(result.get("title") or "")
-    permalink = str(result.get("permalink") or "")
-    raw_content = result.get("content")
-    content = raw_content if isinstance(raw_content, str) else ""
-    raw_frontmatter = result.get("frontmatter")
-    frontmatter: dict[str, Any] = raw_frontmatter if isinstance(raw_frontmatter, dict) else {}
-
-    # Trigger: read_note returns an explicit all-None payload when no note resolves.
-    # Why: treating those values as strings crashes Rich and hides any related-note
-    #      suggestions that the MCP fallback already found.
-    # Outcome: render a stable not-found panel, including safe, copyable suggestions.
-    if raw_content is None and not title and not permalink:
-        raw_related = result.get("related_results")
-        related_results: list[dict[str, Any]] = (
-            [item for item in raw_related if isinstance(item, dict)]
-            if isinstance(raw_related, list)
-            else []
-        )
-        if related_results:
-            table = Table(show_header=True, header_style="bold", expand=False)
-            table.add_column("Title", style="bold cyan")
-            table.add_column("Permalink", style="green")
-            table.add_column("File", style="dim")
-            for item in related_results:
-                table.add_row(
-                    markup_escape(str(item.get("title") or "")),
-                    markup_escape(str(item.get("permalink") or "")),
-                    markup_escape(str(item.get("file_path") or "")),
-                )
-            console.print(
-                Panel(
-                    table,
-                    title="Note not found",
-                    subtitle=f"{len(related_results)} related result(s)",
-                    expand=False,
-                )
-            )
-        else:
-            message = str(result.get("error") or "No note or related content found.")
-            console.print(Panel(Text(message, style="dim"), title="Note not found", expand=False))
-        return
-
-    # The header already uses Text.append so title is never markup-interpreted.
-    header = Text()
-    header.append(title, style="bold cyan")
-    if permalink:
-        header.append(f"  [{permalink}]", style="dim green")
-
-    console.print(Panel(header, expand=False))
-
-    # Trigger: --frontmatter was passed; the MCP tool populates "frontmatter".
-    # Why: the JSON payload always carries a "frontmatter" key regardless of the flag,
-    #      so checking non-empty alone would render it even without the flag.  The flag
-    #      must be threaded in to gate the panel.
-    # Outcome: print a dim key/value block above the content only when the flag is set.
-    if include_frontmatter and frontmatter:
-        fm_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
-        fm_table.add_column("key", style="dim")
-        fm_table.add_column("value", style="dim")
-        for key, value in frontmatter.items():
-            # Trigger: frontmatter keys/values are user-sourced and may contain markup.
-            # Why: Rich table cells with a style column parse markup, so bracketed
-            #      keys or values would be silently consumed or restyled.
-            # Outcome: escape both key and value before adding them to the table.
-            fm_table.add_row(markup_escape(str(key)), markup_escape(str(value)))
-        console.print(Panel(fm_table, title="[dim]frontmatter[/dim]", expand=False))
-
-    # Trigger: --frontmatter makes the API return the literal file, so
-    # content starts with the frontmatter block the panel above already shows.
-    # Why: rendering it again through Markdown duplicates the frontmatter (and
-    #      Markdown mangles the --- fences into rules/headings).
-    # Outcome: strip the block from the body; the panel is the frontmatter view.
-    body = content
-    if include_frontmatter and content and has_frontmatter(content):
-        body = remove_frontmatter(content)
-    if body and body.strip():
-        console.print(Markdown(body))
-    else:
-        console.print(Text("(no content)", style="dim"))
-
-
-def _display_build_context(result: dict[str, Any]) -> None:
-    """Render build-context result as a Rich tree.
-
-    Real GraphContext.model_dump() shape:
-      results: list of ContextResult dicts, each with:
-        primary_result: EntitySummary | RelationSummary | ObservationSummary
-        observations:   list of ObservationSummary
-        related_results: list of EntitySummary | RelationSummary | ObservationSummary
-      metadata: {"uri": ..., ...}
-      page/page_size/has_more
-
-    Each summary has: type, title (EntitySummary/RelationSummary), permalink,
-    and relation_type (RelationSummary only).
-    """
-    metadata = result.get("metadata", {})
-    uri = metadata.get("uri", "")
-    context_items: list[dict[str, Any]] = list(result.get("results", []))
-
-    # Trigger: uri is user-sourced and may contain Rich markup characters.
-    # Why: interpolating it directly into a markup string causes brackets to be
-    #      parsed as style tags, swallowing or restyling bracketed content.
-    # Outcome: escape the uri so its literal characters are always displayed.
-    label = f"[bold cyan]{markup_escape(uri)}[/bold cyan]" if uri else "Context"
-    tree = Tree(f"[bold]Context:[/bold] {label}")
-
-    if not context_items:
-        tree.add("[dim]No related content found.[/dim]")
-    else:
-        for context_result in context_items:
-            # --- Primary result node ---
-            primary = context_result.get("primary_result", {})
-            # Trigger: p_title and p_type are user-sourced values from the knowledge graph.
-            # Why: embedding them in markup strings without escaping would cause any
-            #      bracketed text (e.g. an entity titled "Spec [draft]") to be consumed
-            #      by the Rich markup parser and silently dropped from output.
-            # Outcome: escape all user values before interpolating into markup strings.
-            p_title = markup_escape(primary.get("title") or primary.get("permalink", ""))
-            p_type = markup_escape(primary.get("type", ""))
-            primary_label = f"[cyan]{p_title}[/cyan]"
-            if p_type:
-                primary_label = f"[dim]{p_type}[/dim]  {primary_label}"
-            primary_node = tree.add(primary_label)
-
-            # Entity summaries can carry the note body independently of observations.
-            # Preserve it so human-readable output contains the same primary context
-            # as JSON, even for prose-heavy notes with no structured observations.
-            raw_primary_content = primary.get("content")
-            primary_content = (
-                raw_primary_content.strip()
-                if isinstance(raw_primary_content, str) and raw_primary_content.strip()
-                else ""
-            )
-            if primary_content:
-                primary_node.add(Text(primary_content, style="dim"))
-
-            # --- Observations as children (category + truncated content) ---
-            # Trigger: ContextResult.observations exists in the JSON output but was
-            #          never rendered in the Rich path.
-            # Why: users running interactively lost core entity facts (observations)
-            #      that the --json path exposes; the TTY view must be at least as
-            #      informative as the JSON view for the primary entity.
-            # Outcome: each observation appears as a dim "[category] content" leaf
-            #          under its primary node, truncated at 120 chars.
-            observations: list[dict[str, Any]] = list(context_result.get("observations", []))
-            for obs in observations:
-                category = obs.get("category", "")
-                obs_content = obs.get("content", "")
-                # Truncate long observations so the tree stays readable.
-                if len(obs_content) > 120:
-                    obs_content = obs_content[:117] + "..."
-                # Trigger: category and obs_content are user-sourced strings that may
-                #          contain Rich markup characters.  The category is also wrapped
-                #          in literal "[" "]" brackets in the label, which must be
-                #          escaped too so Rich does not treat "[fact]" as a style tag.
-                # Why: embedding "[fact]" in a markup string causes Rich to parse it as
-                #      an unknown tag and silently drop the text.
-                # Outcome: escape the full "[category] content" fragment including the
-                #          surrounding brackets before embedding it in a styled label.
-                obs_label = f"[dim]{markup_escape(f'[{category}] {obs_content}')}[/dim]"
-                primary_node.add(obs_label)
-
-            # --- Related items as children ---
-            related: list[dict[str, Any]] = list(context_result.get("related_results", []))
-            for rel_item in related:
-                rel_title = markup_escape(rel_item.get("title") or rel_item.get("permalink", ""))
-                rel_type = markup_escape(rel_item.get("type", ""))
-                relation = markup_escape(rel_item.get("relation_type", ""))
-
-                parts = []
-                if relation:
-                    parts.append(f"[yellow]{relation}[/yellow]")
-                if rel_type:
-                    parts.append(f"[dim]{rel_type}[/dim]")
-                parts.append(f"[cyan]{rel_title}[/cyan]")
-                primary_node.add(" ".join(parts))
-
-    # Count total related items across all primary results.
-    total_related = sum(len(cr.get("related_results", [])) for cr in context_items)
-    total_observations = sum(len(cr.get("observations", [])) for cr in context_items)
-    subtitle = f"{len(context_items)} primary  •  {total_observations} observations  •  {total_related} related"
-    console.print(Panel(tree, subtitle=subtitle, expand=False))
-
-
-def _display_recent_activity(result: list[dict[str, Any]]) -> None:
-    """Render recent-activity results as a Rich table."""
-    if not result:
-        console.print(
-            Panel(Text("No recent activity.", style="dim"), title="Recent Activity", expand=False)
-        )
-        return
-
-    table = Table(show_header=True, header_style="bold", expand=False)
-    table.add_column("Type", style="dim", width=12)
-    table.add_column("Title", style="bold cyan")
-    show_project = any(item.get("project") for item in result)
-    if show_project:
-        table.add_column("Project", style="magenta")
-    table.add_column("Permalink", style="green")
-    table.add_column("Updated", style="dim")
-
-    for item in result:
-        item_type = item.get("type", "")
-        # Trigger: title, permalink, and timestamps are user-sourced strings from the
-        #          knowledge graph and may contain Rich markup characters.
-        # Why: Rich table cells with a style column parse markup in cell values, so
-        #      bracketed content would be silently consumed or restyled.
-        # Outcome: escape all user-sourced cell values before adding to the table.
-        item_title = markup_escape(item.get("title") or item.get("permalink", ""))
-        project = markup_escape(str(item.get("project") or ""))
-        permalink = markup_escape(item.get("permalink", ""))
-        updated = str(item.get("updated_at") or item.get("created_at") or "")
-        row = [item_type, item_title]
-        if show_project:
-            row.append(project)
-        row.extend((permalink, updated))
-        table.add_row(*row)
-
-    console.print(Panel(table, title="Recent Activity", expand=False))
-
-
-# --- Plain formatters ---
-#
-# Plain output is NOT Rich markup: it is undecorated, greppable text printed via
-# the builtin print().  Literal brackets ([draft], [fact]) must survive verbatim,
-# so we deliberately do NOT call rich.markup.escape here -- escaping is only for
-# the Rich path and would corrupt literal brackets in plain text.
-
-
-def _plain_search_results(result: dict[str, Any], query: str = "") -> None:
-    """Render search-notes results as numbered plain-text entries.
-
-    Mirrors the Rich table content: a header line, then one numbered block per
-    result (title / score / permalink) with an indented snippet line.
-    """
-    results = result.get("results", [])
-    header = f"Search: {query}" if query else "Search results"
-    print(header)
-    print(_search_result_summary(result).replace("  •  ", " | "))
-
-    if not results:
-        print("No results found.")
-        return
-
-    for index, item in enumerate(results, start=1):
-        item_title = item.get("title") or item.get("permalink", "")
-        permalink = item.get("permalink", "")
-        score = item.get("score")
-        score_str = f"{score:.2f}" if score is not None else ""
-        print(f"{index}. {item_title}  (score: {score_str})  {permalink}")
-        raw_snippet = item.get("matched_chunk") or item.get("content") or ""
-        if raw_snippet:
-            snippet = raw_snippet[:200].replace("\n", " ")
-            print(f"    {snippet}")
-
-
-def _plain_read_note(result: dict[str, Any], *, include_frontmatter: bool = False) -> None:
-    """Render the note body for humans or the literal file for round-tripping.
-
-    Plain mode adds NO decoration: no header line, no synthesized frontmatter
-    block, no placeholder for empty notes. A missing note still reports the miss
-    and any related results so it cannot be confused with an empty note. Without
-    --frontmatter, trim the surrounding newline artifacts left by the API's
-    frontmatter removal. With --frontmatter, write the literal file exactly so
-    redirection round-trips every boundary newline (e.g.
-    ``read-note X --plain --frontmatter > note.md``).
-    """
-    raw_content = result.get("content")
-    content = raw_content if isinstance(raw_content, str) else ""
-    if include_frontmatter:
-        sys.stdout.write(content)
-        return
-
-    # Trigger: the MCP fallback returns null note fields when no note resolves.
-    # Why: silence makes a miss indistinguishable from a real empty note in plain mode.
-    # Outcome: report the miss and preserve any related-note suggestions.
-    if raw_content is None and not result.get("title") and not result.get("permalink"):
-        print("Note not found.")
-        raw_related = result.get("related_results")
-        related_results = (
-            [item for item in raw_related if isinstance(item, dict)]
-            if isinstance(raw_related, list)
-            else []
-        )
-        if related_results:
-            print("Related results:")
-            for item in related_results:
-                title = str(item.get("title") or item.get("permalink") or "")
-                permalink = str(item.get("permalink") or "")
-                print(f"- {title}  {permalink}".rstrip())
-        else:
-            print("No note or related content found.")
-        return
-
-    body = content.strip("\n") if content else ""
-    if body:
-        print(body)
-
-
-def _plain_build_context(result: dict[str, Any]) -> None:
-    """Render build-context as an ASCII-indented outline.
-
-    Each primary result is a top-level line; its observations and related items
-    are two-space indented beneath it, mirroring the Rich tree content.
-    """
-    metadata = result.get("metadata", {})
-    uri = metadata.get("uri", "")
-    context_items: list[dict[str, Any]] = list(result.get("results", []))
-
-    print(f"Context: {uri}" if uri else "Context")
-
-    if not context_items:
-        print("No related content found.")
-        return
-
-    for context_result in context_items:
-        primary = context_result.get("primary_result", {})
-        p_title = primary.get("title") or primary.get("permalink", "")
-        p_type = primary.get("type", "")
-        primary_line = f"{p_type}  {p_title}" if p_type else p_title
-        print(primary_line)
-
-        raw_primary_content = primary.get("content")
-        primary_content = (
-            raw_primary_content.strip()
-            if isinstance(raw_primary_content, str) and raw_primary_content.strip()
-            else ""
-        )
-        if primary_content:
-            for line in primary_content.splitlines():
-                print(f"  {line}")
-
-        observations: list[dict[str, Any]] = list(context_result.get("observations", []))
-        for obs in observations:
-            category = obs.get("category", "")
-            obs_content = obs.get("content", "")
-            if len(obs_content) > 120:
-                obs_content = obs_content[:117] + "..."
-            print(f"  [{category}] {obs_content}")
-
-        related: list[dict[str, Any]] = list(context_result.get("related_results", []))
-        for rel_item in related:
-            rel_title = rel_item.get("title") or rel_item.get("permalink", "")
-            rel_type = rel_item.get("type", "")
-            relation = rel_item.get("relation_type", "")
-            parts = [part for part in (relation, rel_type, rel_title) if part]
-            print(f"  {'  '.join(parts)}")
-
-
-def _plain_recent_activity(result: list[dict[str, Any]]) -> None:
-    """Render recent-activity as plain "- title (type) permalink updated" lines."""
-    if not result:
-        print("No recent activity.")
-        return
-
-    print("Recent Activity")
-    show_project = any(item.get("project") for item in result)
-    for item in result:
-        item_type = item.get("type", "")
-        item_title = item.get("title") or item.get("permalink", "")
-        project = str(item.get("project") or "")
-        permalink = item.get("permalink", "")
-        updated = str(item.get("updated_at") or item.get("created_at") or "")
-        project_label = f" [project: {project}]" if show_project and project else ""
-        print(f"- {item_title} ({item_type}){project_label} {permalink} {updated}".rstrip())
-
-
-def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
-    """Return the CLI failure message for delete-note JSON results, if any."""
-    error = result.get("error")
-    if error:
-        return str(error)
-
-    failed_deletes = result.get("failed_deletes")
-    # Trigger: directory deletion can partially fail without raising from the service.
-    # Why: cleanup scripts need a non-zero exit when files remain undeleted.
-    # Outcome: the CLI fails even if older MCP JSON did not include an error field.
-    if (
-        result.get("is_directory") is True
-        and isinstance(failed_deletes, int)
-        and failed_deletes > 0
-    ):
-        return f"Directory delete incomplete: {failed_deletes} file(s) failed"
-
-    return None
-
-
-def _tool_error_payload(error: Exception) -> dict[str, Any]:
-    """The structured result a JSON-mode tool error carries, or {} for plain text."""
-    try:
-        payload = json.loads(str(error))
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-# --- Commands ---
-
-
-@tool_app.command("write")
-def write_note(
-    title: Annotated[str, typer.Option(help="The title of the note")],
-    folder: Annotated[str, typer.Option(help="The folder to create the note in")],
-    content: Annotated[
-        Optional[str],
-        typer.Option(
-            help="The content of the note. If not provided, content will be read from stdin."
-        ),
-    ] = None,
-    tags: Annotated[
-        Optional[List[str]], typer.Option(help="A list of tags to apply to the note")
-    ] = None,
-    note_type: Annotated[
-        str,
-        typer.Option(
-            "--type",
-            help=(
-                "Note type stored in frontmatter (e.g. 'guide', 'report'). "
-                "A 'type:' in the note's own content frontmatter takes precedence."
-            ),
-        ),
-    ] = "note",
-    project: Annotated[
-        Optional[str],
-        typer.Option(
-            help="The project to write to. If not provided, the default project will be used."
-        ),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    overwrite: bool = typer.Option(
-        False,
-        "--overwrite",
-        help="Replace an existing note on conflict (matches MCP write_note overwrite=True)",
+ProjectOption = Annotated[
+    Optional[str],
+    typer.Option(
+        help="Project name, 'workspace/project', or project id. Defaults to the default project."
     ),
-    expected_checksum: Annotated[
-        Optional[str],
-        typer.Option(
-            "--expected-checksum",
-            help=(
-                "With --overwrite, replace the note only if it is still this revision "
-                "(the checksum from a previous JSON result)."
-            ),
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Create or update a markdown note. Content can be provided via --content or stdin.
+]
+JsonOption = Annotated[bool, typer.Option("--json", help="Print the tool's JSON result")]
+LocalOption = Annotated[
+    bool, typer.Option("--local", help="Force local API routing (ignore cloud mode)")
+]
+CloudOption = Annotated[bool, typer.Option("--cloud", help="Force cloud API routing")]
+PageOption = Annotated[int, typer.Option(help="Page number")]
+PageSizeOption = Annotated[int, typer.Option(help="Results per page (1-100)")]
+ExpectedChecksumOption = Annotated[
+    Optional[str],
+    typer.Option(help="Act only while the note still has this checksum"),
+]
 
-    Examples:
 
-    bm tool write --title "My Note" --folder "notes" --content "Note content"
-    bm tool write --title "My Guide" --folder "notes" --content "..." --type guide
-    echo "content" | bm tool write --title "My Note" --folder "notes"
-    bm tool write --title "My Note" --folder "notes" --overwrite
-    bm tool write --title "My Note" --folder "notes" --overwrite --expected-checksum <checksum>
-    bm tool write --title "My Note" --folder "notes" --local
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+# --- Running a tool ---
+
+
+def run_tool(
+    tool: Callable[..., Coroutine[Any, Any, Any]],
+    *,
+    project: str | None,
+    json_output: bool,
+    local: bool,
+    cloud: bool,
+    default_to_config_project: bool = True,
+    **arguments: Any,
+) -> None:
+    """Call a bm_* tool with MCP argument validation and print its result."""
+    # Deferred with the tool stack (#886).
     from fastmcp.exceptions import ToolError
-
-    from basic_memory.mcp.tools import write_note as mcp_write_note
+    from pydantic import ValidationError, validate_call
 
     try:
         validate_routing_flags(local, cloud)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1)
 
-        # If content is not provided, read from stdin
-        if content is None:
-            if not sys.stdin.isatty():
-                content = sys.stdin.read()
-            else:  # pragma: no cover
-                typer.echo(
-                    "No content provided. Please provide content via --content or by piping to stdin.",
-                    err=True,
-                )
-                raise typer.Exit(1)
-
-        if content is not None and not content.strip():
-            typer.echo("Empty content provided. Please provide non-empty content.", err=True)
+    # Trigger: no --project on a command whose tool needs one.
+    # Why: MCP callers must name a project, but a person at a shell has a default
+    #      project in config, and every other `bm` command already uses it.
+    # Outcome: the configured default, or a clear error when none is set.
+    if project is None and default_to_config_project:
+        project = ConfigManager().config.default_project
+        if project is None:
+            typer.echo("Error: no default project is set; pass --project.", err=True)
             raise typer.Exit(1)
+    arguments["project"] = project
 
-        assert content is not None
-
+    # Only arguments the user supplied are passed, so each tool's own default applies.
+    supplied = {name: value for name, value in arguments.items() if value is not None}
+    validated_tool = validate_call(tool)
+    try:
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
-                mcp_write_note(
-                    title=title,
-                    content=content,
-                    directory=folder,
-                    project=project,
-                    project_id=project_id,
-                    tags=tags,
-                    note_type=note_type,
-                    overwrite=overwrite,
-                    expected_checksum=expected_checksum,
-                    output_format="json",
+                validated_tool(
+                    **supplied,
+                    output_format="json" if json_output else "text",
+                    # Outside an MCP request there is no FastMCP context to inject.
+                    context=None,
                 )
             )
+    except ValidationError as error:
+        for problem in error.errors():
+            flag = "--" + "-".join(str(part) for part in problem["loc"]).replace("_", "-")
+            typer.echo(f"Error: {flag}: {problem['msg']}", err=True)
+        raise typer.Exit(1)
+    except ToolError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1)
 
-        _print_json(result)
-    except ToolError as e:
-        # A refused write (NOTE_ALREADY_EXISTS, NOTE_REVISION_CONFLICT, NOTE_PATH_CONFLICT,
-        # SECURITY_VALIDATION_ERROR) is a tool error whose message, in JSON mode, is the
-        # structured result. Scripts keep the same contract: error on stderr, the result
-        # on stdout, exit 1.
-        payload = _tool_error_payload(e)
-        typer.echo(f"Error: {payload.get('error') or e}", err=True)
-        if payload:
-            _print_json(payload)
-        raise typer.Exit(1)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during write_note: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+    if json_output:
+        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+    else:
+        print(result)
+
+
+# --- Notes ---
 
 
 @tool_app.command("read")
-def read_note(
-    identifier: str,
-    start_line: Annotated[
-        Optional[int],
-        typer.Option(min=1, help="First document line, including frontmatter (1-based)"),
-    ] = None,
-    end_line: Annotated[
-        Optional[int],
-        typer.Option(min=1, help="Last document line, inclusive; omitted reads to EOF"),
-    ] = None,
-    include_frontmatter: bool = typer.Option(
-        False,
-        "--frontmatter",
-        "--include-frontmatter",
-        help="Include YAML frontmatter in output (--include-frontmatter is a deprecated alias)",
-    ),
-    json_output: bool = typer.Option(
-        False, "--json", help="Output raw JSON instead of formatted display"
-    ),
-    plain: bool = typer.Option(
-        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Read a markdown note from the knowledge base.
-
-    Three output modes: Rich formatted Markdown (default in a terminal), plain
-    undecorated text (--plain), and raw JSON (--json, or automatically when
-    piped). The interactive default is set by the cli_output_style config option
-    (rich/plain). --json and --plain are mutually exclusive.
-
-    Examples:
-
-    bm tool read my-note
-    bm tool read my-note --frontmatter
-    bm tool read my-note --plain
-    bm tool read my-note --json
-    bm tool read my-note --start-line 120 --end-line 180 --plain
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import read_note as mcp_read_note
-
-    try:
-        validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_read_note(
-                    identifier=identifier,
-                    project=project,
-                    project_id=project_id,
-                    include_frontmatter=include_frontmatter,
-                    output_format="json",
-                    start_line=start_line,
-                    end_line=end_line,
-                )
-            )
-
-        # A missing note may carry useful suggestions. Render those in the
-        # requested mode before exiting non-zero; other failures keep the
-        # existing JSON diagnostic path.
-        not_found = isinstance(result, dict) and result.get("error") == "NOTE_NOT_FOUND"
-        if isinstance(result, dict) and result.get("error") and not not_found:
-            typer.echo(f"Error: {result['error']}", err=True)
-            _print_json(result)
-            raise typer.Exit(1)
-
-        # A string result (e.g. a not-found message) has no structured shape to
-        # format, so always fall back to JSON regardless of the resolved mode.
-        mode = _resolve_output_mode(json_output, plain)
-        if mode == "json" or isinstance(result, str):
-            _print_json(result)
-        elif "start_line" in result:
-            from basic_memory.markdown.line_scanning import format_line_read
-
-            text = format_line_read(
-                result["content"],
-                start_line=result["start_line"],
-                end_line=result["end_line"],
-                total_lines=result["total_lines"],
-            )
-            if mode == "plain":
-                print(text)
-            else:
-                console.print(Text(text))
-        elif mode == "plain":
-            _plain_read_note(result, include_frontmatter=include_frontmatter and not not_found)
-        else:
-            _display_read_note(result, include_frontmatter=include_frontmatter)
-        if not_found:
-            typer.echo(f"Error: Note not found: {identifier}", err=True)
-            raise typer.Exit(1)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during read_note: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-@tool_app.command("delete")
-def delete_note(
-    identifier: str,
-    is_directory: bool = typer.Option(
-        False, "--is-directory", help="Delete a directory instead of a single note"
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+def read(
+    identifier: Annotated[str, typer.Argument(help="Path, permalink, memory:// URL, or title")],
+    section: Annotated[Optional[str], typer.Option(help="A heading to read")] = None,
+    start_line: Annotated[Optional[int], typer.Option(help="First line (1-based)")] = None,
+    end_line: Annotated[Optional[int], typer.Option(help="Last line, inclusive")] = None,
+    max_tokens: Annotated[Optional[int], typer.Option(help="Approximate token budget")] = None,
+    include_frontmatter: Annotated[bool, typer.Option(help="Include the YAML frontmatter")] = True,
+    include_content: Annotated[
+        bool, typer.Option(help="False returns only metadata and the checksum")
+    ] = True,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
 ) -> None:
-    """Delete a note or directory from the knowledge base.
+    """Read a note or file (bm_read).
 
     Examples:
 
-    bm tool delete notes/old-draft
-    bm tool delete docs/archive --is-directory
+    bm tool read notes/plan.md
+    bm tool read "Q4 Plan" --section Decisions
+    bm tool read notes/plan.md --start-line 1 --end-line 40
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from fastmcp.exceptions import ToolError
+    from basic_memory.mcp.tools import bm_read
 
-    from basic_memory.mcp.tools import delete_note as mcp_delete_note
+    run_tool(
+        bm_read,
+        identifier=identifier,
+        section=section,
+        start_line=start_line,
+        end_line=end_line,
+        max_tokens=max_tokens,
+        include_frontmatter=include_frontmatter,
+        include_content=include_content,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
-    try:
-        validate_routing_flags(local, cloud)
 
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_delete_note(
-                    identifier=identifier,
-                    is_directory=is_directory,
-                    project=project,
-                    project_id=project_id,
-                    output_format="json",
-                )
-            )
+@tool_app.command("write")
+def write(
+    content: Annotated[
+        Optional[str], typer.Option(help="The note's Markdown; read from stdin when omitted")
+    ] = None,
+    identifier: Annotated[Optional[str], typer.Option(help="Exact file path to write")] = None,
+    title: Annotated[Optional[str], typer.Option(help="Note title")] = None,
+    directory: Annotated[Optional[str], typer.Option(help="Folder for a titled note")] = None,
+    note_type: Annotated[Optional[str], typer.Option(help="Frontmatter type")] = None,
+    tags: Annotated[Optional[list[str]], typer.Option(help="Tag (repeatable)")] = None,
+    metadata: Annotated[
+        Optional[str], typer.Option(help="Extra frontmatter as a JSON object")
+    ] = None,
+    overwrite: Annotated[
+        Optional[bool], typer.Option("--overwrite", help="Replace an existing note")
+    ] = None,
+    expected_checksum: ExpectedChecksumOption = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Create a note, or replace one with --overwrite (bm_write).
 
-        if isinstance(result, dict):
-            failure_message = _delete_note_failure_message(result)
-            if failure_message:
-                typer.echo(f"Error: {failure_message}", err=True)
-                raise typer.Exit(1)
+    Examples:
 
-        _print_json(result)
-    except ToolError as e:
-        # A failed delete is a tool error whose message, in JSON mode, is the
-        # structured result; report it the same way as an error field.
-        typer.echo(f"Error: {_delete_note_failure_message(_tool_error_payload(e)) or e}", err=True)
-        raise typer.Exit(1)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during delete_note: {e}", err=True)
+    bm tool write --identifier notes/plan.md --content "# Plan"
+    bm tool write --title "Q4 Plan" --directory plans --note-type plan < plan.md
+    bm tool write --identifier notes/plan.md --overwrite --expected-checksum <checksum> < plan.md
+    """
+    from basic_memory.mcp.tools import bm_write
+
+    # Trigger: no --content flag.
+    # Why: notes are usually longer than a shell argument; piping keeps them intact.
+    # Outcome: read the note from stdin, or fail when stdin is a terminal.
+    if content is None:
+        if sys.stdin.isatty():  # pragma: no cover - CliRunner stdin is never a terminal
+            typer.echo("Error: pass --content or pipe the note on stdin.", err=True)
             raise typer.Exit(1)
-        raise
+        content = sys.stdin.read()
+
+    run_tool(
+        bm_write,
+        content=content,
+        identifier=identifier,
+        title=title,
+        directory=directory,
+        note_type=note_type,
+        tags=tags,
+        metadata=metadata,
+        overwrite=overwrite,
+        expected_checksum=expected_checksum,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
 
 @tool_app.command("edit")
-def edit_note(
-    identifier: str,
-    operation: Annotated[str, typer.Option("--operation", help="Edit operation to apply")],
-    content: Annotated[str, typer.Option("--content", help="Content for the edit operation")],
-    find_text: Annotated[
-        Optional[str], typer.Option("--find-text", help="Text to find for find_replace operation")
-    ] = None,
-    section: Annotated[
-        Optional[str],
+def edit(
+    identifier: Annotated[str, typer.Argument(help="The note to edit")],
+    command: Annotated[
+        str,
         typer.Option(
-            "--section",
-            help=(
-                "Section heading for section-based operations: replace_section, "
-                "insert_before_section, insert_after_section"
-            ),
+            help="append, prepend, find_replace, replace_section, insert_before_section, "
+            "insert_after_section, or set_metadata"
         ),
+    ],
+    content: Annotated[Optional[str], typer.Option(help="Text to add or substitute")] = None,
+    section: Annotated[Optional[str], typer.Option(help="Heading for section commands")] = None,
+    find_text: Annotated[Optional[str], typer.Option(help="Text to replace")] = None,
+    expected_replacements: Annotated[
+        Optional[int], typer.Option(help="For find_replace: required match count")
     ] = None,
-    expected_replacements: int = typer.Option(
-        1,
-        "--expected-replacements",
-        help="Expected replacement count for find_replace operation",
-    ),
-    replace_subsections: bool = typer.Option(
-        True,
-        "--replace-subsections/--no-replace-subsections",
-        help=(
-            "For replace_section, replace nested subsections too; use "
-            "--no-replace-subsections to preserve them"
-        ),
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(
-            help="The project to edit. If not provided, the default project will be used."
-        ),
+    replace_subsections: Annotated[
+        Optional[bool], typer.Option(help="For replace_section: replace nested headings too")
     ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
+    metadata: Annotated[
+        Optional[str], typer.Option(help="Frontmatter changes as a JSON object")
     ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Edit an existing markdown note.
-
-    Operations: append, prepend, find_replace, replace_section,
-    insert_before_section, insert_after_section.
+    expected_checksum: ExpectedChecksumOption = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Change part of a note (bm_edit).
 
     Examples:
 
-    bm tool edit my-note --operation append --content "new content"
-    bm tool edit my-note --operation find_replace --find-text "old" --content "new"
-    bm tool edit my-note --operation insert_after_section --section "## Notes" --content "new line"
-    bm tool edit my-note --operation replace_section --section "## Notes" --content "updated"
-    bm tool edit my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
+    bm tool edit notes/plan.md --command append --content "- [next] ship it"
+    bm tool edit notes/plan.md --command find_replace --find-text draft --content final
+    bm tool edit notes/plan.md --command replace_section --section Status --content "Done."
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from fastmcp.exceptions import ToolError
+    from basic_memory.mcp.tools import bm_edit
 
-    from basic_memory.mcp.tools import edit_note as mcp_edit_note
-
-    try:
-        validate_routing_flags(local, cloud)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_edit_note(
-                    identifier=identifier,
-                    operation=operation,
-                    content=content,
-                    project=project,
-                    project_id=project_id,
-                    section=section,
-                    find_text=find_text,
-                    expected_replacements=expected_replacements,
-                    replace_subsections=replace_subsections,
-                    output_format="json",
-                )
-            )
-
-        # MCP tool returns error field on failure in JSON mode
-        if isinstance(result, dict) and result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
-            raise typer.Exit(1)
-
-        _print_json(result)
-    except ToolError as e:
-        # A failed edit is a tool error whose message, in JSON mode, is the structured
-        # result. Same contract as write-note: error (and any guidance, such as the
-        # read-before-retry warning for an unknown outcome) on stderr, the result on
-        # stdout, exit 1.
-        payload = _tool_error_payload(e)
-        typer.echo(f"Error: {payload.get('error') or e}", err=True)
-        if payload.get("message"):
-            typer.echo(payload["message"], err=True)
-        if payload:
-            _print_json(payload)
-        raise typer.Exit(1)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during edit_note: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+    run_tool(
+        bm_edit,
+        identifier=identifier,
+        command=command,
+        content=content,
+        section=section,
+        find_text=find_text,
+        expected_replacements=expected_replacements,
+        replace_subsections=replace_subsections,
+        metadata=metadata,
+        expected_checksum=expected_checksum,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
 
-@tool_app.command("context")
-def build_context(
-    url: str,
-    compact: Annotated[
-        bool, typer.Option("--compact", help="Omit note and observation bodies for discovery")
+@tool_app.command("move")
+def move(
+    destination: Annotated[str, typer.Option(help="New path for the note or folder")],
+    identifier: Annotated[Optional[str], typer.Option(help="The note to move")] = None,
+    path: Annotated[Optional[str], typer.Option(help="The folder to move")] = None,
+    expected_checksum: ExpectedChecksumOption = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Move or rename a note or folder (bm_move).
+
+    Examples:
+
+    bm tool move --identifier notes/plan.md --destination plans/q4.md
+    bm tool move --path drafts --destination archive/drafts
+    """
+    from basic_memory.mcp.tools import bm_move
+
+    run_tool(
+        bm_move,
+        destination=destination,
+        identifier=identifier,
+        path=path,
+        expected_checksum=expected_checksum,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("delete")
+def delete(
+    identifier: Annotated[Optional[str], typer.Option(help="The note to delete")] = None,
+    path: Annotated[Optional[str], typer.Option(help="The folder to delete")] = None,
+    recursive: Annotated[
+        bool, typer.Option("--recursive", help="Required to delete a folder")
     ] = False,
-    depth: Optional[int] = typer.Option(1, "--depth", help="Depth of context to build"),
-    timeframe: Optional[str] = typer.Option(
-        "7d", "--timeframe", help="Timeframe filter (e.g., '7d', '1 week')"
-    ),
-    page: int = typer.Option(1, "--page", help="Page number for pagination"),
-    page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
-    max_related: int = typer.Option(10, "--max-related", help="Maximum related items to return"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Output raw JSON instead of formatted display"
-    ),
-    plain: bool = typer.Option(
-        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Get context needed to continue a discussion.
-
-    Three output modes: a Rich tree view (default in a terminal), a plain
-    ASCII-indented outline (--plain), and raw JSON (--json, or automatically when
-    piped). The interactive default is set by the cli_output_style config option
-    (rich/plain). --json and --plain are mutually exclusive.
+    expected_checksum: ExpectedChecksumOption = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Delete a note, or a folder with --recursive (bm_delete).
 
     Examples:
 
-    bm tool context memory://specs/search
-    bm tool context specs/search --depth 2 --timeframe 30d
-    bm tool context memory://specs/search --plain
-    bm tool context memory://specs/search --json
+    bm tool delete --identifier notes/old-draft.md
+    bm tool delete --path drafts --recursive
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import build_context as mcp_build_context
+    from basic_memory.mcp.tools import bm_delete
 
-    try:
-        validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_build_context(
-                    url=url,
-                    project=project,
-                    project_id=project_id,
-                    depth=depth,
-                    timeframe=timeframe,
-                    page=page,
-                    page_size=page_size,
-                    max_related=max_related,
-                    output_format="json",
-                    compact=compact,
-                )
-            )
-
-        # A string result has no structured shape to format, so fall back to JSON.
-        mode = _resolve_output_mode(json_output, plain)
-        if mode == "json" or isinstance(result, str):
-            _print_json(result)
-        elif mode == "plain":
-            _plain_build_context(result)
-        else:
-            _display_build_context(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during build_context: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+    run_tool(
+        bm_delete,
+        identifier=identifier,
+        path=path,
+        recursive=recursive,
+        expected_checksum=expected_checksum,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
 
-@tool_app.command("recent")
-def recent_activity(
-    type: Annotated[Optional[List[str]], typer.Option(help="Filter by item type")] = None,
-    depth: Optional[int] = typer.Option(1, "--depth", help="Depth of context to build"),
-    timeframe: Optional[str] = typer.Option(
-        "7d", "--timeframe", help="Timeframe filter (e.g., '7d', '1 week')"
-    ),
-    page: int = typer.Option(1, "--page", help="Page number for pagination"),
-    # Match the MCP recent_activity default (page_size=10) so identical default
-    # invocations return the same number of rows from CLI and MCP.
-    page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Output raw JSON instead of formatted display"
-    ),
-    plain: bool = typer.Option(
-        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Get recent activity across the knowledge base.
+# --- Finding ---
 
-    Three output modes: a formatted Rich table (default in a terminal), plain
-    undecorated lines (--plain), and raw JSON (--json, or automatically when
-    piped). The interactive default is set by the cli_output_style config option
-    (rich/plain). --json and --plain are mutually exclusive.
+
+@tool_app.command("list")
+def list_(
+    path: Annotated[str, typer.Argument(help="The folder to list")] = "/",
+    glob: Annotated[Optional[str], typer.Option(help="File-name glob, e.g. '*.md'")] = None,
+    sort: Annotated[Optional[str], typer.Option(help="File order")] = None,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """List one folder (bm_list).
 
     Examples:
 
-    bm tool recent
-    bm tool recent --timeframe 30d --page-size 20
-    bm tool recent --type entity --type observation
-    bm tool recent --plain
-    bm tool recent --json
+    bm tool list
+    bm tool list plans --glob "*.md"
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
+    from basic_memory.mcp.tools import bm_list
 
-    try:
-        validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+    run_tool(
+        bm_list,
+        path=path,
+        glob=glob,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_recent_activity(
-                    type=type or "",
-                    depth=depth if depth is not None else 1,
-                    timeframe=timeframe if timeframe is not None else "7d",
-                    page=page,
-                    page_size=page_size,
-                    project=project,
-                    project_id=project_id,
-                    output_format="json",
-                )
-            )
 
-        # A string result has no structured shape to format, so fall back to JSON.
-        mode = _resolve_output_mode(json_output, plain)
-        if mode == "json" or isinstance(result, str):
-            _print_json(result)
-        elif mode == "plain":
-            _plain_recent_activity(result)
-        else:
-            _display_recent_activity(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during recent_activity: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+@tool_app.command("find")
+def find(
+    path: Annotated[str, typer.Argument(help="The folder to search under")] = "/",
+    name: Annotated[Optional[str], typer.Option(help="File-name glob, e.g. '*.md'")] = None,
+    filters: Annotated[
+        Optional[str], typer.Option(help="Frontmatter filters as a JSON object")
+    ] = None,
+    fields: Annotated[
+        Optional[list[str]], typer.Option(help="Frontmatter field to return (repeatable)")
+    ] = None,
+    depth: Annotated[Optional[int], typer.Option(help="Folder levels to search (1-10)")] = None,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Find files by name or notes by frontmatter, recursively (bm_find).
+
+    Examples:
+
+    bm tool find --name "*.md"
+    bm tool find --filters '{"type": "task", "status": "active"}' --fields status
+    """
+    from basic_memory.mcp.tools import bm_find
+
+    run_tool(
+        bm_find,
+        path=path,
+        name=name,
+        filters=filters,
+        fields=fields,
+        depth=depth,
+        page=page,
+        page_size=page_size,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
 
 @tool_app.command("search")
-def search_notes(
-    query: Annotated[
-        Optional[str],
-        typer.Argument(help="Search query string (optional when using metadata filters)"),
-    ] = "",
-    compact: Annotated[
-        bool, typer.Option("--compact", help="Omit note bodies and matched excerpts for discovery")
-    ] = False,
-    permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
-    title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
-    vector: Annotated[bool, typer.Option("--vector", help="Use vector retrieval")] = False,
-    hybrid: Annotated[bool, typer.Option("--hybrid", help="Use hybrid retrieval")] = False,
-    after_date: Annotated[
-        Optional[str],
-        typer.Option("--after_date", help="Search results after date, eg. '2d', '1 week'"),
+def search(
+    query: Annotated[Optional[str], typer.Argument(help="What to search for")] = None,
+    mode: Annotated[
+        Optional[str], typer.Option(help="hybrid, text, semantic, title, or permalink")
     ] = None,
-    tags: Annotated[
-        Optional[List[str]],
-        typer.Option("--tag", help="Filter by frontmatter tag (repeatable)"),
-    ] = None,
-    status: Annotated[
-        Optional[str],
-        typer.Option("--status", help="Filter by frontmatter status"),
+    filters: Annotated[
+        Optional[str], typer.Option(help="Frontmatter filters as a JSON object")
     ] = None,
     note_types: Annotated[
-        Optional[List[str]],
-        typer.Option("--type", help="Filter by frontmatter type (repeatable)"),
+        Optional[list[str]], typer.Option(help="Frontmatter type (repeatable)")
     ] = None,
-    entity_types: Annotated[
-        Optional[List[str]],
-        typer.Option(
-            "--entity-type",
-            help="Filter by search item type: entity, observation, relation (repeatable)",
-        ),
+    items: Annotated[
+        Optional[list[str]], typer.Option(help="note, observation, or relation (repeatable)")
     ] = None,
     categories: Annotated[
-        Optional[List[str]],
-        typer.Option(
-            "--category",
-            help=(
-                "Filter observation results to exact categories (repeatable); "
-                "pair with --entity-type observation"
-            ),
-        ),
+        Optional[list[str]], typer.Option(help="Observation category (repeatable)")
     ] = None,
-    meta: Annotated[
-        Optional[List[str]],
-        typer.Option("--meta", help="Filter by frontmatter key=value (repeatable)"),
+    since: Annotated[Optional[str], typer.Option(help="How far back: '7d', 'last week'")] = None,
+    lines: Annotated[
+        Optional[int], typer.Option(help="Return matching lines with this much context")
     ] = None,
-    filter_json: Annotated[
-        Optional[str],
-        typer.Option("--filter", help="JSON metadata filter (advanced)"),
+    max_matches: Annotated[Optional[int], typer.Option(help="Matching lines per note")] = None,
+    identifier: Annotated[Optional[str], typer.Option(help="Search only this note")] = None,
+    path: Annotated[Optional[str], typer.Option(help="Search only this folder")] = None,
+    compact: Annotated[bool, typer.Option("--compact", help="Omit bodies and excerpts")] = False,
+    valid_at: Annotated[Optional[str], typer.Option(help="Facts valid on this date")] = None,
+    valid_overlaps: Annotated[
+        Optional[str], typer.Option(help="Facts valid during '[start,end)'")
     ] = None,
-    page: int = typer.Option(1, "--page", help="Page number for pagination"),
-    page_size: int = typer.Option(10, "--page-size", help="Number of results per page"),
-    json_output: bool = typer.Option(
-        False, "--json", help="Output raw JSON instead of formatted display"
-    ),
-    plain: bool = typer.Option(
-        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
-    ),
+    time_kind: Annotated[Optional[str], typer.Option(help="Kind of authored time")] = None,
+    min_similarity: Annotated[
+        Optional[float], typer.Option(help="Semantic similarity floor (0-1)")
+    ] = None,
+    projects: Annotated[
+        Optional[list[str]], typer.Option(help="Search this project too (repeatable)")
+    ] = None,
+    all_projects: Annotated[
+        bool, typer.Option("--all-projects", help="Search every project")
+    ] = False,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Search notes, ranked by relevance (bm_search).
+
+    Examples:
+
+    bm tool search "auth decision"
+    bm tool search --filters '{"status": "draft"}' --note-types plan
+    bm tool search "retry" --lines 2 --path specs
+    bm tool search "postgres" --all-projects --since 30d
+    """
+    from basic_memory.mcp.tools import bm_search
+
+    run_tool(
+        bm_search,
+        query=query,
+        mode=mode,
+        filters=filters,
+        note_types=note_types,
+        items=items,
+        categories=categories,
+        since=since,
+        lines=lines,
+        max_matches=max_matches,
+        identifier=identifier,
+        path=path,
+        compact=compact,
+        valid_at=valid_at,
+        valid_overlaps=valid_overlaps,
+        time_kind=time_kind,
+        min_similarity=min_similarity,
+        projects=projects,
+        all_projects=all_projects,
+        page=page,
+        page_size=page_size,
+        project=project,
+        # --projects and --all-projects choose the scope themselves.
+        default_to_config_project=not (projects or all_projects),
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("context")
+def context(
+    identifier: Annotated[str, typer.Argument(help="Note or memory:// URL to start from")],
+    depth: Annotated[Optional[int], typer.Option(help="Relation hops to follow (1-5)")] = None,
+    since: Annotated[Optional[str], typer.Option(help="How far back: '7d', 'last week'")] = None,
+    max_related: Annotated[Optional[int], typer.Option(help="Most related results")] = None,
+    compact: Annotated[bool, typer.Option("--compact", help="Omit bodies")] = False,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Follow a note's relations (bm_context).
+
+    Examples:
+
+    bm tool context specs/search
+    bm tool context memory://specs/* --depth 2 --since 30d
+    """
+    from basic_memory.mcp.tools import bm_context
+
+    run_tool(
+        bm_context,
+        identifier=identifier,
+        depth=depth,
+        since=since,
+        max_related=max_related,
+        compact=compact,
+        page=page,
+        page_size=page_size,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+# --- Projects and schemas ---
+
+
+@tool_app.command("project")
+def project_(
+    command: Annotated[str, typer.Argument(help="list, create, or recent")],
+    name: Annotated[Optional[str], typer.Option(help="For create: the project name")] = None,
+    path: Annotated[Optional[str], typer.Option(help="For create: the project folder")] = None,
+    set_default: Annotated[
+        bool, typer.Option("--set-default", help="For create: make it the default")
+    ] = False,
+    workspace: Annotated[Optional[str], typer.Option(help="Cloud workspace slug")] = None,
+    since: Annotated[Optional[str], typer.Option(help="For recent: how far back")] = None,
+    items: Annotated[
+        Optional[list[str]], typer.Option(help="For recent: note, observation, or relation")
+    ] = None,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
     project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
+        Optional[str], typer.Option(help="For recent: one project instead of all")
     ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Search across all content in the knowledge base.
-
-    Three output modes: a formatted Rich table (default in a terminal), plain
-    numbered text results (--plain), and raw JSON (--json, or automatically when
-    piped). The interactive default is set by the cli_output_style config option
-    (rich/plain). --json and --plain are mutually exclusive.
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """List projects, create one, or show recent activity (bm_project).
 
     Examples:
 
-    bm tool search "my query"
-    bm tool search --permalink "specs/*"
-    bm tool search --tag python --tag async
-    bm tool search --meta status=draft
-    bm tool search "auth" --entity-type observation --category requirement
-    bm tool search "my query" --plain
-    bm tool search "my query" --json
+    bm tool project list
+    bm tool project recent --since 3d
+    bm tool project create --name research --path ~/research
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import search_notes as mcp_search
+    from basic_memory.mcp.tools import bm_project
 
-    try:
-        validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
-
-        mode_flags = [permalink, title, vector, hybrid]
-        if sum(1 for enabled in mode_flags if enabled) > 1:  # pragma: no cover
-            typer.echo(
-                "Use only one mode flag: --permalink, --title, --vector, or --hybrid. Exiting.",
-                err=True,
-            )
-            raise typer.Exit(1)
-
-        # --- Build metadata filters from --filter and --meta ---
-        metadata_filters: Dict[str, Any] | None = {}
-        if filter_json:
-            try:
-                metadata_filters = json.loads(filter_json)
-                if not isinstance(metadata_filters, dict):
-                    raise ValueError("Metadata filter JSON must be an object")
-            except json.JSONDecodeError as e:
-                typer.echo(f"Invalid JSON for --filter: {e}", err=True)
-                raise typer.Exit(1)
-
-        if meta:
-            for item in meta:
-                if "=" not in item:
-                    typer.echo(
-                        f"Invalid --meta entry '{item}'. Use key=value format.",
-                        err=True,
-                    )
-                    raise typer.Exit(1)
-                key, value = item.split("=", 1)
-                key = key.strip()
-                if not key:
-                    typer.echo(f"Invalid --meta entry '{item}'.", err=True)
-                    raise typer.Exit(1)
-                metadata_filters[key] = value
-
-        if not metadata_filters:
-            metadata_filters = None
-
-        # --- Determine search type from mode flags ---
-        search_type: str | None = None
-        if permalink:
-            search_type = "permalink"
-        if title:
-            search_type = "title"
-        if vector:
-            search_type = "vector"
-        if hybrid:
-            search_type = "hybrid"
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_search(
-                    query=query or None,
-                    project=project,
-                    project_id=project_id,
-                    search_type=search_type,
-                    output_format="json",
-                    page=page,
-                    after_date=after_date,
-                    page_size=page_size,
-                    note_types=note_types,
-                    entity_types=entity_types,
-                    categories=categories,
-                    metadata_filters=metadata_filters,
-                    tags=tags,
-                    status=status,
-                    compact=compact,
-                )
-            )
-
-        # MCP tool may return a string error message
-        if isinstance(result, str):
-            typer.echo(result, err=True)
-            raise typer.Exit(1)
-
-        mode = _resolve_output_mode(json_output, plain)
-        if mode == "json":
-            _print_json(result)
-        elif mode == "plain":
-            _plain_search_results(result, query=query or "")
-        else:
-            _display_search_results(result, query=query or "")
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            logger.exception("Error during search", e)
-            typer.echo(f"Error during search: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+    run_tool(
+        bm_project,
+        command=command,
+        name=name,
+        path=path,
+        set_default=set_default,
+        workspace=workspace,
+        since=since,
+        items=items,
+        page=page,
+        page_size=page_size,
+        project=project,
+        # recent without --project covers every project.
+        default_to_config_project=False,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
 
 
-# --- list-projects ---
-
-
-@tool_app.command("projects")
-def list_projects(
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """List all available projects with their status (JSON output).
+@tool_app.command("schema")
+def schema(
+    command: Annotated[str, typer.Argument(help="validate, infer, or diff")],
+    note_type: Annotated[Optional[str], typer.Option(help="The note type to check")] = None,
+    identifier: Annotated[Optional[str], typer.Option(help="For validate: one note")] = None,
+    threshold: Annotated[
+        Optional[float], typer.Option(help="For infer: share of notes a field needs (0-1)")
+    ] = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Validate notes against a schema, infer one, or show drift (bm_schema).
 
     Examples:
 
-    bm tool projects
-    bm tool projects --local
+    bm tool schema validate --note-type person
+    bm tool schema infer --note-type meeting --threshold 0.5
+    bm tool schema diff --note-type person
     """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
+    from basic_memory.mcp.tools import bm_schema
 
-    try:
-        validate_routing_flags(local, cloud)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(mcp_list_projects(output_format="json"))
-        _print_json(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during list_projects: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-# --- list-workspaces ---
-
-
-@tool_app.command("workspaces")
-def list_workspaces(
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """List available cloud workspaces (JSON output).
-
-    Examples:
-
-    bm tool workspaces
-    bm tool workspaces --cloud
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
-
-    try:
-        validate_routing_flags(local, cloud)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(mcp_list_workspaces(output_format="json"))
-        _print_json(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during list_workspaces: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-# --- schema-validate ---
-
-
-@tool_app.command("validate")
-def schema_validate(
-    target: Annotated[
-        Optional[str],
-        typer.Argument(help="Note path or note type to validate"),
-    ] = None,
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Validate notes against their schemas (JSON output).
-
-    TARGET can be a note path (e.g., people/ada-lovelace.md) or a note type
-    (e.g., person). If omitted, validates all notes that have schemas.
-
-    Examples:
-
-    bm tool validate person
-    bm tool validate people/ada-lovelace.md
-    bm tool validate --project research
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
-
-    try:
-        validate_routing_flags(local, cloud)
-
-        # Heuristic: if target contains / or ., treat as identifier; otherwise as note type
-        note_type, identifier = None, None
-        if target:
-            if "/" in target or "." in target:
-                identifier = target
-            else:
-                note_type = target
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_schema_tool(
-                mcp_schema_validate(
-                    note_type=note_type,
-                    identifier=identifier,
-                    project=project,
-                    project_id=project_id,
-                    output_format="json",
-                )
-            )
-        _print_json(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during schema_validate: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-# --- schema-infer ---
-
-
-@tool_app.command("infer")
-def schema_infer(
-    note_type: Annotated[
-        str,
-        typer.Argument(help="Note type to analyze (e.g., person, meeting)"),
-    ],
-    threshold: float = typer.Option(
-        0.25, "--threshold", help="Minimum frequency for optional fields (0-1)"
-    ),
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Infer schema from existing notes of a type (JSON output).
-
-    Examples:
-
-    bm tool infer person
-    bm tool infer meeting --threshold 0.5
-    bm tool infer person --project research
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
-
-    try:
-        validate_routing_flags(local, cloud)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_schema_tool(
-                mcp_schema_infer(
-                    note_type=note_type,
-                    threshold=threshold,
-                    project=project,
-                    project_id=project_id,
-                    output_format="json",
-                )
-            )
-        _print_json(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during schema_infer: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-# --- schema-diff ---
-
-
-@tool_app.command("diff")
-def schema_diff(
-    note_type: Annotated[
-        str,
-        typer.Argument(help="Note type to check for drift"),
-    ],
-    project: Annotated[
-        Optional[str],
-        typer.Option(help="The project to use. If not provided, the default project will be used."),
-    ] = None,
-    project_id: Annotated[
-        Optional[str],
-        typer.Option(
-            "--project-id",
-            help="Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.",
-        ),
-    ] = None,
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (ignore cloud mode)"
-    ),
-    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
-):
-    """Show drift between schema and actual usage (JSON output).
-
-    Examples:
-
-    bm tool diff person
-    bm tool diff person --project research
-    """
-    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
-
-    try:
-        validate_routing_flags(local, cloud)
-
-        with force_routing(local=local, cloud=cloud):
-            result = run_schema_tool(
-                mcp_schema_diff(
-                    note_type=note_type,
-                    project=project,
-                    project_id=project_id,
-                    output_format="json",
-                )
-            )
-        _print_json(result)
-    except ValueError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during schema_diff: {e}", err=True)
-            raise typer.Exit(1)
-        raise
+    run_tool(
+        bm_schema,
+        command=command,
+        note_type=note_type,
+        identifier=identifier,
+        threshold=threshold,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )

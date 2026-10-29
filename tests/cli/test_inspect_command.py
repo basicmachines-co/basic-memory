@@ -269,7 +269,7 @@ def _query_response(
     )
 
 
-@patch("basic_memory.cli.commands.tool._use_rich", return_value=True)
+@patch("basic_memory.cli.commands.output.stdout_is_terminal", return_value=True)
 @patch("basic_memory.cli.commands.inspect.run_inspect_chunks", new_callable=AsyncMock)
 def test_inspect_chunks_rich_rendering(mock_run, _mock_use_rich):
     mock_run.return_value = _inspection_response()
@@ -477,7 +477,7 @@ async def test_run_inspect_chunks_uses_typed_client_and_project_route(monkeypatc
     )
 
 
-@patch("basic_memory.cli.commands.tool._use_rich", return_value=True)
+@patch("basic_memory.cli.commands.output.stdout_is_terminal", return_value=True)
 @patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
 def test_inspect_query_rich_renders_query_plan_and_grouped_misses(mock_run, _mock_use_rich):
     mock_run.return_value = _query_response()
@@ -510,7 +510,7 @@ def test_inspect_query_rich_renders_query_plan_and_grouped_misses(mock_run, _moc
     assert "below_threshold" in result.output
 
 
-@patch("basic_memory.cli.commands.tool._use_rich", return_value=True)
+@patch("basic_memory.cli.commands.output.stdout_is_terminal", return_value=True)
 @patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
 def test_inspect_query_renders_fts_readiness_as_not_applicable(mock_run, _mock_use_rich):
     """An FTS-only trace has no manifest snapshot; zeros would misreport the index."""

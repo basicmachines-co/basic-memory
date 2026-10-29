@@ -168,43 +168,22 @@ when working across projects.
 
 ## CLI Access
 
-The `bm tool search` command exposes metadata filtering via `--meta` and `--filter` flags.
-
-### `--meta` — simple key=value filters
-
-Repeatable flag for equality filters on frontmatter fields.
+`bm tool search` takes the same parameters as `bm_search`. `--filters` is the same
+JSON object, and `--note-types` is repeatable.
 
 ```bash
-# Single filter
-bm tool search "my query" --meta status=draft
+# Equality filters (AND logic)
+bm tool search --filters '{"status": "active", "priority": "high"}'
 
-# Multiple filters (AND logic)
-bm tool search "" --meta status=active --meta priority=high
-```
+# Operator filters
+bm tool search --filters '{"score": {"$between": [0.3, 0.8]}}'
+bm tool search --filters '{"priority": {"$in": ["high", "critical"]}}'
 
-### `--filter` — advanced JSON filters
+# Tags are a list field; a list value matches notes that have every tag
+bm tool search "query" --filters '{"tags": ["security", "oauth"]}'
 
-Pass a full JSON filter dictionary for operator-based queries.
-
-```bash
-# Range filter
-bm tool search "" --filter '{"score": {"$between": [0.3, 0.8]}}'
-
-# $in filter
-bm tool search "" --filter '{"priority": {"$in": ["high", "critical"]}}'
-```
-
-### `--tag` and `--status` — convenience shortcuts
-
-```bash
-bm tool search "query" --tag security --tag oauth
-bm tool search "" --status draft
-```
-
-### Combined example
-
-```bash
-bm tool search "authentication" --tag security --meta status=draft --type spec
+# Combined with a query and a note type
+bm tool search "authentication" --filters '{"status": "draft"}' --note-types spec
 ```
 
 ## Practical Examples
@@ -286,8 +265,8 @@ await bm_search("OAuth", filters={"status": "in-progress"})
 ### CLI equivalents
 
 ```bash
-bm tool search "" --meta status=in-progress --type spec
-bm tool search "" --filter '{"confidence": {"$gt": 0.7}}'
-bm tool search "OAuth" --meta status=in-progress
-bm tool search --tag security
+bm tool search --filters '{"status": "in-progress"}' --note-types spec
+bm tool search --filters '{"confidence": {"$gt": 0.7}}'
+bm tool search "OAuth" --filters '{"status": "in-progress"}'
+bm tool search --filters '{"tags": ["security"]}'
 ```

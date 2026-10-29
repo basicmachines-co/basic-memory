@@ -314,7 +314,7 @@ def _invoke(args, **kwargs):
 
 def _tty_invoke(args, **kwargs):
     """Invoke the CLI as if stdout were an interactive TTY."""
-    with patch("basic_memory.cli.commands.tool._use_rich", return_value=True):
+    with patch("basic_memory.cli.commands.output.stdout_is_terminal", return_value=True):
         return _invoke(args, **kwargs)
 
 

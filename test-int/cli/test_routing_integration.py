@@ -75,7 +75,7 @@ class TestRoutingFlagsValidation:
                 "tool",
                 "edit",
                 "test",
-                "--operation",
+                "--command",
                 "append",
                 "--content",
                 "test",
@@ -210,9 +210,9 @@ class TestToolCommandsAcceptFlags:
         "command,args",
         [
             ("search", ["test query"]),
-            ("recent", []),
+            ("project", ["recent"]),
             ("read", ["test"]),
-            ("edit", ["test", "--operation", "append", "--content", "test"]),
+            ("edit", ["test", "--command", "append", "--content", "test"]),
             ("context", ["memory://test"]),
         ],
     )
@@ -227,9 +227,9 @@ class TestToolCommandsAcceptFlags:
         "command,args",
         [
             ("search", ["test query"]),
-            ("recent", []),
+            ("project", ["recent"]),
             ("read", ["test"]),
-            ("edit", ["test", "--operation", "append", "--content", "test"]),
+            ("edit", ["test", "--command", "append", "--content", "test"]),
             ("context", ["memory://test"]),
         ],
     )

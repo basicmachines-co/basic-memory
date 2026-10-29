@@ -173,7 +173,7 @@ _vector_sync_pool = _MaterializationWorkerPool()
 async def drain_pending_materializations() -> None:
     """Block until queued local materializations finish writing, indexing and embedding.
 
-    One-shot clients (``bm tool write-note``, importers) return right after the
+    One-shot clients (``bm tool write``, importers) return right after the
     accept enqueues the markdown write/index; without this drain the event loop can
     close before the worker writes the source-of-truth file, silently losing the
     write even though the API already reported it accepted. Long-lived servers keep

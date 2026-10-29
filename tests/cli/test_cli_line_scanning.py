@@ -4,60 +4,9 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app
-
-
-@pytest.mark.parametrize("mode", ["--plain", "--json", "rich"])
-def test_cli_read_lines(mode: str) -> None:
-    payload = {
-        "title": "Runbook",
-        "file_path": "runbook.md",
-        "permalink": "runbook",
-        "content": "retry [safe]\n",
-        "frontmatter": None,
-        "start_line": 4,
-        "end_line": 5,
-        "total_lines": 8,
-        "has_more": True,
-        "next_start_line": 6,
-        "next_end_line": 7,
-    }
-    tool = AsyncMock(return_value=payload)
-    with (
-        patch("basic_memory.mcp.tools.read_note", tool),
-        patch(
-            "basic_memory.cli.commands.tool._resolve_output_mode",
-            return_value=mode.removeprefix("--"),
-        ),
-    ):
-        result = CliRunner().invoke(
-            app,
-            ["tool", "read", "runbook", "--start-line", "4", "--end-line", "5"]
-            + ([] if mode == "rich" else [mode]),
-        )
-    assert result.exit_code == 0, result.output
-    assert tool.call_args.kwargs["start_line"] == 4
-    assert tool.call_args.kwargs["end_line"] == 5
-    if mode == "--json":
-        assert json.loads(result.stdout) == payload
-    else:
-        assert "4: retry [safe]" in result.stdout
-        assert "start_line=6" in result.stdout
-
-
-def test_cli_read_lines_past_end_reports_error() -> None:
-    """The CLI surfaces the past-end message and exits non-zero (#1634)."""
-    message = "start_line 500 is past the end of the document (17 lines)"
-    tool = AsyncMock(side_effect=ToolError(message))
-    with patch("basic_memory.mcp.tools.read_note", tool):
-        result = CliRunner().invoke(
-            app, ["tool", "read", "runbook", "--start-line", "500", "--plain"]
-        )
-    assert result.exit_code == 1
-    assert message in result.output
 
 
 @pytest.mark.parametrize("mode", ["--plain", "--json", "rich"])
@@ -88,7 +37,7 @@ def test_cli_grep_context(mode: str) -> None:
     with (
         patch("basic_memory.mcp.tools.grep", tool),
         patch(
-            "basic_memory.cli.commands.posix._resolve_output_mode",
+            "basic_memory.cli.commands.posix.resolve_output_mode",
             return_value=mode.removeprefix("--"),
         ),
     ):
