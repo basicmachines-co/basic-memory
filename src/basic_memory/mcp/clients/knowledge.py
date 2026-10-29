@@ -8,7 +8,6 @@ from itertools import batched
 from typing import Any
 
 from httpx import AsyncClient, HTTPStatusError
-from pydantic import TypeAdapter
 
 import logfire
 
@@ -32,23 +31,12 @@ from basic_memory.schemas.v2.accepted_content import (
     MAX_ACCEPTED_CONTENT_BATCH,
     AcceptedNoteContentBatchResponse,
 )
-from basic_memory.schemas.v2.note_placement import (
-    AmbiguousNotePlacementResponse,
-    NoteCreatePlacementResponse,
-    NotePlacementResponse,
-    OutsideProjectPlacementResponse,
-)
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.v2.note_write import (
     WriteNoteRequest,
     WriteNoteResponse,
     write_note_response_adapter,
 )
-
-
-_NOTE_PLACEMENT_ADAPTER: TypeAdapter[
-    NoteCreatePlacementResponse | AmbiguousNotePlacementResponse | OutsideProjectPlacementResponse
-] = TypeAdapter(NotePlacementResponse)
 
 
 class KnowledgeClient:
@@ -485,33 +473,6 @@ class KnowledgeClient:
                 path_template="/v2/projects/{project_id}/knowledge/orphans",
             )
         return OrphanEntitiesResponse.model_validate(response.json()).entities
-
-    # --- Placement ---
-
-    async def place_note(
-        self, identifier: str
-    ) -> (
-        NoteCreatePlacementResponse
-        | AmbiguousNotePlacementResponse
-        | OutsideProjectPlacementResponse
-    ):
-        """Ask where a note that resolves under none of its readings would be created."""
-        from basic_memory.mcp.tools.utils import call_query
-
-        with logfire.span(
-            "mcp.client.knowledge.place_note",
-            client_name="knowledge",
-            operation="place_note",
-        ):
-            response = await call_query(
-                self.http_client,
-                f"{self._base_path}/placement",
-                json={"identifier": identifier},
-                client_name="knowledge",
-                operation="place_note",
-                path_template="/v2/projects/{project_id}/knowledge/placement",
-            )
-        return _NOTE_PLACEMENT_ADAPTER.validate_python(response.json())
 
     # --- Resolution ---
 

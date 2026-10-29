@@ -13,8 +13,10 @@ from fastmcp.exceptions import ToolError
 from mcp.types import EmbeddedResource, ImageContent
 from PIL import Image as PILImage
 
+from basic_memory import db
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools import bm_read, bm_write
+from basic_memory.workspace_context import workspace_permalink_context
 
 LONG_NOTE = "\n".join(
     ["# Plan", "", "## Goals", "- [goal] ship 1.0", "", "## Decisions"]
@@ -257,3 +259,218 @@ async def test_a_palette_png_is_shown_as_an_image(client, test_project, non_note
     result = await bm_read(non_note_files["palette"], project=test_project.name)
 
     assert isinstance(result, ImageContent)
+
+
+# --- Identifier spellings (ported from read_note) ---
+
+
+@pytest.mark.asyncio
+async def test_unicode_content_round_trips(client, test_project):
+    content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
+    await _write(test_project.name, "Unicode Test", content, directory="test")
+
+    text = await read_text("test/unicode-test", project=test_project.name)
+
+    assert content in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("by_external_id", [False, True])
+async def test_memory_url_with_the_project_prefix(client, test_project, by_external_id):
+    """The prefix agrees with `project`, whether that names the project or its id."""
+    await _write(test_project.name, "Prefixed", "prefixed body", directory="test")
+    project = test_project.external_id if by_external_id else test_project.name
+
+    payload = await read_json(f"memory://{test_project.name}/test/prefixed", project=project)
+
+    assert payload["content"].rstrip().endswith("prefixed body")
+
+
+@pytest.mark.asyncio
+async def test_team_workspace_note_reads_by_its_complete_permalink(
+    client, test_project, entity_repository, session_maker
+):
+    expected_permalink = f"team-paul/{test_project.name}/team/team-workspace-note"
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        written = await bm_write(
+            title="Team Workspace Note",
+            directory="team",
+            content="Team canonical content",
+            project=test_project.name,
+        )
+    assert f"permalink: {expected_permalink}" in written
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, expected_permalink)
+    assert stored is not None
+
+    for identifier in (expected_permalink, f"memory://{expected_permalink}"):
+        payload = await read_json(identifier, project=test_project.name)
+        assert payload["permalink"] == expected_permalink
+        assert payload["content"].rstrip().endswith("Team canonical content")
+
+
+@pytest.mark.asyncio
+async def test_team_workspace_permalink_is_complete_without_project_prefixes(
+    client, test_project, config_manager
+):
+    config = config_manager.load_config()
+    config.permalinks_include_project = False
+    config_manager.save_config(config)
+    expected_permalink = f"team-paul/{test_project.name}/team/team-no-project-prefix-note"
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        written = await bm_write(
+            title="Team No Project Prefix Note",
+            directory="team",
+            content="Team content without project-prefix config",
+            project=test_project.name,
+        )
+    assert f"permalink: {expected_permalink}" in written
+
+    payload = await read_json(f"memory://{expected_permalink}", project=test_project.name)
+
+    assert payload["permalink"] == expected_permalink
+
+
+@pytest.mark.asyncio
+async def test_personal_workspace_write_stores_the_complete_permalink(
+    client, test_project, entity_repository, session_maker
+):
+    expected_permalink = f"personal/{test_project.name}/personal/personal-workspace-note"
+    with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
+        written = await bm_write(
+            title="Personal Workspace Note",
+            directory="personal",
+            content="Personal canonical content",
+            project=test_project.name,
+        )
+
+    assert f"permalink: {expected_permalink}" in written
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_permalink(session, expected_permalink)
+    assert stored is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_qualified", [False, True])
+async def test_personal_workspace_still_reads_a_short_project_permalink(
+    client, test_project, workspace_qualified
+):
+    """Notes written before workspace permalinks keep resolving, qualified or not."""
+    short_permalink = f"{test_project.name}/personal/short-personal-note"
+    await _write(
+        test_project.name, "Short Personal Note", "Short personal content", directory="personal"
+    )
+    identifier = f"personal/{short_permalink}" if workspace_qualified else short_permalink
+
+    with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
+        payload = await read_json(f"memory://{identifier}", project=test_project.name)
+
+    assert payload["permalink"] == short_permalink
+    assert payload["content"].rstrip().endswith("Short personal content")
+
+
+# --- Identifiers that leave the project ---
+
+TRAVERSAL_IDENTIFIERS = [
+    "../secrets.txt",
+    "../../etc/passwd",
+    "notes/../../../etc/shadow",
+    "..\\..\\Windows\\System32\\config\\SAM",
+    "\\\\server\\share\\file.txt",
+    "/etc/passwd",
+    "C:\\Users\\user\\.env",
+    "~/.ssh/id_rsa",
+    "~\\AppData\\secrets",
+    "memory://../../etc/passwd",
+    "memory:///etc/passwd",
+    "memory://notes/../../../etc/shadow",
+    "notes/文档/../../../etc/passwd",
+    "../" * 100 + "etc/malicious",
+    " ../../../etc/passwd ",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identifier", TRAVERSAL_IDENTIFIERS)
+async def test_identifiers_outside_the_project_read_nothing(client, test_project, identifier):
+    """The project-scoped API resolves identifiers, so none of these can reach a file."""
+    await _write(test_project.name, "Inside", "inside body")
+
+    with pytest.raises(ToolError, match="^(NOT_FOUND|OUTSIDE_PROJECT|INVALID_ARGUMENTS):"):
+        await bm_read(identifier, project=test_project.name)
+
+
+# --- Misses and line bounds ---
+
+
+@pytest.mark.asyncio
+async def test_missing_external_id_line_read_is_not_found(client, test_project):
+    with pytest.raises(ToolError, match="^NOT_FOUND:"):
+        await bm_read(
+            "22222222-2222-4222-8222-222222222222",
+            start_line=1,
+            end_line=10,
+            project=test_project.name,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["text", "json"])
+async def test_line_read_past_the_end_reports_the_document_length(
+    client, test_project, entity_repository, session_maker, output_format
+):
+    """A start_line past the last line is an error, not a 'Lines 500-N' read (#1634)."""
+    await _write(test_project.name, "Short Lines", "one\ntwo")
+    total = len(
+        (await read_json("notes/Short Lines.md", project=test_project.name))["content"].splitlines()
+    )
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_file_path(session, "notes/Short Lines.md")
+    assert stored is not None
+
+    for identifier in ("notes/Short Lines.md", stored.external_id):
+        with pytest.raises(
+            ToolError, match=f"start_line 500 is past the end of the document \\({total} lines\\)"
+        ):
+            await bm_read(
+                identifier,
+                start_line=500,
+                end_line=510,
+                output_format=output_format,
+                project=test_project.name,
+            )
+
+
+@pytest.mark.asyncio
+async def test_read_checksum_guards_an_overwrite(client, test_project):
+    """The checksum bm_read returns is the revision bm_write's expected_checksum checks."""
+    written = await bm_write(
+        identifier="notes/guarded.md",
+        content="first revision",
+        output_format="json",
+        project=test_project.name,
+    )
+    read = await read_json("notes/guarded.md", project=test_project.name)
+    assert isinstance(written, dict)
+    assert read["checksum"] == written["checksum"]
+
+    replaced = await bm_write(
+        identifier="notes/guarded.md",
+        content="second revision",
+        overwrite=True,
+        expected_checksum=read["checksum"],
+        output_format="json",
+        project=test_project.name,
+    )
+    assert isinstance(replaced, dict)
+    assert replaced["action"] == "updated"
+
+    with pytest.raises(ToolError, match="REVISION_CONFLICT"):
+        await bm_write(
+            identifier="notes/guarded.md",
+            content="stale third revision",
+            overwrite=True,
+            expected_checksum=read["checksum"],
+            project=test_project.name,
+        )

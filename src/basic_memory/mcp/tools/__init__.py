@@ -6,14 +6,7 @@ all tools with the MCP server.
 """
 
 # Shared implementations used by the CLI and the bm_* tools; these do not register MCP tools.
-from basic_memory.mcp.tools.read_note import read_note as read_note
-
 from basic_memory.mcp.tools.search import search_notes as search_notes
-from basic_memory.mcp.tools.edit_note import edit_note as edit_note
-from basic_memory.mcp.tools.workspaces import list_workspaces as list_workspaces
-
-# ChatGPT adapter implementations; Cloud owns their registration.
-from basic_memory.mcp.tools.chatgpt_tools import search as search, fetch as fetch
 
 # Shared POSIX implementations used by the shell commands.
 from basic_memory.mcp.tools.posix_tools import (

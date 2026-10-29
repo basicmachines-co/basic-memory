@@ -13,7 +13,7 @@ from basic_memory.index.local_wiki_projection import (
     LocalWikiState,
     inspect_local_wiki_projection,
 )
-from basic_memory.mcp.tools import bm_delete, bm_write, edit_note
+from basic_memory.mcp.tools import bm_delete, bm_edit, bm_write
 from basic_memory.models import AcceptedProjectNoteChange
 
 
@@ -21,9 +21,7 @@ from basic_memory.models import AcceptedProjectNoteChange
 async def test_wiki_projects_after_api_create_edit_and_delete(app, test_project, session_maker):
     await bm_write(project=test_project.name, title="Kept", directory="a", content="# Kept")
     await bm_write(project=test_project.name, title="Gone", directory="a", content="# Gone")
-    await edit_note(
-        identifier="a/kept", operation="append", content="More.", project=test_project.name
-    )
+    await bm_edit(identifier="a/kept", command="append", content="More.", project=test_project.name)
     await bm_delete(identifier="a/gone", project=test_project.name, context=None)
 
     async with db.scoped_session(session_maker) as session:

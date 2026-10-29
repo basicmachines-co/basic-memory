@@ -2,7 +2,6 @@
 
 import ast
 import importlib
-import json
 import re
 from typing import Any
 from unittest.mock import AsyncMock
@@ -13,7 +12,6 @@ from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp import tools
 from basic_memory.mcp.refusals import Refusal
-from basic_memory.mcp.tools import chatgpt_tools
 
 SCOPED_TOOLS = {
     "bm_read": {"identifier": "notes/plan.md"},
@@ -140,17 +138,6 @@ async def test_conflict_recovery_call_includes_scope_and_can_be_dispatched(clien
     async with Client(server) as mcp_client:
         result = await mcp_client.call_tool("bm_read", arguments)
     assert "# Plan" in str(result.content)
-
-
-@pytest.mark.asyncio
-async def test_chatgpt_fetch_reports_unresolved_scope(monkeypatch):
-    monkeypatch.setattr(chatgpt_tools, "is_openai_mcp_client", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        chatgpt_tools, "detect_project_from_identifier_prefix", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(chatgpt_tools, "resolve_project_parameter", AsyncMock(return_value=None))
-    (result,) = await chatgpt_tools.fetch("Plan")
-    assert json.loads(result["text"])["metadata"]["error"] == "INVALID_ARGUMENTS"
 
 
 @pytest.mark.asyncio

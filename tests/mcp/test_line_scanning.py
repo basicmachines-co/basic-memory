@@ -4,11 +4,11 @@ import json
 from typing import Any
 
 import pytest
+from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
-from httpx import HTTPStatusError, Request, Response
 
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.mcp.tools import bm_write, cat, grep, read_note
+from basic_memory.mcp.tools import bm_read, bm_write, cat, grep
 from basic_memory.schemas.search import SearchResponse
 from basic_memory.schemas.v2 import EntityResponseV2
 
@@ -36,7 +36,7 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
     window = row["windows"][0]
     assert window["match_lines"] == expected_matches[:2]
 
-    sliced = await read_note(
+    sliced = await bm_read(
         row["external_id"],
         start_line=window["start_line"],
         end_line=window["end_line"],
@@ -59,7 +59,7 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
     assert cat_slice["content"] == sliced["content"]
     assert len(json.dumps(sliced)) < len(json.dumps(full)) / 10
 
-    numbered = await read_note(
+    numbered = await bm_read(
         "Scan Note",
         start_line=expected_matches[0],
         end_line=expected_matches[0],
@@ -77,12 +77,12 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
     )
     full = await cat("Bounds", project=test_project.name)
     lines = full["content"].splitlines()
-    opening = await read_note("Bounds", end_line=2, output_format="json", project=test_project.name)
+    opening = await bm_read("Bounds", end_line=2, output_format="json", project=test_project.name)
     assert isinstance(opening, dict)
     assert opening["content"] == "\n".join(lines[:2])
     assert opening["start_line"] == 1
     for end in (None, len(lines) + 100):
-        last = await read_note(
+        last = await bm_read(
             "Bounds",
             start_line=len(lines),
             end_line=end,
@@ -95,7 +95,7 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
         assert last["next_start_line"] is None and last["next_end_line"] is None
     # A range past the last line is an error, not an empty "Lines 1000-N" read (#1634).
     with pytest.raises(ToolError, match="start_line 1000 is past the end of the document"):
-        await read_note("Bounds", start_line=1000, output_format="json", project=test_project.name)
+        await bm_read("Bounds", start_line=1000, output_format="json", project=test_project.name)
 
 
 @pytest.mark.asyncio
@@ -117,31 +117,9 @@ async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monk
         calls.append((entity_id, lines))
         return await original(self, entity_id, section=section, lines=lines, max_tokens=max_tokens)
 
-    async def refuse_resolve(*args: object, **kwargs: object) -> str:
-        raise AssertionError("UUID must not resolve")
-
     monkeypatch.setattr(KnowledgeClient, "get_entity", record)
-    monkeypatch.setattr(KnowledgeClient, "resolve_entity", refuse_resolve)
-    await read_note(identifier, end_line=2, project=test_project.name)
+    await bm_read(identifier, end_line=2, project=test_project.name)
     assert calls == [(identifier, "1-2")]
-
-
-@pytest.mark.asyncio
-async def test_exact_title_fallback_keeps_line_scan(client, test_project, monkeypatch) -> None:
-    await bm_write(
-        title="Exact Fallback", directory="test", content="alpha", project=test_project.name
-    )
-
-    async def refuse_resolve(*args: object, **kwargs: object) -> str:
-        request = Request("POST", "http://test/knowledge/resolve")
-        raise ToolError("force title search") from HTTPStatusError(
-            "Not found", request=request, response=Response(404, request=request)
-        )
-
-    monkeypatch.setattr(KnowledgeClient, "resolve_entity", refuse_resolve)
-    result = await read_note("Exact Fallback", end_line=1, project=test_project.name)
-    assert isinstance(result, str)
-    assert "1: ---" in result
 
 
 @pytest.mark.asyncio
@@ -195,8 +173,14 @@ async def test_grep_refuses_missing_candidate_identity(client, test_project, mon
 )
 @pytest.mark.asyncio
 async def test_invalid_read_bounds_fail_before_routing(bounds: dict[str, int]) -> None:
-    with pytest.raises(ValueError):
-        await read_note("any", start_line=bounds.get("start_line"), end_line=bounds.get("end_line"))
+    # No app or database: the call must fail at validation, before any routing.
+    server = FastMCP("read-bounds")
+    server.tool(bm_read)
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "bm_read", {"identifier": "any", "project": "any", **bounds}, raise_on_error=False
+        )
+    assert result.is_error
 
 
 @pytest.mark.parametrize(

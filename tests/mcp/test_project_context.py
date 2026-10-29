@@ -13,7 +13,8 @@ import pytest
 import pytest_asyncio
 
 from basic_memory import db
-from basic_memory.mcp.project_context import DetectedProjectRoute
+from basic_memory.mcp.project_context import DetectedProjectRoute, resolve_project_and_path
+from basic_memory.workspace_context import workspace_permalink_context
 from tests.mcp.conftest import ContextState, ctx
 
 
@@ -3692,3 +3693,18 @@ async def test_resolve_project_and_path_keeps_patterns_project_qualified(
         context=ctx(context),
     )
     assert resolved_path == "team-paul/manual/man3/write-note-3"
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_reads_this_workspaces_qualified_route(client, test_project):
+    """Inside a workspace, 'memory://<workspace>/<project>/...' keeps its full canonical path."""
+    url = f"memory://team-paul/{test_project.permalink}/team/note"
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+            client, url, project=test_project.name
+        )
+
+    assert active_project.external_id == test_project.external_id
+    assert resolved_path == f"team-paul/{test_project.permalink}/team/note"
+    assert is_memory_url is True

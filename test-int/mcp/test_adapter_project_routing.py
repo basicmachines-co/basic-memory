@@ -1,13 +1,10 @@
 """Native adapters select a project before calling the explicit-routing tools."""
 
-import json
-
 import pytest
 from fastmcp import Client
 from fastmcp.client.transports import FastMCPTransport
 from mcp import types as mt
 
-from basic_memory.config import ConfigManager
 
 import implementation_mcp
 
@@ -55,33 +52,3 @@ async def test_prompts_select_project_with_multiple_projects(
         excluded = "DefaultOnlyMarker" if explicit_project else "OtherOnlyMarker"
         assert expected in text
         assert excluded not in text
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("id_form", ["search_hit", "relative_url", "qualified", "qualified_url"])
-async def test_connector_fetch_routes_relative_and_qualified_ids(
-    implementation_server, app, test_project, app_config, tmp_path, id_form
-):
-    app_config.permalinks_include_project = False
-    ConfigManager().save_config(app_config)
-    async with Client(
-        implementation_server, client_info=mt.Implementation(name="openai-mcp", version="1.0.0")
-    ) as client:
-        await seed_projects(
-            client, test_project.name, str(tmp_path.parent / (tmp_path.name + "-other"))
-        )
-        search = await client.call_tool("search", {"query": "Routing Topic"})
-        search_items = json.loads(search.content[0].text)  # pyright: ignore[reportAttributeAccessIssue]
-        hits = json.loads(search_items[0]["text"])
-        identifier = hits["results"][0]["id"]
-        assert identifier == "notes/routing-topic"
-        if id_form in {"qualified", "qualified_url"}:
-            identifier = f"other/{identifier}"
-        if id_form in {"relative_url", "qualified_url"}:
-            identifier = f"memory://{identifier}"
-        fetched = await client.call_tool("fetch", {"id": identifier})
-        fetched_items = json.loads(fetched.content[0].text)  # pyright: ignore[reportAttributeAccessIssue]
-        document = json.loads(fetched_items[0]["text"])
-        expected = "OtherOnlyMarker" if id_form.startswith("qualified") else "DefaultOnlyMarker"
-        assert document["metadata"] == {"format": "markdown"}
-        assert expected in document["text"]
