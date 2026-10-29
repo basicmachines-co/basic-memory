@@ -15,6 +15,7 @@
     "index.ts",
     "bm-client.ts",
     "context-engine/basic-memory-context-engine.ts",
+    "context-engine/types.ts",
     "config.ts",
     "logger.ts",
     "commands/cli.ts",
