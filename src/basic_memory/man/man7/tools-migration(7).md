@@ -65,13 +65,16 @@ local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config 
 | `search-notes`, `search --vector/--hybrid/--title/--permalink` | `search --mode semantic/hybrid/title/permalink` |
 | `search --meta k=v`, `--filter JSON`, `--tag`, `--status` | `search --filters JSON` |
 | `search --type T`, `--entity-type K`, `--after_date D` | `search --note-types T`, `--items K`, `--since D` |
+| `search --category C` | `search --categories C` |
 | `build-context`, `context URL --timeframe D` | `context IDENTIFIER --since D` |
 | `recent-activity`, `recent` | `project recent` |
+| `recent --timeframe D --type K --depth N` | `project recent --since D --items K`; depth is fixed at 1 |
 | `list-projects`, `projects` | `project list` |
 | `list-workspaces`, `workspaces` | `project list` (omits workspaces with no projects), or `bm cloud workspace list` for every workspace |
 | `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate/infer/diff`; a positional `TYPE` becomes `--note-type TYPE` |
 | `validate path/note.md` | `schema validate --identifier path/note.md` |
 | `--project-id UUID` | `--project UUID` |
+| `--plain` | removed; the default output is the tool's text result |
 | (new) | `move`, `list`, `find` |
 
 `bm tool` prints the tool's text result, or its JSON result with `--json`. It no longer
