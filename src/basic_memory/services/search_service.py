@@ -4,7 +4,8 @@ import asyncio
 import ast
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from itertools import batched
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
 
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import logfire
 
 from basic_memory import db
+from basic_memory.indexing.embedding_index_planning import VECTOR_SYNC_CHUNK_SIZE
 from basic_memory.indexing.relation_resolution import RelationSearchRefreshResult
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
@@ -45,6 +47,14 @@ from basic_memory.temporal import (
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
 MAX_CONTENT_STEMS_SIZE = 6000
+
+
+@dataclass(frozen=True, slots=True)
+class RestoredSearchEntity:
+    """An entity whose missing search rows were rebuilt, kept without its graph."""
+
+    entity_id: int
+    checksum: str | None
 
 
 def entity_embeddings_enabled(entity: Entity) -> bool:
@@ -693,7 +703,11 @@ class SearchService:
             )
             raise  # pragma: no cover
 
-    async def restore_missing_search_rows(self) -> list[Entity]:
+    async def restore_missing_search_rows(
+        self,
+        *,
+        batch_size: int = VECTOR_SYNC_CHUNK_SIZE,
+    ) -> list[RestoredSearchEntity]:
         """Rebuild search rows for entities that have none; return the entities restored.
 
         Vectors are cut from search rows, and change detection skips unchanged
@@ -707,21 +721,29 @@ class SearchService:
         entity_ids = await find_entity_ids_missing_search_rows(
             self.session_maker, self.repository.project_id
         )
-        if not entity_ids:
-            return []
-
-        async with db.scoped_session(self.session_maker) as session:
-            entities = await self.entity_repository.find_by_ids(session, entity_ids)
-        result = await self.index_entities(entities, content_by_entity_id={})
-        restored = [
-            entity for entity in entities if entity.id not in result.missing_content_entity_ids
-        ]
-        logger.info(
-            "Restored missing search rows",
-            project_id=self.repository.project_id,
-            restored=len(restored),
-            unreadable=len(result.missing_content_entity_ids),
-        )
+        restored: list[RestoredSearchEntity] = []
+        unreadable = 0
+        # A migration that recreated search_index can leave every entity without
+        # rows. Each batch loads entities with their observations and relations,
+        # so batches are loaded, indexed, and dropped one at a time to keep memory
+        # bounded by the batch rather than the project.
+        for id_batch in batched(entity_ids, batch_size):
+            async with db.scoped_session(self.session_maker) as session:
+                entities = await self.entity_repository.find_by_ids(session, list(id_batch))
+            result = await self.index_entities(entities, content_by_entity_id={})
+            unreadable += len(result.missing_content_entity_ids)
+            restored.extend(
+                RestoredSearchEntity(entity_id=entity.id, checksum=entity.checksum)
+                for entity in entities
+                if entity.id not in result.missing_content_entity_ids
+            )
+        if entity_ids:
+            logger.info(
+                "Restored missing search rows",
+                project_id=self.repository.project_id,
+                restored=len(restored),
+                unreadable=unreadable,
+            )
         return restored
 
     async def semantic_effectively_enabled(self) -> bool:

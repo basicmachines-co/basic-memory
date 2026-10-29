@@ -110,6 +110,7 @@ from basic_memory.schemas.v2.project_index import (
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
+from basic_memory.services.search_service import RestoredSearchEntity
 from basic_memory.utils import nfc_path
 
 type LocalProjectIndexIgnorePatterns = set[str]
@@ -606,7 +607,9 @@ class LocalDeferredEmbeddingTargetSource:
 class MissingSearchRowRestorer(Protocol):
     """Search capability that rebuilds projections for entities that have none."""
 
-    async def restore_missing_search_rows(self) -> list[Entity]: ...
+    async def restore_missing_search_rows(
+        self, *, batch_size: int
+    ) -> list[RestoredSearchEntity]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -614,13 +617,15 @@ class LocalSearchRowRepairer:
     """Restore missing search rows and hand the restored entities to vector sync."""
 
     search_service: MissingSearchRowRestorer
+    # Entities repaired per load-and-index step; the runtime passes its file batch size.
+    batch_size: int
 
     async def restore_missing_search_rows(self) -> tuple[EmbeddingIndexTarget, ...]:
-        restored = await self.search_service.restore_missing_search_rows()
+        restored = await self.search_service.restore_missing_search_rows(batch_size=self.batch_size)
         # An entity without a checksum has not finished file indexing; the pass
         # that sets its checksum emits its own vector target.
         return tuple(
-            EmbeddingIndexTarget(entity_id=entity.id, entity_checksum=entity.checksum)
+            EmbeddingIndexTarget(entity_id=entity.entity_id, entity_checksum=entity.checksum)
             for entity in restored
             if entity.checksum is not None
         )
@@ -830,7 +835,9 @@ class LocalProjectIndexRuntimeFactory:
                 ),
                 semantic_runtime=dependencies.search_service,
             ),
-            search_row_repairer=LocalSearchRowRepairer(dependencies.search_service),
+            search_row_repairer=LocalSearchRowRepairer(
+                dependencies.search_service, batch_size=self.batch_size
+            ),
             index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
                 session_maker=dependencies.session_maker,
                 project_id=dependencies.project_id,

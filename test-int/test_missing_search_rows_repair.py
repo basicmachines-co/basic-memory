@@ -159,3 +159,53 @@ async def test_reindex_embeddings_restores_search_rows_before_embedding(
     assert stats["search_rows_restored"] == 1
     assert await _search_row_count(session_maker, test_project, entity_id) == 1
     assert await _chunk_count(session_maker, test_project, entity_id) > 0
+
+
+@pytest.mark.asyncio
+async def test_restore_missing_search_rows_loads_entities_in_bounded_batches(
+    test_project: Project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+) -> None:
+    """A migration can strip every entity's rows; repair must not load them all at once."""
+    _engine, session_maker = engine_factory
+    (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
+    for index in range(5):
+        (project_config.home / f"notes/batch-{index}.md").write_text(
+            NOTE_CONTENT.replace("lost-rows", f"batch-{index}").replace(
+                "Lost Rows", f"Batch {index}"
+            ),
+            encoding="utf-8",
+        )
+    await _index_project(test_project, embeddings=False)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("DELETE FROM search_index WHERE project_id = :project_id"),
+            {"project_id": test_project.id},
+        )
+
+    dependencies = await LocalProjectIndexRuntimeFactory().dependencies_for_project(test_project)
+    search_service = dependencies.search_service
+    assert isinstance(search_service, SearchService)
+    entity_repository = search_service.entity_repository
+    loaded_batch_sizes: list[int] = []
+    find_by_ids = entity_repository.find_by_ids
+
+    async def recording_find_by_ids(session, ids):
+        loaded_batch_sizes.append(len(ids))
+        return await find_by_ids(session, ids)
+
+    monkeypatch.setattr(entity_repository, "find_by_ids", recording_find_by_ids)
+
+    restored = await search_service.restore_missing_search_rows(batch_size=2)
+
+    assert loaded_batch_sizes == [2, 2, 1]
+    assert len(restored) == 5
+    missing = await _count(
+        session_maker,
+        "SELECT COUNT(*) FROM entity WHERE project_id = :project_id AND id NOT IN "
+        "(SELECT entity_id FROM search_index WHERE project_id = :project_id AND type = 'entity')",
+        {"project_id": test_project.id},
+    )
+    assert missing == 0

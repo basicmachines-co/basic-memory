@@ -92,6 +92,7 @@ from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
+from basic_memory.services.search_service import RestoredSearchEntity
 
 
 def test_local_project_index_file_paths_filter_and_sort(tmp_path: Path) -> None:
@@ -2779,7 +2780,7 @@ class RuntimeFactorySearchIndex:
     async def semantic_effectively_enabled(self) -> bool:
         return True
 
-    async def restore_missing_search_rows(self) -> list[Entity]:
+    async def restore_missing_search_rows(self, *, batch_size: int) -> list[RestoredSearchEntity]:
         return []
 
 
