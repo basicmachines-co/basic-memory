@@ -140,6 +140,24 @@ PAGES_WITHOUT_LOCAL_TOOLS = {
 }
 
 
+def _markdown_table(text: str, header: str) -> str:
+    start = text.index(header)
+    end = text.find("\n\n", start)
+    return text[start : end if end != -1 else None].strip()
+
+
+@pytest.mark.parametrize(
+    "header", ["| Previous MCP tool | 1.0 replacement |", "| Previous CLI | 1.0 CLI |"]
+)
+def test_tools_migration_page_matches_the_migration_guide(header: str) -> None:
+    """tools-migration(7) ships the guide's tables; drift between them misleads migrations."""
+    page = find_page(PageRef("tools-migration", 7))
+    assert page is not None
+    guide = (Path(__file__).parents[1] / "docs" / "1.0.md").read_text(encoding="utf-8")
+
+    assert _markdown_table(page.read(), header) == _markdown_table(guide, header)
+
+
 def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
     documented = {page.tool for page in bundled_pages() if page.section == 3}
 

@@ -15,8 +15,9 @@ files bundled in the package, so every install has the same manual: local, Cloud
 - `src/basic_memory/man/bm.1` — the groff system page that `bm man install` copies for
   `man bm`. It is not a `bm man` page.
 
-A test holds section 3 equal to the tool registry: every registered tool has a page, and every
-section 3 page names a registered tool.
+A test holds section 3 equal to the local tool registry plus a hard-coded list of the
+Cloud-registered tools (`bm_agent`, `search`, `fetch`). It does not read Cloud's registry, so
+renaming or removing a Cloud tool needs a matching change to its page and to that list.
 
 ## Reading it
 

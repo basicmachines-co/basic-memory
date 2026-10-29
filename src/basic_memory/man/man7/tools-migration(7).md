@@ -27,10 +27,10 @@ after the tool's parameters. The rest have their own commands or none: [[bm-man(
 
 ## MCP TOOLS
 
-This table matches the 1.0 migration guide (`docs/1.0.md`), whose "Tool-by-tool change list"
-gives each tool's renamed arguments and response changes.
+These tables are copied from the 1.0 migration guide (`docs/1.0.md`), and a test keeps them equal.
+The guide's "Tool-by-tool change list" gives each tool's renamed arguments and response changes.
 
-| Pre-1.0 tool | 1.0 replacement |
+| Previous MCP tool | 1.0 replacement |
 | --- | --- |
 | `read_note`, `read_content`, `view_note`, `cat` | `bm_read` with explicit line bounds where needed |
 | `write_note` | `bm_write` |
@@ -48,26 +48,30 @@ gives each tool's renamed arguments and response changes.
 | `move_note` | `bm_move` |
 | `delete_note` | `bm_delete` |
 | `man` | `bm_man` |
-| `cloud_info` | On Basic Memory Cloud, `bm_project(command="info")`; a local server has none |
-| `basic_memory_diagnostics` | `bm doctor` and `bm config list` from the shell |
+
+Two more retired tools: `cloud_info` is `bm_project(command="info")` on Basic Memory Cloud, with no
+local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config list` in a shell.
 
 ## BM TOOL COMMANDS
 
-| Pre-1.0 | 1.0 |
+| Previous CLI | 1.0 CLI |
 | --- | --- |
-| `write-note`, `read-note`, `edit-note`, `delete-note` | `write`, `read`, `edit`, `delete` |
-| `search-notes`, `build-context` | `search`, `context` |
+| `write-note`, `write --title T --folder F --type X` | `write --title T --directory F --note-type X` (or `--identifier path.md`) |
+| `read-note`, `read --frontmatter` | `read` (frontmatter is now included by default) |
+| `read` (body only, the old default) | `read --no-include-frontmatter` |
+| `edit-note`, `edit --operation OP` | `edit --command OP` |
+| `delete-note`, `delete ID --is-directory` | `delete --identifier ID`, or `delete --path DIR --recursive` |
+| `search-notes`, `search --vector/--hybrid/--title/--permalink` | `search --mode semantic/hybrid/title/permalink` |
+| `search --meta k=v`, `--filter JSON`, `--tag`, `--status` | `search --filters JSON` |
+| `search --type T`, `--entity-type K`, `--after_date D` | `search --note-types T`, `--items K`, `--since D` |
+| `build-context`, `context URL --timeframe D` | `context IDENTIFIER --since D` |
 | `recent-activity`, `recent` | `project recent` |
-| `list-projects`, `projects`, `list-workspaces`, `workspaces` | `project list` |
-| `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate`, `schema infer`, `schema diff` |
-| `write --folder F --type X` | `write --directory F --note-type X`, or `--identifier path.md` |
-| `edit --operation OP` | `edit --command OP` |
-| `delete ID --is-directory` | `delete --identifier ID`, or `delete --path DIR --recursive` |
-| `search --vector`, `--hybrid`, `--title`, `--permalink` | `search --mode semantic`, `hybrid`, `title`, `permalink` |
-| `search --meta k=v`, `--filter`, `--tag`, `--status` | `search --filters JSON` |
-| `search --type`, `--entity-type`, `--after_date` | `search --note-types`, `--items`, `--since` |
-| `context URL --timeframe D` | `context IDENTIFIER --since D` |
+| `list-projects`, `projects` | `project list` |
+| `list-workspaces`, `workspaces` | `project list` (projects are grouped by workspace) |
+| `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate/infer/diff`; a positional `TYPE` becomes `--note-type TYPE` |
+| `validate path/note.md` | `schema validate --identifier path/note.md` |
 | `--project-id UUID` | `--project UUID` |
+| (new) | `move`, `list`, `find` |
 
 `bm tool` prints the tool's text result, or its JSON result with `--json`. It no longer
 switches to JSON when piped, so scripts pass `--json`.
