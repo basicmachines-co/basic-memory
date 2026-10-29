@@ -141,7 +141,6 @@ async def _resolve_default_project_from_api() -> Optional[str]:
 
 async def resolve_project_parameter(
     project: Optional[str] = None,
-    default_project: Optional[str] = None,
     context: Optional[Context] = None,
 ) -> Optional[str]:
     """Resolve project parameter using unified linear priority chain.
@@ -158,7 +157,7 @@ async def resolve_project_parameter(
 
     Args:
         project: Optional explicit project parameter
-        default_project: Optional explicit default project. If not provided, reads from ConfigManager.
+        context: Optional FastMCP context that caches the active and default project
 
     Returns:
         Resolved project name or None if no resolution possible
@@ -179,8 +178,8 @@ async def resolve_project_parameter(
         # Why: default-project discovery is only needed as a fallback; doing it
         #   for explicit requests adds an avoidable /v2/projects/ round-trip
         # Outcome: skip default lookup when the active project is already known
-        if default_project is None and project is None:
-            # Load config for any values not explicitly provided.
+        default_project: Optional[str] = None
+        if project is None:
             # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
             # When it returns None, fall back to querying the projects API for the is_default flag.
             default_project = config.default_project
