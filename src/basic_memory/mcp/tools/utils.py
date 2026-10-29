@@ -897,6 +897,20 @@ async def call_query(
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
         raise ToolError(_transport_error_message(e, url, "QUERY")) from e
+    except TimeoutError as e:
+        # Trigger: an in-process deadline (asyncio.timeout around a routed client)
+        #   expired before any response, outside httpx's own TimeoutException.
+        # Why: callers treat ToolError as "the query could not complete"; a bare
+        #      TimeoutError escaped that contract and failed an already-accepted
+        #      write's optional similar-notes advisory (#1886).
+        # Outcome: same ToolError shape as an httpx timeout. CancelledError is not a
+        #          TimeoutError, so cancellation still propagates.
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(
+            f"Request timed out ({type(e).__name__}): the server did not respond to "
+            f"QUERY '{str(url).rstrip('/').split('/')[-1]}' in time."
+        ) from e
     except Exception as e:
         if request_span is not None:
             request_span.set_attributes(_transport_error_span_attrs(e))
