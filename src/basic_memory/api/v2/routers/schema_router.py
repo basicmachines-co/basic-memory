@@ -50,6 +50,7 @@ from basic_memory.services.schema_validation_hooks import (
 from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.picoschema.diff import diff_schema
 from basic_memory.utils import generate_permalink
+from basic_memory.yaml_policy import SimpleYamlHandler
 from typing import Any
 
 # Note: No prefix here -- it's added during registration as /v2/{project_id}/schema
@@ -114,7 +115,7 @@ async def _schema_frontmatter_from_file(
     """
     try:
         content = await file_service.read_file_content(entity.file_path)
-        post = frontmatter.loads(content)
+        post = frontmatter.loads(content, handler=SimpleYamlHandler())
         metadata = dict(post.metadata)
 
         # Trigger: file is mid-edit and missing required schema fields

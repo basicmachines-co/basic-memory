@@ -61,6 +61,7 @@ from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.file_service import FileService
 from basic_memory.utils import build_canonical_permalink
 from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
+from basic_memory.yaml_policy import SimpleSafeDumper, SimpleYamlHandler
 
 
 def accepted_section_writes(entity_markdown: EntityMarkdown) -> tuple[AcceptedSectionWrite, ...]:
@@ -515,7 +516,7 @@ def reconcile_prepared_edit_title_from_h1(
         or prepared_title != current_title
     ):
         return PreparedEditTitleReconciliation(markdown_content, prepared_title, metadata)
-    post = frontmatter.loads(markdown_content)
+    post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
     post.metadata["title"] = prepared_h1
     reconciled_metadata = {**metadata, "title": prepared_h1} if metadata is not None else None
     return PreparedEditTitleReconciliation(dump_frontmatter(post), prepared_h1, reconciled_metadata)
@@ -786,7 +787,9 @@ def _prepend_after_frontmatter(current_content: str, content: str) -> str:
         # `---` block inside it is Markdown, not frontmatter.
         separator = _prepend_separator(content, body_content, body_before=content)
         new_body = content + separator + body_content
-        yaml_frontmatter = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
+        yaml_frontmatter = yaml.dump(
+            frontmatter_data, Dumper=SimpleSafeDumper, sort_keys=False, allow_unicode=True
+        )
         return f"---\n{yaml_frontmatter}---\n\n{new_body.strip()}"
     # Without existing frontmatter the prepended content opens the note itself, so a
     # frontmatter block at its start becomes the note's frontmatter.
@@ -1010,7 +1013,7 @@ async def prepare_edit_entity_content(
             skip_conflict_check=skip_conflict_check,
             session=session,
         )
-    post = frontmatter.loads(markdown_content)
+    post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
     if post.metadata.get("permalink") != permalink:
         post.metadata["permalink"] = permalink
         markdown_content = dump_frontmatter(post)
@@ -1066,7 +1069,7 @@ async def prepare_move_entity_content(
     if permalink is None:  # pragma: no cover - update_permalink repairs legacy null rows
         raise ValueError(f"Markdown note is missing a canonical permalink: {entity.file_path}")
     if entity_markdown.frontmatter_state != "malformed":
-        post = frontmatter.loads(markdown_content)
+        post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
         if post.metadata.get("permalink") != permalink:
             post.metadata["permalink"] = permalink
             markdown_content = dump_frontmatter(post)

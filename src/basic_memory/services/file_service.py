@@ -26,6 +26,7 @@ from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.utils import FilePath, resolve_path_within_root, validate_project_path
+from basic_memory.yaml_policy import SimpleSafeDumper
 from loguru import logger
 
 
@@ -550,7 +551,9 @@ class FileService:
             new_fm = {**current_fm, **updates}
 
             # Write new file with updated frontmatter
-            yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
+            yaml_fm = yaml.dump(
+                new_fm, Dumper=SimpleSafeDumper, sort_keys=False, allow_unicode=True
+            )
             final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 
             logger.debug(

@@ -20,6 +20,7 @@ import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
+from basic_memory.yaml_policy import SimpleSafeDumper, SimpleSafeLoader
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.config import BasicMemoryConfig
@@ -459,7 +460,7 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
 
         # Parse YAML
         try:
-            frontmatter = yaml.safe_load(yaml_block)
+            frontmatter = yaml.load(yaml_block, Loader=SimpleSafeLoader)
             # Handle empty frontmatter (None from yaml.safe_load)
             if frontmatter is None:
                 return {}
@@ -515,7 +516,7 @@ def _is_frontmatter_mapping(yaml_block: str) -> bool:
     """Whether a fenced block is what every frontmatter reader here accepts: a YAML
     mapping, or empty. The same rule `parse_frontmatter` enforces by raising."""
     try:
-        loaded = yaml.safe_load(yaml_block)
+        loaded = yaml.load(yaml_block, Loader=SimpleSafeLoader)
     except yaml.YAMLError:
         return False
     return loaded is None or isinstance(loaded, dict)
@@ -561,7 +562,7 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
-        Dumper=yaml.SafeDumper,
+        Dumper=SimpleSafeDumper,
     )
 
     # Construct the final markdown with frontmatter

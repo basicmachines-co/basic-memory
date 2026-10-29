@@ -37,6 +37,7 @@ from basic_memory.markdown import EntityParser
 from basic_memory.models import AcceptedProjectNoteChange, Project
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.utils import build_canonical_permalink, ensure_timezone_aware
+from basic_memory.yaml_policy import SimpleYamlHandler
 
 
 class LocalWikiState(StrEnum):
@@ -382,7 +383,7 @@ def _is_projector_owned(relative_path: str, content: bytes) -> bool:
     if path.name not in RESERVED_WIKI_FILENAMES:
         return False
     try:
-        metadata, _ = frontmatter.parse(content.decode("utf-8"))
+        metadata, _ = frontmatter.parse(content.decode("utf-8"), handler=SimpleYamlHandler())
     except (UnicodeDecodeError, yaml.YAMLError):
         return False
     generated = metadata.get("generated")
