@@ -357,6 +357,17 @@ class WatchService:
             projects = [project for project in projects if project.name not in skipped]
             logger.debug(f"Skipping projects that are not locally syncable: {skipped}")
 
+        # Trigger: a configured project's directory does not exist (deleted, or an
+        #   unmounted drive).
+        # Why: watchfiles refuses the whole path list when one path is missing, so a
+        #   single absent directory stopped file watching for every project.
+        # Outcome: watch the projects that exist; the next reload picks the missing
+        #   one up once its directory is back.
+        missing = [project.name for project in projects if not Path(project.path).is_dir()]
+        if missing:
+            projects = [project for project in projects if project.name not in missing]
+            logger.warning(f"Not watching projects whose directory is missing: {missing}")
+
         return list(projects)
 
     async def run(self) -> None:  # pragma: no cover
