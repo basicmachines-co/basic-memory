@@ -25,7 +25,7 @@ from basic_memory.mcp.project_context import (
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
 )
-from basic_memory.mcp.tools import bm_write, cat, find, grep, ls, man, search_notes, tail
+from basic_memory.mcp.tools import bm_search, bm_write, cat, find, grep, ls, man, tail
 from basic_memory.models import Entity
 from basic_memory.repository.metadata_filters import (
     MetadataPath,
@@ -1580,19 +1580,13 @@ async def test_find_without_meta_stays_the_directory_listing(client, test_graph,
         (["review.approved=true"], {"review.approved": True}),
     ],
 )
-async def test_find_meta_matches_search_notes_parity(
-    client, test_project, meta_notes, meta, filters
-):
+async def test_find_meta_matches_bm_search_parity(client, test_project, meta_notes, meta, filters):
     """PARITY: the POSIX surface and the rich surface answer the same question
     identically — same filters dict, same hits — through the same real stack."""
     assert posix_tools._parse_meta_predicates(meta) == filters
 
     found = await find(meta=meta, project=test_project.name)
-    searched = await search_notes(
-        project=test_project.name,
-        metadata_filters=filters,
-        output_format="json",
-    )
+    searched = await bm_search(project=test_project.name, filters=filters, output_format="json")
 
     assert isinstance(searched, dict)
     assert found["results"]

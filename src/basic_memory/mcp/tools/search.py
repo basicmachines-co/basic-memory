@@ -1,36 +1,27 @@
-"""Search tools for Basic Memory MCP server."""
+"""Shared query pipeline for bm_search.
+
+Maps search arguments onto one ``SearchQuery``, picks the default search mode, and
+runs a search across several projects as one scoped query per database.
+"""
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from textwrap import dedent
-from typing import Annotated, List, Optional, Dict, Any, Literal, cast
+from typing import Any, cast
 from uuid import UUID
 
-import logfire
 from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
-from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
 from basic_memory.utils import (
     build_canonical_permalink,
-    coerce_dict,
     generate_permalink,
-    parse_str_list,
-    parse_tags,
-    strict_search_tags,
 )
 from basic_memory.mcp.async_client import get_client, routes_off_host
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.index_readiness import project_index_required
-from basic_memory.mcp.project_context import (
-    detect_project_from_identifier_prefix,
-    get_project_client,
-    resolve_project_and_path,
-)
-from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.search import (
     normalize_file_path_prefix,
@@ -40,37 +31,16 @@ from basic_memory.schemas.search import (
     SearchResult,
     SearchRetrievalMode,
 )
-from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 from basic_memory.repository.semantic_runtime import semantic_runtime_available
 
-_SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
-_NO_SEARCH_CRITERIA_MESSAGE = (
-    "# No Search Criteria\n\n"
-    "Please provide at least one of: `query`, `metadata_filters`, "
-    "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
-    "`after_date`, `valid_at`, `valid_overlaps`, or `time_kind`."
-)
 # Alias common column/model names to their frontmatter key equivalents. Users often
 # pass "note_type" (the entity model column) when the frontmatter field is "type".
-
-METADATA_FILTERS_DESCRIPTION = (
-    "Structured frontmatter filters, {field: condition}. Nested fields use dot notation "
-    '("schema.confidence"). Conditions: a value for equality ({"status": "draft"}); null '
-    'for absent-or-null ({"owner": null}); a list for array-contains-all ({"tags": ["a", "b"]}); '
-    "or an operator object using $gt, $gte, $lt, $lte, $in (list), $between ([min, max]), "
-    '$contains (value or list), $exists (true/false), e.g. {"priority": {"$in": ["high"]}}. '
-    'Several operators on one field AND together: {"started": {"$gte": "2026-01-01", '
-    '"$lt": "2026-02-01"}}. The leading $ is optional.'
-)
-
 _METADATA_KEY_ALIASES = {"note_type": "type"}
 _VALID_SEARCH_TYPES = ("hybrid", "permalink", "semantic", "text", "title", "vector")
 
 
-def split_tag_shorthand(
-    query: str | None, tags: list[str] | None
-) -> tuple[str | None, list[str] | None]:
-    """Move `tag:<value>` tokens out of the query and into the tags filter.
+def split_tag_shorthand(query: str | None) -> tuple[str | None, list[str] | None]:
+    """Move `tag:<value>` tokens out of the query and into a tags filter.
 
     Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing" and
     comma lists ("tag:coffee,brewing"). Done at the tool level so it works in every
@@ -78,16 +48,16 @@ def split_tag_shorthand(
     parser clears the text after the mode is set.
     """
     if not query or "tag:" not in query.lower():
-        return query, tags
+        return query, None
     raw_values = re.findall(r"tag:(\S+)", query, flags=re.IGNORECASE)
     tag_values = [value for raw in raw_values for value in raw.split(",") if value]
     if not tag_values:
-        return query, tags
-    merged_tags = list(set((tags or []) + tag_values))
+        return query, None
+    tags = list(dict.fromkeys(tag_values))
     # Remove tag: tokens and Boolean connectors; whatever text remains is the query.
     remainder = re.sub(r"tag:\S+", "", query, flags=re.IGNORECASE)
     remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
-    return remainder or None, merged_tags
+    return remainder or None, tags
 
 
 def _build_search_query(
@@ -100,7 +70,6 @@ def _build_search_query(
     after_date: str | None,
     metadata_filters: dict[str, Any] | None,
     tags: list[str] | None,
-    status: str | None,
     min_similarity: float | None,
     valid_at: str | None,
     valid_overlaps: str | None,
@@ -154,8 +123,6 @@ def _build_search_query(
         }
     if tags:
         search_query.tags = tags
-    if status:
-        search_query.status = status
     if min_similarity is not None:
         search_query.min_similarity = min_similarity
     # Presence, not truthiness, for the same reason as everywhere else on this path:
@@ -187,7 +154,7 @@ def _build_search_query(
         #      filter against entity rows and return nothing, defeating the
         #      whole query.
         # Outcome: scope the implicit default to observations so
-        #          search_notes(categories=[...]) and search_notes(valid_at=...)
+        #          bm_search(categories=[...]) and bm_search(valid_at=...)
         #          return the matching bullets.
         if search_query.categories or search_query.has_temporal_filter():
             search_query.entity_types = [SearchItemType("observation")]
@@ -275,362 +242,6 @@ def _is_service_unavailable_error(error: BaseException) -> bool:
             return current.response.status_code == 503
         current = current.__cause__
     return False
-
-
-def _format_service_unavailable_response(project: str, error_message: str, query: str) -> str:
-    """Keep retryable outages distinct so fan-out never turns them into partial success."""
-    return dedent(f"""
-        {_SERVICE_UNAVAILABLE_HEADING}
-
-        Search for '{query}' in project '{project}' could not complete: {error_message}
-
-        No partial results were returned because retrying with a changing project set
-        could duplicate or skip results across pages.
-
-        ## Next step
-        Retry the same search after the service recovers.
-        """).strip()
-
-
-def _format_search_error_response(
-    project: str, error_message: str, query: str, search_type: str = "text"
-) -> str:
-    """Format helpful error responses for search failures that guide users to successful searches."""
-
-    # Semantic config/dependency errors
-    if "semantic search is unavailable" in error_message.lower():
-        return dedent(f"""
-            # Search Failed - Semantic Search Unavailable
-
-            You requested `{search_type}` search for query '{query}', but the vector search
-            runtime failed to load when Basic Memory started, so search is keyword-only.
-
-            ## How to fix
-            1. Check the Basic Memory startup log for the cause (usually sqlite-vec could
-               not load under this Python build)
-            2. Reinstall under a Python with SQLite extension support, then restart
-
-            ## Alternative now
-            - Run FTS search instead:
-              `bm_search(query="{query}", project="{project}", mode="text")`
-            """).strip()
-
-    if "pip install" in error_message.lower() and "semantic" in error_message.lower():
-        return dedent(f"""
-            # Search Failed - Semantic Dependencies Missing
-
-            Semantic retrieval is enabled but required packages are not installed.
-
-            ## Fix
-            1. Install/update Basic Memory: `pip install -U basic-memory`
-            2. Restart Basic Memory
-            3. Retry your query:
-               `bm_search(query="{query}", project="{project}", mode="{search_type}")`
-            """).strip()
-
-    # Corrupt/missing FastEmbed model cache (interrupted download leaves a partial
-    # snapshot missing model_optimized.onnx; the ONNX runtime then raises NO_SUCHFILE).
-    # Basic Memory self-heals by re-downloading on the next load, but if the user still
-    # hits this, point them at the cache dir to clear manually and offer a text fallback.
-    error_lower = error_message.lower()
-    # "load model from" is the exact ONNX phrasing ("Load model from <path>.onnx failed").
-    # The looser "load model" matched unrelated errors, so we keep only the specific phrase
-    # alongside the onnxruntime / no_suchfile / model_optimized.onnx fingerprints.
-    if (
-        "onnxruntime" in error_lower
-        or "no_suchfile" in error_lower
-        or "model_optimized.onnx" in error_lower
-        or "load model from" in error_lower
-    ):
-        # Deferred import: keeps the repository layer out of the tool's import graph
-        # (matches the SearchClient deferral below) and is only needed on this error path.
-        from basic_memory.repository.embedding_provider_factory import _resolve_cache_dir
-
-        try:
-            cache_dir = _resolve_cache_dir(get_container().config)
-        except RuntimeError:
-            cache_dir = _resolve_cache_dir(ConfigManager().config)
-        return dedent(f"""
-            # Search Failed - Embedding Model Missing or Corrupt
-
-            The local FastEmbed model could not be loaded for query '{query}': {error_message}
-
-            This usually means an earlier model download was interrupted and left an
-            incomplete file in the model cache.
-
-            ## How to fix
-            1. Delete the FastEmbed model cache so it re-downloads on the next search:
-               `{cache_dir}`
-            2. Run your search again (the model downloads automatically on first use):
-               `bm_search(query="{query}", project="{project}", mode="{search_type}")`
-
-            ## Workaround right now
-            - Use full-text search, which needs no embedding model:
-              `bm_search(query="{query}", project="{project}", mode="text")`
-            """).strip()
-
-    # FTS5 syntax errors
-    if "syntax error" in error_message.lower() or "fts5" in error_message.lower():
-        clean_query = (
-            query.replace('"', "")
-            .replace("(", "")
-            .replace(")", "")
-            .replace("+", "")
-            .replace("*", "")
-        )
-        return dedent(f"""
-            # Search Failed - Invalid Syntax
-
-            The search query '{query}' contains invalid syntax that the search engine cannot process.
-
-            ## Common syntax issues:
-            1. **Special characters**: Characters like `+`, `*`, `"`, `(`, `)` have special meaning in search
-            2. **Unmatched quotes**: Make sure quotes are properly paired
-            3. **Invalid operators**: Check AND, OR, NOT operators are used correctly
-
-            ## How to fix:
-            1. **Simplify your search**: Try using simple words instead: `{clean_query}`
-            2. **Remove special characters**: Use alphanumeric characters and spaces
-            3. **Use basic boolean operators**: `word1 AND word2`, `word1 OR word2`, `word1 NOT word2`
-
-            ## Examples of valid searches:
-            - Simple text: `project planning`
-            - Boolean AND: `project AND planning`
-            - Boolean OR: `meeting OR discussion`
-            - Boolean NOT: `project NOT archived`
-            - Grouped: `(project OR planning) AND notes`
-            - Exact phrases: `"weekly standup meeting"`
-            - Content-specific: `tag:example`
-
-            ## Try again with:
-            ```
-            bm_search(query="{clean_query}", project="{project}")
-            ```
-
-            ## Alternative search strategies:
-            - Break into simpler terms: `bm_search(query="{" ".join(clean_query.split()[:2])}", project="{project}")`
-            - Try different search types: `bm_search(query="{clean_query}", project="{project}", mode="title")`
-            - Use filtering: `bm_search(query="{clean_query}", project="{project}", note_types=["note"])`
-            """).strip()
-
-    # Project not found errors (check before general "not found")
-    if "project not found" in error_message.lower():
-        return dedent(f"""
-            # Search Failed - Project Not Found
-
-            The current project is not accessible or doesn't exist: {error_message}
-
-            ## How to resolve:
-            1. **Check available projects**: `bm_list(path="/")`
-            3. **Verify project setup**: Ensure your project is properly configured
-
-            ## Current session info:
-            - See available projects: `bm_list(path="/")`
-            """).strip()
-
-    # No results found
-    if "no results" in error_message.lower() or "not found" in error_message.lower():
-        simplified_query = (
-            " ".join(query.split()[:2])
-            if len(query.split()) > 2
-            else query.split()[0]
-            if query.split()
-            else "notes"
-        )
-        return dedent(f"""
-            # Search Complete - No Results Found
-
-            No content found matching '{query}' in the current project.
-
-            ## Search strategy suggestions:
-            1. **Broaden your search**: Try fewer or more general terms
-               - Instead of: `{query}`
-               - Try: `{simplified_query}`
-
-            2. **Check spelling and try variations**:
-               - Verify terms are spelled correctly
-               - Try synonyms or related terms
-
-            3. **Use different search approaches**:
-               - **Text search**: `bm_search(query="{query}", project="{project}", mode="text")` (searches full content)
-               - **Title search**: `bm_search(query="{query}", project="{project}", mode="title")` (searches only titles)
-               - **Permalink search**: `bm_search(query="{query}", project="{project}", mode="permalink")` (searches file paths)
-
-            4. **Try boolean operators for broader results**:
-               - OR search: `bm_search(query="{" OR ".join(query.split()[:3])}", project="{project}")`
-               - Remove restrictive terms: Focus on the most important keywords
-
-            5. **Use filtering to narrow scope**:
-               - By note type in frontmatter: `bm_search(query="{query}", project="{project}", note_types=["note"])`
-               - By recent content: `bm_search(query="{query}", project="{project}", since="1 week")`
-               - By entity type: `bm_search(query="{query}", project="{project}", items=["observation"])`
-
-            6. **Try advanced search patterns**:
-               - Tag search: `bm_search(query="tag:your-tag", project="{project}")`
-               - Observation category: `bm_search(query="{query}", project="{project}", items=["observation"], categories=["requirement"])`
-               - Pattern matching: `bm_search(query="*{query}*", project="{project}", mode="permalink")`
-
-            ## Explore what content exists:
-            - **Recent activity**: `bm_search(since="7d", project="{project}")` - See what's been updated recently
-            - **List directories**: `bm_list(path="/", project="{project}")` - Browse all content
-            - **Browse by folder**: `bm_list(path="/notes", project="{project}")` or `bm_list("/docs")`
-            """).strip()
-
-    # Server/API errors
-    if "server error" in error_message.lower() or "internal" in error_message.lower():
-        return dedent(f"""
-            # Search Failed - Server Error
-
-            The search service encountered an error while processing '{query}': {error_message}
-
-            ## Immediate steps:
-            1. **Try again**: The error might be temporary
-            2. **Simplify the query**: Use simpler search terms
-            3. **Check project status**: Ensure your project is properly synced
-
-            ## Alternative approaches:
-            - Browse files directly: `bm_list(path="/", project="{project}")`
-            - Check recent activity: `bm_search(since="7d", project="{project}")`
-            - Try a different search type: `bm_search(query="{query}", project="{project}", mode="title")`
-
-            ## If the problem persists:
-            The search index might need to be rebuilt. Send a message to support@basicmachines.co or check the project sync status.
-            """).strip()
-
-    # Permission/access errors
-    if (
-        "permission" in error_message.lower()
-        or "access" in error_message.lower()
-        or "forbidden" in error_message.lower()
-    ):
-        return f"""# Search Failed - Access Error
-
-You don't have permission to search in the current project: {error_message}
-
-## How to resolve:
-1. **Check your project access**: Verify you have read permissions for this project
-2. **Switch projects**: Try searching in a different project you have access to
-3. **Check authentication**: You might need to re-authenticate
-
-## Alternative actions:
-- List available projects: `bm_list(path="/")`"""
-
-    # Generic fallback
-    return f"""# Search Failed
-
-Error searching for '{query}': {error_message}
-
-## Troubleshooting steps:
-1. **Simplify your query**: Try basic words without special characters
-2. **Check search syntax**: Ensure boolean operators are correctly formatted
-3. **Verify project access**: Make sure you can access the current project
-4. **Test with simple search**: Try `bm_search("test")` to verify search is working
-
-## Alternative search approaches:
-- **Different search types**: 
-  - Title only: `bm_search(query="{query}", project="{project}", mode="title")`
-  - Permalink patterns: `bm_search(query="{query}*", project="{project}", mode="permalink")`
-- **With filters**: `bm_search(query="{query}", project="{project}", note_types=["note"])`
-- **Recent content**: `bm_search(query="{query}", project="{project}", since="1 week")`
-- **Boolean variations**: `bm_search(query="{" OR ".join(query.split()[:2])}", project="{project}")`
-
-## Explore your content:
-- **Browse files**: `bm_list(path="/", project="{project}")` - See all available content
-- **Recent activity**: `bm_search(since="7d", project="{project}")` - Check what's been updated
-- **All projects**: `bm_list(path="/")`
-
-## Search syntax reference:
-- **Basic**: `keyword` or `multiple words`
-- **Boolean**: `term1 AND term2`, `term1 OR term2`, `term1 NOT term2`
-- **Phrases**: `"exact phrase"`
-- **Grouping**: `(term1 OR term2) AND term3`
-- **Tags**: `tag:example`
-- **Observation categories**: `items=["observation"], categories=["requirement"]`"""
-
-
-def _format_search_markdown(
-    result: SearchResponse,
-    project: str,
-    query: str | None,
-    project_id: str | None = None,
-    project_names: Mapping[str, str] | None = None,
-) -> str:
-    """Format SearchResponse as compact markdown text.
-
-    Produces a human-readable markdown representation suitable for LLM
-    consumption when structured data isn't needed. ``project_names`` maps a
-    project's external id to the name a hit should be labelled with when the
-    page spans several projects.
-    """
-    if not result.results:
-        # Empty search is usually "no match for this query," not "empty knowledge base," so we
-        # do not repeat the first-note offer here (that would nag established users). Point at
-        # recent_activity, which owns the getting-started guidance when the base is truly empty.
-        if project == "all projects":
-            # A bare recent_activity() is NOT force-discovery: with a configured default/cached
-            # project it resolves to that one project. So for an all-projects miss, point at the
-            # enumerator instead — suggesting recent_activity() could silently narrow to the
-            # default project and miss activity elsewhere.
-            suggestion = 'call bm_list(path="/") to see what exists across your projects'
-        elif project_id:
-            # Names collide across cloud workspaces; route the orientation call by external id.
-            suggestion = f'call bm_list(path="/", project="{project_id}") to browse the project'
-        else:
-            suggestion = f'call bm_list(path="/", project="{project}") to browse the project'
-        return (
-            f"No results found for '{query or ''}' in project '{project}'. "
-            f"Try broader or different terms, or {suggestion}."
-            + (f"\n\n{result.query_hint}" if result.query_hint else "")
-        )
-
-    parts = []
-
-    # --- Header ---
-    if query:
-        parts.append(f"# Search Results: {query}")
-    else:
-        parts.append("# Search Results")
-    parts.append(f"*project: {project}*")
-    parts.append("")
-
-    # --- Result blocks ---
-    for r in result.results:
-        parts.append(f"### {r.title}")
-        parts.append(f"- permalink: {r.permalink}")
-        # A page over several projects must say which one each hit lives in, or the
-        # reader cannot route the next call; single-project pages already know.
-        project_name = (project_names or {}).get(r.project_external_id or "")
-        if project_name is not None:
-            parts.append(f"- project: {project_name}")
-        # external_id is the note's stable identifier. Emitting it lets the hosted MCP layer
-        # deep-link each hit to the web app from the final (post-merge) result the caller sees,
-        # which matters for all-projects search where the displayed page is decided after the
-        # per-project API calls the gateway would otherwise record (#1423).
-        if r.external_id:
-            parts.append(f"- external_id: {r.external_id}")
-        parts.append(f"- score: {r.score:.4f}")
-        if r.matched_chunk:
-            parts.append(f"- match: {r.matched_chunk[:200]}")
-        # Name the kind and the units. A bare "2026-06-10" here would read as an edit
-        # date; "effective valid time ... (date)" says which time this is and that it
-        # is a calendar date carrying no timezone.
-        for assertion in r.temporal or []:
-            parts.append(
-                f"- {assertion.kind} valid time: {assertion.valid_during.literal} "
-                f"({assertion.valid_during.axis})"
-            )
-        parts.append("")
-
-    # --- Footer with pagination ---
-    parts.append("---")
-    count = len(result.results)
-    parts.append(
-        f"*{count} result{'s' if count != 1 else ''}"
-        f" | page {result.current_page}, page_size {result.page_size}"
-        f"{' | more available' if result.has_more else ''}*"
-    )
-
-    return "\n".join(parts)
 
 
 def _valid_project_id(value: object) -> str | None:
@@ -765,7 +376,7 @@ def _select_project_refs(
 
 
 async def _load_search_project_refs(context: Context | None = None) -> list[SearchProjectRef]:
-    """Load accessible projects for search_all_projects without coupling the wrapper tool."""
+    """Load the projects a search across projects may read."""
     from basic_memory.mcp.tools.project_management import list_memory_projects
 
     return _search_project_refs(await list_memory_projects(output_format="json", context=context))
@@ -863,9 +474,9 @@ def _project_item(ref: SearchProjectRef) -> ProjectItem:
 
 @dataclass(frozen=True, slots=True)
 class MultiProjectRan:
-    """The search ran in at least one database; `rendered` is its JSON or text."""
+    """The search ran in at least one database; `payload` is the merged page as JSON."""
 
-    rendered: dict[str, Any] | str
+    payload: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -880,8 +491,6 @@ class MultiProjectFailed:
     """No database answered: the search did not run."""
 
     reason: str
-    # The legacy tool's rendering of the failure.
-    rendered: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -900,14 +509,12 @@ async def _search_all_projects(
     page: int,
     page_size: int,
     search_type: str | None,
-    output_format: Literal["text", "json"],
     note_types: list[str],
     entity_types: list[str],
     categories: list[str],
     after_date: str | None,
     metadata_filters: dict[str, Any] | None,
     tags: list[str] | None,
-    status: str | None,
     min_similarity: float | None,
     valid_at: str | None,
     valid_overlaps: str | None,
@@ -931,7 +538,6 @@ async def _search_all_projects(
     project_refs = await _load_search_project_refs(context=context)
     if projects:
         project_refs = _select_project_refs(project_refs, projects)
-    scope_label = ", ".join(ref.name for ref in project_refs) if projects else "all projects"
     if not project_refs:
         response = SearchResponse(
             results=[],
@@ -942,9 +548,7 @@ async def _search_all_projects(
             has_more=False,
             temporal_applied=True if temporal_requested else None,
         )
-        if output_format == "json":
-            return MultiProjectRan(response.model_dump(mode="json", exclude_none=True))
-        return MultiProjectRan(_format_search_markdown(response, scope_label, query))
+        return MultiProjectRan(response.model_dump(mode="json", exclude_none=True))
 
     effective_search_type = _search_type_for(search_type, query, [ref.name for ref in project_refs])
     search_query = _build_search_query(
@@ -956,7 +560,6 @@ async def _search_all_projects(
         after_date=after_date,
         metadata_filters=metadata_filters,
         tags=tags,
-        status=status,
         min_similarity=min_similarity,
         valid_at=valid_at,
         valid_overlaps=valid_overlaps,
@@ -1005,10 +608,7 @@ async def _search_all_projects(
                             return MultiProjectNotIndexed(guidance)
         except Exception as exc:
             if _is_service_unavailable_error(exc):
-                return MultiProjectFailed(
-                    reason=f"{label}: {exc}",
-                    rendered=_format_service_unavailable_response(label, str(exc), query or ""),
-                )
+                return MultiProjectFailed(reason=f"{label}: {exc}")
             logger.warning(f"Multi-project search failed for {label}: {exc}")
             failures.append(f"{label}: {exc}")
             total_is_exact = False
@@ -1046,12 +646,7 @@ async def _search_all_projects(
         )
     if databases_answered == 0:
         # Every database failed. That is a failed search, not an empty one.
-        return MultiProjectFailed(
-            reason="; ".join(failures),
-            rendered=_format_search_error_response(
-                scope_label, "; ".join(failures), query or "", effective_search_type
-            ),
-        )
+        return MultiProjectFailed(reason="; ".join(failures))
 
     # Each database owns retrieval and optional reranking behind its typed API client.
     # The MCP process only merges returned scores; it must not instantiate repository
@@ -1080,659 +675,7 @@ async def _search_all_projects(
     )
 
     project_names = {ref.external_id: ref.name for ref in project_refs}
-    if output_format == "json":
-        payload = response.model_dump(mode="json", exclude_none=True)
-        for item in payload["results"]:
-            item["project"] = project_names[item["project_external_id"]]
-        return MultiProjectRan(payload)
-    return MultiProjectRan(
-        _format_search_markdown(response, scope_label, query, project_names=project_names)
-    )
-
-
-async def search_notes(
-    # Accept common search-query aliases models reach for from training data.
-    # `q` is the universal HTTP convention; `search`/`text` are common in NL APIs.
-    query: Annotated[
-        Optional[str],
-        Field(default=None, validation_alias=AliasChoices("query", "q", "search", "text")),
-    ] = None,
-    project: Optional[str] = None,
-    project_id: Optional[str] = None,
-    search_all_projects: Annotated[
-        bool,
-        Field(
-            default=False,
-            validation_alias=AliasChoices("search_all_projects", "all_projects"),
-        ),
-    ] = False,
-    projects: Optional[List[str]] = None,
-    # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
-    # (skip N items) while page is 1-indexed page-number. Direct aliasing would
-    # silently return the wrong slice.
-    page: Annotated[
-        int,
-        Field(default=1, validation_alias=AliasChoices("page", "page_number")),
-    ] = 1,
-    page_size: Annotated[
-        int,
-        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
-    ] = 10,
-    search_type: str | None = None,
-    output_format: Literal["text", "json"] = "text",
-    # Plural-vs-singular trips models constantly. Accept the singular too.
-    note_types: Annotated[
-        List[str] | None,
-        # parse_str_list, not coerce_list: "note,task" must split into ["note", "task"]
-        # consistent with how tags are handled (#910/#930). coerce_list wraps the whole
-        # comma string as the single literal type ["note,task"], which matches nothing.
-        BeforeValidator(parse_str_list),
-        Field(default=None, validation_alias=AliasChoices("note_types", "note_type", "types")),
-        "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
-        "Accepts a list, a comma-separated string (e.g. 'note,task'), or a JSON-array string. "
-        "Case-insensitive.",
-    ] = None,
-    entity_types: Annotated[
-        List[str] | None,
-        BeforeValidator(parse_str_list),
-        Field(default=None, validation_alias=AliasChoices("entity_types", "entity_type")),
-        "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
-        "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
-        "'Chapter' here — use note_types instead. "
-        "Accepts a list, a comma-separated string (e.g. 'entity,observation'), or a JSON-array string.",
-    ] = None,
-    categories: Annotated[
-        List[str] | None,
-        BeforeValidator(parse_str_list),
-        Field(default=None, validation_alias=AliasChoices("categories", "category")),
-        "Filter observation results to these exact categories (e.g. ['requirement']). "
-        "Accepts a list, a comma-separated string (e.g. 'requirement,decision'), or a JSON-array string. "
-        "Pair with entity_types=['observation'] to return only observations whose "
-        "category matches exactly — not every row mentioning the word.",
-    ] = None,
-    # Time-filter naming varies wildly across APIs.
-    after_date: Annotated[
-        Optional[str],
-        Field(
-            default=None,
-            validation_alias=AliasChoices("after_date", "since", "after", "from_date"),
-        ),
-    ] = None,
-    metadata_filters: Annotated[
-        Dict[str, Any] | None,
-        BeforeValidator(coerce_dict),
-        # The schema description is what a client's model actually reads; the
-        # docstring's grammar section is often truncated or skimmed.
-        Field(description=METADATA_FILTERS_DESCRIPTION),
-    ] = None,
-    # strict_search_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to
-    # match the tag: query shorthand below and write_note's documented tags convention
-    # (#910). coerce_list would wrap the comma string as the single literal tag
-    # ["a,b"], which matches nothing. Unlike bare parse_tags, the strict wrapper only
-    # splits str/list/None and lets Pydantic reject other types (42, {"a": 1}) with a
-    # clear validation error instead of stringifying them into junk tags.
-    tags: Annotated[
-        List[str] | None,
-        BeforeValidator(strict_search_tags),
-    ] = None,
-    status: Optional[str] = None,
-    min_similarity: Annotated[
-        Optional[float],
-        Field(
-            default=None,
-            validation_alias=AliasChoices("min_similarity", "threshold", "similarity_threshold"),
-        ),
-    ] = None,
-    # --- Valid-time filters (SPEC-82) ---
-    # A different axis from after_date: these ask what a note SAYS was true, not when
-    # the note was last touched. Appended at the end of the signature so no existing
-    # positional caller shifts.
-    valid_at: Annotated[
-        Optional[str],
-        Field(
-            default=None,
-            validation_alias=AliasChoices("valid_at", "as_of", "valid_on"),
-        ),
-        "Return only sources whose authored valid range CONTAINS this date "
-        "('2026-07-28') or RFC 3339 instant ('2026-07-28T09:00:00Z'; a timestamp "
-        "with no offset is read as UTC). Sources with no temporal qualifier are "
-        "excluded.",
-    ] = None,
-    valid_overlaps: Annotated[
-        Optional[str],
-        Field(
-            default=None,
-            validation_alias=AliasChoices("valid_overlaps", "overlaps", "valid_during"),
-        ),
-        "Return only sources whose authored valid range OVERLAPS this range literal, "
-        "written PostgreSQL-style: '[2026-06-10,2026-07-27)', '(,2026-07-27]', "
-        "'[2026-06-10,)'. Mutually exclusive with valid_at.",
-    ] = None,
-    time_kind: Annotated[
-        Optional[str],
-        Field(
-            default=None,
-            validation_alias=AliasChoices("time_kind", "kind"),
-        ),
-        "Narrow valid-time matching to one authored kind of time: 'effective', "
-        "'valid', 'occurred', 'due', or 'mentioned'. Usable on its own to find every "
-        "source carrying an assertion of that kind.",
-    ] = None,
-    context: Context | None = None,
-    compact: Annotated[
-        bool,
-        "Omit note bodies and matched excerpts from results. Keep identifiers, metadata, "
-        "relation targets, scores and pagination for discovery, then read selected notes.",
-    ] = False,
-) -> dict[str, Any] | str:
-    """Search across all content in the knowledge base with comprehensive syntax support.
-
-    This tool searches the knowledge base using full-text search, pattern matching,
-    or exact permalink lookup. It supports filtering by content type, entity type,
-    and date, with advanced boolean and phrase search capabilities.
-
-    Project Resolution:
-    Server resolves projects in this order: Single Project Mode → project parameter → default project.
-    If project unknown, use list_memory_projects() or recent_activity() first.
-    Set search_all_projects=True to search every accessible project, or pass projects=[...] to
-    search a chosen subset. Either runs one scoped query per database the projects live in.
-
-    ## Search Syntax Examples
-
-    ### Basic Searches
-    - `search_notes("keyword", project="my-project")` - Find any content containing "keyword"
-    - `search_notes("'exact phrase'", project="work-docs")` - Search for exact phrase match
-
-    ### Advanced Boolean Searches
-    - `search_notes("term1 term2", project="my-project")` - Strict implicit-AND first; retries with
-      relaxed OR terms only if strict search returns no results
-    - `search_notes("term1 AND term2", project="my-project")` - Explicit AND search (both terms required)
-    - `search_notes("term1 OR term2", project="my-project")` - Either term can be present
-    - `search_notes("term1 NOT term2", project="my-project")` - Include term1 but exclude term2
-    - `search_notes("(project OR planning) AND notes", project="my-project")` - Grouped boolean logic
-
-    ### Content-Specific Searches
-    - `search_notes("tag:example", project="research")` - Search within specific tags (if supported by content)
-    - `search_notes("req", project="work-project", entity_types=["observation"], categories=["requirement"])`
-      - Return only observations whose category is exactly "requirement"
-    - `search_notes("author:username", project="team-docs")` - Find content by author (if metadata available)
-
-    **Note:** `tag:` shorthand is automatically converted to a `tags` filter, so it works
-    with any search type (text, hybrid, vector). You can also use the `tags` parameter
-    directly: `search_notes("query", project="project", tags=["my-tag"])`
-
-    ### Search Type Examples
-    - `search_notes("Meeting", project="my-project", search_type="title")` - Search only in titles
-    - `search_notes("docs/meeting-*", project="work-docs", search_type="permalink")` - Pattern match permalinks
-      Note: Permalink patterns match the full path (e.g., "project/folder/chapter-13*", not just "chapter-13*").
-    - `search_notes("keyword", project="research")` - Default search (hybrid when semantic is enabled,
-      text when disabled)
-
-    ### Filtering Options
-    - `search_notes("query", project="my-project", note_types=["note"])` - Search only notes
-    - `search_notes("query", project="work-docs", note_types=["note", "person"])` - Multiple note types
-    - `search_notes("query", project="research", entity_types=["observation"])` - Filter by entity type
-    - `search_notes("query", project="research", entity_types=["observation"], categories=["requirement"])`
-      - Filter observations to an exact category
-    - `search_notes("query", project="team-docs", after_date="2024-01-01")` - Recent content only
-    - `search_notes("query", project="my-project", after_date="1 week")` - Relative date filtering
-    - `search_notes("query", project="my-project", tags=["security"])` - Filter by frontmatter tags
-    - `search_notes("query", project="my-project", status="in-progress")` - Filter by frontmatter status
-    - `search_notes("query", project="my-project", metadata_filters={"priority": {"$in": ["high"]}})`
-
-    ### Structured Metadata Filters
-    Filters match frontmatter metadata. Supported forms:
-    - Equality: `{"status": "in-progress"}`
-    - Array contains (all): `{"tags": ["security", "oauth"]}`
-    - Operators:
-      - `$in`: `{"priority": {"$in": ["high", "critical"]}}`
-      - `$gt`, `$gte`, `$lt`, `$lte`: `{"schema.confidence": {"$gt": 0.7}}`
-      - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
-      - `$contains`: `{"tags": {"$contains": "security"}}`
-      - `$exists`: `{"owner": {"$exists": true}}` (has a non-null value)
-    - Several operators on one key AND together: `{"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}`
-    - The `$` is optional: `{"started": {"gte": "2026-01-01"}}` works too.
-    - Nested keys use dot notation (e.g., `"schema.confidence"`).
-
-    ### Filter-only Searches
-    Omit `query` (or pass None) when only using structured filters:
-    - `search_notes(metadata_filters={"type": "spec"}, project="my-project")`
-    - `search_notes(tags=["security"], project="my-project")`
-    - `search_notes(status="draft", project="my-project")`
-
-    ### Convenience Filters
-    `tags` and `status` are shorthand for metadata_filters. If the same key exists in
-    metadata_filters, that value wins.
-
-    ### Valid-Time Filters (what a note says was true)
-    Notes can state when a fact holds, by writing a qualifier on an observation:
-
-        - [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis.
-        - [decision] @effective:2026-07-27 The cache layer will use Memcached.
-
-    The bracket form is an explicit range; the `@kind:date` form is a point, meaning
-    the span its precision covers — `@2026` that year, `@2026-06` that month, and
-    `@2026-06-10` from that date onward. The kind may be omitted (`@2026-07-27`),
-    which files the assertion as `valid` time; a point with no kind has to start
-    with a digit and be at least as wide as a year, so `@v2` and `@may` stay prose.
-
-    An unquoted point is **one whitespace-delimited token**, because nothing can tell
-    where a multi-word date ends. Slash dates (`@occurred:03/04/2026`, read by the
-    `date_order` setting) work as they are; anything longer goes in double quotes,
-    which move the token boundary to the closing quote:
-
-        - [decision] @occurred:"June 10, 2026" The cutover ran.
-        - [decision] @occurred:"June 2026" The cutover ran.
-        - [decision] @"June 10, 2026" The cutover ran.
-
-    Whatever is inside the quotes is read as the date, month-only forms included, and
-    whatever follows the closing quote is ordinary content. An unreadable token is left
-    as content, never half-read.
-
-    **Relative dates are not accepted here.** `@occurred:yesterday`, `@occurred:"2 days
-    ago"`, `@occurred:"last week"` and a bare month name like `@occurred:March` all name
-    a different span depending on the day the note is indexed, so an unedited file would
-    assert a different valid time on every pass. They stay ordinary content, silently,
-    and quoting does not change that — quotes settle where a token ends, not what a date
-    means. Write the date the qualifier should mean: `@occurred:2026-06-10`. This is the
-    authored-time axis only; `recent_activity` and `build_context` still take relative
-    `timeframe` values, because those ask about edit time, which really is relative to now.
-
-    These filters query that authored time, which is a different axis from `after_date`
-    (last-indexed time) — `after_date` is never reinterpreted as valid time.
-    - `search_notes("cache layer", time_kind="effective", valid_at="2026-07-28")`
-      - Returns the Memcached decision; the Redis decision expired at the cutover.
-    - `search_notes("cache layer", time_kind="effective", valid_at="2026-07-01")`
-      - Returns the Redis decision; Memcached is not yet effective.
-    - `search_notes("cache layer", time_kind="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
-      - Returns both, since each overlaps that window.
-    - `search_notes("cache layer")` with no valid-time filter
-      - Both compete under ordinary relevance, exactly as before.
-
-    **Sources with no temporal qualifier are excluded from any valid-time query.**
-    An undated note makes no claim about when it holds, so it cannot answer "what was
-    true on this date". Drop the valid-time filter to search dated and undated content
-    together.
-
-    Because a single note can carry several assertions that disagree (as above), these
-    queries return observation-level results by default rather than whole notes, and
-    each result carries the assertion that matched so the answer can explain itself.
-
-    Bounds follow PostgreSQL range conventions: `[` / `]` include an endpoint, `(` / `)`
-    exclude it, and an omitted side is unbounded. Calendar dates (`2026-07-27`) and
-    instants (`2026-07-27T16:42:00Z`) are separate axes that never convert into each
-    other: a date query matches only date ranges, an instant query only instant ranges.
-    An instant written without an offset is read as UTC.
-
-    ### Advanced Pattern Examples
-    - `search_notes("project AND (meeting OR discussion)", project="work-project")` - Complex boolean logic
-    - `search_notes('"exact phrase" AND keyword', project="research")` - Combine phrase and keyword search
-    - `search_notes("bug NOT fixed", project="dev-notes")` - Exclude resolved issues
-    - `search_notes("docs/2024-*", project="archive", search_type="permalink")` - Year-based permalink search
-
-    Args:
-        query: Optional search query string (supports boolean operators, phrases, patterns).
-              Omit or pass None for filter-only searches using metadata_filters, tags, or status.
-        project: Project name to search in. Optional - server will resolve using hierarchy.
-                If unknown, use list_memory_projects() to discover available projects.
-        project_id: Project external_id (UUID). Prefer this over `project` when known —
-                it routes to the exact project regardless of name collisions across cloud
-                workspaces. Takes precedence over `project`. Get from list_memory_projects().
-        search_all_projects: Optional opt-in to search every accessible project. Ignored when
-                `project` or `project_id` is supplied.
-        projects: Optional list of project names or external ids to search together. Names
-                are matched exactly as list_memory_projects() reports them (cloud projects
-                by their workspace-qualified name). Ignored when `project` or `project_id`
-                is supplied; an unknown name is an error rather than a silent skip.
-        page: The page number of results to return (default 1).
-            Aliases: page_number.
-        page_size: The number of results to return per page (default 10).
-            Aliases: limit, per_page.
-        search_type: Type of search to perform, one of:
-                    "text", "title", "permalink", "vector", "semantic", "hybrid".
-                    Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
-        output_format: "text" returns a formatted markdown result list. "json" returns a
-            machine-readable dictionary payload.
-        note_types: Filter by the frontmatter `type` field (e.g. "note", "person").
-            Case-insensitive. Accepts a list, a comma-separated string, or a JSON-array string.
-        entity_types: Knowledge-graph item types to return: "entity" (whole notes),
-            "observation", "relation". Defaults to entity, or to observation when categories
-            or a valid-time filter is given. Not the frontmatter `type` (use note_types for
-            that). Accepts a list, a comma-separated string, or a JSON-array string.
-        categories: Observation categories to match exactly (e.g. ["requirement"]). Implies
-            observation results unless entity_types is set. Accepts a list, a
-            comma-separated string, or a JSON-array string.
-        after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
-        metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"}).
-                Integer values match integer YAML fields ({"section": 3} works).
-                A None value is an is-null match: notes where the key is absent or explicitly
-                null. None inside $in/$between/a contains list/a comparison is refused —
-                those compare against the value, and a comparison with null is never true.
-        tags: Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"].
-              Accepts a list (["a", "b"]) or a comma-separated string ("a,b"), matching the
-              write_note tags convention and the tag: query shorthand.
-        status: Optional status filter (frontmatter status); shorthand for metadata_filters["status"]
-        min_similarity: Optional float to override the global semantic_min_similarity threshold
-                       for this query. E.g., 0.0 to see all vector results, or 0.8 for high precision.
-                       Only applies to vector and hybrid search types.
-        valid_at: Optional date ("2026-07-28") or RFC 3339 instant ("2026-07-28T09:00:00Z";
-                 a timestamp with no offset is read as UTC). Returns sources whose authored
-                 valid range contains it. Sources with no temporal qualifier are excluded.
-                 Aliases: as_of, valid_on.
-        valid_overlaps: Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)",
-                 "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range
-                 overlaps it. Mutually exclusive with valid_at; also excludes undated sources.
-                 Aliases: overlaps, valid_during.
-        time_kind: Optional kind of valid time to narrow to: "effective", "valid",
-                 "occurred", "due", or "mentioned". Valid on its own. Alias: kind.
-        context: Optional FastMCP context for performance caching.
-        compact: Omit content and matched excerpts in either output format. Defaults to False.
-                 Use returned note identifiers with read_note for content verification.
-
-    Returns:
-        Formatted markdown text (output_format="text"), dict (output_format="json"),
-        or helpful error guidance string if search fails
-
-        Pagination note: use `total` as a count only when `total_is_exact` is true.
-        Vector and hybrid searches skip the count query (it would cost a second
-        semantic retrieval pass), report the results seen through this page as
-        `total` with `total_is_exact: false`, and use `has_more` for pagination.
-
-    Examples:
-        # Basic text search
-        results = await search_notes("project planning")
-        # Plain multi-term text uses strict matching first, then relaxed OR fallback if needed
-
-        # Boolean AND search (both terms must be present)
-        results = await search_notes("project AND planning")
-
-        # Boolean OR search (either term can be present)
-        results = await search_notes("project OR meeting")
-
-        # Boolean NOT search (exclude terms)
-        results = await search_notes("project NOT meeting")
-
-        # Boolean search with grouping
-        results = await search_notes("(project OR planning) AND notes")
-
-        # Exact phrase search
-        results = await search_notes("\"weekly standup meeting\"")
-
-        # Search with note type filter - type property in frontmatter
-        results = await search_notes(
-            "meeting notes",
-            note_types=["note"],
-        )
-
-        # Search with entity type filter
-        results = await search_notes(
-            "meeting notes",
-            entity_types=["observation"],
-        )
-
-        # Search for recent content
-        results = await search_notes(
-            "bug report",
-            after_date="1 week"
-        )
-
-        # Pattern matching on permalinks
-        results = await search_notes(
-            "docs/meeting-*",
-            search_type="permalink"
-        )
-
-        # Title-only search
-        results = await search_notes(
-            "Machine Learning",
-            search_type="title"
-        )
-
-        # Complex search with multiple filters
-        results = await search_notes(
-            "(bug OR issue) AND NOT resolved",
-            note_types=["note"],
-            after_date="2024-01-01"
-        )
-
-        # Explicit project specification
-        results = await search_notes("project planning", project="my-project")
-    """
-    # Validate pagination arguments before they reach the API/repository layer.
-    # Trigger: page < 1 or page_size < 1 (e.g. page_size=0 or a negative slice).
-    # Why: a non-positive page_size yields zero rows yet the router computes
-    #      has_more = offset + len(results) < total, returning a misleading
-    #      has_more=True with no reachable page; a negative page_size becomes an
-    #      uncapped SQLite LIMIT. Mirrors recent_activity's guard so all navigation
-    #      tools reject invalid pagination consistently.
-    # Outcome: caller gets an explicit ValueError instead of a silent bad payload.
-    if page < 1:
-        raise ValueError(f"page must be >= 1, got {page}")
-    if page_size < 1:
-        raise ValueError(f"page_size must be >= 1, got {page_size}")
-
-    # Trigger: both valid-time forms supplied.
-    # Why: SearchQuery rejects the pair too, but the tool assigns its fields after
-    #      construction, so that validator never runs on this path — the caller would
-    #      otherwise learn about it as an opaque 422 from the API.
-    # Outcome: one clear error naming the two mutually exclusive parameters.
-    if valid_at and valid_overlaps:
-        raise ValueError("Use either valid_at (containment) or valid_overlaps (overlap), not both.")
-
-    # Trigger: any valid-time filter string is supplied.
-    # Why: these strings are parsed server-side, so a typo comes back as a 400 that the
-    #      fan-out below cannot tell from a project being unavailable -- it logs the
-    #      project, skips it, and after every project is skipped reports an empty result
-    #      that still claims the filter ran. A malformed filter would read as "no matches"
-    #      instead of as an error. This is the only layer that can tell a client mistake
-    #      from a per-project availability failure, and it shares the parser the search
-    #      service uses so the two can never disagree about what is well formed.
-    # Outcome: one error naming the bad value, before any project is searched.
-    try:
-        parse_temporal_filter(valid_at=valid_at, valid_overlaps=valid_overlaps, time_kind=time_kind)
-    except TemporalQualifierError as exc:
-        raise ValueError(f"Invalid valid-time filter: {exc}") from exc
-
-    # Trigger: list params arrived via a direct function call instead of the MCP layer.
-    # Why: the BeforeValidator annotations only run through MCP/Pydantic validation; direct
-    #      callers (e.g. `bm tool search-notes --type note,task` in cli/commands/tool.py,
-    #      which Typer collects as the one-element list ["note,task"]) would otherwise
-    #      forward the comma string as one literal type that matches nothing (#930).
-    # Outcome: comma-split/list normalization applies on every path; parse_str_list is
-    #          idempotent, so MCP-validated input passes through unchanged.
-    note_types = parse_str_list(note_types) if note_types is not None else []
-    projects = parse_str_list(projects) if projects is not None else None
-    entity_types = parse_str_list(entity_types) if entity_types is not None else []
-    categories = parse_str_list(categories) if categories is not None else []
-
-    # Avoid mutable-default-argument footguns. Treat None as "no filter".
-    # Note types use one snake_case identity at write and query boundaries. Lowercasing
-    # alone leaves multiword and camel-case inputs in a separate logical population.
-    note_types = [normalize_note_type(note_type) for note_type in note_types]
-    entity_types = entity_types or []
-    # Categories are matched exactly against the indexed observation category,
-    # so preserve their original casing (unlike the canonicalized note_types).
-    categories = categories or []
-
-    # Trigger: tags arrived via a direct function call instead of the MCP layer.
-    # Why: the BeforeValidator above only runs through MCP/Pydantic validation; direct
-    #      callers (e.g. `bm tool search-notes --tag a,b` in cli/commands/tool.py, which
-    #      Typer collects as the one-element list ["a,b"]) would otherwise forward the
-    #      comma string as one literal tag that matches nothing (#910).
-    # Outcome: comma-split/list normalization applies on every path; parse_tags is
-    #          idempotent, so MCP-validated input passes through unchanged.
-    tags = parse_tags(tags) or None
-
-    query, tags = split_tag_shorthand(query, tags)
-
-    # Detect project from a memory URL or permalink prefix before routing.
-    # project_id routes by external UUID, so it bypasses URL discovery entirely.
-    if project is None and project_id is None and query is not None:
-        detected = await detect_project_from_identifier_prefix(
-            query,
-            ConfigManager().config,
-            context=context,
-        )
-        if detected is not None:
-            # The id rides along so the name is never re-resolved against a
-            # different accessible workspace holding the same permalink (#1432).
-            project, project_id = detected.project, detected.project_id
-
-    # Trigger: caller explicitly requests account/workspace-wide search and did not
-    # already provide a concrete project route.
-    # Why: multi-project fan-out can be slow, so default search remains project-scoped.
-    # Outcome: run one normal search per accessible project and merge ranked results.
-    if (search_all_projects or projects) and project is None and project_id is None:
-        all_projects_result = await _search_all_projects(
-            query=query,
-            page=page,
-            page_size=page_size,
-            search_type=search_type,
-            output_format=output_format,
-            note_types=note_types,
-            entity_types=entity_types,
-            categories=categories,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            tags=tags,
-            status=status,
-            min_similarity=min_similarity,
-            valid_at=valid_at,
-            valid_overlaps=valid_overlaps,
-            time_kind=time_kind,
-            context=context,
-            compact=compact,
-            projects=projects,
-        )
-        # search_notes reports every outcome in its result, as it always has.
-        match all_projects_result:
-            case MultiProjectRan(rendered=rendered):
-                return rendered
-            case MultiProjectNotIndexed(guidance=guidance):
-                return guidance
-            case MultiProjectFailed(rendered=rendered):
-                return rendered
-            case MultiProjectNoCriteria():
-                return _NO_SEARCH_CRITERIA_MESSAGE
-
-    with logfire.span(
-        "mcp.tool.search_notes",
-        entrypoint="mcp",
-        tool_name="search_notes",
-        requested_project=project,
-        requested_project_id=project_id,
-        search_all_projects=search_all_projects,
-        search_type=search_type or "default",
-        output_format=output_format,
-        page=page,
-        page_size=page_size,
-        has_query=bool(query and query.strip()),
-        note_type_filter_count=len(note_types),
-        entity_type_filter_count=len(entity_types),
-        category_filter_count=len(categories),
-        has_filters=bool(
-            metadata_filters
-            or tags
-            or status
-            or note_types
-            or entity_types
-            or categories
-            or after_date
-            or valid_at
-            or valid_overlaps
-            or time_kind
-        ),
-        has_tags_filter=bool(tags),
-        has_status_filter=bool(status),
-        has_temporal_filter=(
-            valid_at is not None or valid_overlaps is not None or time_kind is not None
-        ),
-    ):
-        async with get_project_client(project, context=context, project_id=project_id) as (
-            client,
-            active_project,
-        ):
-            # Handle memory:// URLs by resolving to permalink search.
-            # Use active_project.name so resolution hits the cached active project
-            # when project_id was used or `project` was wrong/ambiguous.
-            is_memory_url = False
-            if query is not None:
-                _, resolved_query, is_memory_url = await resolve_project_and_path(
-                    client, query, active_project.name, context
-                )
-                if is_memory_url:
-                    query = resolved_query
-            effective_search_type = _search_type_for(search_type, query, [active_project.name])
-            if is_memory_url:
-                effective_search_type = "permalink"
-
-            try:
-                search_query = _build_search_query(
-                    query=query,
-                    search_type=effective_search_type,
-                    note_types=note_types,
-                    entity_types=entity_types,
-                    categories=categories,
-                    after_date=after_date,
-                    metadata_filters=metadata_filters,
-                    tags=tags,
-                    status=status,
-                    min_similarity=min_similarity,
-                    valid_at=valid_at,
-                    valid_overlaps=valid_overlaps,
-                    time_kind=time_kind,
-                )
-                if search_query is None:
-                    return _NO_SEARCH_CRITERIA_MESSAGE
-                effective_query = (query or "").strip()
-
-                logger.debug(
-                    f"Search request: project={active_project.name} "
-                    f"search_type={effective_search_type} "
-                    f"query={effective_query or '<filters-only>'} "
-                    f"note_types={len(note_types)} entity_types={len(search_query.entity_types or [])} "
-                    f"page={page} page_size={page_size}"
-                )
-                # Import here to avoid circular import (tools → clients → utils → tools)
-                from basic_memory.mcp.clients import SearchClient
-
-                # Use typed SearchClient for API calls
-                search_client = SearchClient(client, active_project.external_id)
-                result = await search_client.search(
-                    search_query.model_dump(),
-                    page=page,
-                    page_size=page_size,
-                )
-                logger.debug(
-                    f"Search response: project={active_project.name} "
-                    f"results={len(result.results)} has_more={str(result.has_more).lower()} "
-                    f"page={result.current_page} page_size={result.page_size}"
-                )
-
-                # An empty page is a trustworthy miss only after an index pass.
-                if not result.results:
-                    guidance = await project_index_required(client, active_project)
-                    if guidance is not None:
-                        return guidance
-
-                if compact:
-                    result = _compact_search_response(result)
-                if output_format == "json":
-                    return result.model_dump(mode="json", exclude_none=True)
-
-                return _format_search_markdown(
-                    result, active_project.name, query, project_id=active_project.external_id
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"Search failed for query '{query or ''}': {e}, project: {active_project.name}"
-                )
-                if _is_service_unavailable_error(e):
-                    return _format_service_unavailable_response(
-                        active_project.name, str(e), query or ""
-                    )
-                # Return formatted error message as string for better user experience
-                return _format_search_error_response(
-                    active_project.name, str(e), query or "", effective_search_type
-                )
+    payload = response.model_dump(mode="json", exclude_none=True)
+    for item in payload["results"]:
+        item["project"] = project_names[item["project_external_id"]]
+    return MultiProjectRan(payload)

@@ -169,29 +169,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     ],
     "ls": ["path", "page", "page_size", "project", "project_id"],
     "man": ["page", "query", "project", "project_id"],
-    "search_notes": [
-        "query",
-        "project",
-        "project_id",
-        "search_all_projects",
-        "projects",
-        "page",
-        "page_size",
-        "search_type",
-        "output_format",
-        "note_types",
-        "entity_types",
-        "categories",
-        "after_date",
-        "metadata_filters",
-        "tags",
-        "status",
-        "min_similarity",
-        "valid_at",
-        "valid_overlaps",
-        "time_kind",
-        "compact",
-    ],
     "tail": ["timeframe", "lines", "project", "project_id"],
 }
 
@@ -212,7 +189,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_project": {"readOnlyHint": False, "destructiveHint": False},
     "bm_schema": {"readOnlyHint": True, "destructiveHint": False},
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
-    "search_notes": {"readOnlyHint": True, "destructiveHint": False},
 }
 
 # The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
@@ -264,7 +240,6 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "grep": tools.grep,
     "ls": tools.ls,
     "man": tools.man,
-    "search_notes": tools.search_notes,
     "tail": tools.tail,
 }
 

@@ -1,7 +1,7 @@
 """bm_search: ranked search over notes, observations and relations.
 
-The query pipeline is search_notes's (`_build_search_query`, the tag: shorthand,
-the default search mode), plus three scopes and views:
+The query pipeline lives in `search.py` (`_build_search_query`, the tag: shorthand,
+the default search mode, the search across projects), plus three scopes and views:
 
 - `lines`: matching-line windows, built by scanning each ranked hit's body for the
   query's terms, in any search mode;
@@ -72,7 +72,7 @@ type SearchMode = Literal["hybrid", "text", "semantic", "title", "permalink"]
 
 
 def _parse_mode(value: Any) -> Any:
-    """Read "vector", search_notes' other name for semantic search, as "semantic"."""
+    """Read "vector", the older name for semantic search, as "semantic"."""
     return "semantic" if value == "vector" else value
 
 
@@ -358,7 +358,7 @@ async def bm_search(
         )
 
     # --- Shared query shape ---
-    query, tags = split_tag_shorthand(query, None)
+    query, tags = split_tag_shorthand(query)
     normalized_note_types = [normalize_note_type(note_type) for note_type in note_types or []]
     entity_types = [item.value for item in search_item_types(items) or []]
 
@@ -375,7 +375,6 @@ async def bm_search(
             after_date=since,
             metadata_filters=filters,
             tags=tags,
-            status=None,
             min_similarity=min_similarity,
             valid_at=valid_at,
             valid_overlaps=valid_overlaps,
@@ -383,12 +382,9 @@ async def bm_search(
             context=context,
             compact=compact,
             projects=projects,
-            # bm_search re-qualifies the rows and renders text itself, so it always
-            # asks for the rows.
-            output_format="json",
         )
         match searched:
-            case MultiProjectRan(rendered=dict() as rows):
+            case MultiProjectRan(payload=rows):
                 # Each hit carries its project, so its path can be routed back to it.
                 payload = {
                     **rows,
@@ -405,9 +401,6 @@ async def bm_search(
                 scope = f"projects {', '.join(projects)}" if projects else "all projects"
                 next_call = Pagination.of(payload).next_call("bm_search", call_arguments)
                 return _format_results(payload, query, scope, next_call=next_call)
-            case MultiProjectRan(rendered=str() as text):  # pragma: no cover
-                # Only a text request renders text, and this call asks for JSON.
-                return text
             case MultiProjectNotIndexed(guidance=guidance):
                 return (
                     {"results": [], "guidance": guidance} if output_format == "json" else guidance
@@ -476,7 +469,6 @@ async def bm_search(
             after_date=since,
             metadata_filters=filters,
             tags=tags,
-            status=None,
             min_similarity=min_similarity,
             valid_at=valid_at,
             valid_overlaps=valid_overlaps,

@@ -24,7 +24,6 @@ IMPLEMENTATION_NAMES = (
     "grep",
     "ls",
     "man",
-    "search_notes",
     "tail",
 )
 

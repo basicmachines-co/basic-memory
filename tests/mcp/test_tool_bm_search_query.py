@@ -1,6 +1,6 @@
 """bm_search query shape: modes, filters, tag shorthand, defaults and index readiness.
 
-Ported from the pre-1.0 `search_notes` tests. The end-to-end cases run bm_search over
+The end-to-end cases run bm_search over
 the real ASGI stack; the query-building cases call the shared, pure
 `_build_search_query` / `split_tag_shorthand` / `_search_type_for` helpers that
 bm_search runs every request through.
@@ -59,7 +59,6 @@ def _query(**overrides: Any) -> dict[str, Any]:
         "after_date": None,
         "metadata_filters": None,
         "tags": None,
-        "status": None,
         "min_similarity": None,
         "valid_at": None,
         "valid_overlaps": None,
@@ -471,7 +470,6 @@ def test_filters_reach_the_query():
             search_type="vector",
             metadata_filters={"note_type": "spec", "priority": "high"},
             tags=["important"],
-            status="published",
             min_similarity=0.0,
         )
     )
@@ -479,7 +477,6 @@ def test_filters_reach_the_query():
     assert search_query is not None
     assert search_query.metadata_filters == {"type": "spec", "priority": "high"}
     assert search_query.tags == ["important"]
-    assert search_query.status == "published"
     assert search_query.min_similarity == 0.0
 
 
@@ -502,22 +499,19 @@ def test_results_default_to_whole_notes_unless_items_say_otherwise():
 
 
 @pytest.mark.parametrize(
-    ("query", "tags", "expected_query", "expected_tags"),
+    ("query", "expected_query", "expected_tags"),
     [
-        ("tag:security", None, None, {"security"}),
-        ("tag:security", ["oauth"], None, {"security", "oauth"}),
-        ("tag:coffee AND tag:brewing", None, None, {"coffee", "brewing"}),
-        ("tag:coffee,brewing", None, None, {"coffee", "brewing"}),
-        ("authentication tag:security", None, "authentication", {"security"}),
-        ("no tags here", None, "no tags here", None),
-        (None, None, None, None),
+        ("tag:security", None, ["security"]),
+        ("tag:coffee AND tag:brewing", None, ["coffee", "brewing"]),
+        ("tag:coffee,brewing tag:coffee", None, ["coffee", "brewing"]),
+        ("authentication tag:security", "authentication", ["security"]),
+        ("tag:", "tag:", None),
+        ("no tags here", "no tags here", None),
+        (None, None, None),
     ],
 )
-def test_tag_shorthand_moves_tags_out_of_the_query(query, tags, expected_query, expected_tags):
-    remaining_query, merged_tags = split_tag_shorthand(query, tags)
-
-    assert remaining_query == expected_query
-    assert (set(merged_tags) if merged_tags is not None else None) == expected_tags
+def test_tag_shorthand_moves_tags_out_of_the_query(query, expected_query, expected_tags):
+    assert split_tag_shorthand(query) == (expected_query, expected_tags)
 
 
 # --- Index readiness ---

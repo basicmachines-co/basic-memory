@@ -383,3 +383,53 @@ async def test_max_matches_needs_a_line_scan(client, test_project):
     """Ranked results have no matching lines, so a max_matches bound cannot apply."""
     with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: `max_matches` bounds"):
         await bm_search(query="deploy", max_matches=1, project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_search_needs_an_explicit_scope(client, test_project):
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: Search needs an explicit scope"):
+        await bm_search(query="deploy")
+
+
+@pytest.mark.asyncio
+async def test_lines_text_points_at_further_matches(client, test_project):
+    """A note with more matching lines than max_matches says where the next one is."""
+    await _seed(test_project.name)
+
+    text = await search_text(
+        query="deploy", mode="text", lines=0, max_matches=1, path="tasks", project=test_project.name
+    )
+
+    assert "(more matches from line " in text
+
+
+@pytest.mark.asyncio
+async def test_semantic_text_results_show_the_matched_excerpt(client, test_project):
+    await _seed(test_project.name)
+
+    text = await search_text(
+        query="rollback is manual", mode="semantic", min_similarity=0.0, project=test_project.name
+    )
+
+    assert "- tasks/Deploy Plan.md | Deploy Plan | score " in text
+    assert "\n    " in text
+
+
+@pytest.mark.asyncio
+async def test_lines_skip_hits_without_markdown(
+    client, test_project, test_files, project_repository, session_maker
+):
+    """A ranked hit that is not a Markdown note has no lines to match, so it is left out."""
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository, session_maker=session_maker
+    )
+    await runner.index_project(test_project.id, force_full=True)
+    image_name = test_files["image"].stem
+
+    ranked = await search_json(query=image_name, mode="text", project=test_project.name)
+    with_lines = await search_json(
+        query=image_name, mode="text", lines=0, project=test_project.name
+    )
+
+    assert ranked["results"], "the image must be a ranked hit for this test to mean anything"
+    assert with_lines["results"] == []

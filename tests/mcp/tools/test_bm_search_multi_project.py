@@ -502,6 +502,8 @@ def test_project_refs_need_an_id_an_external_id_and_a_name():
             {"name": "no-id", "external_id": BETA.external_id},
             {"name": "no-external-id", "id": 5},
             {"name": "bool-id", "external_id": PERSONAL.external_id, "id": True},
+            {"name": "bad-uuid", "external_id": "not-a-uuid", "id": 6},
+            {"name": "alpha-again", "external_id": ALPHA.external_id, "id": 3},
             {
                 "name": "main",
                 "qualified_name": "team-paul/main",
@@ -528,6 +530,15 @@ def test_project_refs_need_an_id_an_external_id_and_a_name():
     ]
     assert search_module._search_project_refs({"projects": "nope"}) == []
     assert search_module._search_project_refs(None) == []
+
+
+def test_permalinks_are_qualified_with_the_workspace_once():
+    qualify = search_module._qualify_permalink_for_project
+
+    assert qualify(None, "team-paul/main") is None
+    assert qualify("notes/a", "alpha") == "notes/a"
+    assert qualify("/team-paul/main/notes/a", "team-paul/main") == "team-paul/main/notes/a"
+    assert qualify("notes/a", "team-paul/main") == "team-paul/main/notes/a"
 
 
 def test_project_names_match_by_permalink_like_routing():
