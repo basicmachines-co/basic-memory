@@ -2,10 +2,7 @@
 
 import pytest
 
-from basic_memory.mcp.tools.delete import bm_delete
-from basic_memory.mcp.tools.edit_note import edit_note
-from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools import bm_write
+from basic_memory.mcp.tools import bm_delete, bm_edit, bm_read, bm_write
 from basic_memory.workspace_context import workspace_permalink_context
 
 
@@ -36,7 +33,7 @@ async def test_link_resolver_strictly_finds_legacy_project_permalink_from_worksp
 
 
 @pytest.mark.asyncio
-async def test_edit_note_workspace_qualified_url_edits_legacy_project_permalink(
+async def test_bm_edit_workspace_qualified_url_edits_legacy_project_permalink(
     app,
     test_project,
 ):
@@ -52,20 +49,20 @@ async def test_edit_note_workspace_qualified_url_edits_legacy_project_permalink(
     )
 
     with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
-        edit_result = await edit_note(
+        edit_result = await bm_edit(
             identifier=f"memory://{qualified_permalink}",
             project=test_project.name,
-            operation="find_replace",
+            command="find_replace",
             find_text="status: draft",
             content="status: done",
             output_format="json",
         )
 
     assert isinstance(edit_result, dict)
-    assert edit_result["fileCreated"] is False
+    assert edit_result["action"] == "edited"
     assert edit_result["permalink"] == legacy_permalink
 
-    read_result = await read_note(
+    read_result = await bm_read(
         legacy_permalink,
         project=test_project.name,
         output_format="json",

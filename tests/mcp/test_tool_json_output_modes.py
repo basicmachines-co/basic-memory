@@ -9,8 +9,6 @@ import pytest
 from basic_memory.mcp.tools import (
     bm_project,
     bm_write,
-    edit_note,
-    read_note,
 )
 
 
@@ -37,80 +35,6 @@ async def test_write_note_text_and_json_modes(app, test_project):
     assert isinstance(json_result, dict)
     assert json_result["title"] == "Mode Write Note"
     assert json_result["action"] in ("created", "updated")
-    assert json_result["permalink"]
-    assert json_result["file_path"]
-    assert "checksum" in json_result
-
-
-@pytest.mark.asyncio
-async def test_read_note_text_and_json_modes(app, test_project, indexed_project):
-    await bm_write(
-        project=test_project.name,
-        title="Mode Read Note",
-        directory="mode-tests",
-        content="# Mode Read Note\n\nbody",
-    )
-
-    text_result = await read_note(
-        identifier="mode-tests/mode-read-note",
-        project=test_project.name,
-        output_format="text",
-    )
-    assert isinstance(text_result, str)
-    assert "Mode Read Note" in text_result
-
-    json_result = await read_note(
-        identifier="mode-tests/mode-read-note",
-        project=test_project.name,
-        output_format="json",
-    )
-    assert isinstance(json_result, dict)
-    assert json_result["title"] == "Mode Read Note"
-    assert json_result["permalink"]
-    assert json_result["file_path"]
-    assert isinstance(json_result["content"], str)
-    assert "frontmatter" in json_result
-
-    missing_json = await read_note(
-        identifier="mode-tests/missing-note",
-        project=test_project.name,
-        output_format="json",
-    )
-    assert isinstance(missing_json, dict)
-    assert set(["title", "permalink", "file_path", "content", "frontmatter"]).issubset(
-        missing_json.keys()
-    )
-
-
-@pytest.mark.asyncio
-async def test_edit_note_text_and_json_modes(app, test_project):
-    await bm_write(
-        project=test_project.name,
-        title="Mode Edit Note",
-        directory="mode-tests",
-        content="# Mode Edit Note\n\nstart",
-    )
-
-    text_result = await edit_note(
-        identifier="mode-tests/mode-edit-note",
-        operation="append",
-        content="\n\ntext-append",
-        project=test_project.name,
-        output_format="text",
-    )
-    assert isinstance(text_result, str)
-    assert "Edited note" in text_result
-
-    json_result = await edit_note(
-        identifier="mode-tests/mode-edit-note",
-        operation="append",
-        content="\n\njson-append",
-        project=test_project.name,
-        output_format="json",
-    )
-    assert isinstance(json_result, dict)
-    assert json_result["title"] == "Mode Edit Note"
-    assert json_result["operation"] == "append"
     assert json_result["permalink"]
     assert json_result["file_path"]
     assert "checksum" in json_result

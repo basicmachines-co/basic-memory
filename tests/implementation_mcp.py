@@ -20,15 +20,10 @@ from basic_memory.mcp.server import mcp
 
 IMPLEMENTATION_NAMES = (
     "cat",
-    "edit_note",
-    "fetch",
     "find",
     "grep",
-    "list_workspaces",
     "ls",
     "man",
-    "read_note",
-    "search",
     "search_notes",
     "tail",
 )

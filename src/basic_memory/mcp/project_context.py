@@ -54,10 +54,7 @@ from basic_memory.workspace_context import (
     workspace_permalink_context,
 )
 from basic_memory.mcp.project_context_identifiers import (
-    UnresolvedProjectRouteError,
     WorkspaceMemoryUrlResolution,
-    add_project_metadata as _add_project_metadata,
-    routes_to_default_project as _routes_to_default_project,
     canonical_memory_path_for_active_route as _canonical_memory_path_for_active_route,
     canonical_memory_path_for_workspace as _canonical_memory_path_for_workspace,
     canonicalize_project_name as _canonicalize_project_name,
@@ -94,8 +91,6 @@ from basic_memory.mcp.workspace_project_index import (
 
 # Keep the original module's helper surface intact for callers and tests while
 # the implementations live in focused, dependency-light modules.
-add_project_metadata = _add_project_metadata
-routes_to_default_project = _routes_to_default_project
 _format_qualified_choices = _format_qualified_choices_impl
 _match_workspace_identifier = _match_workspace_identifier_impl
 _split_qualified_project_identifier = _split_qualified_project_identifier_impl
@@ -795,31 +790,11 @@ async def resolve_project_and_path(
     project: Optional[str] = None,
     context: Optional[Context] = None,
     headers: HeaderTypes | None = None,
-    *,
-    strict_project_routing: bool = False,
-    allow_missing_project_fallback: bool = False,
-    cache_resolved_project: bool = True,
 ) -> tuple[ProjectItem, str, bool]:
     """Resolve project and normalized path for memory:// identifiers.
 
-    Args:
-        strict_project_routing: Reject a memory URL whose leading project-like
-            segment cannot be resolved. Mutating tools use this to prevent a
-            failed route from falling back to the active project.
-        allow_missing_project_fallback: When strict routing is enabled, still
-            allow a genuinely missing project prefix to be treated as an active-
-            project path. This is safe only for mutations that require an existing
-            target and cannot create content.
-        cache_resolved_project: Persist a project resolved from the memory URL in
-            MCP context. Set this to false for validation-only routing that may
-            reject a resolved cross-project source.
-
     Returns:
         Tuple of (active_project, normalized_path, is_memory_url)
-
-    Raises:
-        UnresolvedProjectRouteError: If strict routing is enabled and the
-            memory URL's leading project segment does not resolve.
     """
     is_memory_url = identifier.strip().startswith("memory://")
     config = ConfigManager().config
@@ -957,18 +932,9 @@ async def resolve_project_and_path(
                     "does not have access to this project" in error_message
                     and cached_project is not None
                     and _project_matches_identifier(cached_project, project)
-                    and not strict_project_routing
                 )
                 if not project_route_missing and not project_route_hidden_by_scope:
                     raise
-                if strict_project_routing and not (
-                    project_route_missing and allow_missing_project_fallback
-                ):
-                    # Mutations that can create content must not reinterpret a
-                    # missing project route as an active-project path (#1066).
-                    # Existing-target mutations may opt into that legacy path
-                    # fallback, while scope-hidden routes always fail above.
-                    raise UnresolvedProjectRouteError(identifier, project_prefix) from exc
             else:
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
                 if resolved_project and generate_permalink(resolved_project) != generate_permalink(
@@ -985,8 +951,7 @@ async def resolve_project_and_path(
                     path=resolved.path,
                     is_default=resolved.is_default,
                 )
-                if cache_resolved_project:
-                    await _set_cached_active_project(context, active_project)
+                await _set_cached_active_project(context, active_project)
 
                 resolved_path = _canonical_memory_path_for_active_route(
                     active_project,

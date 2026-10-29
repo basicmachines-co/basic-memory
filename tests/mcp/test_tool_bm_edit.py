@@ -3,6 +3,7 @@
 These run the real ASGI stack through the shared `client` fixture.
 """
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -10,10 +11,13 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
+from basic_memory import db
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import bm_edit, bm_read, bm_write
+from basic_memory.mcp.tools.edit import SECTION_COMMANDS
+from basic_memory.workspace_context import workspace_permalink_context
 
 NOTE = (
     "---\ntitle: Plan\nstatus: draft\n---\n\n# Plan\n\n## Goals\n\n- ship\n\n"
@@ -319,3 +323,316 @@ async def test_guarded_edit_of_a_note_already_gone(client, test_project):
             expected_checksum="abc",
             project=test_project.name,
         )
+
+
+# --- Sections (ported from edit_note) ---
+
+SPEC = (
+    "# Spec\n\n## Implementation\nOld details.\n\n### Internals\nOld internals.\n\n"
+    "## Testing\nTest info here."
+)
+
+
+async def _seed_spec(project_name: str) -> None:
+    await bm_write(identifier="specs/spec.md", content=SPEC, project=project_name)
+
+
+async def spec_text(project_name: str) -> str:
+    text = await bm_read("specs/spec.md", include_frontmatter=False, project=project_name)
+    assert isinstance(text, str)
+    return text
+
+
+@pytest.mark.asyncio
+async def test_replace_section_takes_its_subsections_by_default(client, test_project):
+    """The h3 under the h2 goes with it, through the next h2 (#1012)."""
+    await _seed_spec(test_project.name)
+
+    await bm_edit(
+        identifier="specs/spec.md",
+        command="replace_section",
+        section="Implementation",
+        content="New details.\n\n## Rollout\nShip behind a flag.\n",
+        project=test_project.name,
+    )
+
+    text = await spec_text(test_project.name)
+    assert "New details." in text and "## Rollout" in text
+    assert "### Internals" not in text and "Old internals." not in text
+    assert "Test info here." in text
+
+
+@pytest.mark.asyncio
+async def test_replace_section_can_keep_its_subsections(client, test_project):
+    await _seed_spec(test_project.name)
+
+    await bm_edit(
+        identifier="specs/spec.md",
+        command="replace_section",
+        section="Implementation",
+        content="New details.\n",
+        replace_subsections=False,
+        project=test_project.name,
+    )
+
+    text = await spec_text(test_project.name)
+    assert "New details." in text and "Old details." not in text
+    assert "### Internals\nOld internals." in text
+    assert "Test info here." in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("insert_before_section", "INSERTED\n\n## Testing"),
+        ("insert_after_section", "## Testing\nINSERTED"),
+    ],
+)
+async def test_insert_around_a_section(client, test_project, command, expected):
+    await _seed_spec(test_project.name)
+
+    await bm_edit(
+        identifier="specs/spec.md",
+        command=command,
+        section="Testing",
+        content="INSERTED",
+        project=test_project.name,
+    )
+
+    assert expected in await spec_text(test_project.name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", sorted(SECTION_COMMANDS))
+async def test_a_missing_section_changes_nothing(client, test_project, command):
+    await _seed_spec(test_project.name)
+    before = await spec_text(test_project.name)
+
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: .*Nonexistent"):
+        await bm_edit(
+            identifier="specs/spec.md",
+            command=command,
+            section="Nonexistent",
+            content="x",
+            project=test_project.name,
+        )
+
+    assert await spec_text(test_project.name) == before
+
+
+# --- find_replace counts ---
+
+
+@pytest.mark.asyncio
+async def test_find_replace_must_match_the_expected_count(client, test_project):
+    await bm_write(
+        identifier="config/config.md",
+        content="# Configuration\nVersion: v0.12.0\nSettings for v0.12.0 release.",
+        project=test_project.name,
+    )
+
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: .*Expected 1 .*found 2"):
+        await bm_edit(
+            identifier="config/config.md",
+            command="find_replace",
+            find_text="v0.12.0",
+            content="v0.13.0",
+            project=test_project.name,
+        )
+    await bm_edit(
+        identifier="config/config.md",
+        command="find_replace",
+        find_text="v0.12.0",
+        content="v0.13.0",
+        expected_replacements=2,
+        project=test_project.name,
+    )
+
+    text = await bm_read("config/config.md", project=test_project.name)
+    assert isinstance(text, str)
+    assert "v0.12.0" not in text and text.count("v0.13.0") == 2
+
+
+@pytest.mark.asyncio
+async def test_whitespace_find_text_is_refused(client, test_project):
+    await _seed(test_project.name)
+
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS:"):
+        await bm_edit(
+            identifier="notes/plan.md",
+            command="find_replace",
+            find_text="   ",
+            content="x",
+            project=test_project.name,
+        )
+
+
+# --- Identifiers ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identifier",
+    ["notes/plan", "Plan", "notes/Plan", "notes/plan.md", "memory://notes/plan"],
+)
+async def test_identifier_spellings_edit_the_same_note(client, test_project, identifier):
+    await _seed(test_project.name)
+
+    result = await edit_json(
+        identifier=identifier, command="append", content="tail", project=test_project.name
+    )
+
+    assert result["file_path"] == "notes/plan.md"
+
+
+@pytest.mark.asyncio
+async def test_memory_url_with_the_project_prefix(client, test_project):
+    await _seed(test_project.name)
+
+    result = await edit_json(
+        identifier=f"memory://{test_project.name}/notes/plan",
+        command="append",
+        content="tail",
+        project=test_project.name,
+    )
+
+    assert result["action"] == "edited"
+    assert (await body(test_project.name)).rstrip().endswith("tail")
+
+
+@pytest.mark.asyncio
+async def test_a_near_miss_edits_nothing(client, test_project):
+    """A missing note never falls through to a similar title."""
+    for title in ("Routing Test A", "Routing Test B"):
+        await bm_write(
+            title=title, directory="test", content=f"# {title}\nContent.", project=test_project.name
+        )
+
+    with pytest.raises(ToolError, match="^NOT_FOUND:"):
+        await bm_edit(
+            identifier="Routing Test NONEXISTENT",
+            command="find_replace",
+            find_text="Content",
+            content="replaced",
+            project=test_project.name,
+        )
+
+    for title in ("Routing Test A", "Routing Test B"):
+        assert "Content." in str(await bm_read(title, project=test_project.name))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identifier",
+    ["../escape-note", "/tmp/outside-note", "notes/../../../escape", "~/escape-note"],
+)
+async def test_identifiers_outside_the_project_write_nothing(client, test_project, identifier):
+    project_root = Path(test_project.path)
+
+    with pytest.raises(ToolError, match="^(NOT_FOUND|OUTSIDE_PROJECT|INVALID_ARGUMENTS):"):
+        await bm_edit(
+            identifier=f"{test_project.permalink}/{identifier}",
+            command="append",
+            content="should never be written",
+            project=test_project.name,
+        )
+
+    assert not (project_root.parent / "escape-note.md").exists()
+    assert not (project_root.parent / "escape.md").exists()
+    assert not Path("/tmp/outside-note.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_team_workspace_memory_url_keeps_the_complete_permalink(client, test_project):
+    expected_permalink = f"team-paul/{test_project.name}/team/tool-edit-note"
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        await bm_write(
+            title="Tool Edit Note",
+            directory="team",
+            content="# Tool Edit Note\nOriginal content.",
+            project=test_project.name,
+        )
+        result = await edit_json(
+            identifier=f"memory://{expected_permalink}",
+            command="append",
+            content="\nAppended in team workspace.",
+            project=test_project.name,
+        )
+
+    assert result["permalink"] == expected_permalink
+
+
+# --- What an edit leaves behind ---
+
+
+@pytest.mark.asyncio
+async def test_repeated_edits_keep_the_permalink(client, test_project):
+    """A note without a permalink in its frontmatter keeps the one it was indexed with (#170)."""
+    await bm_write(
+        title="Plain", directory="test", content="# Plain\nOriginal.", project=test_project.name
+    )
+
+    for line in ("First edit.", "Second edit."):
+        result = await edit_json(
+            identifier="test/plain", command="append", content=line, project=test_project.name
+        )
+        assert result["permalink"] == f"{test_project.name}/test/plain"
+
+
+@pytest.mark.asyncio
+async def test_empty_append_is_accepted(client, test_project):
+    await _seed(test_project.name)
+
+    result = await edit_json(
+        identifier="notes/plan.md", command="append", content="", project=test_project.name
+    )
+
+    assert result["action"] == "edited"
+
+
+@pytest.mark.asyncio
+async def test_explicit_nulls_for_unused_fields_are_accepted(client, test_project):
+    """MCP clients may send null for every optional field an append does not use."""
+    await _seed(test_project.name)
+    async with Client(mcp) as mcp_client:
+        result = await mcp_client.call_tool(
+            "bm_edit",
+            {
+                "identifier": "notes/plan.md",
+                "command": "append",
+                "content": "tail",
+                "find_text": None,
+                "section": None,
+                "metadata": None,
+                "expected_checksum": None,
+                "project": test_project.name,
+            },
+        )
+
+    assert not result.is_error
+    assert (await body(test_project.name)).rstrip().endswith("tail")
+
+
+@pytest.mark.asyncio
+async def test_appended_observations_and_relations_are_indexed(
+    client, test_project, entity_repository, session_maker
+):
+    await bm_write(
+        identifier="features/spec.md",
+        content="# Feature Spec\n\n- [design] Initial design #architecture\n- implements [[Base]]",
+        project=test_project.name,
+    )
+
+    await bm_edit(
+        identifier="features/spec.md",
+        command="append",
+        content="\n- [implementation] Added a feature #development\n- relates_to [[User Guide]]",
+        project=test_project.name,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, "features/spec.md")
+    assert entity is not None
+    assert {o.category for o in entity.observations} == {"design", "implementation"}
+    assert {r.relation_type for r in entity.outgoing_relations} == {"implements", "relates_to"}

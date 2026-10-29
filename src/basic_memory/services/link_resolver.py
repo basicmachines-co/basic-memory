@@ -1,7 +1,7 @@
 """Service and helpers for resolving markdown links and permalink-like identifiers."""
 
 import uuid as uuid_mod
-from typing import Any, Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -25,54 +25,6 @@ from basic_memory.utils import (
 from basic_memory.workspace_context import (
     workspace_slug_for_canonical_permalinks,
 )
-
-
-def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
-    """Return True for plain ``<workspace>/<project>/<path>`` identifiers."""
-    stripped = identifier.strip()
-    if stripped.startswith("memory://"):
-        return False
-
-    normalized = normalize_project_reference(stripped).strip("/")
-    return len(normalized.split("/", 2)) == 3
-
-
-async def detect_project_from_workspace_identifier_prefix(
-    identifier: str,
-    config: BasicMemoryConfig,
-    context: Any | None = None,
-) -> Optional[str]:
-    """Resolve a project route from a plain workspace-qualified identifier."""
-    if not is_workspace_qualified_plain_identifier(identifier):
-        return None
-
-    from basic_memory.mcp.project_context import (
-        _workspace_identifier_discovery_available,
-        resolve_workspace_qualified_identifier,
-    )
-
-    if not _workspace_identifier_discovery_available(identifier, config):
-        return None
-
-    workspace_discovery_fallback_errors = (
-        "not found",
-        "no accessible workspaces",
-        "unable to discover",
-    )
-    try:
-        workspace_resolution = await resolve_workspace_qualified_identifier(
-            identifier,
-            context=context,
-        )
-    except ValueError as exc:
-        message = str(exc).lower()
-        if any(error in message for error in workspace_discovery_fallback_errors):
-            return None
-        raise
-
-    if workspace_resolution is None:
-        return None
-    return workspace_resolution.project_identifier
 
 
 def normalize_link_text(link_text: str) -> tuple[str, str | None]:

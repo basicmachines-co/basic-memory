@@ -68,3 +68,12 @@ def test_transport_failures_are_not_refusals():
     error.__cause__ = httpx.ConnectError("down")
 
     assert api_refusal(error) is None
+
+
+def test_a_plain_409_is_not_a_revision_conflict():
+    """Only a 409 carrying the {"db_checksum": ...} detail pins a revision."""
+    refused = api_refusal(_client_error(409, json={"detail": "ambiguous identifier"}))
+
+    assert refused is not None
+    assert (refused.message, refused.revision_conflict) == ("ambiguous identifier", False)
+    assert refused.current_checksum is None

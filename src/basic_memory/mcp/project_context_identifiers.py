@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -17,18 +16,6 @@ from basic_memory.utils import (
     normalize_project_reference,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
-
-
-class UnresolvedProjectRouteError(ValueError):
-    """A mutating memory URL named a project prefix that could not be resolved."""
-
-    def __init__(self, identifier: str, project_prefix: str):
-        self.identifier = identifier
-        self.project_prefix = project_prefix
-        super().__init__(
-            f"Memory URL project route '{project_prefix}' could not be resolved; "
-            "refusing to treat the URL as a path in the active project."
-        )
 
 
 @dataclass(frozen=True)
@@ -261,32 +248,6 @@ def split_project_prefix(path: str) -> tuple[Optional[str], str]:
     if not project_prefix or not remainder or "*" in project_prefix:
         return None, path
     return project_prefix, remainder
-
-
-def routes_to_default_project(project: Optional[str], project_id: Optional[str]) -> bool:
-    """Return whether a call with these arguments is served by the default project.
-
-    MCP requests carry no session state, so a call that names no project goes to the
-    default project, unless the server is constrained to one project
-    (BASIC_MEMORY_MCP_PROJECT), which then serves every call.
-    """
-    if project is not None or project_id is not None:
-        return False
-    return not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-
-
-def add_project_metadata(result: str, project_name: str, *, used_default: bool) -> str:
-    """Name the project a write landed in.
-
-    When the default project served a call that named none, say so, so a caller that
-    meant another project does not mistake where the write went.
-    """
-    if not used_default:
-        return f"{result}\n\n[Project: '{project_name}']"
-    return (
-        f"{result}\n\n[Project: '{project_name}' (no project was given, so this used "
-        "the default project; pass project to target another)]"
-    )
 
 
 def detect_project_from_url_prefix(
