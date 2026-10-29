@@ -96,6 +96,18 @@ async def test_search_is_query_only_and_advertises_media_type(
 
 
 @pytest.mark.asyncio
+async def test_search_rejects_text_over_length_cap(client: AsyncClient, v2_project_url: str):
+    """Oversized hosted queries fail validation instead of reaching the phrase parser."""
+    response = await client.request(
+        "QUERY",
+        f"{v2_project_url}/search/",
+        json={"text": '"a" ' * 1_001},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_search_with_pagination(
     client: AsyncClient,
     test_project: Project,

@@ -2,7 +2,11 @@
 
 from datetime import datetime
 
+import pytest
+from pydantic import ValidationError
+
 from basic_memory.schemas.search import (
+    MAX_SEARCH_TEXT_CHARS,
     SearchItemType,
     SearchQuery,
     SearchRetrievalMode,
@@ -161,3 +165,10 @@ def test_search_response():
     unknown_response = response.model_copy(update={"total": 0, "total_is_exact": False})
     assert unknown_response.total == 0
     assert unknown_response.total_is_exact is False
+
+
+def test_search_text_length_is_capped():
+    """Long text is refused before it reaches the boolean query parser (#1893)."""
+    assert SearchQuery(text="a" * MAX_SEARCH_TEXT_CHARS).text
+    with pytest.raises(ValidationError):
+        SearchQuery(text="a" * (MAX_SEARCH_TEXT_CHARS + 1))

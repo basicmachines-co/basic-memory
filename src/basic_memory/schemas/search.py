@@ -15,6 +15,11 @@ from basic_memory.schemas.base import Permalink, normalize_note_type
 from basic_memory.temporal import TemporalQualifierError, reject_blank_temporal_value
 
 
+# Boolean phrase parsing grows with query length, and the query is caller input on
+# hosted search. Agent prompts and the similar-notes probe (900 chars) fit well under this.
+MAX_SEARCH_TEXT_CHARS = 4_000
+
+
 class SearchItemType(str, Enum):
     """Types of searchable items."""
 
@@ -96,7 +101,9 @@ class SearchQuery(BaseModel):
     # Primary search modes (use ONE of these)
     permalink: Optional[str] = None  # Exact permalink match
     permalink_match: Optional[str] = None  # Glob permalink match
-    text: Optional[str] = None  # Full-text search (now supports boolean operators)
+    text: Optional[str] = Field(  # Full-text search (supports boolean operators)
+        default=None, max_length=MAX_SEARCH_TEXT_CHARS
+    )
     title: Optional[str] = None  # title only search
 
     # Optional filters

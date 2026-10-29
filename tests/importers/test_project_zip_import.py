@@ -118,3 +118,25 @@ def test_project_zip_import_plan_enforces_expanded_size_limit(monkeypatch) -> No
 
     with pytest.raises(ProjectZipImportError, match="import limit"):
         build_project_zip_import_plan(zip_bytes({"notes/a.md": b"abc"}))
+
+
+def test_project_zip_import_plan_enforces_file_count_limit(monkeypatch) -> None:
+    monkeypatch.setattr(project_zip_import, "MAX_PROJECT_ZIP_FILES", 2)
+
+    with pytest.raises(ProjectZipImportError, match="more than 2 files"):
+        build_project_zip_import_plan(zip_bytes({"a.md": b"A", "b.md": b"B", "c.md": b"C"}))
+
+
+def test_project_zip_import_plan_enforces_ignore_pattern_limit(monkeypatch) -> None:
+    """Archive-authored patterns are capped; Basic Memory defaults do not count (#1899)."""
+    monkeypatch.setattr(project_zip_import, "MAX_PROJECT_ZIP_IGNORE_PATTERNS", 2)
+
+    plan = build_project_zip_import_plan(
+        zip_bytes({".gitignore": b"one.md\ntwo.md\n# comment\n", "notes/a.md": b"A"})
+    )
+    assert plan.uploaded_files == 1
+
+    with pytest.raises(ProjectZipImportError, match="more than 2 patterns"):
+        build_project_zip_import_plan(
+            zip_bytes({".bmignore": b"one.md\n", ".gitignore": b"two.md\nthree.md\n"})
+        )

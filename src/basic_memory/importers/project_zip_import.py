@@ -18,6 +18,10 @@ from basic_memory.ignore_utils import DEFAULT_IGNORE_PATTERNS, should_ignore_pat
 
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
 MAX_PROJECT_ZIP_EXPANDED_BYTES = 100 * 1024 * 1024
+# Ignore matching costs files x patterns, and both come from the uploaded archive.
+# These caps keep that product bounded on the shared import worker.
+MAX_PROJECT_ZIP_FILES = 20_000
+MAX_PROJECT_ZIP_IGNORE_PATTERNS = 500
 _ARCHIVE_BASE_PATH = Path("/archive")
 _DRIVE_LETTER_PATH = re.compile(r"^[A-Za-z]:")
 
@@ -57,6 +61,7 @@ def build_project_zip_import_plan(
     try:
         with ZipFile(BytesIO(archive_bytes)) as archive:
             file_infos = [info for info in archive.infolist() if not info.is_dir()]
+            ensure_file_count_within_limit(file_infos)
             ensure_expanded_size_within_limit(file_infos)
             stripped_paths = strip_common_root(
                 [validated_archive_path(info.filename) for info in file_infos]
@@ -99,6 +104,12 @@ def build_project_zip_import_plan(
             )
     except BadZipFile as exc:
         raise ProjectZipImportError("Import file must be a valid ZIP archive") from exc
+
+
+def ensure_file_count_within_limit(file_infos: list[ZipInfo]) -> None:
+    """Fail before path validation when a ZIP holds more files than the worker accepts."""
+    if len(file_infos) > MAX_PROJECT_ZIP_FILES:
+        raise ProjectZipImportError(f"ZIP archive contains more than {MAX_PROJECT_ZIP_FILES} files")
 
 
 def ensure_expanded_size_within_limit(file_infos: list[ZipInfo]) -> None:
@@ -157,7 +168,7 @@ def load_archive_root_ignore_patterns(
     archive_entries: list[tuple[ZipInfo, str]],
 ) -> set[str]:
     """Load Basic Memory defaults plus archive-root .bmignore and .gitignore."""
-    patterns = set(DEFAULT_IGNORE_PATTERNS)
+    archive_patterns: set[str] = set()
     by_relative_path = {
         relative_path: info
         for info, relative_path in archive_entries
@@ -177,6 +188,10 @@ def load_archive_root_ignore_patterns(
         for line in content.splitlines():
             pattern = line.strip()
             if pattern and not pattern.startswith("#"):
-                patterns.add(pattern)
+                archive_patterns.add(pattern)
 
-    return patterns
+    if len(archive_patterns) > MAX_PROJECT_ZIP_IGNORE_PATTERNS:
+        raise ProjectZipImportError(
+            f"ZIP archive ignore files contain more than {MAX_PROJECT_ZIP_IGNORE_PATTERNS} patterns"
+        )
+    return set(DEFAULT_IGNORE_PATTERNS) | archive_patterns
