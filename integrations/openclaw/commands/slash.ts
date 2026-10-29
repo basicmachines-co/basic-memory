@@ -89,7 +89,7 @@ export function registerCommands(
         }
 
         const lines = results.map((r, i) => {
-          const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : ""
+          const score = r.score ? ` (score ${r.score.toFixed(2)})` : ""
           return `${i + 1}. ${r.title}${score}`
         })
 

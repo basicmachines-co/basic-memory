@@ -138,7 +138,8 @@ describe("search tool", () => {
           title: "High Score Note",
           permalink: "high-score",
           content: "Content with high relevance score",
-          score: 0.95,
+          // Fused keyword + vector scores can exceed 1 (BM range is 0–1.3).
+          score: 1.18,
           file_path: "notes/high-score.md",
         },
         {
@@ -157,8 +158,9 @@ describe("search tool", () => {
       const result = await executeFunction("tool-call-id", { query: "test" })
 
       const text = result.content[0].text
-      expect(text).toContain("**High Score Note** (95%)")
-      expect(text).toContain("**Medium Score Note** (67%)")
+      expect(text).toContain("**High Score Note** (score 1.18)")
+      expect(text).toContain("**Medium Score Note** (score 0.67)")
+      expect(text).not.toContain("%")
     })
 
     it("should handle results without scores", async () => {
@@ -179,7 +181,7 @@ describe("search tool", () => {
 
       const text = result.content[0].text
       expect(text).toContain("No Score Note")
-      expect(text).not.toContain("(%)")
+      expect(text).not.toContain("(score")
     })
 
     it("should truncate long content with ellipsis", async () => {

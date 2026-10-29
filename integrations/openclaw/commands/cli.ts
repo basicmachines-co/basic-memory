@@ -31,7 +31,7 @@ export function registerCli(
           }
 
           for (const r of results) {
-            const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : ""
+            const score = r.score ? ` (score ${r.score.toFixed(2)})` : ""
             console.log(`- ${r.title}${score}`)
             if (r.content) {
               const preview =

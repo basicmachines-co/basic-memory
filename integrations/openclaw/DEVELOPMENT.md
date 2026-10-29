@@ -118,8 +118,11 @@ openclaw-basic-memory/
 │   ├── list-workspaces.ts       # list_workspaces
 │   ├── schema-validate.ts       # schema_validate
 │   ├── schema-infer.ts          # schema_infer
-│   ├── schema-diff.ts           # schema_diff
-│   └── memory-provider.ts       # Composited memory_search + memory_get
+│   └── schema-diff.ts           # schema_diff
+├── memory/
+│   └── basic-memory-capability.ts  # OpenClaw memory capability (host search, recall tools, flush)
+├── context-engine/
+│   └── basic-memory-context-engine.ts  # Auto-recall and conversation capture
 ├── commands/
 │   ├── slash.ts          # /remember, /recall
 │   ├── skills.ts         # /tasks, /reflect, /defrag, /schema

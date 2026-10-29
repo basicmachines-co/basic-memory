@@ -12,6 +12,7 @@ import {
 } from "./config.ts"
 import { BasicMemoryContextEngine } from "./context-engine/basic-memory-context-engine.ts"
 import { initLogger, log } from "./logger.ts"
+import { buildBasicMemoryCapability } from "./memory/basic-memory-capability.ts"
 import { CONVERSATION_SCHEMA_CONTENT } from "./schema/conversation-schema.ts"
 import { TASK_SCHEMA_CONTENT } from "./schema/task-schema.ts"
 import { registerContextTool } from "./tools/build-context.ts"
@@ -19,10 +20,6 @@ import { registerDeleteTool } from "./tools/delete-note.ts"
 import { registerEditTool } from "./tools/edit-note.ts"
 import { registerProjectListTool } from "./tools/list-memory-projects.ts"
 import { registerWorkspaceListTool } from "./tools/list-workspaces.ts"
-import {
-  registerMemoryProvider,
-  setWorkspaceDir,
-} from "./tools/memory-provider.ts"
 import { registerMoveTool } from "./tools/move-note.ts"
 import { registerReadTool } from "./tools/read-note.ts"
 import { registerSchemaDiffTool } from "./tools/schema-diff.ts"
@@ -44,7 +41,7 @@ export default definePluginEntry({
   id: "openclaw-basic-memory",
   name: "Basic Memory",
   description:
-    "Local-first knowledge graph for OpenClaw — persistent memory with graph search and composited memory_search",
+    "Local-first knowledge graph for OpenClaw — persistent memory with graph search, recall and conversation capture",
   configSchema: basicMemoryConfigSchema,
 
   register(api) {
@@ -72,9 +69,14 @@ export default definePluginEntry({
     registerSchemaInferTool(api, client)
     registerSchemaDiffTool(api, client)
 
-    // --- Composited memory_search + memory_get (always registered) ---
-    registerMemoryProvider(api, client, cfg)
-    log.info("registered composited memory_search + memory_get")
+    // --- Memory capability ---
+    // OpenClaw 2026.10 owns the memory_search and memory_get tool names
+    // (memory-core registers them even when another plugin holds the memory
+    // slot), so the plugin serves the host through registerMemoryCapability:
+    // gateway memory search, status and doctor, Active Memory recall, and the
+    // pre-compaction flush.
+    api.registerMemoryCapability(buildBasicMemoryCapability(client))
+    log.info("registered Basic Memory memory capability")
     api.registerContextEngine(
       "openclaw-basic-memory",
       () => new BasicMemoryContextEngine(client, cfg),
@@ -165,8 +167,6 @@ export default definePluginEntry({
             }
           }
         }
-
-        setWorkspaceDir(workspace)
 
         log.info("connected — BM MCP stdio session running")
       },

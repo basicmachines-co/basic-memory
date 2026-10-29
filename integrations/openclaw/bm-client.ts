@@ -246,7 +246,7 @@ function isRecoverableConnectionError(err: unknown): boolean {
   )
 }
 
-function isNoteNotFoundError(err: unknown): boolean {
+export function isNoteNotFoundError(err: unknown): boolean {
   return (
     err instanceof BmToolError &&
     parseRefusalPayload(err.toolMessage)?.error === "NOT_FOUND"
