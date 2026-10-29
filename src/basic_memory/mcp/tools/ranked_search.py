@@ -663,6 +663,8 @@ def _format_results(
     pattern alone); their scores are all zero, so they are left out.
     """
     results = payload["results"]
+    # A blank query searched by filters alone; there is no text to repeat.
+    query = query if query and query.strip() else None
     heading = f"Results for '{query}'" if query else "Results"
     continuation = (
         f"\n\nMore results available. Call {next_call} to continue."

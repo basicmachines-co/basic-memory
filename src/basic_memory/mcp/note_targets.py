@@ -57,14 +57,25 @@ class ProjectTarget:
     client: AsyncClient
     project: ProjectItem
     route: ProjectPathRoute
-    # The `project` value the caller passed, echoed in try_instead hints: it just
-    # resolved, so it works again, and it reads as the caller wrote it.
+    # The project try_instead hints name (see hint_project_ref).
     project_ref: str
 
     @property
     def paths(self) -> "PathQualifier":
         """Re-qualifies response paths the way this target addressed its project."""
         return PathQualifier.for_route(self.route)
+
+
+def hint_project_ref(
+    project: str | None, route: ProjectPathRoute, active_project: ProjectItem
+) -> str:
+    """The `project` value to put in a try_instead hint so it reaches this project again.
+
+    The caller's own value comes first: it just resolved. Without one, the id that
+    routing pinned keeps a Cloud mount in the workspace that listed it, where its bare
+    name could resolve to another workspace's project of the same name.
+    """
+    return project or route.project_id or route.project or active_project.external_id
 
 
 @asynccontextmanager
@@ -127,7 +138,7 @@ async def open_project_target(
             client=client,
             project=active_project,
             route=route,
-            project_ref=project or route.project or active_project.external_id,
+            project_ref=hint_project_ref(project, route, active_project),
         )
 
 
