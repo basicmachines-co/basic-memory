@@ -299,7 +299,7 @@ async def validate_schema(
 
     # --- All-types validation ---
     # Trigger: neither identifier nor note_type was provided
-    # Why: schema_validate() with no arguments should check every note type that
+    # Why: validate with no arguments should check every note type that
     #   has a schema defined instead of returning an empty report (#1013)
     # Outcome: aggregated report with a per-type breakdown in type_summaries
     covered_types = await _schema_covered_note_types(session, entity_repository)

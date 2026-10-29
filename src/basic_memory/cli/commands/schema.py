@@ -3,9 +3,8 @@
 Provides CLI access to schema validation, inference, and drift detection.
 Registered as a subcommand group: `bm schema validate`, `bm schema infer`, `bm schema diff`.
 
-Each command calls the corresponding MCP tool with output_format="json" and
-renders the result as Rich tables — same code path as `bm tool schema-*` but
-with human-friendly formatting.
+Each command calls the bm_schema MCP tool with output_format="json" and
+renders the result as Rich tables.
 """
 
 import json
@@ -17,9 +16,8 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_schema_tool
+from basic_memory.cli.commands.command_utils import project_or_default, run_schema_tool
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager
 from basic_memory.cli.markup import literal
 
 # MCP tool functions are imported inside each command: importing
@@ -30,18 +28,6 @@ console = Console()
 
 schema_app = typer.Typer(help="Schema management commands")
 app.add_typer(schema_app, name="schema")
-
-
-def _resolve_project_name(project: Optional[str]) -> Optional[str]:
-    """Resolve project name from CLI argument or config default."""
-    config_manager = ConfigManager()
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-        return project_name
-    return config_manager.default_project
 
 
 # --- Rendering helpers ---
@@ -194,11 +180,11 @@ def validate(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         # Heuristic: if target contains / or ., treat as identifier; otherwise as note type
         note_type, identifier = None, None
@@ -210,7 +196,8 @@ def validate(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_validate(
+                bm_schema(
+                    command="validate",
                     note_type=note_type,
                     identifier=identifier,
                     project=project_name,
@@ -280,15 +267,16 @@ def infer(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_infer(
+                bm_schema(
+                    command="infer",
                     note_type=note_type,
                     threshold=threshold,
                     project=project_name,
@@ -306,14 +294,6 @@ def infer(
 
         # output_format="json" guarantees a dict return
         assert isinstance(result, dict)
-
-        # Handle zero notes
-        if result.get("notes_analyzed", 0) == 0:
-            if json_output:
-                print(json.dumps(result, indent=2, default=str))
-            else:
-                console.print(f"[yellow]No notes found with type: {literal(note_type)}[/yellow]")
-            return
 
         if json_output:
             print(json.dumps(result, indent=2, default=str))
@@ -363,15 +343,16 @@ def diff(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
-        project_name = _resolve_project_name(project)
+        project_name = project_or_default(project)
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_diff(
+                bm_schema(
+                    command="diff",
                     note_type=note_type,
                     project=project_name,
                     output_format="json",
