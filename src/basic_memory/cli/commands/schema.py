@@ -3,9 +3,8 @@
 Provides CLI access to schema validation, inference, and drift detection.
 Registered as a subcommand group: `bm schema validate`, `bm schema infer`, `bm schema diff`.
 
-Each command calls the corresponding MCP tool with output_format="json" and
-renders the result as Rich tables — same code path as `bm tool schema-*` but
-with human-friendly formatting.
+Each command calls the bm_schema MCP tool with output_format="json" and
+renders the result as Rich tables.
 """
 
 import json
@@ -32,7 +31,7 @@ schema_app = typer.Typer(help="Schema management commands")
 app.add_typer(schema_app, name="schema")
 
 
-def _resolve_project_name(project: Optional[str]) -> Optional[str]:
+def _resolve_project_name(project: Optional[str]) -> str:
     """Resolve project name from CLI argument or config default."""
     config_manager = ConfigManager()
     if project is not None:
@@ -41,6 +40,11 @@ def _resolve_project_name(project: Optional[str]) -> Optional[str]:
             typer.echo(f"No project found named: {project}", err=True)
             raise typer.Exit(1)
         return project_name
+    # default_project may be unset on purpose (automatic project resolution disabled),
+    # and bm_schema needs a named project.
+    if config_manager.default_project is None:
+        typer.echo("No project given and no default project is set; pass --project.", err=True)
+        raise typer.Exit(1)
     return config_manager.default_project
 
 
@@ -194,7 +198,7 @@ def validate(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
@@ -210,7 +214,8 @@ def validate(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_validate(
+                bm_schema(
+                    command="validate",
                     note_type=note_type,
                     identifier=identifier,
                     project=project_name,
@@ -280,7 +285,7 @@ def infer(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
@@ -288,7 +293,8 @@ def infer(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_infer(
+                bm_schema(
+                    command="infer",
                     note_type=note_type,
                     threshold=threshold,
                     project=project_name,
@@ -306,14 +312,6 @@ def infer(
 
         # output_format="json" guarantees a dict return
         assert isinstance(result, dict)
-
-        # Handle zero notes
-        if result.get("notes_analyzed", 0) == 0:
-            if json_output:
-                print(json.dumps(result, indent=2, default=str))
-            else:
-                console.print(f"[yellow]No notes found with type: {literal(note_type)}[/yellow]")
-            return
 
         if json_output:
             print(json.dumps(result, indent=2, default=str))
@@ -363,7 +361,7 @@ def diff(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
+    from basic_memory.mcp.tools import bm_schema
 
     try:
         validate_routing_flags(local, cloud)
@@ -371,7 +369,8 @@ def diff(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                mcp_schema_diff(
+                bm_schema(
+                    command="diff",
                     note_type=note_type,
                     project=project_name,
                     output_format="json",

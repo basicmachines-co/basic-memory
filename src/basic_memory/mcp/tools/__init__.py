@@ -32,13 +32,6 @@ from basic_memory.mcp.tools.posix_tools import (
     tail as tail,
 )
 
-# Schema tools
-from basic_memory.mcp.tools.schema import (
-    schema_validate as schema_validate,
-    schema_infer as schema_infer,
-    schema_diff as schema_diff,
-)
-
 # 1.0 tool surface (SPEC-35.2, #1827).
 from basic_memory.mcp.tools.context import bm_context
 from basic_memory.mcp.tools.delete import bm_delete
