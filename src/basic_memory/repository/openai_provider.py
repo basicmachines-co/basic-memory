@@ -10,6 +10,19 @@ from basic_memory.repository.embedding_provider import unit_normalized
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
+def openai_embedding_identity(*, model_name: str, dimensions: int, api_base: str | None) -> str:
+    """Return the stored-vector identity for an OpenAI-compatible embedding setup.
+
+    Vectors are unit-normalized since #1862. api.openai.com always returned unit
+    vectors, so its identity is unchanged and nothing re-embeds. A custom endpoint
+    may have stored unnormalized vectors that match nothing; a new identity makes
+    the next index pass re-embed them.
+    """
+    if not api_base:
+        return f"{model_name}:{dimensions}"
+    return f"{model_name}:{dimensions}:unit-normalized"
+
+
 class OpenAIEmbeddingProvider:
     """Embedding provider backed by OpenAI's embeddings API."""
 
@@ -40,6 +53,12 @@ class OpenAIEmbeddingProvider:
             "provider_batch_size": self.batch_size,
             "request_concurrency": self.request_concurrency,
         }
+
+    def identity_key(self) -> str:
+        """Return the embedding semantics that should invalidate stored vectors."""
+        return openai_embedding_identity(
+            model_name=self.model_name, dimensions=self.dimensions, api_base=self._base_url
+        )
 
     async def _get_client(self) -> Any:
         if self._client is not None:

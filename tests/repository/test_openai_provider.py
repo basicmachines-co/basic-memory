@@ -12,10 +12,14 @@ from basic_memory.config import BasicMemoryConfig
 import basic_memory.repository.embedding_provider_factory as embedding_provider_factory_module
 from basic_memory.repository.embedding_provider_factory import (
     _provider_cache_key,
+    configured_embedding_provider_identity,
     create_embedding_provider,
     reset_embedding_provider_cache,
 )
-from basic_memory.repository.embedding_provider import unit_normalized
+from basic_memory.repository.embedding_provider import (
+    embedding_provider_identity,
+    unit_normalized,
+)
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
@@ -215,6 +219,33 @@ def test_embedding_provider_factory_forwards_openai_api_configuration():
     assert isinstance(provider, OpenAIEmbeddingProvider)
     assert provider._base_url == "https://embedding.example/v1"
     assert provider._api_key == "test-key"
+
+
+@pytest.mark.parametrize(
+    ("api_base", "identity"),
+    [
+        (None, "text-embedding-3-small:1536"),
+        ("https://ark.example/api/v3", "text-embedding-3-small:1536:unit-normalized"),
+    ],
+)
+def test_openai_identity_changes_only_for_custom_endpoints(api_base, identity):
+    """Custom endpoints may hold unnormalized vectors; a new identity re-embeds them (#1862).
+
+    api.openai.com always returned unit vectors, so its stored vectors keep their identity.
+    """
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_base=api_base,
+        semantic_embedding_api_key="test-key",
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert embedding_provider_identity(provider) == identity
+    assert configured_embedding_provider_identity(config) == (f"OpenAIEmbeddingProvider:{identity}")
 
 
 def test_embedding_provider_factory_separates_openai_api_cache_keys():
