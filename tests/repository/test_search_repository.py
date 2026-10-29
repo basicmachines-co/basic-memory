@@ -1655,3 +1655,55 @@ async def test_title_search_ranks_exact_title_first(search_repository, session_m
     results = await search_repository.search(title="Project Atlas")
 
     assert [r.title for r in results] == ["project atlas", "Project Atlas meeting notes 2026-10-02"]
+
+
+@pytest.mark.asyncio
+async def test_and_not_excludes_the_negated_term(search_repository, session_maker, test_project):
+    """``a AND NOT b`` means ``a NOT b`` on both backends.
+
+    FTS5's NOT is binary, so SQLite read ``AND NOT`` as a syntax error and answered with
+    no rows; live testing found ``espresso AND NOT french`` empty while
+    ``espresso NOT french`` matched.
+    """
+    notes = [
+        ("Espresso Notes", "espresso is brewed under pressure"),
+        ("French Espresso", "espresso from a french press"),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        entities = [
+            Entity(
+                project_id=test_project.id,
+                title=title,
+                note_type="note",
+                permalink=f"coffee/{title.lower().replace(' ', '-')}",
+                file_path=f"coffee/{title}.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            for title, _ in notes
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    for entity, (title, body) in zip(entities, notes, strict=True):
+        await search_repository.index_item(
+            SearchIndexRow(
+                project_id=search_repository.project_id,
+                id=entity.id,
+                type=SearchItemType.ENTITY.value,
+                title=title,
+                content_snippet=body,
+                content_stems=body.lower(),
+                permalink=entity.permalink,
+                file_path=entity.file_path,
+                entity_id=entity.id,
+                metadata={"note_type": entity.note_type},
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
+            )
+        )
+
+    for query in ("espresso AND NOT french", "espresso NOT french"):
+        results = await search_repository.search(search_text=query)
+        assert [result.title for result in results] == ["Espresso Notes"], query

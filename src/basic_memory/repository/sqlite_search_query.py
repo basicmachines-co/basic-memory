@@ -196,6 +196,10 @@ def prepare_boolean_query(query: str) -> str:
         if not part:
             continue
         if part in ("AND", "OR", "NOT"):
+            # FTS5's NOT is binary ("a NOT b" already means a and not b), so
+            # "a AND NOT b" is a syntax error, which the search answers with no rows.
+            if part == "NOT" and processed_parts and processed_parts[-1] == "AND":
+                processed_parts.pop()
             processed_parts.append(part)
         elif "(" in part or ")" in part:
             processed_parts.append(prepare_parenthetical_term(part))
