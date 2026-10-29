@@ -84,6 +84,20 @@ async def test_continue_conversation_without_topic(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "field"),
+    [("prompt/search", "query"), ("prompt/continue-conversation", "topic")],
+)
+async def test_prompt_routes_reject_oversized_search_text(
+    client: AsyncClient, v2_project_url: str, route: str, field: str
+):
+    """Prompt text becomes SearchQuery.text, so oversize fails at the request boundary."""
+    response = await client.post(f"{v2_project_url}/{route}", json={field: "a" * 4_001})
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_search_prompt_endpoint(
     client: AsyncClient, entity_service, search_service, test_graph, v2_project_url: str
 ):
