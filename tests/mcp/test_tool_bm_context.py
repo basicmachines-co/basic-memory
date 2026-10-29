@@ -10,17 +10,17 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools import bm_context, write_note
+from basic_memory.mcp.tools import bm_context, bm_write
 
 
 async def _seed(project_name: str) -> None:
-    await write_note(
+    await bm_write(
         title="Node A",
         directory="graph",
         content="# Node A\n\n- [fact] A starts the chain\n\n- links_to [[Node B]]",
         project=project_name,
     )
-    await write_note(
+    await bm_write(
         title="Node B",
         directory="graph",
         content="# Node B\n\n- [fact] B is in the middle\n\n- links_to [[Node A]]",

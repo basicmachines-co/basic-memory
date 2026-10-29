@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
-from basic_memory.mcp.tools.write_note import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 
@@ -484,7 +484,7 @@ async def test_schema_validate_all_types_no_schemas_json(app, test_project, inde
 
 @pytest.mark.asyncio
 async def test_write_note_metadata_creates_schema_note(app, test_project, index_project):
-    """Create a schema note via write_note(metadata=...), then validate against it.
+    """Create a schema note via bm_write(metadata=...), then validate against it.
 
     Proves the end-to-end workflow: write_note → sync → schema_validate.
     """
@@ -499,7 +499,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, index_
         )
 
     # 2. Create the schema note via write_note with metadata
-    await write_note(
+    await bm_write(
         title="Person",
         directory="schemas",
         note_type="schema",

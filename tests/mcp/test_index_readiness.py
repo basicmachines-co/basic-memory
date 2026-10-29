@@ -9,7 +9,7 @@ from sqlalchemy import update
 
 from basic_memory import db
 from basic_memory.mcp.clients.project import ProjectClient
-from basic_memory.mcp.tools import recent_activity, search_notes, write_note
+from basic_memory.mcp.tools import bm_write, recent_activity, search_notes
 from basic_memory.models import Project
 
 
@@ -54,7 +54,7 @@ async def test_readiness_failure_is_not_an_empty_success(client, test_project, m
 
 
 async def test_nonempty_reads_skip_status(client, test_project, monkeypatch):
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Visible", content="Visible content", directory="notes"
     )
     status = AsyncMock(side_effect=AssertionError("nonempty reads must not scan status"))

@@ -14,7 +14,7 @@ from mcp.types import EmbeddedResource, ImageContent
 from PIL import Image as PILImage
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
-from basic_memory.mcp.tools import bm_read, write_note
+from basic_memory.mcp.tools import bm_read, bm_write
 
 LONG_NOTE = "\n".join(
     ["# Plan", "", "## Goals", "- [goal] ship 1.0", "", "## Decisions"]
@@ -38,7 +38,7 @@ async def read_json(identifier: str, **arguments: Any) -> dict[str, Any]:
 
 
 async def _write(project_name: str, title: str, content: str, directory: str = "notes") -> None:
-    await write_note(title=title, directory=directory, content=content, project=project_name)
+    await bm_write(title=title, directory=directory, content=content, project=project_name)
 
 
 @pytest_asyncio.fixture

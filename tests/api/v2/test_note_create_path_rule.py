@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.models import Entity as EntityModel, Project
 
 TRAVERSAL_DIRECTORIES = ["../outside", "notes/../../outside", "..\\outside"]
@@ -144,12 +144,14 @@ async def test_nested_directories_still_create_through_both_routes(
 
 @pytest.mark.asyncio
 async def test_mcp_write_note_still_creates_nested_note(app, test_project: Project) -> None:
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Through MCP",
         directory="mcp/nested",
         content="# Through MCP\nmarker",
+        output_format="json",
     )
 
-    assert "# Created note" in result
-    assert "file_path: mcp/nested/Through MCP.md" in result
+    assert isinstance(result, dict)
+    assert result["action"] == "created"
+    assert result["file_path"] == "mcp/nested/Through MCP.md"

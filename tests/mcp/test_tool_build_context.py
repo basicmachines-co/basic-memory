@@ -6,7 +6,7 @@ import pytest
 
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import build_context, write_note
+from basic_memory.mcp.tools import bm_write, build_context
 from basic_memory.schemas.memory import MAX_CONTEXT_DEPTH
 
 
@@ -86,8 +86,8 @@ async def test_build_context_project_id_preserves_workspace_contextvar_canonical
     from basic_memory.workspace_context import workspace_permalink_context
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
-        await write_note(
-            project_id=test_project.external_id,
+        await bm_write(
+            project=test_project.external_id,
             title="Workspace Build Context Note",
             directory="tests",
             content="Build context should find this workspace note",
@@ -363,13 +363,13 @@ def test_format_entity_block_renders_unresolved_relations_by_name():
 @pytest.mark.asyncio
 async def test_build_context_text_names_the_source_of_incoming_relations(client, test_project):
     """An incoming relation names its source instead of reading as a self-link (#1717)."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Bean Origins",
         directory="coffee",
         content="# Bean Origins\n\n- informs [[Brewing Notes]]\n",
     )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Brewing Notes",
         directory="coffee",
@@ -404,7 +404,7 @@ async def test_build_context_finds_explicit_non_slug_permalink(client, test_proj
     from basic_memory.mcp.tools import read_note
 
     permalink = "s/2026/09/ses_AbCdEfGhIj"
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="index",
         directory="s/2026/09/sessions",
@@ -426,7 +426,7 @@ async def test_build_context_finds_explicit_non_slug_permalink(client, test_proj
 async def test_build_context_miss_returns_nothing(client, test_project):
     """A memory:// URL is an address; a miss must not become a fuzzy guess (#1626)."""
     for title in ("Search Spec", "Cache Layer Design"):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title=title,
             directory="specs",
@@ -448,7 +448,7 @@ async def test_build_context_miss_returns_nothing(client, test_project):
 async def test_build_context_refuses_ambiguous_title(client, test_project):
     """A title URL naming two notes is refused, as read_note refuses it, not guessed."""
     for directory in ("coffee", "archive"):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Bean Origins",
             directory=directory,

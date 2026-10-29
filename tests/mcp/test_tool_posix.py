@@ -25,7 +25,7 @@ from basic_memory.mcp.project_context import (
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
 )
-from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
+from basic_memory.mcp.tools import bm_write, cat, find, grep, ls, man, search_notes, tail
 from basic_memory.models import Entity
 from basic_memory.repository.metadata_filters import (
     MetadataPath,
@@ -47,7 +47,7 @@ def no_project_constraint(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cat_returns_full_note_round_trip(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Note",
         directory="test",
         content="# Cat Note\n\nline one\nline two",
@@ -70,7 +70,7 @@ async def test_cat_returns_full_note_round_trip(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_include_frontmatter_toggle(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Frontmatter Note",
         directory="test",
         content="body text only",
@@ -89,7 +89,7 @@ async def test_cat_include_frontmatter_toggle(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_line_range_slices_content(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Range Note",
         directory="test",
         content="alpha\nbravo\ncharlie\ndelta",
@@ -114,7 +114,7 @@ async def test_cat_line_range_slices_content(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_start_line_only_runs_to_end(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Tail Note",
         directory="test",
         content="alpha\nbravo\ncharlie",
@@ -135,7 +135,7 @@ async def test_cat_start_line_only_runs_to_end(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_end_line_clamped_to_total(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Clamp Note",
         directory="test",
         content="alpha\nbravo",
@@ -160,7 +160,7 @@ async def test_cat_end_line_clamped_to_total(client, test_project):
 @pytest.mark.asyncio
 async def test_cat_start_line_past_end_is_an_error(client, test_project):
     """Both slicing paths reject a range that starts after the last line (#1634)."""
-    await write_note(
+    await bm_write(
         title="Cat Past End Note",
         directory="test",
         content="alpha\nbravo",
@@ -193,7 +193,7 @@ async def test_cat_start_line_past_end_is_an_error(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_section_returns_exact_span(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Section Note",
         directory="test",
         content="# Guide\nintro\n## First\nalpha\n## Second\nbeta",
@@ -218,7 +218,7 @@ async def test_cat_section_returns_exact_span(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_section_path_form_disambiguates(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Section Paths",
         directory="test",
         content="# Auth\n## Decisions\na\n# Ops\n## Decisions\nb",
@@ -233,7 +233,7 @@ async def test_cat_section_path_form_disambiguates(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_section_bracket_form_addresses_duplicates(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Section Duplicates",
         directory="test",
         content="# Spec\n## Auth\nfirst\n## Auth\nsecond",
@@ -248,7 +248,7 @@ async def test_cat_section_bracket_form_addresses_duplicates(client, test_projec
 
 @pytest.mark.asyncio
 async def test_cat_unknown_section_lists_available_headings(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Section Missing",
         directory="test",
         content="# Guide\n## First\nalpha",
@@ -288,7 +288,7 @@ async def test_cat_rejects_bad_slice_arguments_before_io(kwargs, message):
 
 @pytest.mark.asyncio
 async def test_cat_max_tokens_truncates_and_resumes(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Token Budget",
         directory="test",
         content="# One\n" + "a" * 40 + "\n# Two\n" + "b" * 40,
@@ -317,7 +317,7 @@ async def test_cat_max_tokens_truncates_and_resumes(client, test_project):
 
 @pytest.mark.asyncio
 async def test_cat_max_tokens_with_line_range_routes_server_side(client, test_project):
-    await write_note(
+    await bm_write(
         title="Cat Combined Slice",
         directory="test",
         content="alpha\nbravo\ncharlie\ndelta",
@@ -369,7 +369,7 @@ async def test_cat_unknown_identifier_raises(client, test_project):
 
 @pytest.mark.asyncio
 async def test_grep_keyword_finds_seeded_content(client, test_project):
-    await write_note(
+    await bm_write(
         title="Grep Target",
         directory="test",
         content="# Grep Target\n\nThe posixgrepneedle hides here.",
@@ -923,7 +923,7 @@ def _paths(keys: list[str]) -> list[MetadataPath]:
 @pytest_asyncio.fixture
 async def meta_notes(client, test_project):
     """Seed metadata-bearing notes across two directories (one name has a space)."""
-    await write_note(
+    await bm_write(
         title="Alpha Spec",
         directory="specs",
         content="# Alpha Spec\n\nalpha body",
@@ -937,7 +937,7 @@ async def meta_notes(client, test_project):
             "review": {"approved": True},
         },
     )
-    await write_note(
+    await bm_write(
         title="Beta Spec",
         directory="specs",
         content="# Beta Spec\n\nbeta body",
@@ -949,7 +949,7 @@ async def meta_notes(client, test_project):
             "tags": ["security"],
         },
     )
-    await write_note(
+    await bm_write(
         title="Gamma Note",
         directory="My Notes",
         content="# Gamma Note\n\ngamma body",
@@ -976,7 +976,7 @@ async def diverged_permalink_notes(client, test_project):
     mirror image. Any scope built from permalinks answers this pair exactly
     backwards, which is what the regression below pins down.
     """
-    await write_note(
+    await bm_write(
         title="Housed In Specs",
         directory="specs",
         content=dedent("""
@@ -989,7 +989,7 @@ async def diverged_permalink_notes(client, test_project):
         """).strip(),
         project=test_project.name,
     )
-    await write_note(
+    await bm_write(
         title="Housed In Archive",
         directory="archive",
         content=dedent("""
@@ -1149,7 +1149,7 @@ async def test_find_meta_scopes_by_path_subtree(
 @pytest.mark.asyncio
 async def test_find_meta_scope_stops_at_a_directory_boundary(client, test_project, meta_notes):
     """A sibling directory whose name starts with the scope stays out."""
-    await write_note(
+    await bm_write(
         title="Archived Spec",
         directory="specs-archive",
         content="# Archived Spec",
@@ -1437,7 +1437,7 @@ async def test_find_meta_quoted_list_element_keeps_its_comma(client, test_projec
     Splitting the raw value before scalar inference would sever '"a,b"' into
     '"a' and 'b"' and filter for values nothing carries — no error, no hits.
     """
-    await write_note(
+    await bm_write(
         title="Comma Note",
         directory="notes",
         content="# Comma Note",
@@ -1458,7 +1458,7 @@ async def test_find_meta_quoting_reaches_operator_prefixed_values(client, test_p
     the same value is matched literally — proved against the real stack so the
     documented escape hatch is not just a parser property.
     """
-    await write_note(
+    await bm_write(
         title="Range Note",
         directory="notes",
         content="# Range Note",
@@ -1685,7 +1685,7 @@ async def test_man_page_and_query_mutually_exclusive():
 @pytest.mark.asyncio
 async def test_man_reads_only_bundled_pages(client, test_project):
     """A manual project is never consulted; `project` is accepted and ignored."""
-    await write_note(
+    await bm_write(
         title="posix-custom-guide",
         directory="man",
         content="# posix-custom-guide\n\nA note that is no bundled page.",
@@ -1769,7 +1769,7 @@ async def test_ls_mount_view_paginates_over_project_rows(
 async def test_ls_single_segment_project_name_lists_its_root(
     client, test_project, second_project, no_project_constraint
 ):
-    await write_note(
+    await bm_write(
         title="Second Root Note",
         directory="notes",
         content="# Second Root Note\n\nsecond project content",
@@ -1786,7 +1786,7 @@ async def test_ls_single_segment_project_name_lists_its_root(
 async def test_ls_qualified_path_routes_into_project_directory(
     client, test_project, second_project, no_project_constraint
 ):
-    await write_note(
+    await bm_write(
         title="Second Dir Note",
         directory="notes",
         content="# Second Dir Note",
@@ -1803,7 +1803,7 @@ async def test_ls_qualified_path_routes_into_project_directory(
 async def test_find_qualified_path_routes_to_project(
     client, test_project, second_project, no_project_constraint
 ):
-    await write_note(
+    await bm_write(
         title="Second Find Note",
         directory="notes",
         content="# Second Find Note",
@@ -1828,14 +1828,14 @@ async def test_find_meta_qualified_path_routes_to_project(
     root, while 'second-project/notes' strips to the 'notes' subtree of the
     same project.
     """
-    await write_note(
+    await bm_write(
         title="Second Meta Note",
         directory="notes",
         content="# Second Meta Note",
         project="second-project",
         metadata={"status": "active"},
     )
-    await write_note(
+    await bm_write(
         title="Home Meta Note",
         directory="notes",
         content="# Home Meta Note",
@@ -1843,7 +1843,7 @@ async def test_find_meta_qualified_path_routes_to_project(
         metadata={"status": "active"},
     )
 
-    await write_note(
+    await bm_write(
         title="Second Root Note",
         directory="specs",
         content="# Second Root Note",
@@ -1909,7 +1909,7 @@ async def test_tool_output_permalink_round_trips_into_cat(
     """Round trip: stored permalinks are already project-qualified, so tail's
     output is a valid cat identifier with no project param anywhere — and the
     mount view's prefix is that permalink's first segment."""
-    await write_note(
+    await bm_write(
         title="Round Trip",
         directory="notes",
         content="# Round Trip\n\nround trip body",
@@ -2027,7 +2027,7 @@ async def test_project_named_folder_is_reachable_double_qualified(
 ):
     """Collision rule: the project wins the first segment, so a top-level folder
     named like its own project is addressed by double-qualifying."""
-    await write_note(
+    await bm_write(
         title="Shadowed",
         directory="second-project",
         content="# Shadowed\n\nshadowed body",
@@ -2129,7 +2129,7 @@ async def test_ls_returned_paths_route_back_to_the_same_project(
     """A qualified `ls` advertises child paths; feeding one back must reach the
     same project. Returning the API's project-relative '/notes' refused as
     unqualified — or, with a project mounted as 'notes', opened that one."""
-    await write_note(
+    await bm_write(
         title="Second Root Note",
         directory="notes",
         content="# Second Root Note",
@@ -2151,7 +2151,7 @@ async def test_find_returned_paths_route_back_to_the_same_project(
 ):
     """find advertises both directory_path and file_path; each must address the
     project the call routed to, so `cat` and `ls` accept them unchanged."""
-    await write_note(
+    await bm_write(
         title="Second Root Note",
         directory="notes",
         content="# Second Root Note",
@@ -2181,7 +2181,7 @@ async def test_find_meta_returned_paths_route_back_to_the_same_project(
     unqualified — or, where another project is mounted as 'notes', opened that
     one instead.
     """
-    await write_note(
+    await bm_write(
         title="Second Meta Note",
         directory="notes",
         content="# Second Meta Note",
@@ -2214,7 +2214,7 @@ async def test_unrouted_find_meta_keeps_project_relative_paths(
     """The prefix goes back only when the call put it in the path — the same
     rule the listing arm follows, so an explicit project param keeps its own
     addressing frame."""
-    await write_note(
+    await bm_write(
         title="Second Meta Note",
         directory="notes",
         content="# Second Meta Note",
@@ -2251,7 +2251,7 @@ async def test_every_response_qualifier_is_exercised_by_a_routed_call(
     verb can answer with already has a qualifier, so a new arm either reuses one
     (and inherits the rule) or introduces one this test then reports.
     """
-    await write_note(
+    await bm_write(
         title="Second Round Trip Note",
         directory="notes",
         content="# Second Round Trip Note",
@@ -2313,7 +2313,7 @@ async def test_routed_cat_never_rewrites_note_frontmatter(
     routed read returned frontmatter that disagreed with both its own `content`
     and the file on disk. Position, not spelling, separates the two.
     """
-    await write_note(
+    await bm_write(
         title="Imported Note",
         directory="notes",
         content="# Imported Note\n\nbody",

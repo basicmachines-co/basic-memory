@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter
 
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.mcp.tools.search import (
     search_notes,
     _format_search_error_response,
@@ -29,7 +29,7 @@ implementation_server = implementation_mcp.implementation_server
 async def test_search_text(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -63,7 +63,7 @@ async def test_search_text(client, test_project):
 async def test_search_title(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -94,7 +94,7 @@ async def test_search_title(client, test_project):
 async def test_search_permalink(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -128,7 +128,7 @@ async def test_search_permalink(client, test_project):
 async def test_search_permalink_match(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -161,7 +161,7 @@ async def test_search_permalink_match(client, test_project):
 @pytest.mark.asyncio
 async def test_search_memory_url_with_project_prefix(client, test_project):
     """Test searching with a memory:// URL that includes the project prefix."""
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Memory URL Search Note",
         directory="test",
@@ -293,7 +293,7 @@ async def test_search_workspace_memory_url_routes_with_local_config(monkeypatch,
 async def test_search_pagination(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -329,7 +329,7 @@ async def test_search_pagination(client, test_project):
 async def test_search_with_type_filter(client, test_project):
     """Test search with note type filter."""
     # Create test content
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Note Type Test",
         directory="test",
@@ -358,7 +358,7 @@ async def test_search_with_type_filter(client, test_project):
 async def test_search_with_entity_type_filter(client, test_project):
     """Test search with entity_types (SearchItemType) filter."""
     # Create test content
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Entity Type Test",
         directory="test",
@@ -391,7 +391,7 @@ async def test_search_with_categories_filter(client, test_project):
     observation that also mentions the word "requirement". The categories filter
     must return only the requirement observation.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Category Filter Note",
         directory="test",
@@ -443,7 +443,7 @@ async def test_search_categories_without_entity_types_returns_observations(clien
     category against entity rows (which have NULL category) and return nothing. The implicit
     default must scope to observations when categories is supplied.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Category Default Note",
         directory="test",
@@ -474,7 +474,7 @@ async def test_search_categories_without_entity_types_returns_observations(clien
 async def test_search_with_date_filter(client, test_project):
     """Test search with date filter."""
     # Create test content
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Recent Note",
         directory="test",
@@ -1554,17 +1554,14 @@ async def test_search_notes_tags_comma_string_filters_via_mcp(
     """tags="alpha,beta" through the real MCP layer must match like a real list (#910)."""
     from fastmcp import Client
 
+    await bm_write(
+        project=test_project.name,
+        title="Tag Split Note",
+        directory="test",
+        content="# Tag Split Note\nTagSplitToken body",
+        tags=["alpha", "beta"],
+    )
     async with Client(implementation_server) as mcp_client:
-        await mcp_client.call_tool(
-            "write_note",
-            {
-                "project": test_project.name,
-                "title": "Tag Split Note",
-                "directory": "test",
-                "content": "# Tag Split Note\nTagSplitToken body",
-                "tags": ["alpha", "beta"],
-            },
-        )
 
         async def found(tags_value: object) -> bool:
             result = await mcp_client.call_tool(
@@ -1736,7 +1733,7 @@ async def test_search_notes_direct_call_splits_comma_tags(client, test_project, 
     function directly with Typer's collected list ["alpha,beta"], which must split
     into ["alpha", "beta"] instead of matching nothing (#910, #932 follow-up).
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Direct Tag Split Note",
         directory="test",
@@ -2185,7 +2182,7 @@ async def test_search_notes_direct_call_splits_comma_note_types(
     function directly with Typer's collected list ["note,task"], which must split into
     ["note", "task"] and match the note correctly (#930, Codex review follow-up).
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Direct NoteType Split Note",
         directory="test",
@@ -2303,7 +2300,6 @@ async def test_search_indexed_miss_keeps_original_copy(
     from sqlalchemy import text as sa_text
 
     from basic_memory import db
-    from basic_memory.mcp.tools import write_note as write_note_tool
 
     async with db.scoped_session(session_maker) as session:
         await session.execute(
@@ -2311,7 +2307,7 @@ async def test_search_indexed_miss_keeps_original_copy(
             {"now": datetime.now(), "id": test_project.id},
         )
 
-    created = await write_note_tool(
+    created = await bm_write(
         project=test_project.name,
         title="Indexed Note",
         directory="notes",

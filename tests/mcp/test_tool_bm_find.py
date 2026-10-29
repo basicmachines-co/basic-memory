@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import bm_find, write_note
+from basic_memory.mcp.tools import bm_find, bm_write
 
 
 async def find_text(**arguments: Any) -> str:
@@ -24,21 +24,21 @@ async def find_json(**arguments: Any) -> dict[str, Any]:
 
 
 async def _seed(project_name: str) -> None:
-    await write_note(
+    await bm_write(
         title="Alpha",
         directory="tasks",
         content="# Alpha",
         metadata={"status": "active", "priority": 2},
         project=project_name,
     )
-    await write_note(
+    await bm_write(
         title="Beta",
         directory="tasks/archive",
         content="# Beta",
         metadata={"status": "done", "priority": 1},
         project=project_name,
     )
-    await write_note(
+    await bm_write(
         title="Gamma",
         directory="notes",
         content="# Gamma",

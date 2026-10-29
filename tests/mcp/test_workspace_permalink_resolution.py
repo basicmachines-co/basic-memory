@@ -5,7 +5,7 @@ import pytest
 from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit_note import edit_note
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools.write_note import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.workspace_context import workspace_permalink_context
 
 
@@ -16,7 +16,7 @@ async def test_link_resolver_strictly_finds_legacy_project_permalink_from_worksp
     entity_service,
 ):
     """Workspace/project IDs should resolve legacy project-prefixed rows centrally."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Resolver Legacy Workspace Note",
         directory="personal",
@@ -44,7 +44,7 @@ async def test_edit_note_workspace_qualified_url_edits_legacy_project_permalink(
     legacy_permalink = f"{test_project.name}/personal/edit-legacy-workspace-note"
     qualified_permalink = f"personal/{legacy_permalink}"
 
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Edit Legacy Workspace Note",
         directory="personal",
@@ -83,7 +83,7 @@ async def test_delete_note_workspace_qualified_url_deletes_legacy_project_permal
     legacy_permalink = f"{test_project.name}/personal/delete-legacy-workspace-note"
     qualified_permalink = f"personal/{legacy_permalink}"
 
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Delete Legacy Workspace Note",
         directory="personal",

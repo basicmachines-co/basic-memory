@@ -39,7 +39,6 @@ IMPLEMENTATION_NAMES = (
     "search",
     "search_notes",
     "tail",
-    "write_note",
 )
 
 

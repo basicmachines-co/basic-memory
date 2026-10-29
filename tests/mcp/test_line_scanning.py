@@ -8,7 +8,7 @@ from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request, Response
 
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.mcp.tools import cat, grep, read_note, write_note
+from basic_memory.mcp.tools import bm_write, cat, grep, read_note
 from basic_memory.schemas.search import SearchResponse
 from basic_memory.schemas.v2 import EntityResponseV2
 
@@ -19,7 +19,7 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
         "retry the operation" if n in (70, 72, 180) else f"Background line {n}: " + "detail " * 15
         for n in range(200)
     )
-    await write_note(title="Scan Note", directory="test", content=body, project=test_project.name)
+    await bm_write(title="Scan Note", directory="test", content=body, project=test_project.name)
     full = await cat("Scan Note", project=test_project.name)
     lines = full["content"].splitlines()
     expected_matches = [n for n, line in enumerate(lines, 1) if "retry" in line]
@@ -72,7 +72,7 @@ async def test_scan_read_round_trip_and_token_savings(client, test_project) -> N
 
 @pytest.mark.asyncio
 async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_project) -> None:
-    await write_note(
+    await bm_write(
         title="Bounds", directory="test", content="alpha\nbeta", project=test_project.name
     )
     full = await cat("Bounds", project=test_project.name)
@@ -100,7 +100,7 @@ async def test_ranges_include_frontmatter_and_have_eof_metadata(client, test_pro
 
 @pytest.mark.asyncio
 async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monkeypatch) -> None:
-    await write_note(title="One Get", directory="test", content="alpha", project=test_project.name)
+    await bm_write(title="One Get", directory="test", content="alpha", project=test_project.name)
     found = await grep("alpha", project=test_project.name)
     identifier = found["results"][0]["external_id"]
     original = KnowledgeClient.get_entity
@@ -128,7 +128,7 @@ async def test_exact_uuid_line_read_is_one_sliced_get(client, test_project, monk
 
 @pytest.mark.asyncio
 async def test_exact_title_fallback_keeps_line_scan(client, test_project, monkeypatch) -> None:
-    await write_note(
+    await bm_write(
         title="Exact Fallback", directory="test", content="alpha", project=test_project.name
     )
 
@@ -149,7 +149,7 @@ async def test_grep_candidate_pagination_survives_no_current_match(
     client, test_project, monkeypatch
 ) -> None:
     for title in ("First", "Second"):
-        await write_note(title=title, directory="test", content="retry", project=test_project.name)
+        await bm_write(title=title, directory="test", content="retry", project=test_project.name)
     original = KnowledgeClient.get_entity
 
     async def changed_content(self: KnowledgeClient, entity_id: str) -> EntityResponseV2:
@@ -170,7 +170,7 @@ async def test_grep_candidate_pagination_survives_no_current_match(
 
 @pytest.mark.asyncio
 async def test_grep_refuses_missing_candidate_identity(client, test_project, monkeypatch) -> None:
-    await write_note(title="Legacy", directory="test", content="retry", project=test_project.name)
+    await bm_write(title="Legacy", directory="test", content="retry", project=test_project.name)
     original = SearchClient.search
 
     async def old_server(

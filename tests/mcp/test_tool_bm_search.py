@@ -10,7 +10,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
-from basic_memory.mcp.tools import bm_read, bm_search, write_note
+from basic_memory.mcp.tools import bm_read, bm_search, bm_write
 from basic_memory.mcp.tools import ranked_search as ranked_search_module
 from basic_memory.mcp.tools.ranked_search import _query_terms
 from basic_memory.mcp.tools.search import MultiProjectFailed, MultiProjectNotIndexed
@@ -29,7 +29,7 @@ async def search_json(**arguments: Any) -> dict[str, Any]:
 
 
 async def _seed(project_name: str) -> None:
-    await write_note(
+    await bm_write(
         title="Deploy Plan",
         directory="tasks",
         content=(
@@ -39,7 +39,7 @@ async def _seed(project_name: str) -> None:
         metadata={"status": "active"},
         project=project_name,
     )
-    await write_note(
+    await bm_write(
         title="Deploy History",
         directory="notes",
         content="# Deploy History\n\nThe last deploy was quiet.",
@@ -307,7 +307,7 @@ async def test_identifier_text_shows_the_note_lines(client, test_project):
 @pytest.mark.asyncio
 async def test_lines_for_several_observations_of_one_note(client, test_project):
     """Observation hits share their note's id; the content batch reads it once."""
-    await write_note(
+    await bm_write(
         title="Runbook",
         directory="ops",
         content="# Runbook\n\n- [step] deploy the canary\n- [step] deploy the fleet",

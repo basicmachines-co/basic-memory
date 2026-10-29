@@ -12,11 +12,11 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.note_targets import PathQualifier, open_project_target, resolve_note
 from basic_memory.mcp.project_context import ProjectPathRoute
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools import bm_write
 
 
 async def _write_plan(project_name: str) -> None:
-    await write_note(
+    await bm_write(
         title="Plan",
         directory="notes",
         content="# Plan\n\nship it",
@@ -153,7 +153,7 @@ async def test_other_resolution_failures_pass_through(client, test_project, monk
 @pytest.mark.asyncio
 async def test_an_identifier_can_be_a_title_that_looks_like_a_path(client, test_project):
     """A title such as 'Home ~ Plan' is resolved, not checked as a path."""
-    await write_note(
+    await bm_write(
         title="Home ~ Plan", directory="notes", content="# Home", project=test_project.name
     )
 
@@ -172,7 +172,7 @@ async def test_an_identifier_can_be_a_title_that_looks_like_a_path(client, test_
 async def test_an_ambiguous_title_is_an_ambiguous_refusal(client, test_project):
     """Two notes share the title, so neither is picked; JSON keeps the refusal shape."""
     for directory in ("a", "b"):
-        await write_note(
+        await bm_write(
             title="Twin", directory=directory, content="# Twin", project=test_project.name
         )
 
