@@ -254,3 +254,47 @@ async def test_entity_row_under_another_id_counts_as_missing(
         {"project_id": test_project.id, "entity_id": entity_id},
     )
     assert restored == 1
+
+
+@pytest.mark.asyncio
+async def test_partially_indexed_entity_is_counted_once(
+    test_project: Project,
+    project_config,
+    engine_factory,
+    config_manager: ConfigManager,
+) -> None:
+    """An entity that keeps observation rows but lost its entity row counts once, as missing.
+
+    Coverage adds indexed and missing entities, so the two counts must not overlap.
+    """
+    _engine, session_maker = engine_factory
+    (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
+    (project_config.home / NOTE_PATH).write_text(NOTE_CONTENT, encoding="utf-8")
+    await _index_project(test_project, embeddings=False)
+    entity_id = await _indexed_note_entity_id(session_maker, test_project)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "DELETE FROM search_index WHERE project_id = :project_id "
+                "AND type = 'entity' AND id = :entity_id"
+            ),
+            {"project_id": test_project.id, "entity_id": entity_id},
+        )
+    observation_rows = await _count(
+        session_maker,
+        "SELECT COUNT(*) FROM search_index WHERE project_id = :project_id "
+        "AND entity_id = :entity_id",
+        {"project_id": test_project.id, "entity_id": entity_id},
+    )
+    assert observation_rows > 0
+
+    project_service = ProjectService(ProjectRepository(), session_maker)
+    status = await project_service.get_embedding_status(test_project.id)
+
+    entities = await _count(
+        session_maker,
+        "SELECT COUNT(*) FROM entity WHERE project_id = :project_id",
+        {"project_id": test_project.id},
+    )
+    assert status.entities_missing_search_rows == 1
+    assert status.total_indexed_entities + status.entities_missing_search_rows == entities

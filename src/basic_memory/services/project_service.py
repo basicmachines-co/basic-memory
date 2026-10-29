@@ -120,6 +120,16 @@ def project_permalink(name: str, *, top_level: bool) -> str:
 RESERVED_PROJECT_PERMALINKS = frozenset({"man"})
 
 
+# An entity is indexed when it has its canonical search row: `type = 'entity'` keyed
+# by the entity's own id. This is the complement of the missing-rows query in
+# search_repository_base, so indexed + missing equals the entity count even when
+# observation or relation rows outlive a lost entity row (#1826).
+INDEXED_ENTITY_COUNT_SQL = (
+    "SELECT COUNT(*) FROM search_index WHERE project_id = :project_id "
+    "AND type = 'entity' AND id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+)
+
+
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -1315,13 +1325,10 @@ class ProjectService:
                 }.issubset(manifest_columns)
 
             if not manifest_schema_current or not vector_tables_exist:
-                # Count distinct entities in search index for the recommendation message
+                # Count indexed entities for the recommendation message
                 si_result = await self.repository.execute_query(
                     session,
-                    text(
-                        "SELECT COUNT(DISTINCT entity_id) FROM search_index "
-                        "WHERE project_id = :project_id"
-                    ),
+                    text(INDEXED_ENTITY_COUNT_SQL),
                     {"project_id": project_id},
                 )
                 total_indexed_entities = si_result.scalar() or 0
@@ -1361,10 +1368,7 @@ class ProjectService:
 
             si_result = await self.repository.execute_query(
                 session,
-                text(
-                    "SELECT COUNT(DISTINCT entity_id) FROM search_index "
-                    f"WHERE project_id = :project_id {entity_exists}"
-                ),
+                text(INDEXED_ENTITY_COUNT_SQL),
                 {"project_id": project_id},
             )
             total_indexed_entities = si_result.scalar() or 0
