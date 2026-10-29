@@ -1,6 +1,10 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient, ProjectListResult } from "../bm-client.ts"
+import {
+  type BmClient,
+  describeToolError,
+  type ProjectListResult,
+} from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 function normalizeProject(project: ProjectListResult) {
@@ -102,7 +106,7 @@ export function registerProjectListTool(
             content: [
               {
                 type: "text" as const,
-                text: "Failed to list Basic Memory projects. Is Basic Memory running? Check logs for details.",
+                text: `Failed to list Basic Memory projects: ${describeToolError(err)}`,
               },
             ],
             details: {

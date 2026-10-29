@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeNoteError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerMoveTool(
@@ -62,7 +62,7 @@ export function registerMoveTool(
             content: [
               {
                 type: "text" as const,
-                text: `Failed to move "${params.identifier}". It may not exist.`,
+                text: `Failed to move "${params.identifier}": ${describeNoteError(err)}`,
               },
             ],
             details: {

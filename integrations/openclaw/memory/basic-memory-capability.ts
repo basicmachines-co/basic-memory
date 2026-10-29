@@ -1,5 +1,9 @@
 import type { MemoryPluginCapability } from "openclaw/plugin-sdk/memory-host-core"
-import { type BmClient, isNoteNotFoundError } from "../bm-client.ts"
+import {
+  type BmClient,
+  isNoteNotFoundError,
+  searchResultText,
+} from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 // OpenClaw documents deriving the provider types from the public capability
@@ -137,7 +141,7 @@ export function openBasicMemoryReader(
         )
         .map(({ result, score }) => ({
           reference: { providerId: MEMORY_PROVIDER_ID, id: result.permalink },
-          excerpt: excerptOf(result.content ?? ""),
+          excerpt: excerptOf(searchResultText(result)),
           source: result.file_path,
           ...(score === undefined ? {} : { score }),
         }))

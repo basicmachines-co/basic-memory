@@ -2,7 +2,7 @@ import { execSync } from "node:child_process"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeToolError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -62,7 +62,7 @@ export function registerCommands(
       } catch (err) {
         log.error("/remember failed", err)
         return {
-          text: "Failed to save memory. Is Basic Memory running?",
+          text: `Failed to save memory: ${describeToolError(err)}`,
         }
       }
     },
@@ -99,7 +99,7 @@ export function registerCommands(
       } catch (err) {
         log.error("/recall failed", err)
         return {
-          text: "Failed to search. Is Basic Memory running?",
+          text: `Failed to search: ${describeToolError(err)}`,
         }
       }
     },

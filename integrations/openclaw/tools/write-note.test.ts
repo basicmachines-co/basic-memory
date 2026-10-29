@@ -544,7 +544,7 @@ const code = "example";
         content: [
           {
             type: "text",
-            text: "Failed to write note. Is Basic Memory running? Check logs for details.",
+            text: "Failed to write note: Failed to write note",
           },
         ],
         details: {
@@ -659,8 +659,8 @@ Normal line
         folder: "notes",
       })
 
-      expect(result.content[0].text).toContain(
-        "Failed to write note. Is Basic Memory running?",
+      expect(result.content[0].text).toBe(
+        "Failed to write note: Connection refused",
       )
     })
 

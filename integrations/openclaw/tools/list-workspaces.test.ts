@@ -119,7 +119,7 @@ describe("workspace list tool", () => {
         content: [
           {
             type: "text",
-            text: "Failed to list workspaces. Is Basic Memory running? Check logs for details.",
+            text: "Failed to list workspaces: boom",
           },
         ],
         details: {

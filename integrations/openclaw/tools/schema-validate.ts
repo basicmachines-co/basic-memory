@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeToolError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerSchemaValidateTool(
@@ -89,7 +89,7 @@ export function registerSchemaValidateTool(
             content: [
               {
                 type: "text" as const,
-                text: "Schema validation failed. Check logs for details.",
+                text: `Schema validation failed: ${describeToolError(err)}`,
               },
             ],
             details: {

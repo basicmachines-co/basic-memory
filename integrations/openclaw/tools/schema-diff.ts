@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeToolError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerSchemaDiffTool(
@@ -93,7 +93,7 @@ export function registerSchemaDiffTool(
             content: [
               {
                 type: "text" as const,
-                text: "Schema diff failed. Check logs for details.",
+                text: `Schema diff failed: ${describeToolError(err)}`,
               },
             ],
             details: {

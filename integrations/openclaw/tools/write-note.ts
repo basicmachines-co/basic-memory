@@ -1,7 +1,8 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
 import {
+  type BmClient,
+  describeToolError,
   NoteAlreadyExistsError,
   NoteRevisionConflictError,
 } from "../bm-client.ts"
@@ -185,7 +186,7 @@ export function registerWriteTool(
             content: [
               {
                 type: "text" as const,
-                text: "Failed to write note. Is Basic Memory running? Check logs for details.",
+                text: `Failed to write note: ${describeToolError(err)}`,
               },
             ],
             details: {

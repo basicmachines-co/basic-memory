@@ -185,7 +185,7 @@ describe("search tool", () => {
     })
 
     it("should truncate long content with ellipsis", async () => {
-      const longContent = "a".repeat(300)
+      const longContent = "a".repeat(700)
       const mockResults = [
         {
           title: "Long Content Note",
@@ -203,8 +203,31 @@ describe("search tool", () => {
       const result = await executeFunction("tool-call-id", { query: "test" })
 
       const text = result.content[0].text
-      expect(text).toContain(`${"a".repeat(200)}...`)
-      expect(text).not.toContain("a".repeat(250))
+      expect(text).toContain(`${"a".repeat(500)}...`)
+      expect(text).not.toContain("a".repeat(501))
+    })
+
+    // Regression: a fact deep in a long note (a day of captured
+    // conversation) was matched but cut off, because the preview showed
+    // only the start of the note.
+    it("previews the matched chunk instead of the start of the note", async () => {
+      ;(mockClient.search as jest.MockedFunction<any>).mockResolvedValue([
+        {
+          title: "conversations-2026-10-29",
+          permalink: "conversations/conversations-2026-10-29",
+          content: "# Conversations 2026-10-29\n\n### 14:12\nAbout the cat...",
+          matched_chunk:
+            "### 14:15\n**User:**\nmy test plant is a fern called Bramble",
+          score: 1.19,
+          file_path: "conversations/conversations-2026-10-29.md",
+        },
+      ])
+
+      const result = await executeFunction("tool-call-id", { query: "plant" })
+
+      const text = result.content[0].text
+      expect(text).toContain("a fern called Bramble")
+      expect(text).not.toContain("About the cat")
     })
 
     it("should not truncate short content", async () => {
@@ -368,7 +391,7 @@ describe("search tool", () => {
         content: [
           {
             type: "text",
-            text: "Search failed. Is Basic Memory running? Check logs for details.",
+            text: "Search failed: Search service unavailable",
           },
         ],
         details: {

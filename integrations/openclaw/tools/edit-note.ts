@@ -2,9 +2,8 @@ import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
 import {
   type BmClient,
-  describeToolError,
+  describeNoteError,
   type EditOperation,
-  isNoteNotFoundError,
 } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
@@ -134,10 +133,7 @@ export function registerEditTool(
           // Why: a blanket "may not exist" sent agents hunting for the wrong
           //   problem; the server's message says what to change.
           // Outcome: the agent sees the server's reason verbatim.
-          const reason = describeToolError(err)
-          const text = isNoteNotFoundError(err)
-            ? `Failed to edit note "${params.identifier}": it does not exist. ${reason}`
-            : `Failed to edit note "${params.identifier}": ${reason}`
+          const text = `Failed to edit note "${params.identifier}": ${describeNoteError(err)}`
           return {
             content: [{ type: "text" as const, text }],
             details: {

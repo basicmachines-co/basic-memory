@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, jest } from "bun:test"
 import {
   BmClient,
   BmToolError,
+  describeNoteError,
+  describeToolError,
   NoteAlreadyExistsError,
   NoteRevisionConflictError,
 } from "./bm-client.ts"
@@ -941,6 +943,96 @@ describe("BmClient MCP behavior", () => {
     const args = (client as any).writeNote.mock.calls[0]
     expect(args[3]).toBeUndefined() // project
     expect(args[4]).toBeUndefined() // overwrite
+  })
+
+  it("describes tool errors with the server's own reason", () => {
+    expect(
+      describeToolError(
+        new BmToolError(
+          "bm_edit",
+          JSON.stringify({ error: "CONFLICT", message: "checksum changed" }),
+        ),
+      ),
+    ).toBe("CONFLICT: checksum changed")
+    // Plain-text tool failures (older servers) pass through unchanged.
+    expect(
+      describeToolError(new BmToolError("bm_read", "database is locked")),
+    ).toBe("database is locked")
+    expect(describeToolError(new Error("spawn bm ENOENT"))).toBe(
+      "spawn bm ENOENT",
+    )
+    expect(
+      describeNoteError(
+        new BmToolError(
+          "bm_read",
+          JSON.stringify({ error: "NOT_FOUND", message: "Missing note" }),
+        ),
+      ),
+    ).toBe("it does not exist. NOT_FOUND: Missing note")
+  })
+
+  describe("startup gate", () => {
+    const structured = (payload: unknown) => ({ structuredContent: payload })
+
+    it("holds tool calls until startup has created the project", async () => {
+      let finishConnect = () => {}
+      ;(client as any).connectWithRetries = jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishConnect = resolve
+          }),
+      )
+      const callToolRaw = jest.fn(
+        async (_name: string, args: Record<string, unknown>) =>
+          args.command === "create"
+            ? structured({ ok: true })
+            : structured({ projects: [] }),
+      )
+      ;(client as any).callToolRaw = callToolRaw
+
+      const startup = client.start({ projectPath: "/tmp/ws/memory" })
+      const listing = client.listProjects()
+      await Promise.resolve()
+      expect(callToolRaw).not.toHaveBeenCalled()
+
+      finishConnect()
+      await startup
+      await listing
+
+      // Project creation runs first, then the waiting call.
+      expect(callToolRaw.mock.calls.map(([name]) => name)).toEqual([
+        "bm_project",
+        "bm_project",
+      ])
+      expect(callToolRaw.mock.calls[0][1]).toMatchObject({ command: "create" })
+      expect(callToolRaw.mock.calls[1][1]).toMatchObject({ command: "list" })
+    })
+
+    it("retries a failed startup once for the next tool calls", async () => {
+      const connect = jest
+        .fn()
+        .mockRejectedValueOnce(new Error("bm not ready"))
+        .mockResolvedValue(undefined)
+      ;(client as any).connectWithRetries = connect
+      ;(client as any).callToolRaw = jest.fn(async () =>
+        structured({ projects: [] }),
+      )
+
+      await expect(client.start()).rejects.toThrow("bm not ready")
+      await Promise.all([client.listProjects(), client.listProjects()])
+
+      // One original attempt plus one retry shared by both callers.
+      expect(connect).toHaveBeenCalledTimes(2)
+    })
+
+    it("surfaces the retry's error when startup keeps failing", async () => {
+      ;(client as any).connectWithRetries = jest
+        .fn()
+        .mockRejectedValue(new Error("BM MCP unavailable: spawn bm ENOENT"))
+
+      await expect(client.start()).rejects.toThrow("spawn bm ENOENT")
+      await expect(client.listProjects()).rejects.toThrow("spawn bm ENOENT")
+    })
   })
 
   it("reports the service as running only between start() and stop()", async () => {

@@ -1,7 +1,15 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import {
+  type BmClient,
+  describeToolError,
+  searchResultText,
+} from "../bm-client.ts"
 import { log } from "../logger.ts"
+
+// Long enough to show a whole captured conversation turn from the matched
+// chunk, short enough that ten results stay readable.
+const MAX_PREVIEW_CHARS = 500
 
 export function registerSearchTool(
   api: OpenClawPluginApi,
@@ -100,9 +108,11 @@ export function registerSearchTool(
           const text = results
             .map((r, i) => {
               const score = r.score ? ` (score ${r.score.toFixed(2)})` : ""
-              const content = r.content ?? ""
+              const text = searchResultText(r)
               const preview =
-                content.length > 200 ? `${content.slice(0, 200)}...` : content
+                text.length > MAX_PREVIEW_CHARS
+                  ? `${text.slice(0, MAX_PREVIEW_CHARS)}...`
+                  : text
               return `${i + 1}. **${r.title}**${score}\n   ${preview}`
             })
             .join("\n\n")
@@ -129,7 +139,7 @@ export function registerSearchTool(
             content: [
               {
                 type: "text" as const,
-                text: "Search failed. Is Basic Memory running? Check logs for details.",
+                text: `Search failed: ${describeToolError(err)}`,
               },
             ],
             details: {

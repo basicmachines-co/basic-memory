@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
-import type { BmClient } from "../bm-client.ts"
+import { type BmClient, describeToolError } from "../bm-client.ts"
 import { log } from "../logger.ts"
 
 export function registerSchemaInferTool(
@@ -91,7 +91,7 @@ export function registerSchemaInferTool(
             content: [
               {
                 type: "text" as const,
-                text: "Schema inference failed. Check logs for details.",
+                text: `Schema inference failed: ${describeToolError(err)}`,
               },
             ],
             details: {
