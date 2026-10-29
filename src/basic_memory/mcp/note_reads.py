@@ -11,7 +11,7 @@ from basic_memory.yaml_policy import SimpleSafeLoader
 
 
 class ReadNoteJsonPayload(TypedDict):
-    """Successful ``read_note(output_format="json")`` payload.
+    """Successful ``bm_read(output_format="json")`` note payload.
 
     The slice keys appear only on sliced reads (section/lines/max_tokens), whose
     ``content`` is the server-computed slice with document-absolute coordinates;
@@ -23,7 +23,7 @@ class ReadNoteJsonPayload(TypedDict):
     file_path: str
     content: str
     frontmatter: dict[str, Any] | None
-    # The accepted revision's checksum: pass it as write_note's expected_checksum to
+    # The accepted revision's checksum: pass it as bm_write's expected_checksum to
     # overwrite only the revision that was read. None for entities with no accepted
     # Markdown (legacy or non-note entities).
     checksum: str | None
@@ -94,7 +94,7 @@ def parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]
 def format_note_metadata(metadata: dict[str, Any]) -> str:
     """Format a metadata-only read as plain key/value lines.
 
-    The checksum is printed in full: it is the token edit_note and write_note take
+    The checksum is printed in full: it is the token bm_edit and bm_write take
     as expected_checksum, so a truncated one would be useless.
     """
     lines = ["# Note metadata"]

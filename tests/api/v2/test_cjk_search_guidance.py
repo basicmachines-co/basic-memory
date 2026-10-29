@@ -7,11 +7,12 @@ from sqlalchemy import text
 from httpx import AsyncClient
 
 from basic_memory import db
+from basic_memory.mcp.tools import bm_search
 
 
 @pytest.mark.asyncio
 async def test_unspaced_compound_miss_has_actionable_hint(
-    client: AsyncClient, v2_project_url: str, entity_repository, search_service
+    client: AsyncClient, v2_project_url: str, test_project, entity_repository, search_service
 ):
     async with db.scoped_session(search_service.session_maker) as session:
         entity = await entity_repository.create(
@@ -51,8 +52,6 @@ async def test_unspaced_compound_miss_has_actionable_hint(
 
     # The typed MCP client and formatter must preserve the API's guidance in
     # both output formats, including compact discovery responses.
-    from basic_memory.mcp.tools.search import search_notes
-
     async with db.scoped_session(search_service.session_maker) as session:
         await session.execute(
             text("UPDATE project SET last_indexed_at = CURRENT_TIMESTAMP WHERE id = :id"),
@@ -60,8 +59,12 @@ async def test_unspaced_compound_miss_has_actionable_hint(
         )
     formats: tuple[Literal["text", "json"], ...] = ("text", "json")
     for output_format in formats:
-        result = await search_notes(
-            query="雾凇拼音", search_type="text", output_format=output_format, compact=True
+        result = await bm_search(
+            query="雾凇拼音",
+            mode="text",
+            output_format=output_format,
+            compact=True,
+            project=test_project.name,
         )
         if isinstance(result, str):
             assert "shorter word" in result
@@ -74,8 +77,6 @@ async def test_unspaced_compound_miss_has_actionable_hint(
 async def test_unindexed_cjk_miss_keeps_index_guidance(
     client, test_project, session_maker, config_home, output_format
 ):
-    from basic_memory.mcp.tools.search import search_notes
-
     notes_dir = config_home / "notes"
     notes_dir.mkdir(exist_ok=True)
     (notes_dir / "unindexed.md").write_text("# Diary\n\n雾凇词库部署\n", encoding="utf-8")
@@ -84,12 +85,12 @@ async def test_unindexed_cjk_miss_keeps_index_guidance(
             text("UPDATE project SET last_indexed_at = NULL WHERE id = :id"),
             {"id": test_project.id},
         )
-    result = await search_notes(
-        project=test_project.name, query="雾凇拼音", search_type="text", output_format=output_format
+    result = await bm_search(
+        project=test_project.name, query="雾凇拼音", mode="text", output_format=output_format
     )
-    assert isinstance(result, str)
-    assert result.startswith("# Project Index Required")
-    assert "shorter word" not in result
+    guidance = result if isinstance(result, str) else result["guidance"]
+    assert guidance.startswith("# Project Index Required")
+    assert "shorter word" not in guidance
 
 
 @pytest.mark.asyncio

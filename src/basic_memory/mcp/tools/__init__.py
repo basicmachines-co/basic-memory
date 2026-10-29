@@ -5,9 +5,6 @@ Basic Memory through the MCP protocol. Importing this module registers
 all tools with the MCP server.
 """
 
-# Shared implementations used by the CLI and the bm_* tools; these do not register MCP tools.
-from basic_memory.mcp.tools.search import search_notes as search_notes
-
 # Shared POSIX implementations used by the shell commands.
 from basic_memory.mcp.tools.posix_tools import (
     cat as cat,

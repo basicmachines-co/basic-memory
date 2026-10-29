@@ -37,7 +37,7 @@ NoteIdentifier = Annotated[
 DirectoryPath = Annotated[
     str,
     Field(
-        # list_directory's `dir_name`, and the word models most often reach for.
+        # `dir_name` from older callers, and the word models most often reach for.
         validation_alias=AliasChoices("path", "dir_name", "folder"),
         description=(
             "A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the "
@@ -232,8 +232,8 @@ type ItemKind = Literal["note", "observation", "relation"]
 def _parse_item_kinds(value: Any) -> Any:
     """Split list-shaped input and read the API's word "entity" as "note".
 
-    Callers written against `search_notes(entity_types=...)` send "entity"; the alias
-    alone would carry that value into a field that no longer accepts it.
+    Callers using the `entity_types` alias often send the API's word "entity"; the
+    alias alone would carry that value into a field that accepts only "note".
     """
     if value is None:
         return None

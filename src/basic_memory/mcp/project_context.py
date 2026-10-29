@@ -233,7 +233,7 @@ def _workspace_identifier_discovery_available(
     if _cloud_workspace_discovery_available(config):
         return True
 
-    # Identifier detection serves read_note and search, which have no mount
+    # Identifier detection serves memory:// note resources, which have no mount
     # table and no refusal rule, so only the unmistakable three-segment form may
     # reach for the network here.
     return _local_cloud_discovery_allowed(config) and _is_workspace_route_shaped(identifier)
@@ -422,9 +422,8 @@ async def invalidate_project_caches(context: Optional[Context] = None) -> None:
     The session listing is the one that decides which first path segment names a
     project (``addressable_projects``), so leaving it behind made a project
     created mid-session unaddressable by name and a deleted one keep routing to
-    its dead external_id — for ``ls "/"`` and the posix resolver, and, once
-    identifier detection started reading the same mount table, for ``read_note``
-    and ``search_notes`` as well (#1432 review).
+    its dead external_id in identifier detection, which reads the same mount
+    table (#1432 review).
 
     Deliberately NOT cleared: ``active_workspace`` and ``available_workspaces``
     hold workspace metadata — tenant id, slug, type — which no project
@@ -1048,7 +1047,7 @@ async def detect_project_from_identifier_prefix(
     for its reason: only one reading of '<name>/...' can win, and a name ``ls
     /`` advertises must address that mount or we advertise an address that
     resolves somewhere else. Reading it the other way here meant `ls team/docs`
-    and `read_note("team/docs/x")` disagreed about what 'team' named. It is also
+    and `bm_read("team/docs/x")` disagreed about what 'team' named. It is also
     the cheaper order — a mount hit never builds the account-wide workspace
     index at all.
 

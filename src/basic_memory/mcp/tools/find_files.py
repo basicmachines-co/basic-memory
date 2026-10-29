@@ -126,7 +126,7 @@ async def bm_find(
         # --- Frontmatter arm ---
         if filters is not None:
             # "note_type" is the entity column's name for the frontmatter `type`;
-            # search_notes and find accept both spellings, and so does bm_find.
+            # bm_find accepts both spellings, as bm_search's filters do.
             metadata_filters = {
                 ("type" if key == "note_type" else key): value for key, value in filters.items()
             }
