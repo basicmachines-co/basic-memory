@@ -361,6 +361,9 @@ async def bm_search(
     # The caller's query, tag: tokens included, is what result headings echo.
     query_text = query
     query, tags = split_tag_shorthand(query)
+    # Search text ranks the hits; a blank query is stripped downstream into a
+    # filter-only search, whose scores are all zero.
+    has_search_text = bool(query and query.strip())
     normalized_note_types = [normalize_note_type(note_type) for note_type in note_types or []]
     entity_types = [item.value for item in search_item_types(items) or []]
 
@@ -407,7 +410,7 @@ async def bm_search(
                     query_text,
                     scope,
                     next_call=next_call,
-                    ranked=bool(query) and mode != "permalink",
+                    ranked=has_search_text and mode != "permalink",
                 )
             case MultiProjectNotIndexed(guidance=guidance):
                 return (
@@ -516,7 +519,7 @@ async def bm_search(
         query_text,
         f"project '{target.project.name}'",
         next_call=next_call,
-        ranked=bool(query) and search_mode != "permalink",
+        ranked=has_search_text and search_mode != "permalink",
     )
 
 

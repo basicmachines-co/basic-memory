@@ -110,11 +110,15 @@ async def test_unranked_hits_show_no_score(client, test_project):
     await _seed(test_project.name)
 
     by_filter = await search_text(filters={"status": "done"}, project=test_project.name)
+    by_blank_query = await search_text(
+        query="   ", filters={"status": "done"}, project=test_project.name
+    )
     by_pattern = await search_text(query="tasks/*", mode="permalink", project=test_project.name)
 
     assert "- notes/Deploy History.md | Deploy History" in by_filter
     assert "- tasks/Deploy Plan.md | Deploy Plan" in by_pattern
-    assert "score" not in by_filter + by_pattern
+    assert "- notes/Deploy History.md | Deploy History" in by_blank_query
+    assert "score" not in by_filter + by_blank_query + by_pattern
 
 
 @pytest.mark.asyncio
