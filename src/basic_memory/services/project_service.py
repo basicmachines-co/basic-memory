@@ -20,6 +20,7 @@ from basic_memory import db
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository import SearchRepository, create_search_repository
+from basic_memory.repository.search_repository_base import ENTITY_IDS_MISSING_SEARCH_ROWS_SQL
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -1338,6 +1339,18 @@ class ProjectService:
             )
             total_indexed_entities = si_result.scalar() or 0
 
+            # Trigger: entities can exist with no search_index row at all (#1826).
+            # Why: every count below starts from search_index, so such an entity is
+            #   missing from both the indexed and the embedded totals and the gap
+            #   would read as full coverage.
+            # Outcome: count them against the entity table and report them.
+            missing_search_result = await self.repository.execute_query(
+                session,
+                text(f"SELECT COUNT(*) FROM ({ENTITY_IDS_MISSING_SEARCH_ROWS_SQL}) AS missing"),
+                {"project_id": project_id},
+            )
+            entities_missing_search_rows = missing_search_result.scalar() or 0
+
             manifest_params = {
                 "project_id": project_id,
                 "vector_index": vector_index,
@@ -1463,7 +1476,13 @@ class ProjectService:
             reindex_recommended = False
             reindex_reason = None
 
-            if total_indexed_entities > 0 and total_chunks == 0:
+            if entities_missing_search_rows > 0:
+                reindex_recommended = True
+                reindex_reason = (
+                    f"{entities_missing_search_rows} entities missing from the search index "
+                    "— run: bm reindex"
+                )
+            elif total_indexed_entities > 0 and total_chunks == 0:
                 reindex_recommended = True
                 reindex_reason = "Embeddings have never been built — run: bm reindex --embeddings"
             elif orphaned_chunks > 0:
@@ -1486,6 +1505,7 @@ class ProjectService:
                 embedding_document_prefix_set=document_prefix_set,
                 embedding_query_prefix_set=query_prefix_set,
                 total_indexed_entities=total_indexed_entities,
+                entities_missing_search_rows=entities_missing_search_rows,
                 total_entities_with_chunks=total_entities_with_chunks,
                 total_chunks=total_chunks,
                 total_embeddings=total_embeddings,

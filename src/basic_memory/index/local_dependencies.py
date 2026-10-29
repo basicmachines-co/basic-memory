@@ -203,6 +203,8 @@ class LocalIndexSearchService(
 
     async def semantic_effectively_enabled(self) -> bool: ...
 
+    async def restore_missing_search_rows(self) -> list[Entity]: ...
+
 
 class LocalIndexEntityService(Protocol):
     """Entity service capabilities needed by local index maintenance adapters."""

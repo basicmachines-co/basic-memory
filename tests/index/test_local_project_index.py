@@ -2779,6 +2779,9 @@ class RuntimeFactorySearchIndex:
     async def semantic_effectively_enabled(self) -> bool:
         return True
 
+    async def restore_missing_search_rows(self) -> list[Entity]:
+        return []
+
 
 class RuntimeFactoryRelationRepository:
     async def find_unresolved_relations(

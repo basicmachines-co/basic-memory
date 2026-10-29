@@ -11,6 +11,7 @@ from basic_memory.indexing.embedding_index_planning import (
     DeferredEmbeddingTargetSource,
     EmbeddingBatchVectorSync,
     EmbeddingIndexBatchJobRequest,
+    EmbeddingIndexTarget,
     run_embedding_index_batch,
 )
 from basic_memory.indexing.models import IndexFileBatchJobResult
@@ -76,6 +77,14 @@ class ProjectIndexChangeDetector(Protocol):
         self,
         storage_files: Mapping[str, RuntimeObservedIndexFile],
     ) -> ChangeReport: ...
+
+
+class ProjectIndexSearchRowRepairer(Protocol):
+    """Capability that rebuilds search rows for entities that have none."""
+
+    async def restore_missing_search_rows(self) -> tuple[EmbeddingIndexTarget, ...]:
+        """Rebuild missing search projections; return the restored entity versions."""
+        ...
 
 
 class ProjectIndexWorkflowStarter(Protocol):
@@ -181,6 +190,7 @@ class ProjectIndexCoordinatorResult:
     enqueued_batches: int
     deleted_files: int
     moved_files: int = 0
+    restored_search_entities: int = 0
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
     batch_results: tuple[IndexFileBatchJobResult, ...] = ()
     completion: ProjectIndexCompletion | None = None
@@ -265,6 +275,7 @@ async def run_project_index_coordinator(
     batch_size: int,
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None,
     deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None,
+    search_row_repairer: ProjectIndexSearchRowRepairer | None = None,
 ) -> ProjectIndexCoordinatorResult:
     """Run the storage-neutral project-index coordinator fan-out."""
     if not request.search:
@@ -333,11 +344,24 @@ async def run_project_index_coordinator(
             )
         raise
 
+    # Trigger: an entity still has no search rows after this pass's file batches.
+    # Why: change detection compares checksums only, so an unchanged file whose
+    #   rows were dropped (a migration that recreated search_index, a lost
+    #   refresh) never reaches a batch, and with no rows it has no vectors (#1826).
+    # Outcome: rebuild those projections now, after the batches so only entities
+    #   that stayed broken are touched, and embed them with this pass's targets.
+    restored_search_targets = (
+        await search_row_repairer.restore_missing_search_rows()
+        if search_row_repairer is not None
+        else ()
+    )
+
     await sync_project_index_vector_targets(
         request=request,
         batch_results=batch_results,
         embedding_vector_sync=embedding_vector_sync,
         deferred_embedding_targets=deferred_embedding_targets,
+        extra_vector_targets=restored_search_targets,
     )
 
     return ProjectIndexCoordinatorResult(
@@ -346,6 +370,7 @@ async def run_project_index_coordinator(
         enqueued_batches=enqueued_batches,
         deleted_files=delete_run.total_deleted_entities,
         moved_files=move_run.total_updated_files,
+        restored_search_entities=len(restored_search_targets),
         relation_cleanup_entity_ids=(
             move_run.relation_cleanup_entity_ids | delete_run.relation_cleanup_entity_ids
         ),
@@ -360,12 +385,15 @@ async def sync_project_index_vector_targets(
     batch_results: Sequence[IndexFileBatchJobResult],
     embedding_vector_sync: EmbeddingBatchVectorSync | None,
     deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None,
+    extra_vector_targets: Sequence[EmbeddingIndexTarget] = (),
 ) -> None:
     """Refresh vectors produced by inline project-index batch execution.
 
     Entities a previous pass left unfinished ride along with this pass's
     changed files, so an oversized note keeps advancing one shard per pass
-    until it is fully embedded and its marker clears.
+    until it is fully embedded and its marker clears. ``extra_vector_targets``
+    carries entities the pass touched outside a file batch, such as restored
+    search projections.
     """
     if not request.embeddings or embedding_vector_sync is None:
         return
@@ -382,6 +410,7 @@ async def sync_project_index_vector_targets(
     )
     vector_targets = (
         *(target for batch_result in batch_results for target in batch_result.vector_targets),
+        *extra_vector_targets,
         *deferred_targets,
     )
     if not vector_targets:

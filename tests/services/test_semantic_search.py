@@ -290,6 +290,7 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
         "sample_errors": ("embedding service unavailable",),
         "vector_index": "sqlite-vec",
         "embedding_model": "FastEmbedEmbeddingProvider:test-model",
+        "search_rows_restored": 0,
     }
 
 
@@ -339,6 +340,7 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
         "sample_errors": (),
         "vector_index": "sqlite-vec",
         "embedding_model": "FastEmbedEmbeddingProvider:test-model",
+        "search_rows_restored": 0,
     }
 
 
@@ -448,6 +450,7 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
         "sample_errors": (),
         "vector_index": "sqlite-vec",
         "embedding_model": "FastEmbedEmbeddingProvider:test-model",
+        "search_rows_restored": 0,
     }
 
 

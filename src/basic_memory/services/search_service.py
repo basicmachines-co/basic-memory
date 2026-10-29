@@ -27,6 +27,7 @@ from basic_memory.repository.search_repository import (
 )
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_refresh_race import lost_search_refresh_race
+from basic_memory.repository.search_repository_base import find_entity_ids_missing_search_rows
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
@@ -692,6 +693,37 @@ class SearchService:
             )
             raise  # pragma: no cover
 
+    async def restore_missing_search_rows(self) -> list[Entity]:
+        """Rebuild search rows for entities that have none; return the entities restored.
+
+        Vectors are cut from search rows, and change detection skips unchanged
+        files, so an entity whose rows are gone is invisible to search and to every
+        embedding path until its file changes (#1826). Rebuilding the projection
+        from the entity and its file converges that state on the next pass.
+
+        An entity whose file cannot be read is left alone: the scan that notices
+        the file is gone deletes the entity.
+        """
+        entity_ids = await find_entity_ids_missing_search_rows(
+            self.session_maker, self.repository.project_id
+        )
+        if not entity_ids:
+            return []
+
+        async with db.scoped_session(self.session_maker) as session:
+            entities = await self.entity_repository.find_by_ids(session, entity_ids)
+        result = await self.index_entities(entities, content_by_entity_id={})
+        restored = [
+            entity for entity in entities if entity.id not in result.missing_content_entity_ids
+        ]
+        logger.info(
+            "Restored missing search rows",
+            project_id=self.repository.project_id,
+            restored=len(restored),
+            unreadable=len(result.missing_content_entity_ids),
+        )
+        return restored
+
     async def semantic_effectively_enabled(self) -> bool:
         """Return whether this runtime can embed, honoring the keyword-only fallback."""
         return await self.repository.semantic_effectively_enabled()
@@ -850,7 +882,15 @@ class SearchService:
             ``deferred`` counts entities that still have pending chunks because the
             drain stopped making progress; a non-zero value means the rebuild is
             incomplete and a later incremental run continues it.
+            ``search_rows_restored`` counts entities whose missing search rows were
+            rebuilt before embedding.
         """
+        # Trigger: an entity has no search_index rows (#1826).
+        # Why: vectors are cut from search rows, so the sync below would skip it
+        #   and still count it as done; `--embeddings` runs no search pass.
+        # Outcome: its search rows are rebuilt first, and it embeds in this run.
+        search_rows_restored = len(await self.restore_missing_search_rows())
+
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
         entity_ids = [entity.id for entity in entities]
@@ -868,6 +908,7 @@ class SearchService:
                 "sample_errors": (),
                 "vector_index": None,
                 "embedding_model": None,
+                "search_rows_restored": search_rows_restored,
             }
 
         # Clean up stale rows in search_index and search_vector_chunks
@@ -927,6 +968,7 @@ class SearchService:
             "sample_errors": tuple(dict.fromkeys(sample_errors))[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT],
             "vector_index": batch_result.vector_index,
             "embedding_model": batch_result.embedding_model,
+            "search_rows_restored": search_rows_restored,
         }
 
         for failed_entity_id in failed_entity_ids:

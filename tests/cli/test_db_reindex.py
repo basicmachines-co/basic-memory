@@ -33,6 +33,7 @@ def _vector_stats(
     errors: int,
     deferred: int = 0,
     sample_errors: tuple[str, ...] = (),
+    search_rows_restored: int = 0,
 ) -> dict[str, object]:
     return {
         "total_entities": total_entities,
@@ -43,6 +44,7 @@ def _vector_stats(
         "sample_errors": sample_errors,
         "vector_index": "milvus",
         "embedding_model": "FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5",
+        "search_rows_restored": search_rows_restored,
     }
 
 
@@ -887,6 +889,30 @@ def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
     ) in output
     assert "Representative error:" not in output
     assert "Reindex complete!" in output
+
+
+def test_reindex_reports_restored_search_rows(monkeypatch, session_maker):
+    # Entities that had no search rows are rebuilt by both phases and named (#1826).
+    stats = _vector_stats(total_entities=2, embedded=2, skipped=0, errors=0, search_rows_restored=2)
+    _app_config, project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+    project_index.return_value = ProjectIndexCoordinatorResult(
+        total_files=1,
+        enqueued_files=0,
+        enqueued_batches=0,
+        deleted_files=0,
+        restored_search_entities=3,
+    )
+
+    result = runner.invoke(app, ["reindex"])
+
+    assert result.exit_code == 0, result.output
+    output = "\n".join(printed_lines)
+    assert "3 entities had no search rows; restored" in output
+    assert "2 entities had no search rows; restored before embedding" in output
 
 
 def test_reindex_on_keyword_only_host_reports_skipped_embeddings(monkeypatch, session_maker):
