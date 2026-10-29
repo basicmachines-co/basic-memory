@@ -329,9 +329,18 @@ def compile_fts_filter(
                     "search_index.content_snippet MATCH :text)"
                 )
 
+    leading_order_by = ""
     if query.title:
         params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)
         match_conditions.append("search_index.title MATCH :title_text")
+        # Trigger: title search.
+        # Why: bm25 normalizes by the whole row's length, so among notes whose titles
+        #   all contain the query the shortest body wins, and the note titled exactly
+        #   the query can rank below a longer title (#1956).
+        # Outcome: an exact title match (ASCII case-insensitive) sorts first; bm25
+        #   orders the rest.
+        params["title_exact"] = query.title.strip()
+        leading_order_by = "(lower(search_index.title) = lower(:title_exact)) DESC, "
 
     if query.permalink_match:
         # GLOB patterns keep their syntax; prepare_search_term would quote the slashes.
@@ -482,6 +491,7 @@ def compile_fts_filter(
         params=params,
         order_by_clause=AFTER_DATE_ORDER_BY if query.after_date else "",
         score_expression=score_expression,
+        leading_order_by=leading_order_by,
     )
 
 
@@ -555,7 +565,8 @@ class SQLiteFts:
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
-            ORDER BY score ASC {compiled.order_by_clause}, search_index.id ASC
+            ORDER BY {compiled.leading_order_by}score ASC {compiled.order_by_clause},
+                search_index.id ASC
             LIMIT :limit
             OFFSET :offset
         """

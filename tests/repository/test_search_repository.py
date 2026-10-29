@@ -1601,3 +1601,57 @@ async def test_delete_by_permalink_leaves_the_other_kind_at_that_address(
     assert await _rows_at_shared_address(session_maker, search_repository) == [
         (SearchItemType.OBSERVATION.value, 11),
     ]
+
+
+@pytest.mark.asyncio
+async def test_title_search_ranks_exact_title_first(search_repository, session_maker, test_project):
+    """The note titled exactly the query outranks longer titles containing it (#1956).
+
+    bm25 normalizes by the whole row, so on SQLite the shorter body used to win, and a
+    Postgres title-only search has no rank at all. The exact-title note is created
+    second with the longer body, so neither the score nor the id tie-break favors it.
+    """
+    hub_body = "Status update on milestones, owners, budget and open risks. " * 30
+    memo_body = "Agenda and talking points before the review meeting. " * 8
+    notes = [
+        ("Project Atlas meeting notes 2026-10-02", memo_body),
+        ("project atlas", hub_body),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        entities = [
+            Entity(
+                project_id=test_project.id,
+                title=title,
+                note_type="note",
+                permalink=f"projects/{title.lower().replace(' ', '-')}",
+                file_path=f"projects/{title}.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            for title, _ in notes
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    for entity, (title, body) in zip(entities, notes, strict=True):
+        await search_repository.index_item(
+            SearchIndexRow(
+                project_id=search_repository.project_id,
+                id=entity.id,
+                type=SearchItemType.ENTITY.value,
+                title=title,
+                content_snippet=body,
+                content_stems=body.lower(),
+                permalink=entity.permalink,
+                file_path=entity.file_path,
+                entity_id=entity.id,
+                metadata={"note_type": entity.note_type},
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
+            )
+        )
+
+    results = await search_repository.search(title="Project Atlas")
+
+    assert [r.title for r in results] == ["project atlas", "Project Atlas meeting notes 2026-10-02"]
