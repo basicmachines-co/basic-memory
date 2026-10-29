@@ -475,6 +475,11 @@ async def _reindex(
                         f"  [red]...and {len(failed_files) - FAILED_FILES_SHOWN} more[/red]"
                     )
 
+                if result.restored_search_entities:
+                    console.print(
+                        f"  [dim]{result.restored_search_entities} entities had no search rows; "
+                        "restored[/dim]"
+                    )
                 purged = await purge_stale_search_index_rows(session_maker, proj.id)
                 console.print(f"  [dim]{purged} stale search rows purged[/dim]")
 
@@ -542,6 +547,12 @@ async def _reindex(
                         task,
                         total=stats["total_entities"],
                         completed=stats["total_entities"] - stats["deferred"],
+                    )
+
+                if stats["search_rows_restored"]:
+                    console.print(
+                        f"  [dim]{stats['search_rows_restored']} entities had no search rows; "
+                        "restored before embedding[/dim]"
                     )
 
                 # Trigger: the host cannot load sqlite-vec, so search runs keyword-only

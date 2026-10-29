@@ -85,7 +85,7 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.link_resolver import LinkResolver
-from basic_memory.services.search_service import SearchService
+from basic_memory.services.search_service import SearchRowRepair, SearchService
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +202,8 @@ class LocalIndexSearchService(
     ) -> VectorSyncBatchResult: ...
 
     async def semantic_effectively_enabled(self) -> bool: ...
+
+    async def restore_missing_search_rows(self, *, batch_size: int) -> SearchRowRepair: ...
 
 
 class LocalIndexEntityService(Protocol):

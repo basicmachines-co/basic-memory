@@ -4,7 +4,8 @@ import asyncio
 import ast
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from itertools import batched
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
 
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import logfire
 
 from basic_memory import db
+from basic_memory.indexing.embedding_index_planning import VECTOR_SYNC_CHUNK_SIZE
 from basic_memory.indexing.relation_resolution import RelationSearchRefreshResult
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
@@ -27,6 +29,7 @@ from basic_memory.repository.search_repository import (
 )
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_refresh_race import lost_search_refresh_race
+from basic_memory.repository.search_repository_base import find_entity_ids_missing_search_rows
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
@@ -44,6 +47,24 @@ from basic_memory.temporal import (
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
 MAX_CONTENT_STEMS_SIZE = 6000
+
+
+@dataclass(frozen=True, slots=True)
+class RestoredSearchEntity:
+    """An entity whose missing search rows were rebuilt, kept without its graph."""
+
+    entity_id: int
+    checksum: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchRowRepair:
+    """What a missing-search-row repair restored, and which entities it could not."""
+
+    restored: tuple[RestoredSearchEntity, ...]
+    # Entities whose file could not be read or parsed; they stay unsearchable.
+    failed_entity_ids: tuple[int, ...]
+    sample_errors: tuple[str, ...]
 
 
 def entity_embeddings_enabled(entity: Entity) -> bool:
@@ -692,6 +713,71 @@ class SearchService:
             )
             raise  # pragma: no cover
 
+    async def restore_missing_search_rows(
+        self,
+        *,
+        batch_size: int = VECTOR_SYNC_CHUNK_SIZE,
+    ) -> SearchRowRepair:
+        """Rebuild search rows for entities that have none; report what was restored.
+
+        Vectors are cut from search rows, and change detection skips unchanged
+        files, so an entity whose rows are gone is invisible to search and to every
+        embedding path until its file changes (#1826). Rebuilding the projection
+        from the entity and its file converges that state on the next pass.
+
+        An entity whose file cannot be read is left alone: the scan that notices
+        the file is gone deletes the entity.
+        """
+        entity_ids = await find_entity_ids_missing_search_rows(
+            self.session_maker, self.repository.project_id
+        )
+        restored: list[RestoredSearchEntity] = []
+        unreadable = 0
+        failed_entity_ids: list[int] = []
+        sample_errors: list[str] = []
+        # A migration that recreated search_index can leave every entity without
+        # rows. Each batch loads entities with their observations and relations,
+        # so batches are loaded, indexed, and dropped one at a time to keep memory
+        # bounded by the batch rather than the project.
+        for id_batch in batched(entity_ids, batch_size):
+            async with db.scoped_session(self.session_maker) as session:
+                entities = await self.entity_repository.find_by_ids(session, list(id_batch))
+            for entity in entities:
+                try:
+                    await self.index_entity_data(entity)
+                except FileNotFoundError:
+                    unreadable += 1
+                    continue
+                except Exception as error:
+                    # Trigger: one file cannot be read or parsed (e.g. invalid UTF-8).
+                    # Why: file batches already isolate per-file failures; aborting here
+                    #      would stop every later entity from converging on each pass.
+                    # Outcome: log it, leave it out of the restored and vector targets,
+                    #          and keep repairing the rest. Cancellation still propagates.
+                    failed_entity_ids.append(entity.id)
+                    sample_errors.append(f"{entity.file_path}: {error}")
+                    logger.exception(
+                        "Could not restore search rows for entity",
+                        project_id=self.repository.project_id,
+                        entity_id=entity.id,
+                        file_path=entity.file_path,
+                    )
+                    continue
+                restored.append(RestoredSearchEntity(entity_id=entity.id, checksum=entity.checksum))
+        if entity_ids:
+            logger.info(
+                "Restored missing search rows",
+                project_id=self.repository.project_id,
+                restored=len(restored),
+                unreadable=unreadable,
+                failed=len(failed_entity_ids),
+            )
+        return SearchRowRepair(
+            restored=tuple(restored),
+            failed_entity_ids=tuple(failed_entity_ids),
+            sample_errors=tuple(sample_errors[:5]),
+        )
+
     async def semantic_effectively_enabled(self) -> bool:
         """Return whether this runtime can embed, honoring the keyword-only fallback."""
         return await self.repository.semantic_effectively_enabled()
@@ -850,24 +936,36 @@ class SearchService:
             ``deferred`` counts entities that still have pending chunks because the
             drain stopped making progress; a non-zero value means the rebuild is
             incomplete and a later incremental run continues it.
+            ``search_rows_restored`` counts entities whose missing search rows were
+            rebuilt before embedding.
         """
+        # Trigger: an entity has no search_index rows (#1826).
+        # Why: vectors are cut from search rows, so the sync below would skip it
+        #   and still count it as done; `--embeddings` runs no search pass.
+        # Outcome: its search rows are rebuilt first, and it embeds in this run. An
+        #   entity whose repair failed is reported as an error, not embedded empty.
+        repair = await self.restore_missing_search_rows()
+        search_rows_restored = len(repair.restored)
+        repair_failed = set(repair.failed_entity_ids)
+
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
-        entity_ids = [entity.id for entity in entities]
+        entity_ids = [entity.id for entity in entities if entity.id not in repair_failed]
 
         # A host that cannot load sqlite-vec runs keyword-only (#711); its vector
         # tables cannot even be opened, so the whole rebuild is a no-op there.
         if not await self.repository.semantic_effectively_enabled():
             logger.warning("Skipping vector reindex: semantic search is unavailable on this host")
             return {
-                "total_entities": len(entity_ids),
+                "total_entities": len(entity_ids) + len(repair.failed_entity_ids),
                 "embedded": 0,
                 "skipped": len(entity_ids),
-                "errors": 0,
+                "errors": len(repair.failed_entity_ids),
                 "deferred": 0,
-                "sample_errors": (),
+                "sample_errors": repair.sample_errors,
                 "vector_index": None,
                 "embedding_model": None,
+                "search_rows_restored": search_rows_restored,
             }
 
         # Clean up stale rows in search_index and search_vector_chunks
@@ -882,9 +980,9 @@ class SearchService:
         )
         embedded = batch_result.entities_synced
         skipped = batch_result.entities_skipped
-        errors = batch_result.entities_failed
-        failed_entity_ids = list(batch_result.failed_entity_ids)
-        sample_errors = list(batch_result.sample_errors)
+        errors = batch_result.entities_failed + len(repair.failed_entity_ids)
+        failed_entity_ids = [*repair.failed_entity_ids, *batch_result.failed_entity_ids]
+        sample_errors = [*repair.sample_errors, *batch_result.sample_errors]
         deferred_entity_ids = list(batch_result.deferred_entity_ids)
 
         # --- Drain deferred shards ---
@@ -919,7 +1017,8 @@ class SearchService:
 
         await self.repository.reconcile_vector_index()
         stats = {
-            "total_entities": batch_result.entities_total,
+            # Failed repairs skip vector sync but are part of what this run covered.
+            "total_entities": batch_result.entities_total + len(repair.failed_entity_ids),
             "embedded": embedded,
             "skipped": skipped,
             "errors": errors,
@@ -927,6 +1026,7 @@ class SearchService:
             "sample_errors": tuple(dict.fromkeys(sample_errors))[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT],
             "vector_index": batch_result.vector_index,
             "embedding_model": batch_result.embedding_model,
+            "search_rows_restored": search_rows_restored,
         }
 
         for failed_entity_id in failed_entity_ids:

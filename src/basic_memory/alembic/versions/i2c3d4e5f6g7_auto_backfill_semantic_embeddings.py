@@ -1,4 +1,6 @@
-"""Trigger automatic semantic embedding backfill during migration.
+"""Empty revision kept for migration-chain continuity.
+
+The name promises an embedding backfill, but no migration hook ever ran one (#1826).
 
 Revision ID: i2c3d4e5f6g7
 Revises: h1b2c3d4e5f6
@@ -16,12 +18,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """No schema change.
+    """No schema change and no data change.
 
-    Trigger: this revision is newly applied.
-    Why: db.run_migrations() detects this revision transition and runs the existing
-    sync_entity_vectors() pipeline to backfill semantic embeddings automatically.
-    Outcome: users no longer need to run `bm reindex --embeddings` after upgrading.
+    An earlier docstring said db.run_migrations() detects this revision and backfills
+    embeddings. It never did. Notes without vectors converge through index passes
+    instead: the project-index pass embeds what it indexes and restores entities that
+    have no search rows, and `bm reindex --embeddings` embeds every eligible note.
     """
 
 

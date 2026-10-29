@@ -171,6 +171,40 @@ async def purge_stale_search_index_rows(
     return purged
 
 
+# Every indexed entity owns exactly one `type = 'entity'` search row, keyed by the
+# entity's own id and written with its other rows in one transaction, so an entity
+# without that row has no search projection at all. Match on `id`, as the
+# integrity checker does (`index_integrity._MISSING_ENTITY_ROWS`): a stale entity
+# row that carries the right `entity_id` under another `id` is not a projection.
+# Plain uncorrelated NOT IN: SQLite FTS5 cannot index these columns, so it reads
+# the project's search rows once per statement instead of once per entity. The
+# SQL text is identical on SQLite FTS5 and Postgres.
+ENTITY_IDS_MISSING_SEARCH_ROWS_SQL = (
+    "SELECT id FROM entity WHERE project_id = :project_id "
+    "AND id NOT IN (SELECT id FROM search_index WHERE project_id = :project_id "
+    "AND type = 'entity' AND id IS NOT NULL)"
+)
+
+
+async def find_entity_ids_missing_search_rows(
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+) -> list[int]:
+    """Return ids of this project's entities that have no search_index projection.
+
+    The inverse of `purge_stale_search_index_rows`. File change detection compares
+    checksums only, so an unchanged file whose search rows are gone (a migration
+    that recreated search_index, a lost refresh) is never re-read (#1826). This
+    query lets an index pass find those entities and rebuild their rows.
+    """
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            text(f"{ENTITY_IDS_MISSING_SEARCH_ROWS_SQL} ORDER BY id"),
+            {"project_id": project_id},
+        )
+        return [int(row[0]) for row in result.all()]
+
+
 class SearchRepositoryBase(ABC):
     """Abstract base class for backend-specific search repository implementations.
 

@@ -1837,15 +1837,19 @@ def display_project_info(
                     right.add_row("  Provider", es.embedding_provider)
                 if es.embedding_model:
                     right.add_row("  Model", es.embedding_model)
-                # Embedding coverage bar
-                if es.total_indexed_entities > 0:
+                # Embedding coverage bar. Entities with no search row have no
+                # vectors either, so they count against coverage (#1826).
+                coverage_total = es.total_indexed_entities + es.entities_missing_search_rows
+                # Without a vector runtime there is no coverage to show; the
+                # search-index gap is reported in the status line instead.
+                if es.vector_runtime_available and coverage_total > 0:
                     coverage_bar = make_bar(
                         es.total_entities_with_chunks,
-                        es.total_indexed_entities,
+                        coverage_total,
                         width=20,
                     )
                     count_text = Text(
-                        f" {es.total_entities_with_chunks}/{es.total_indexed_entities}",
+                        f" {es.total_entities_with_chunks}/{coverage_total}",
                         style="green",
                     )
                     bar_with_count = Text.assemble("  Indexed  ", coverage_bar, count_text)

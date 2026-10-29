@@ -20,6 +20,7 @@ from basic_memory import db
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository import SearchRepository, create_search_repository
+from basic_memory.repository.search_repository_base import ENTITY_IDS_MISSING_SEARCH_ROWS_SQL
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -117,6 +118,17 @@ def project_permalink(name: str, *, top_level: bool) -> str:
 
 # Project permalinks the server already uses as memory:// namespaces.
 RESERVED_PROJECT_PERMALINKS = frozenset({"man"})
+
+
+# An entity is indexed when it has its canonical search row: `type = 'entity'` keyed
+# by the entity's own id. This is the complement of the missing-rows query in
+# search_repository_base, so indexed + missing equals the entity count even when
+# observation or relation rows outlive a lost entity row (#1826). DISTINCT keeps a
+# duplicated canonical row, which index integrity reports, from counting twice.
+INDEXED_ENTITY_COUNT_SQL = (
+    "SELECT COUNT(DISTINCT id) FROM search_index WHERE project_id = :project_id "
+    "AND type = 'entity' AND id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+)
 
 
 class ProjectService:
@@ -1219,6 +1231,36 @@ class ProjectService:
 
         Reports config, counts, and whether a reindex is recommended.
         """
+        # Trigger: entities can exist with no search_index row at all (#1826).
+        # Why: every vector count starts from search_index, so such an entity is
+        #   missing from the indexed and embedded totals, and keyword-only or
+        #   missing-storage states never look at search rows at all.
+        # Outcome: count them against the entity table on every path; when any
+        #   exist, `bm reindex` (search pass + embeddings) is the first remedy.
+        async with db.scoped_session(self.session_maker) as session:
+            missing_search_result = await self.repository.execute_query(
+                session,
+                text(f"SELECT COUNT(*) FROM ({ENTITY_IDS_MISSING_SEARCH_ROWS_SQL}) AS missing"),
+                {"project_id": project_id},
+            )
+        entities_missing_search_rows = missing_search_result.scalar() or 0
+
+        status = await self._get_vector_embedding_status(project_id)
+        if not entities_missing_search_rows:
+            return status
+        return status.model_copy(
+            update={
+                "entities_missing_search_rows": entities_missing_search_rows,
+                "reindex_recommended": True,
+                "reindex_reason": (
+                    f"{entities_missing_search_rows} entities missing from the search index "
+                    "— run: bm reindex"
+                ),
+            }
+        )
+
+    async def _get_vector_embedding_status(self, project_id: int) -> EmbeddingStatus:
+        """Report vector config, counts, and the vector-side reindex recommendation."""
         config = self.config_manager.config
         provider = config.semantic_embedding_provider
         model = config.semantic_embedding_model
@@ -1284,13 +1326,10 @@ class ProjectService:
                 }.issubset(manifest_columns)
 
             if not manifest_schema_current or not vector_tables_exist:
-                # Count distinct entities in search index for the recommendation message
+                # Count indexed entities for the recommendation message
                 si_result = await self.repository.execute_query(
                     session,
-                    text(
-                        "SELECT COUNT(DISTINCT entity_id) FROM search_index "
-                        "WHERE project_id = :project_id"
-                    ),
+                    text(INDEXED_ENTITY_COUNT_SQL),
                     {"project_id": project_id},
                 )
                 total_indexed_entities = si_result.scalar() or 0
@@ -1330,10 +1369,7 @@ class ProjectService:
 
             si_result = await self.repository.execute_query(
                 session,
-                text(
-                    "SELECT COUNT(DISTINCT entity_id) FROM search_index "
-                    f"WHERE project_id = :project_id {entity_exists}"
-                ),
+                text(INDEXED_ENTITY_COUNT_SQL),
                 {"project_id": project_id},
             )
             total_indexed_entities = si_result.scalar() or 0
@@ -1366,9 +1402,14 @@ class ProjectService:
 
             entities_with_chunks_result = await self.repository.execute_query(
                 session,
+                # Coverage counts entities that are searchable and embedded, the same
+                # set the indexed count uses, so vectors that outlived their search
+                # rows (#1826) do not show as full coverage.
                 text(
                     "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id {entity_exists}"
+                    f"WHERE project_id = :project_id {entity_exists} "
+                    "AND entity_id IN (SELECT id FROM search_index "
+                    "WHERE project_id = :project_id AND type = 'entity')"
                 ),
                 {"project_id": project_id},
             )

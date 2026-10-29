@@ -70,6 +70,7 @@ from basic_memory.indexing.project_index_coordinator import (
     ProjectIndexCoordinatorResult,
     ProjectIndexFanoutFailureRecorder,
     ProjectIndexObservedFileSource,
+    ProjectIndexSearchRowRepairer,
     ProjectIndexWorkflowStarter,
     run_project_index_coordinator,
 )
@@ -109,6 +110,7 @@ from basic_memory.schemas.v2.project_index import (
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
+from basic_memory.services.search_service import SearchRowRepair
 from basic_memory.utils import nfc_path
 
 type LocalProjectIndexIgnorePatterns = set[str]
@@ -555,6 +557,7 @@ class LocalProjectIndexRuntime:
     completion_relation_runtime: RelationResolutionRuntime | None = None
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None
     deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None
+    search_row_repairer: ProjectIndexSearchRowRepairer | None = None
     index_completion_recorder: ProjectIndexCompletionRecorder | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
@@ -599,6 +602,31 @@ class LocalDeferredEmbeddingTargetSource:
         if not await self.semantic_runtime.semantic_effectively_enabled():
             return ()
         return await self.targets.list_deferred_embedding_targets()
+
+
+class MissingSearchRowRestorer(Protocol):
+    """Search capability that rebuilds projections for entities that have none."""
+
+    async def restore_missing_search_rows(self, *, batch_size: int) -> SearchRowRepair: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSearchRowRepairer:
+    """Restore missing search rows and hand the restored entities to vector sync."""
+
+    search_service: MissingSearchRowRestorer
+    # Entities repaired per load-and-index step; the runtime passes its file batch size.
+    batch_size: int
+
+    async def restore_missing_search_rows(self) -> tuple[EmbeddingIndexTarget, ...]:
+        repair = await self.search_service.restore_missing_search_rows(batch_size=self.batch_size)
+        # An entity without a checksum has not finished file indexing; the pass
+        # that sets its checksum emits its own vector target.
+        return tuple(
+            EmbeddingIndexTarget(entity_id=entity.entity_id, entity_checksum=entity.checksum)
+            for entity in repair.restored
+            if entity.checksum is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -805,6 +833,9 @@ class LocalProjectIndexRuntimeFactory:
                 ),
                 semantic_runtime=dependencies.search_service,
             ),
+            search_row_repairer=LocalSearchRowRepairer(
+                dependencies.search_service, batch_size=self.batch_size
+            ),
             index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
                 session_maker=dependencies.session_maker,
                 project_id=dependencies.project_id,
@@ -947,6 +978,7 @@ async def run_local_project_index(
             batch_size=runtime.batch_size,
             embedding_vector_sync=runtime.embedding_vector_sync,
             deferred_embedding_targets=runtime.deferred_embedding_targets,
+            search_row_repairer=runtime.search_row_repairer,
         )
     if runtime.completion_relation_runtime is not None:
         # Relation repair can mutate cached entity responses after the first

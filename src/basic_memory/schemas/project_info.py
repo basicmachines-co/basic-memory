@@ -94,6 +94,8 @@ class EmbeddingStatus(BaseModel):
 
     # Counts
     total_indexed_entities: int = 0
+    # Entities with no search_index row: unsearchable and never embedded (#1826).
+    entities_missing_search_rows: int = 0
     total_entities_with_chunks: int = 0
     total_chunks: int = 0
     total_embeddings: int = 0
