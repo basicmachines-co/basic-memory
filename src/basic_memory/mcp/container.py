@@ -10,6 +10,8 @@ Design principles:
 - File indexing decisions are centralized here
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -89,22 +91,48 @@ class McpContainer:
         )
 
 
-# Module-level container instance (set by lifespan)
+# Container set for the whole process by an embedding host (set_container).
 _container: McpContainer | None = None
+# Containers of the lifespans running now, oldest first.
+_lifespan_containers: list[McpContainer] = []
 
 
 def get_container() -> McpContainer:
-    """Get the current MCP container.
+    """Get the current MCP container: the newest running lifespan's, else the host's.
 
     Raises:
         RuntimeError: If container hasn't been initialized
     """
+    if _lifespan_containers:
+        return _lifespan_containers[-1]
     if _container is None:
         raise RuntimeError("MCP container not initialized. Call set_container() first.")
     return _container
 
 
 def set_container(container: McpContainer) -> None:
-    """Set the MCP container (called by lifespan)."""
+    """Set the process-wide MCP container for a host that runs no lifespan."""
     global _container
     _container = container
+
+
+@contextmanager
+def installed_container(container: McpContainer) -> Iterator[None]:
+    """Expose a container for one server lifespan and withdraw it when that lifespan ends.
+
+    Trigger: an in-process MCP session (``Client(mcp)``) enters and exits the lifespan.
+    Why: a lifespan that set a global and never reset it left its config installed
+      after the session ended, and later code in the same process, such as the
+      default search mode, read a config that no longer applied (#1955). Saving and
+      restoring a single slot is not enough either: two lifespans that overlap and
+      exit out of order would restore an exited container.
+    Outcome: each lifespan adds its container on entry and removes that same
+      container, by identity, on exit; the newest still-running one is current.
+    """
+    _lifespan_containers.append(container)
+    try:
+        yield
+    finally:
+        newest_first = reversed(range(len(_lifespan_containers)))
+        own_entry = next(i for i in newest_first if _lifespan_containers[i] is container)
+        del _lifespan_containers[own_entry]

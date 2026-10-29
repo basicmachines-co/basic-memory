@@ -86,6 +86,7 @@ from basic_memory.models import Project
 from basic_memory.models.base import Base
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.search_repository import create_search_repository
 from fastapi import FastAPI
 
 from basic_memory.deps import get_engine_factory, get_app_config
@@ -318,8 +319,6 @@ async def engine_factory(
     None,
 ]:
     """Create engine and session factory for the configured database backend."""
-    from basic_memory.models.search import CREATE_SEARCH_INDEX
-    from basic_memory import db
 
     if db_backend == "postgres":
         assert postgres_engine is not None
@@ -371,11 +370,22 @@ async def engine_factory(
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
-            # Drop any SearchIndex ORM table, then create FTS5 virtual table
+            # create_all made search_index a plain table from the ORM model; drop it so
+            # the search repository creates the FTS5 virtual table instead.
             async with db.scoped_session(session_maker) as session:
                 await session.execute(text("DROP TABLE IF EXISTS search_index"))
-                await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
+
+            # Trigger: production initializes search storage (the FTS5 table and the
+            # vector storage) once, when the database is opened, before any request.
+            # Why: left to the first embedding, the vector-table DDL runs while other
+            #   connections search; each schema change makes those connections reload
+            #   the schema and reconnect search_index, and a reconnect that overlaps
+            #   the DDL fails with "vtable constructor failed: search_index" (#1955).
+            # Outcome: tests open the database the way production does.
+            await create_search_repository(
+                session_maker, project_id=1, app_config=app_config
+            ).init_search_index()
 
             yield engine, session_maker
 

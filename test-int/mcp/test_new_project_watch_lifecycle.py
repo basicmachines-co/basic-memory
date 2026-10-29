@@ -11,7 +11,6 @@ from fastmcp import Client
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.server import mcp
-from basic_memory.services.initialization import _initial_index_tasks
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.real_embedder]
@@ -103,7 +102,3 @@ async def test_new_project_copied_files_and_live_changes_are_searchable(
                 noise.cancel()
                 with suppress(asyncio.CancelledError):
                     await noise
-                # Startup scans have explicit task ownership outside the watch task.
-                # Let them settle before fixture teardown closes the database.
-                await asyncio.gather(*_initial_index_tasks)
-                await drain_background_tasks()

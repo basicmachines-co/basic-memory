@@ -18,7 +18,7 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.db import scoped_session
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
-from basic_memory.mcp.container import McpContainer, set_container
+from basic_memory.mcp.container import McpContainer, installed_container as installed_mcp_container
 from basic_memory.mcp.empty_results import EmptyListResultMiddleware
 from basic_memory.read_cache import ReadCacheUnavailable
 from basic_memory.read_cache.redis import RedisReadCache
@@ -116,12 +116,11 @@ async def lifespan(app: FastMCP):
         max_connections=config.redis_max_connections,
     ) as read_cache:
         container.read_cache = read_cache
-        set_container(container)
         api_container = ApiContainer(config=config, mode=container.mode, read_cache=read_cache)
 
         # Local MCP requests use FastAPI through ASGITransport without entering its lifespan.
         # Installing the same container keeps request reads and watcher invalidation on one cache.
-        with installed_container(api_container):
+        with installed_mcp_container(container), installed_container(api_container):
             with logfire.span(
                 "mcp.lifecycle.startup",
                 entrypoint="mcp",

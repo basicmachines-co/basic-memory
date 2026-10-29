@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
@@ -17,7 +18,6 @@ from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
-    _initial_index_tasks,
     ensure_initialization,
     initialize_database,
     initialize_file_indexing,
@@ -265,23 +265,6 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
         monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "Event Startup")
 
-        original_create_task = asyncio.create_task
-        created_coroutines = []
-
-        class _CapturedTask:
-            """Stand-in task: the scheduler holds a strong ref and registers a
-            done callback, so the fake must accept both."""
-
-            def add_done_callback(self, callback) -> None:  # noqa: ANN001
-                del callback
-
-        def capture_task(coro):
-            coroutine_name = getattr(getattr(coro, "cr_code", None), "co_name", "")
-            if coroutine_name == "index_project_background":
-                created_coroutines.append(coro)
-                return _CapturedTask()
-            return original_create_task(coro)
-
         class RecordingProjectIndexRuntimeFactory:
             def __init__(self, *, read_cache: object) -> None:
                 self.read_cache = read_cache
@@ -304,9 +287,6 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
             )
 
         monkeypatch.setattr(
-            "basic_memory.services.initialization.asyncio.create_task", capture_task
-        )
-        monkeypatch.setattr(
             "basic_memory.index.local_project.LocalProjectIndexRuntimeFactory",
             RecordingProjectIndexRuntimeFactory,
         )
@@ -315,6 +295,8 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
             run_project_index_for_project,
         )
 
+        # The fake watcher returns at once; initialize_file_indexing still returns only
+        # after the startup index it owns has finished.
         await initialize_file_indexing(updated, quiet=True)
 
         watch_kwargs = _FakeWatchService.last_kwargs
@@ -326,9 +308,6 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         assert len(initial_projects) == 1
         assert isinstance(initial_projects[0], Project)
         assert initial_projects[0].name == "event-startup"
-        assert len(created_coroutines) == 1
-        await created_coroutines[0]
-
         assert project_index_calls == [("event-startup", "runtime:event-startup", False)]
     finally:
         await db.shutdown_db()
@@ -344,7 +323,6 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
     recognized as cloud, yet Path("") resolves to the process cwd. Indexing it
     would inject frontmatter into unrelated files, so it must be skipped.
     """
-    initial_index_tasks = _initial_index_tasks.copy()
     await db.shutdown_db()
     try:
         from basic_memory.config import ProjectEntry
@@ -383,9 +361,69 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
         assert "empty-path" in skip_logs[0]
         assert "good" not in skip_logs[0]
     finally:
-        # The fake watcher returns immediately; let this test's startup index
-        # finish before closing its database and event loop.
-        await asyncio.gather(*(_initial_index_tasks - initial_index_tasks))
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_startup_index_leaves_the_watcher_running(
+    app_config: BasicMemoryConfig, config_manager, config_home, monkeypatch
+):
+    """One project's failed startup index must not stop file watching for every project.
+
+    The startup indexes and the watcher share one task group, so an index failure that
+    escaped its task would cancel the watcher. The index of a project whose root is a
+    regular file fails for real; the watcher keeps running until it finishes on its own.
+    """
+    await db.shutdown_db()
+    try:
+        from basic_memory.config import ProjectEntry
+
+        watched = config_home / "watched"
+        watched.mkdir(parents=True, exist_ok=True)
+        not_a_directory = config_home / "not-a-directory"
+        not_a_directory.write_text("a file where a project root should be\n")
+        updated = app_config.model_copy(
+            update={
+                "projects": {
+                    "watched": ProjectEntry(path=str(watched)),
+                    "broken": ProjectEntry(path=str(not_a_directory)),
+                },
+                "default_project": "watched",
+            }
+        )
+        config_manager.save_config(updated)
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        index_failed = asyncio.Event()
+
+        def record_index_failure(message) -> None:  # noqa: ANN001
+            if "Error in background project index for project broken" in str(message):
+                index_failed.set()
+
+        sink_id = logger.add(record_index_failure, level="ERROR")
+
+        class WatchUntilTheIndexFails(_FakeWatchService):
+            finished = False
+
+            @override
+            async def run(self) -> None:
+                await index_failed.wait()
+                # Still running after the failure: the task group did not cancel it.
+                WatchUntilTheIndexFails.finished = True
+
+        _disable_test_env_short_circuit(monkeypatch)
+        monkeypatch.setattr(
+            "basic_memory.index.watch_service.WatchService", WatchUntilTheIndexFails
+        )
+        try:
+            async with asyncio.timeout(60):
+                await initialize_file_indexing(updated, quiet=True)
+        finally:
+            logger.remove(sink_id)
+
+        assert WatchUntilTheIndexFails.finished
+    finally:
         await db.shutdown_db()
 
 

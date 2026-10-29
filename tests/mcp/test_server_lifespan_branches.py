@@ -43,6 +43,20 @@ async def test_mcp_lifespan_sync_enabled_branch(config_manager):
 
 
 @pytest.mark.asyncio
+async def test_mcp_lifespan_uninstalls_its_container_on_exit(config_manager):
+    """A session's container, and the config it read, end with the session (#1955).
+
+    Later work in the same process, such as picking the default search mode, must
+    not read a config that a finished in-process session captured.
+    """
+    async with lifespan(mcp):
+        assert get_container().config.default_project == config_manager.config.default_project
+
+    with pytest.raises(RuntimeError, match="MCP container not initialized"):
+        get_container()
+
+
+@pytest.mark.asyncio
 async def test_mcp_lifespan_shuts_down_db_when_engine_was_none(config_manager):
     db._engine = None
     async with lifespan(mcp):

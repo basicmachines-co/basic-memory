@@ -9,9 +9,16 @@ and left for the next refresh, and the rollback keeps the winner's whole project
 A real 80 KB note opens the race window by itself: indexing it takes longer than the gap
 between saves. Here every refresh also pauses between its delete and its insert, and the
 collision rounds start from an entity whose rows another writer has just deleted, so the
-deletes have nothing to wait on and the inserts arrive together. The negative controls
-remove the tolerance and show the same refreshes still collide underneath, so the
-positive tests are not passing by luck.
+deletes have nothing to wait on and the inserts arrive together.
+
+Whether two such inserts actually collide is Postgres's call, not this file's: the upsert
+absorbs a conflict it sees in its arbiter index, and ``search_index_pkey`` fires only when
+two inserts pass that check in the same instant. No barrier outside the INSERT can force
+that instant, so these tests assert only that overlapping refreshes never fail. The lost-
+race branch itself is pinned deterministically by
+``test_search_refresh_atomicity.py`` (an injected ``deadlock detected`` is logged and the
+previous projection kept; any other database error still raises) and by
+``tests/repository/test_search_refresh_race.py`` (which errors count as a lost race).
 """
 
 from __future__ import annotations
@@ -31,7 +38,6 @@ from basic_memory.indexing.accepted_note_write_runner import (
 )
 from basic_memory.models import Entity
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
-from basic_memory.services import search_service as search_service_module
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgres]
 
@@ -65,10 +71,6 @@ def _widen_the_window(monkeypatch, repository) -> None:
         await original(search_index_rows, session)
 
     monkeypatch.setattr(repository, "bulk_index_items", pause_then_insert)
-
-
-def _remove_the_race_tolerance(monkeypatch) -> None:
-    monkeypatch.setattr(search_service_module, "lost_search_refresh_race", lambda error: None)
 
 
 async def _projection(search_service, entity: Entity) -> list[tuple[str, int]]:
@@ -159,34 +161,6 @@ async def test_concurrent_saves_of_a_long_note_all_succeed_and_converge(
         ) == await file_service.read_entity_content(entity)
 
 
-async def test_negative_control_without_the_tolerance_overlapping_saves_fail(
-    monkeypatch,
-    db_backend,
-    search_service,
-    file_service,
-    full_entity,
-    entity_repository,
-    session_maker,
-):
-    _skip_unless_postgres(db_backend)
-    entity = await _reload(session_maker, entity_repository, full_entity)
-    await search_service.index_entity_data(entity, content="before")
-    _widen_the_window(monkeypatch, search_service.repository)
-    _remove_the_race_tolerance(monkeypatch)
-
-    failures: list[BaseException] = []
-    # The collision is a race, so a round can miss; ten rounds have not all missed.
-    for round_start in range(0, 1000, 100):
-        results = await _save_round(search_service, file_service, entity, round_start)
-        failures += [r for r in results if isinstance(r, BaseException)]
-        if failures:
-            break
-
-    messages = " ".join(str(failure) for failure in failures)
-    assert failures, "without the tolerance, overlapping saves were expected to collide"
-    assert "search_index_pkey" in messages or "deadlock detected" in messages
-
-
 async def _refresh_relations_concurrently(search_service, entity: Entity) -> list[BaseException]:
     """Refresh with the content in hand, as the batch indexer does; relation rows ride along.
 
@@ -218,24 +192,6 @@ async def test_concurrent_refreshes_keep_relation_rows_single(
     for _ in range(3):
         assert await _refresh_relations_concurrently(search_service, entity) == []
         assert await _projection(search_service, entity) == before
-
-
-async def test_negative_control_relation_rows_collide_without_the_tolerance(
-    monkeypatch, db_backend, search_service, full_entity, entity_repository, session_maker
-):
-    _skip_unless_postgres(db_backend)
-    entity = await _reload(session_maker, entity_repository, full_entity)
-    await search_service.index_entity_data(entity, content="before")
-    _widen_the_window(monkeypatch, search_service.repository)
-    _remove_the_race_tolerance(monkeypatch)
-
-    failures: list[BaseException] = []
-    for _ in range(10):
-        failures += await _refresh_relations_concurrently(search_service, entity)
-        if failures:
-            break
-    assert failures, "without the tolerance, overlapping refreshes were expected to collide"
-    assert "search_index_pkey" in " ".join(str(failure) for failure in failures)
 
 
 async def test_an_accepted_write_and_an_index_refresh_overlap_without_failing(

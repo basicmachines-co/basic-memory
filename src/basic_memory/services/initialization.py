@@ -212,11 +212,6 @@ async def reconcile_projects_with_config_once(app_config: BasicMemoryConfig) -> 
         _reconciled_database_paths.add(database_path)
 
 
-# Strong references for fire-and-forget startup index tasks; the event loop
-# alone would hold only weak references (asyncio.create_task docs).
-_initial_index_tasks: set[asyncio.Task[None]] = set()
-
-
 async def initialize_file_indexing(
     app_config: BasicMemoryConfig,
     quiet: bool = True,
@@ -316,7 +311,6 @@ async def initialize_file_indexing(
     if recovery_complete is not None:
         recovery_complete.set()
 
-    # Start indexing for all projects as background tasks (non-blocking)
     async def index_project_background(project: Project):
         """Index a single project in the background."""
         logger.info(f"Starting background project index for project: {project.name}")
@@ -326,29 +320,32 @@ async def initialize_file_indexing(
                 runtime_factory=project_index_runtime_factory,
             )
             logger.info(f"Background project index completed for project: {project.name}")
-        except Exception as e:  # pragma: no cover
+        except Exception as e:
+            # Trigger: one project's startup index failed (unreadable root, bad file).
+            # Why: an exception escaping this task would make the task group below
+            #   cancel the watcher, stopping file watching for every project.
+            # Outcome: log it and keep watching; the next startup or reindex retries it.
+            #   CancelledError is not an Exception, so shutdown still propagates.
             logger.error(f"Error in background project index for project {project.name}: {e}")
 
-    # Create background tasks for all project indexes (non-blocking). The event
-    # loop keeps only weak task references, so hold them in the module-level set
-    # to keep GC from cancelling an index mid-flight.
-    for project in active_projects:
-        index_task = asyncio.create_task(index_project_background(project))
-        _initial_index_tasks.add(index_task)
-        index_task.add_done_callback(_initial_index_tasks.discard)
-    logger.info(f"Created {len(active_projects)} background indexing tasks")
+    # Trigger: startup indexes every active project while the watcher starts.
+    # Why: the indexes used to be fire-and-forget tasks in a module-level set, so
+    #   cancelling the watcher at shutdown left them running against a database
+    #   the lifespan was about to close, and the set leaked between event loops.
+    # Outcome: this function owns them. The watcher and the indexes run in one
+    #   task group, so cancelling the watcher cancels and awaits the indexes too.
+    async with asyncio.TaskGroup() as startup_tasks:
+        for project in active_projects:
+            startup_tasks.create_task(index_project_background(project))
+        logger.info(f"Created {len(active_projects)} background indexing tasks")
 
-    # Don't await the tasks - let them run in background while we continue
+        if constrained_project:
+            logger.info(f"Starting watch service constrained to project: {constrained_project}")
+        else:
+            logger.info("Starting watch service for all projects")
 
-    # Then start the watch service in the background
-    if constrained_project:
-        logger.info(f"Starting watch service constrained to project: {constrained_project}")
-    else:
-        logger.info("Starting watch service for all projects")
-
-    # run the watch service
-    await watch_service.run()
-    logger.info("Watch service started")
+        await watch_service.run()
+        logger.info("Watch service started")
 
     return None
 
