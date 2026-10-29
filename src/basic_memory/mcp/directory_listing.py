@@ -1,63 +1,12 @@
-"""Directory listings: the project mount view and the text rendering of a page.
+"""The text rendering of a directory listing page.
 
-The legacy mount view lists addressable projects as directories. The bm_* surface
-discovers projects with bm_project and requires scope on bm_list. The text
-formatter renders any listing page with the next-page call when more pages exist.
+The formatter renders any listing page with the next-page call when more pages
+exist.
 """
 
 from datetime import datetime
-from typing import Any
 
-from fastmcp import Context
-
-from basic_memory.mcp.project_context import (
-    OTHER_WORKSPACES_HINT,
-    addressable_projects,
-    other_workspace_slugs,
-)
-from basic_memory.schemas.directory import DirectoryListResponse, DirectoryNode
-
-
-async def project_mount_listing(
-    *, page: int, page_size: int, context: Context | None
-) -> dict[str, Any]:
-    """Render the addressable projects as directory entries (the mount-point view).
-
-    Sources ``addressable_projects`` — the same set the path resolver routes by
-    — so every mount advertised here is reachable as '<project>/path' (#1421).
-    Each row's ``directory_path`` is the copyable '/<project>' prefix form, and
-    the set already arrives sorted by project name.
-
-    A cloud session that can see several workspaces also gets their slugs and a
-    note on reaching them (#1778). They are not listed as rows: a bare slug is not
-    a routable path, and every row here must be one.
-    """
-    rows = [
-        DirectoryNode(
-            name=item.name,
-            directory_path=f"/{item.permalink}",
-            permalink=item.permalink,
-            type="directory",
-        )
-        for item in await addressable_projects(context=context)
-    ]
-    start = (page - 1) * page_size
-    listing = DirectoryListResponse(
-        nodes=rows[start : start + page_size],
-        page=page,
-        page_size=page_size,
-        total=len(rows),
-        has_more=start + page_size < len(rows),
-    ).model_dump(mode="json")
-    workspaces = await other_workspace_slugs(context=context)
-    if workspaces:
-        listing["workspaces"] = list(workspaces)
-        listing["note"] = (
-            "the projects above are this session's workspace; "
-            + OTHER_WORKSPACES_HINT
-            + f" (workspace slugs: {', '.join(workspaces)})"
-        )
-    return listing
+from basic_memory.schemas.directory import DirectoryListResponse
 
 
 def format_listing_text(

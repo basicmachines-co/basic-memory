@@ -1590,35 +1590,6 @@ OTHER_WORKSPACES_HINT = (
 )
 
 
-async def other_workspace_slugs(context: Optional[Context] = None) -> tuple[str, ...]:
-    """Slugs of the accessible workspaces, for a cloud session that can see several.
-
-    The ``ls /`` mount view lists this session's own projects only, so without this
-    an agent reading the root takes it for the whole world (#1778). Every slug
-    returned is a working '<workspace-slug>/<project>/' prefix, the session's own
-    included. Empty for a session that does not route to the cloud, so a local
-    root listing never calls the control plane, and for a single-workspace account.
-    """
-    if not _cloud_workspace_discovery_available(ConfigManager().config):
-        return ()
-    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
-    from fastmcp.exceptions import ToolError
-
-    try:
-        workspaces = await get_available_workspaces(context=context)
-    except ToolError as exc:
-        # Trigger: the control plane timed out or failed while the session's own
-        #   project listing already succeeded.
-        # Why: the slugs only annotate the root listing; losing them must not turn a
-        #   working `ls /` into an error.
-        # Outcome: the root lists its mounts without the workspace note.
-        logger.warning(f"Workspace discovery failed; listing mounts without it: {exc}")
-        return ()
-    if len(workspaces) < 2:
-        return ()
-    return tuple(sorted(workspace.slug for workspace in workspaces))
-
-
 def _hint_for_other_workspace_project(
     entry: WorkspaceProjectEntry,
     path: str,
