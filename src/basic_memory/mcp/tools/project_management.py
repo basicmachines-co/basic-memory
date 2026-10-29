@@ -1,6 +1,6 @@
 """Project listing, creation and deletion behind bm_project and bm_project_delete.
 
-list_memory_projects also serves search across all projects and the Cloud server.
+The project listing also serves bm_search across projects and the Cloud server.
 """
 
 import os
@@ -459,9 +459,9 @@ async def create_memory_project(
         Confirmation message with project details
 
     Example:
-        create_memory_project(project_name="my-research", project_path="~/Documents/research")
-        create_memory_project(project_name="work-notes", project_path="/home/user/work", set_default=True)
-        create_memory_project(project_name="team-notes", project_path="/team/notes", workspace="team-paul")
+        bm_project(command="create", name="my-research", path="~/Documents/research")
+        bm_project(command="create", name="work-notes", path="/home/user/work", set_default=True)
+        bm_project(command="create", name="team-notes", path="/team/notes", workspace="team-paul")
     """
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors
@@ -480,7 +480,7 @@ async def create_memory_project(
     workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
 
     # workspace targets a non-default cloud workspace at create time.
-    # Trigger: caller passed workspace (e.g. a slug discovered via list_workspaces).
+    # Trigger: caller passed workspace (e.g. a slug from bm_project(command="list")).
     # Why: there is no project_id yet for per-project routing — the project doesn't exist.
     # Outcome: cloud factory routes the create request to the resolved workspace tenant id.
     async with get_client(workspace=workspace_id) as client:
@@ -692,17 +692,17 @@ async def delete_project(
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
             used. A workspace selector implies cloud routing: without cloud
-            credentials the call fails fast, matching create_memory_project
-            behavior.
+            credentials the call fails fast, as bm_project(command="create")
+            does.
 
     Returns:
         Confirmation message describing what was deleted and whether note
         files were removed or retained.
 
     Example:
-        delete_project("old-project")
-        delete_project("old-project", delete_notes=True)
-        delete_project("team-project", workspace="team-paul")
+        bm_project_delete(name="old-project")
+        bm_project_delete(name="old-project", delete_notes=True)
+        bm_project_delete(name="team-project", workspace="team-paul")
 
     Warning:
         This action cannot be undone. For a local project with

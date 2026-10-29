@@ -233,7 +233,7 @@ def _workspace_identifier_discovery_available(
     if _cloud_workspace_discovery_available(config):
         return True
 
-    # Identifier detection serves read_note and search, which have no mount
+    # Identifier detection serves memory:// note resources, which have no mount
     # table and no refusal rule, so only the unmistakable three-segment form may
     # reach for the network here.
     return _local_cloud_discovery_allowed(config) and _is_workspace_route_shaped(identifier)
@@ -1047,7 +1047,7 @@ async def detect_project_from_identifier_prefix(
     for its reason: only one reading of '<name>/...' can win, and a name ``ls
     /`` advertises must address that mount or we advertise an address that
     resolves somewhere else. Reading it the other way here meant `ls team/docs`
-    and `read_note("team/docs/x")` disagreed about what 'team' named. It is also
+    and `bm_read("team/docs/x")` disagreed about what 'team' named. It is also
     the cheaper order — a mount hit never builds the account-wide workspace
     index at all.
 
