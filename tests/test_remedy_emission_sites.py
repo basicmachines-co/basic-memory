@@ -27,8 +27,8 @@ COMMAND_BUILDERS = {"shell_command", "command_hint"}
 MODE_RESTRICTED_COMMANDS: dict[tuple[str, ...], str] = {
     ("bm", "project", "index"): "runs the local reindex, which rejects cloud projects",
     ("bm", "reindex"): "runs the local reindex, which rejects cloud projects",
-    ("bm", "cloud", "bisync"): "_require_personal_workspace rejects Team workspaces",
-    ("bm", "cloud", "sync"): "_require_personal_workspace rejects Team workspaces",
+    ("bm", "cloud", "bisync"): "was removed in 1.0 and only prints migration guidance",
+    ("bm", "cloud", "sync"): "was removed in 1.0 and only prints migration guidance",
     ("bm", "cloud", "prune"): "_require_personal_workspace rejects Team workspaces",
 }
 
@@ -50,10 +50,6 @@ JUSTIFIED_SITES: dict[tuple[str, str], str] = {
     ("cli/commands/status.py", "status"): (
         "passes index_command=None when routing is cloud, so describe() says the server "
         "indexes it instead of naming a local command"
-    ),
-    ("cli/commands/cloud/project_sync.py", "bisync_reset"): (
-        "inside `bm cloud bisync-reset`, which calls _require_personal_workspace itself; "
-        "the hints repeat that command's own invocation"
     ),
     ("index/watch_service.py", "warn_unreadable_new_directories"): (
         "names `bm project index` only when local_index_available, which handle_changes "

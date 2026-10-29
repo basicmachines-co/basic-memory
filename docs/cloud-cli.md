@@ -22,7 +22,7 @@ The cloud CLI enables you to:
 
 `push` and `pull` never delete on the destination, so they are safe on a shared Team bucket. On Personal workspaces they run over rclone; on Team workspaces they run over WebDAV, where the service applies per-project access. You run the same commands either way.
 
-The older rclone mirror commands (`bm cloud sync`, `bm cloud bisync`, `bm cloud bisync-reset`) are **deprecated**. They still run on Personal workspaces, refuse Team workspaces, and will be removed in a future release. See [Deprecated: rclone mirror commands](#deprecated-rclone-mirror-commands-personal-only).
+The rclone mirror commands (`bm cloud sync`, `bm cloud bisync`, `bm cloud bisync-reset`) were **removed in 1.0**. See [Removed in 1.0: sync and bisync](#removed-in-10-sync-and-bisync).
 
 ## Prerequisites
 
@@ -382,8 +382,9 @@ bm cloud pull --name research --workspace acme
 
 `push`/`pull` are deliberately simple, conflict-aware byte transfers — not a full reconciler. Without a sync baseline:
 
-- **Deletions are not propagated.** A note deleted on one side is not removed from the other (we cannot tell an intentional delete from a file the other side never had). This is surfaced in the command output.
-- **Every divergence is treated as a conflict.** We cannot tell a teammate's edit from your stale copy, so any differing file prompts a decision rather than auto-resolving.
+- **Deletions are not propagated.** A note deleted on one side is not removed from the other (we cannot tell an intentional delete from a file the other side never had). This is surfaced in the command output. A later transfer in the other direction can copy the deleted file back.
+- **Renames are not propagated as moves.** The file at its new path transfers, and the old path remains on the destination until you remove it.
+- **Every divergence is treated as a conflict.** We cannot tell a teammate's edit from your stale copy, so any differing file prompts a decision rather than auto-resolving. There is no automatic three-way merge.
 
 For conflict-aware *editing*, write through the MCP/API tools (which merge at the note level). A bidirectional reconciler with a real baseline is tracked in [issue #862](https://github.com/basicmachines-co/basic-memory/issues/862).
 
@@ -763,48 +764,26 @@ bm cloud status
 
 If instance is down, wait a few minutes and retry.
 
-## Deprecated: rclone mirror commands (Personal only)
+## Removed in 1.0: sync and bisync
 
-`bm cloud sync`, `bm cloud bisync`, and `bm cloud bisync-reset` are **deprecated and will be removed in a future release**. Use `bm cloud pull` / `bm cloud push` instead.
+`bm cloud sync`, `bm cloud bisync`, and `bm cloud bisync-reset` were removed in 1.0 ([#1845](https://github.com/basicmachines-co/basic-memory/issues/1845)). `sync` made the cloud match your local folder and deleted cloud-only files, including notes created in the cloud by teammates and agents. Running any of the three now prints migration guidance and exits nonzero. It transfers, deletes, and provisions nothing.
 
-Until removal:
-- They are marked deprecated in `--help`.
-- Every run prints a deprecation warning that points to `bm cloud pull --name <project>` / `bm cloud push --name <project>`.
-- They still run on Personal workspaces.
-- They refuse Team workspaces. As mirrors, they can delete a teammate's files on a shared bucket.
+Replace them with `bm cloud pull` and `bm cloud push`:
 
-`bm cloud check` is a legacy, Personal-only command that compares against the same mirror remote. Use `bm cloud pull --dry-run` / `bm cloud push --dry-run` to preview differences instead.
+| Old command | Replacement |
+|---|---|
+| `bm cloud sync --name research` | `bm cloud push --name research` (add `--on-conflict keep-local` for local precedence) |
+| `bm cloud bisync --name research` | `bm cloud pull --name research`, then `bm cloud push --name research` |
+| `bm cloud bisync-reset research` | Nothing to reset: push and pull keep no sync state |
 
-This section is kept so existing users can keep working until the commands are removed.
+How the replacements differ from mirroring:
 
-### sync (deprecated): one-way mirror, local → cloud
+- **Deletions are not propagated.** Delete the cloud copy yourself if you deleted a file locally, and the reverse.
+- **Renames are not propagated as moves.** The old path remains on the destination until you remove it.
+- **Any differing file is a conflict.** The transfer stops before copying anything. Re-run with `--on-conflict keep-local`, `keep-cloud`, or `keep-both`.
+- **`push --on-conflict keep-local` is not an exact mirror.** Local content wins for differing files, but cloud-only files remain.
 
-```bash
-bm cloud sync --name research --dry-run
-bm cloud sync --name research
-```
-
-Makes the cloud identical to local with `rclone sync`. Cloud files that are missing locally are **deleted**. Preview deletions with `--dry-run`.
-
-### bisync (deprecated): two-way mirror, local ↔ cloud
-
-```bash
-# First run: establish a baseline
-bm cloud bisync --name research --resync --dry-run
-bm cloud bisync --name research --resync
-
-# Later runs
-bm cloud bisync --name research
-```
-
-Syncs both directions and can delete or overwrite on both sides. Conflicts resolve as newer file wins. State lives in `~/.basic-memory/bisync-state/<project>/`.
-
-- **"First bisync requires --resync"** - Run once with `--resync` to create the baseline. Do not use `--resync` again unless you need a new baseline.
-- **"Empty prior Path1 listing. Cannot sync to an empty directory"** - Bisync cannot baseline an empty directory. Add a file (for example a `README.md`) and run `--resync` again.
-- **"max delete limit (25) exceeded"** - Bisync stops when a run would delete more than 25 files. Check with `--dry-run`, then run `--resync` if the deletes are intended.
-- **Corrupted state or listing files** - Clear the state with `bm cloud bisync-reset research`, then run `--resync`. This does not touch your files. Removing a project also clears its bisync state.
-
-To move off bisync, run `bm cloud pull --name <project>` and `bm cloud push --name <project>` instead. They need no baseline or state.
+Old bisync state in `~/.basic-memory/bisync-state/` is no longer used. Basic Memory does not delete it; remove it yourself if you like. To clean up cloud files that match `.bmignore`, use `bm cloud prune --name <project> --dry-run` on Personal workspaces.
 
 ### check (legacy): verify mirror integrity
 
@@ -813,7 +792,7 @@ bm cloud check --name research
 bm cloud check --name research --one-way   # faster, one direction
 ```
 
-Compares checksums between local and the Personal mirror remote. No files are transferred.
+Compares checksums between local and the default Personal workspace remote. No files are transferred. Use `bm cloud pull --dry-run` / `bm cloud push --dry-run` to preview differences instead.
 
 ## Security
 
@@ -890,13 +869,11 @@ bm project ls --name <project> --cloud
 bm project ls --name <project> --cloud --path <subpath>
 ```
 
-### Deprecated (Personal only, removed in a future release)
+### Legacy (Personal only)
 
 ```bash
-bm cloud sync --name <project>              # Deprecated one-way mirror
-bm cloud bisync --name <project> [--resync] # Deprecated two-way mirror
-bm cloud bisync-reset <project>             # Deprecated: clear bisync state
-bm cloud check --name <project>             # Legacy mirror integrity check
+bm cloud check --name <project>             # Legacy integrity check
+bm cloud prune --name <project> [--dry-run] # Delete cloud files matching .bmignore
 ```
 
 ## Summary

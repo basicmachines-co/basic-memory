@@ -21,8 +21,8 @@ from basic_memory.cli.commands.cloud.api_client import (
     get_cloud_config,
     make_api_request,
 )
-from basic_memory.cli.commands.cloud.bisync_commands import (
-    BisyncError,
+from basic_memory.cli.commands.cloud.mount_api import (
+    MountApiError,
     generate_mount_credentials,
     get_mount_info,
 )
@@ -295,7 +295,7 @@ def setup(
             "\n[dim]Tip: Always use --dry-run first to preview changes before syncing[/dim]"
         )
 
-    except (RcloneInstallError, BisyncError, CloudAPIError) as e:
+    except (RcloneInstallError, MountApiError, CloudAPIError) as e:
         console.print(f"\n[red]Setup failed: {literal(e)}[/red]")
         raise typer.Exit(1)
     except typer.Exit:

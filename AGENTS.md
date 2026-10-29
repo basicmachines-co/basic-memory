@@ -446,7 +446,7 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Fetch cloud changes (cloud -> local): `basic-memory cloud pull --name "name"` (Team-safe; additive, never deletes local)
 - Upload local changes (local -> cloud): `basic-memory cloud push --name "name"` (Team-safe; additive, never deletes cloud)
 - Resolve conflicts on push/pull: `--on-conflict [fail|keep-local|keep-cloud|keep-both]` (default `fail` lists conflicts and aborts, git-style)
-- Deprecated (#1596), Personal workspaces only, to be removed: `basic-memory cloud sync` (one-way mirror; deletes cloud files missing locally), `basic-memory cloud bisync` and `bisync-reset` (two-way mirror). They warn on every run; use pull/push.
+- Removed in 1.0 (#1845): `basic-memory cloud sync`, `bisync`, and `bisync-reset`. They exit nonzero with migration guidance and transfer nothing; use pull/push.
 
 ### MCP Capabilities
 
@@ -467,7 +467,7 @@ Basic Memory now supports cloud synchronization and storage (requires active sub
 **File Sync:**
 - `bm cloud pull` / `bm cloud push`: additive, git-style transfers on Personal and Team workspaces
 - Conflict resolution with `--on-conflict`
-- rclone bisync is deprecated (#1596)
+- The rclone mirror commands (`sync`, `bisync`) were removed in 1.0 (#1845)
 
 **Cloud Project Management:**
 - Create and manage projects in the cloud

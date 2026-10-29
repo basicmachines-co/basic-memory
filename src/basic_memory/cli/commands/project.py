@@ -17,7 +17,7 @@ from rich.text import Text
 from basic_memory.cli.app import app
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.cli.commands.cloud.api_client import CloudAPIError, make_api_request
-from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
+from basic_memory.cli.commands.cloud.mount_api import get_mount_info
 from basic_memory.cli.commands.cloud.project_sync import (
     _has_cloud_credentials,
     _require_cloud_credentials,
@@ -655,8 +655,8 @@ def list_projects(
 
             # Push/pull works on every workspace type (rclone on Personal, WebDAV
             # on Team), so a local sync path is usable everywhere. The JSON keys
-            # stay for scripts that read them; the mirror commands that were
-            # Personal-only (sync/bisync) are deprecated (#1596).
+            # stay for scripts that read them; the Personal-only mirror commands
+            # (sync/bisync) were removed in 1.0 (#1845).
             sync_supported = True
             sync_reason = None
             local_usage = "sync-supported"
@@ -1103,8 +1103,7 @@ def add_project(
             console.print(
                 f"\n[green]Local sync path configured: {literal(local_sync_path)}[/green]"
             )
-            # Push/pull is the supported sync workflow on every workspace; the
-            # bisync mirror is deprecated (#1596), so it is not suggested here.
+            # Push/pull is the transfer workflow on every workspace.
             # Mirrors `bm cloud sync-setup`.
             console.print("\nNext steps:")
             console.print(
@@ -1221,15 +1220,8 @@ def remove_project(
         raise typer.Exit(1)
 
     local_path_config = None
-    bisync_state_path: Path | None = None
-    if cloud_routed and entry is not None and entry_name is not None and entry.local_sync_path:
+    if cloud_routed and entry is not None and entry.local_sync_path:
         local_path_config = entry.local_sync_path
-
-        # Bisync state is keyed by the canonical config name, not the form
-        # the user typed.
-        from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
-
-        bisync_state_path = get_project_bisync_state(entry_name)
 
     # Trigger: the delete goes to the cloud.
     # Why: the cloud service always deletes a project's files on delete
@@ -1333,13 +1325,6 @@ def remove_project(
                 )
             elif local_dir.exists():
                 console.print(f"[yellow]Local files kept at {literal(local_path_config)}[/yellow]")
-
-        # Clean up bisync state if it exists
-        if bisync_state_path is not None and bisync_state_path.exists():
-            import shutil
-
-            shutil.rmtree(bisync_state_path)
-            console.print("[green]Removed bisync state[/green]")
 
     except Exception as e:
         # str() of httpx transport errors is often empty (#1034) — never print a blank error.

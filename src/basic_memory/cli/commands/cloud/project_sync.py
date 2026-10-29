@@ -1,10 +1,9 @@
-"""Cloud sync commands for Basic Memory projects.
+"""Cloud transfer commands for Basic Memory projects.
 
-`bm cloud pull` / `bm cloud push` are the supported way to move files between a
-local project and Basic Memory Cloud, on Personal and Team workspaces alike. The
-rclone mirror commands (`sync`, `bisync`, `bisync-reset`) are deprecated (#1596):
-they still run on Personal workspaces, warn on every run, and refuse Team
-workspaces with the push/pull command to use instead.
+`bm cloud pull` / `bm cloud push` are the way to move files between a local
+project and Basic Memory Cloud, on Personal and Team workspaces alike. The
+rclone mirror commands (`sync`, `bisync`, `bisync-reset`) were removed in 1.0
+(#1845); `removed_mirror_commands` keeps their names as migration stubs.
 """
 
 import os
@@ -12,25 +11,20 @@ import shlex
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, override
 
 import typer
 from rich.console import Console
-from typer.core import TyperCommand
 
 from basic_memory.cli.app import cloud_app
-from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
+from basic_memory.cli.commands.cloud.mount_api import get_mount_info
 from basic_memory.cli.commands.cloud.rclone_commands import (
     RcloneError,
     SyncProject,
     get_bmignore_prune_filter_path,
-    get_project_bisync_state,
-    project_bisync,
     project_check,
     project_diff,
     project_prune,
     project_prune_preview,
-    project_sync,
     project_transfer,
 )
 from basic_memory.ignore_utils import get_bmignore_path
@@ -62,30 +56,7 @@ from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
 from basic_memory.cli.markup import literal
 
-if TYPE_CHECKING:
-    # Typer 0.26 vendors Click as `typer._click`; older Typer releases allowed by
-    # our `typer>=0.9.0` pin do not have that module, so never import it at runtime.
-    from typer._click.core import Context
-
 console = Console()
-
-MIRROR_DEPRECATION_NOTICE = (
-    "`bm cloud {command}` is deprecated and will be removed in a future release.\n"
-    "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
-    "(additive upload) instead. They work on Personal and Team workspaces."
-)
-
-TEAM_WORKSPACE_BISYNC_UNSUPPORTED = (
-    "`bm cloud bisync` is deprecated and does not run on Team workspaces.\n"
-    "Use `bm cloud pull --name {name}` / `bm cloud push --name {name}` instead."
-)
-
-TEAM_WORKSPACE_SYNC_UNSUPPORTED = (
-    "`bm cloud sync` is deprecated and does not run on Team workspaces: it mirrors "
-    "local onto the shared bucket and can delete a teammate's files.\n"
-    "Use `bm cloud pull --name {name}` (fetch) / `bm cloud push --name {name}` "
-    "(additive upload) instead."
-)
 
 TEAM_WORKSPACE_PRUNE_UNSUPPORTED = (
     "The prune operation deletes files from the shared bucket based on your "
@@ -114,32 +85,7 @@ class ConflictStrategy(str, Enum):
     keep_both = "keep-both"
 
 
-class MirrorCommand(TyperCommand):
-    """A deprecated mirror command that prints only our own deprecation notice.
-
-    Click prints "DeprecationWarning: The command 'sync' is deprecated." before
-    any command whose ``deprecated`` flag is set, and Typer reads the same flag
-    to mark the command ``(deprecated)`` in help. The mirror commands keep the
-    flag for the help marker and print MIRROR_DEPRECATION_NOTICE themselves,
-    which names the pull/push commands to run, so this skips Click's line.
-    """
-
-    @override
-    def invoke(self, ctx: "Context") -> object:
-        # Typer builds every command from a decorated function.
-        assert self.callback is not None
-        return ctx.invoke(self.callback, **ctx.params)
-
-
 # --- Shared helpers ---
-
-
-def _warn_mirror_deprecated(command: str, name: str) -> None:
-    """Print the deprecation notice every deprecated mirror command shows on each run."""
-    notice = MIRROR_DEPRECATION_NOTICE.format(command=command, name=shlex.quote(name))
-    # markup=False: the project name is user text, and a name like `[bold]x[/bold]`
-    # would otherwise render as `x`, so the copied pull/push command would be wrong.
-    console.print(notice, style="yellow", markup=False)
 
 
 def _has_cloud_credentials(config: BasicMemoryConfig) -> bool:
@@ -221,17 +167,11 @@ async def _get_workspace_for_project(
     )
 
 
-def _require_personal_workspace(
-    name: str,
-    config: BasicMemoryConfig,
-    *,
-    unsupported_message: str = TEAM_WORKSPACE_BISYNC_UNSUPPORTED,
-) -> WorkspaceInfo:
-    """Exit before mirror work when the target workspace is not personal.
+def _require_personal_workspace(name: str, config: BasicMemoryConfig) -> WorkspaceInfo:
+    """Exit before prune work when the target workspace is not personal.
 
-    Used to gate the destructive mirror operations (`sync`, `bisync`) to
-    Personal workspaces. ``unsupported_message`` lets each command point Team
-    users at the right Team-safe alternative.
+    Prune deletes from the bucket based on this machine's .bmignore, so it is
+    gated to Personal workspaces; Team users are pointed at push/pull.
     """
     try:
         workspace = run_with_cleanup(_get_workspace_for_project(name, config))
@@ -242,9 +182,13 @@ def _require_personal_workspace(
         raise typer.Exit(1)
 
     if workspace.workspace_type != "personal":
-        # The templates below embed `--name {name}`; quote it before rendering so a
-        # name with a space stays one argument in the command they print.
-        console.print(unsupported_message.format(name=shlex.quote(name)), style="red", markup=False)
+        # The template embeds `--name {name}`; quote it before rendering so a
+        # name with a space stays one argument in the command it prints.
+        console.print(
+            TEAM_WORKSPACE_PRUNE_UNSUPPORTED.format(name=shlex.quote(name)),
+            style="red",
+            markup=False,
+        )
         raise typer.Exit(1)
 
     return workspace
@@ -317,76 +261,6 @@ def _get_sync_project(
 # --- Commands ---
 
 
-@cloud_app.command("sync", deprecated=True, cls=MirrorCommand)
-def sync_project_command(
-    name: str = typer.Option(..., "--name", "--project", help="Project name to sync"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
-) -> None:
-    """One-way mirror: local -> cloud (make cloud identical to local).
-
-    Use `bm cloud push` / `bm cloud pull` instead. Personal workspaces only. This deletes cloud files not present locally —
-    including files matching .bmignore, even if they synced before the pattern
-    was added — so on Team workspaces use `bm cloud push` (additive upload) /
-    `bm cloud pull` (fetch) instead. Preview deletions with --dry-run.
-
-    Example:
-      bm cloud sync --name research
-      bm cloud sync --name research --dry-run
-    """
-    config = ConfigManager().config
-    # The migration notice comes first so a missing login still shows pull/push.
-    _warn_mirror_deprecated("sync", name)
-    _require_cloud_credentials(config)
-    target_workspace = _require_personal_workspace(
-        name,
-        config,
-        unsupported_message=TEAM_WORKSPACE_SYNC_UNSUPPORTED,
-    )
-
-    try:
-        remote_name = remote_name_for_workspace(
-            target_workspace.slug,
-            is_default=target_workspace.is_default,
-        )
-        tenant_info = run_with_cleanup(get_mount_info(workspace_id=target_workspace.tenant_id))
-        bucket_name = tenant_info.bucket_name
-
-        # Resolve project metadata, bucket credentials, and rclone remote from
-        # the same Personal workspace. A same-named project may exist elsewhere.
-        with force_routing(cloud=True):
-            project_data = run_with_cleanup(
-                _get_cloud_project(name, workspace_id=target_workspace.tenant_id)
-            )
-        if not project_data:
-            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
-            raise typer.Exit(1)
-
-        sync_project, local_sync_path = _get_sync_project(
-            name,
-            config,
-            project_data,
-            remote_name=remote_name,
-        )
-
-        # Run sync
-        console.print(f"[blue]Syncing {literal(name)} (local -> cloud)...[/blue]")
-        success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
-
-        if success:
-            console.print(f"[green]{literal(name)} synced successfully[/green]")
-        else:
-            console.print(f"[red]{literal(name)} sync failed[/red]")
-            raise typer.Exit(1)
-
-    except RcloneError as e:
-        console.print(f"[red]Sync error: {literal(e)}[/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Error: {literal(e)}[/red]")
-        raise typer.Exit(1)
-
-
 @cloud_app.command("prune")
 def prune_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to prune"),
@@ -400,8 +274,8 @@ def prune_project_command(
 
     Targeted cleanup for files that synced before their pattern was added to
     .bmignore in the Basic Memory config directory ($BASIC_MEMORY_CONFIG_DIR,
-    default ~/.basic-memory). The sync filter hides ignored paths from normal
-    deletion, stranding them on the cloud (#1032). Prune lists the
+    default ~/.basic-memory). Push and pull skip ignored paths and never
+    delete, so those uploads stay on the cloud (#1032). Prune lists the
     matching remote files and deletes them only after confirmation.
 
     Personal workspaces only: prune deletes from the bucket based on this
@@ -415,11 +289,7 @@ def prune_project_command(
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
-    target_workspace = _require_personal_workspace(
-        name,
-        config,
-        unsupported_message=TEAM_WORKSPACE_PRUNE_UNSUPPORTED,
-    )
+    target_workspace = _require_personal_workspace(name, config)
 
     try:
         remote_name = remote_name_for_workspace(
@@ -440,7 +310,7 @@ def prune_project_command(
             console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
             raise typer.Exit(1)
 
-        # Prune inspects and deletes only remote files, so unlike sync/bisync it
+        # Prune inspects and deletes only remote files, so unlike push/pull it
         # needs no local_sync_path — cleanup works from any machine that has the
         # .bmignore patterns.
         sync_project = SyncProject(
@@ -833,78 +703,6 @@ def push_project_command(
     )
 
 
-@cloud_app.command("bisync", deprecated=True, cls=MirrorCommand)
-def bisync_project_command(
-    name: str = typer.Option(..., "--name", "--project", help="Project name to bisync"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
-    resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
-) -> None:
-    """Two-way mirror: local <-> cloud (bidirectional sync).
-
-    Use `bm cloud pull` (fetch) / `bm cloud push` (additive upload) instead.
-    Personal workspaces only: this mirror can delete and overwrite files on
-    both sides.
-
-    Examples:
-      bm cloud bisync --name research --resync  # First time
-      bm cloud bisync --name research           # Subsequent syncs
-      bm cloud bisync --name research --dry-run # Preview changes
-    """
-    config = ConfigManager().config
-    # The migration notice comes first so a missing login still shows pull/push.
-    _warn_mirror_deprecated("bisync", name)
-    _require_cloud_credentials(config)
-    _require_personal_workspace(name, config)
-
-    try:
-        # Get tenant info for bucket name.
-        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
-        # because these mirror commands are gated to the (default-tenant) Personal
-        # workspace, so the default mount info is correct.
-        tenant_info = run_with_cleanup(get_mount_info())
-        bucket_name = tenant_info.bucket_name
-
-        # Get project info
-        with force_routing(cloud=True):
-            project_data = run_with_cleanup(_get_cloud_project(name))
-        if not project_data:
-            console.print(f"[red]Error: Project '{literal(name)}' not found[/red]")
-            raise typer.Exit(1)
-
-        sync_project, local_sync_path = _get_sync_project(name, config, project_data)
-
-        # Run bisync
-        console.print(f"[blue]Bisync {literal(name)} (local <-> cloud)...[/blue]")
-        success = project_bisync(
-            sync_project, bucket_name, dry_run=dry_run, resync=resync, verbose=verbose
-        )
-
-        if success:
-            console.print(f"[green]{literal(name)} bisync completed successfully[/green]")
-
-            # Update config — sync_entry is guaranteed non-None because
-            # _get_sync_project validated local_sync_path (which comes from sync_entry)
-            sync_entry = config.projects.get(name)
-            if sync_entry is None:
-                raise RuntimeError(
-                    f"Sync entry for project '{name}' unexpectedly missing after validation"
-                )
-            sync_entry.last_sync = datetime.now()
-            sync_entry.bisync_initialized = True
-            ConfigManager().save_config(config)
-        else:
-            console.print(f"[red]{literal(name)} bisync failed[/red]")
-            raise typer.Exit(1)
-
-    except RcloneError as e:
-        console.print(f"[red]Bisync error: {literal(e)}[/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Error: {literal(e)}[/red]")
-        raise typer.Exit(1)
-
-
 @cloud_app.command("check")
 def check_project_command(
     name: str = typer.Option(..., "--name", "--project", help="Project name to check"),
@@ -912,10 +710,9 @@ def check_project_command(
 ) -> None:
     """Verify file integrity between local and cloud (no changes made).
 
-    Legacy, Personal workspaces only: check compares against the Personal
-    workspace mirror remote used by the deprecated `sync` / `bisync` commands.
-    Use `bm cloud pull --dry-run` / `bm cloud push --dry-run` to preview
-    differences instead.
+    Legacy, Personal workspaces only: check compares against the default
+    Personal workspace remote. Use `bm cloud pull --dry-run` /
+    `bm cloud push --dry-run` to preview differences instead.
 
     Example:
       bm cloud check --name research
@@ -925,9 +722,8 @@ def check_project_command(
 
     try:
         # Get tenant info for bucket name.
-        # TODO(#919): scope to the project's workspace like push/pull. Safe for now
-        # because these mirror commands are gated to the (default-tenant) Personal
-        # workspace, so the default mount info is correct.
+        # TODO(#919): scope to the project's workspace like push/pull. Check
+        # reads the default tenant's mount info and remote.
         tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
@@ -954,49 +750,6 @@ def check_project_command(
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Error: {literal(e)}[/red]")
-        raise typer.Exit(1)
-
-
-@cloud_app.command("bisync-reset", deprecated=True, cls=MirrorCommand)
-def bisync_reset(
-    name: str = typer.Argument(..., help="Project name to reset bisync state for"),
-) -> None:
-    """Clear bisync state for a project.
-
-    `bm cloud bisync` is deprecated; use `bm cloud pull` / `bm cloud push`
-    instead. Personal workspaces only.
-
-    This removes the bisync metadata files, forcing a fresh --resync on next bisync.
-    Useful when bisync gets into an inconsistent state or when remote path changes.
-    """
-    import shutil
-
-    config = ConfigManager().config
-    _warn_mirror_deprecated("bisync-reset", name)
-    if _has_cloud_credentials(config):
-        _require_personal_workspace(name, config)
-
-    try:
-        state_path = get_project_bisync_state(name)
-
-        if not state_path.exists():
-            console.print(f"[yellow]No bisync state found for project '{literal(name)}'[/yellow]")
-            return
-
-        # Remove the entire state directory
-        shutil.rmtree(state_path)
-        console.print(f"[green]Cleared bisync state for project '{literal(name)}'[/green]")
-        console.print("\nNext steps:")
-        console.print(
-            f"  1. Preview: "
-            f"{literal(shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run'))}"
-        )
-        console.print(
-            f"  2. Sync: {literal(shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync'))}"
-        )
-
-    except Exception as e:
-        console.print(f"[red]Error clearing bisync state: {literal(str(e))}[/red]")
         raise typer.Exit(1)
 
 
@@ -1063,8 +816,7 @@ def setup_project_sync(
 
         console.print(f"[green]Sync configured for project '{literal(name)}'[/green]")
         console.print(f"\nLocal sync path: {literal(resolved_path)}")
-        # Push/pull is the supported sync workflow on every workspace; the
-        # `sync`/`bisync` mirrors are deprecated (#1596), so they are not suggested.
+        # Push/pull is the transfer workflow on every workspace.
         console.print("\nNext steps:")
         console.print(
             f"  1. Preview a pull: {literal(shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run'))}"

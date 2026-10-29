@@ -29,8 +29,8 @@ import basic_memory.cli.commands.project as project_cmd
 from basic_memory.cli.main import app as cli_app
 from basic_memory.schemas.cloud import WorkspaceInfo
 
-# The package exposes a *function* named `project_sync`, which shadows the
-# submodule, so the module object has to be imported explicitly.
+# The cloud package star-imports its command modules, so import the module
+# object explicitly to patch its collaborators.
 project_sync_cmd = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
 runner = CliRunner()
@@ -175,7 +175,7 @@ def cloud_transfer(monkeypatch):
     """Let the cloud transfer commands run their guards, then stop before the network.
 
     The question each row asks is whether the printed command is *accepted* for
-    this project -- a Team workspace refuses `bisync` before doing any work -- so
+    this project -- the removed `bisync` refuses before doing any work -- so
     the workspace guard stays real and only the transfer is stubbed.
     """
     transfers: list[str] = []
@@ -376,34 +376,16 @@ def test_the_printed_remedy_actually_works(
     )
 
 
-def test_a_team_workspace_really_does_refuse_the_personal_only_mirror(
-    monkeypatch, cloud_credentials, cloud_transfer
-):
-    """Control for the Team rows: the command we stopped advising does dead-end.
+def test_the_removed_mirror_really_does_dead_end():
+    """Control for the matrix: the command we stopped advising does dead-end.
 
-    Without this, the Team rows above would pass even if `bisync` were harmless
-    there, and would not be evidence of anything.
+    Without this, rows that check the remedy is push/pull rather than `bisync`
+    would pass even if `bisync` still worked, and would not be evidence of anything.
     """
-
-    async def _team(_name: str, _config: Any) -> WorkspaceInfo:
-        return WorkspaceInfo(
-            tenant_id="ws-123",
-            workspace_type="organization",
-            slug="ws",
-            name="Workspace",
-            role="owner",
-            is_default=True,
-        )
-
-    monkeypatch.setattr(project_sync_cmd, "_get_workspace_for_project", _team)
-    monkeypatch.setattr(project_sync_cmd, "_require_cloud_credentials", lambda _config: None)
-
     result = runner.invoke(cli_app, ["cloud", "bisync", "--name", PROJECT], env=WIDE_TERMINAL_ENV)
 
     assert result.exit_code == 1
-    assert "`bm cloud bisync` is deprecated and does not run on Team workspaces" in flat(
-        result.output
-    )
+    assert "`bm cloud bisync` was removed in Basic Memory 1.0" in flat(result.output)
 
 
 # --- Convergence ---

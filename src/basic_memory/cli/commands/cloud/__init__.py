@@ -7,6 +7,7 @@ from basic_memory.cli.commands.cloud.core_commands import *  # noqa: F401,F403
 from basic_memory.cli.commands.cloud.api_client import get_authenticated_headers, get_cloud_config  # noqa: F401
 from basic_memory.cli.commands.cloud.upload_command import *  # noqa: F401,F403
 from basic_memory.cli.commands.cloud.project_sync import *  # noqa: F401,F403
+from basic_memory.cli.commands.cloud.removed_mirror_commands import *  # noqa: F401,F403
 
 # Register snapshot sub-command group
 from basic_memory.cli.commands.cloud.snapshot import snapshot_app
