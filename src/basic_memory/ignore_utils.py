@@ -290,13 +290,20 @@ def _directory_rules(patterns: frozenset[str]) -> GitIgnoreSpec:
     return GitIgnoreSpec(compiled_patterns, backend="simple")
 
 
-def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[str]) -> bool:
+def should_ignore_path(
+    file_path: Path,
+    base_path: Path,
+    ignore_patterns: Set[str],
+    *,
+    is_directory: bool | None = None,
+) -> bool:
     """Check if a file path should be ignored based on gitignore patterns.
 
     Args:
         file_path: The file path to check
         base_path: The base directory for relative path calculation
         ignore_patterns: Set of patterns to match against
+        is_directory: Known entry kind for virtual paths; None inspects the local path.
 
     Returns:
         True if the path should be ignored, False otherwise
@@ -312,7 +319,10 @@ def should_ignore_path(file_path: Path, base_path: Path, ignore_patterns: Set[st
     directory_patterns = frozenset(pattern for pattern in ignore_patterns if pattern.endswith("/"))
     if directory_patterns:
         # A trailing slash distinguishes directories being pruned from files.
-        directory_match_path = relative_posix + ("/" if file_path.is_dir() else "")
+        # Remote and archive entries must not inherit a conflicting local entry's kind.
+        if is_directory is None:
+            is_directory = file_path.is_dir()
+        directory_match_path = relative_posix + ("/" if is_directory else "")
         if _directory_rules(directory_patterns).match_file(directory_match_path):
             return True
 

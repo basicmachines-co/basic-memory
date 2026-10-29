@@ -7,6 +7,8 @@ from types import CodeType
 import pytest
 
 from basic_memory.ignore_utils import filter_files, load_gitignore_patterns
+from basic_memory.cli.commands.cloud.webdav import RemoteFile
+from basic_memory.cli.commands.cloud.webdav_transfer import build_transfer_plan
 
 
 @pytest.mark.parametrize(
@@ -132,3 +134,23 @@ def test_invalid_directory_rule_cannot_disable_exclusions(
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_text("private content")
     assert filter_files([source], tmp_path, {invalid, valid}) == ([], 1)
+
+
+def test_remote_file_is_not_typed_by_a_local_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / ".bmignore").write_text("keys/\n")
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(config))
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "keys").mkdir()
+    remote_files = [
+        RemoteFile(path="keys", size=6, etag=None, modified=None),
+        RemoteFile(path="keys/secret.md", size=6, etag=None, modified=None),
+    ]
+
+    plan = build_transfer_plan(local_root=root, remote_files=remote_files, direction="pull")
+
+    assert plan.new == ["keys"]

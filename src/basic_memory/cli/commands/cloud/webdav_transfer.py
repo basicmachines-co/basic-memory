@@ -336,7 +336,7 @@ def build_transfer_plan(
         # outside the project is a broken or hostile response, and the user
         # should see that before a plan is presented, not mid-transfer.
         local_equivalent = _safe_local_path(local_root, remote.path)
-        if should_ignore_path(local_equivalent, local_root, ignore_patterns):
+        if should_ignore_path(local_equivalent, local_root, ignore_patterns, is_directory=False):
             continue
         remote_by_path[remote.path] = remote
 
