@@ -27,24 +27,28 @@ after the tool's parameters. The rest have their own commands or none: [[bm-man(
 
 ## MCP TOOLS
 
+This table matches the 1.0 migration guide (`docs/1.0.md`), whose "Tool-by-tool change list"
+gives each tool's renamed arguments and response changes.
+
 | Pre-1.0 tool | 1.0 replacement |
 | --- | --- |
-| `read_note`, `read_content`, `view_note`, `cat` | [[bm-read(3)]] |
-| `write_note` | [[bm-write(3)]] |
-| `edit_note` | [[bm-edit(3)]] |
-| `move_note` | [[bm-move(3)]] |
-| `delete_note` | [[bm-delete(3)]] |
-| `list_directory`, `ls` | [[bm-list(3)]] for one folder; [[bm-find(3)]] for `depth` > 1 or a name glob over a subtree |
-| `find` | [[bm-find(3)]] |
-| `search_notes`, `grep` | [[bm-search(3)]] |
-| `build_context` | [[bm-context(3)]] |
-| `recent_activity`, `tail` | [[bm-project(3)]] with `command="recent"` |
-| `list_memory_projects`, `list_workspaces` | [[bm-project(3)]] with `command="list"` |
-| `create_memory_project` | [[bm-project(3)]] with `command="create"` |
+| `read_note`, `read_content`, `view_note`, `cat` | `bm_read` with explicit line bounds where needed |
+| `write_note` | `bm_write` |
+| `edit_note` | `bm_edit` |
+| `search_notes`, `grep` | `bm_search` |
+| `build_context` | `bm_context` |
+| `list_directory`, `ls` | `bm_list` for one level; `bm_find` for recursive inventory |
+| `find` | `bm_find` |
+| `recent_activity` | `bm_project(command="recent")` |
+| `tail` | `bm_project(command="recent")`; map `timeframe` to `since` and `lines` to `page_size`. Recent JSON includes `created_at`, not `updated_at`; shell users needing the last-change timestamp can use `bm tail --json`. |
+| `list_memory_projects`, `list_workspaces` | `bm_project(command="list")` |
+| `create_memory_project` | `bm_project(command="create", name=..., path=...)` |
+| `delete_project` | `bm_project_delete` (opt-in) |
+| `schema_validate`, `schema_infer`, `schema_diff` | `bm_schema(command="validate"/"infer"/"diff")` |
+| `move_note` | `bm_move` |
+| `delete_note` | `bm_delete` |
+| `man` | `bm_man` |
 | `cloud_info` | On Basic Memory Cloud, `bm_project(command="info")`; a local server has none |
-| `delete_project` | [[bm-project-delete(3)]], when enabled in config |
-| `schema_validate`, `schema_infer`, `schema_diff` | [[bm-schema(3)]] |
-| `man` | [[bm-man(3)]] |
 | `basic_memory_diagnostics` | `bm doctor` and `bm config list` from the shell |
 
 ## BM TOOL COMMANDS
