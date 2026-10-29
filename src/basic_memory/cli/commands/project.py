@@ -997,7 +997,7 @@ def add_project(
         # Why: registration alone leaves every read surface reporting an empty
         #   project while the notes sit unindexed on disk, and there is no
         #   daemon-reachability probe to delegate to -- so index inline, the
-        #   same way MCP's create_memory_project already does (#1414).
+        #   same way MCP's bm_project(command="create") already does (#1414).
         # Outcome: the project's existing notes are queryable when this returns.
         try:
             with force_routing(local=local, cloud=cloud):

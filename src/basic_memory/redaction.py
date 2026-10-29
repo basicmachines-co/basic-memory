@@ -1,8 +1,8 @@
 """Shared secret-redaction rules for surfacing ``BasicMemoryConfig`` values.
 
-Used by the ``basic_memory_diagnostics`` MCP tool (#963) and the ``bm config``
-CLI command group (#991) so both surfaces apply identical scrubbing rules
-instead of drifting apart over time.
+Used by the ``bm config`` CLI command group (#991), which shows config values
+the way the retired ``basic_memory_diagnostics`` tool did (#963), so secrets are
+scrubbed by one set of rules.
 """
 
 from typing import Any

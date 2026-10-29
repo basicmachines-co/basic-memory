@@ -302,8 +302,8 @@ def render_parameters(tool_name: str, parameters: Mapping[str, Any]) -> str:
     (the order clients see) — mirroring render_synopsis. Each bullet names the
     parameter, its type when the schema gives one, whether it is required or
     optional (with the default for optionals that carry one), and its description.
-    Returns "" when the schema has no properties, so tools like
-    basic_memory_diagnostics get no section.
+    Returns "" when the schema has no properties, so a tool that takes no
+    arguments gets no section.
     """
     required: list[str] = parameters.get("required") or []
     properties: Mapping[str, Any] = parameters.get("properties") or {}
