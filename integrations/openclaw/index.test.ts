@@ -47,6 +47,7 @@ describe("plugin service lifecycle", () => {
       registerCommand: jest.fn(),
       registerCli: jest.fn(),
       registerContextEngine: jest.fn(),
+      registerMemoryCapability: jest.fn(),
       registerService: jest.fn((service: any) => {
         services.push(service)
       }),
@@ -61,6 +62,20 @@ describe("plugin service lifecycle", () => {
       expect.any(Function),
     )
     expect(api.on).not.toHaveBeenCalled()
+
+    // memory-core owns memory_search and memory_get on OpenClaw 2026.10, so
+    // the plugin serves the host through its memory capability instead.
+    expect(api.registerMemoryCapability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerRuntime: expect.any(Object),
+        recallToolNames: ["search_notes", "read_note", "build_context"],
+      }),
+    )
+    const toolNames = api.registerTool.mock.calls.map(
+      ([tool]) => (tool as { name: string }).name,
+    )
+    expect(toolNames).not.toContain("memory_search")
+    expect(toolNames).not.toContain("memory_get")
 
     await services[0].start({ workspaceDir: "/tmp/workspace" })
 

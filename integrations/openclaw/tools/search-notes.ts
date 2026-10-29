@@ -98,7 +98,7 @@ export function registerSearchTool(
 
           const text = results
             .map((r, i) => {
-              const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : ""
+              const score = r.score ? ` (score ${r.score.toFixed(2)})` : ""
               const content = r.content ?? ""
               const preview =
                 content.length > 200 ? `${content.slice(0, 200)}...` : content

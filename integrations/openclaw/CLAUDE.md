@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with the OpenClaw packag
 
 ## Project Overview
 
-`@basicmemory/openclaw-basic-memory` is a TypeScript OpenClaw plugin that integrates [Basic Memory](https://github.com/basicmachines-co/basic-memory) with the OpenClaw agent framework. It lives under `integrations/openclaw/` in the monorepo, manages a persistent MCP stdio session to a `bm mcp` process, exposes 14 agent tools (including workspace/project management and cross-project operations), composited memory search/get providers, slash commands, CLI commands, and optional auto-capture of conversations.
+`@basicmemory/openclaw-basic-memory` is a TypeScript OpenClaw plugin that integrates [Basic Memory](https://github.com/basicmachines-co/basic-memory) with the OpenClaw agent framework. It lives under `integrations/openclaw/` in the monorepo, manages a persistent MCP stdio session to a `bm mcp` process, exposes 12 agent tools (including workspace/project management and cross-project operations), registers an OpenClaw memory capability and context engine, slash commands, CLI commands, and optional auto-capture of conversations.
 
 ## Development Commands
 
@@ -66,7 +66,14 @@ Central orchestration layer that:
 Each tool file exports a function that calls `api.registerTool()` with a TypeBox schema and handler. Tools delegate to `BmClient` methods and return OpenClaw-standard responses (`{ content: [{type: "text", text}], details? }`).
 
 - `search-notes.ts`, `read-note.ts`, `write-note.ts`, `edit-note.ts`, `delete-note.ts`, `move-note.ts`, `build-context.ts`, `list-memory-projects.ts`, `list-workspaces.ts`, `schema-validate.ts`, `schema-infer.ts`, `schema-diff.ts` — thin wrappers around `BmClient`; all content tools accept an optional `project` param for cross-project operations
-- `memory-provider.ts` — composited `memory_search` + `memory_get` providers. `memory_search` queries 3 sources in parallel: MEMORY.md (grep), BM knowledge graph (FTS + vector), and active task notes (YAML frontmatter scan)
+
+### Memory capability (`memory/basic-memory-capability.ts`)
+
+Registered with `api.registerMemoryCapability`. OpenClaw 2026.10's bundled Memory Core plugin owns the `memory_search` and `memory_get` tool names, so the plugin does not register them. The capability supplies:
+- `providerRuntime` — host-facing search, get, health and close over the shared `BmClient` (gateway `memory.search` v2, `memory.status`, doctor)
+- `recallToolNames` — `search_notes`, `read_note`, `build_context` for Active Memory deep recall
+- `providerFlushPlanResolver` — a tools-arm pre-compaction flush through `write_note` / `edit_note`
+- `promptBuilder` — a system-prompt section steering agents to the Basic Memory tools
 
 ### Commands & Hooks
 
