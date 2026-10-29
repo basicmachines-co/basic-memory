@@ -347,6 +347,16 @@ def _format_project_list_json(
     constrained_project: str | None,
 ) -> dict[str, Any]:
     """Format merged project list as structured JSON."""
+    # Trigger: BASIC_MEMORY_MCP_PROJECT pins this server to one project
+    # Why: text output already shows only that project; JSON must not list the others
+    # Outcome: projects holds only entries whose name resolves to the constraint
+    if constrained_project:
+        constrained_permalink = generate_permalink(constrained_project)
+        merged = [
+            project
+            for project in merged
+            if generate_permalink(project["name"]) == constrained_permalink
+        ]
     return {
         "projects": merged,
         "default_project": default_project,

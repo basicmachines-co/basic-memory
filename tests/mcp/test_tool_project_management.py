@@ -117,6 +117,21 @@ async def test_list_memory_projects_constrained_env(monkeypatch, app, test_proje
 
 
 @pytest.mark.asyncio
+async def test_list_memory_projects_constrained_env_json_hides_other_projects(
+    monkeypatch, app, test_project, tmp_path_factory
+):
+    other_root = tmp_path_factory.mktemp("unconstrained-other-project")
+    await create_memory_project(project_name="other-project", project_path=str(other_root))
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
+
+    result = await list_memory_projects(output_format="json")
+
+    assert isinstance(result, dict)
+    assert [project["name"] for project in result["projects"]] == [test_project.name]
+    assert result["constrained_project"] == test_project.name
+
+
+@pytest.mark.asyncio
 async def test_create_and_delete_project_and_name_match_branch(
     app, tmp_path_factory, session_maker
 ):
