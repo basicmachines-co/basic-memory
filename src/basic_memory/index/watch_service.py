@@ -138,15 +138,16 @@ class WatchService:
         self._project_index_runtime_factory = (
             project_index_runtime_factory or LocalProjectIndexRuntimeFactory()
         )
-        # Startup already schedules these projects' initial scans, so the first
-        # cycle catches up only projects added later, after their watch is attached.
-        # Track by project identity, not root: a path change rewrites config before
-        # the files move, so rescanning the new root would index every old path as
-        # deleted (`bm project move`).
-        self._indexed_project_ids = {project.external_id for project in initial_projects}
-        # Roots watched by the previous cycle, so a restart can catch up the
-        # projects whose events the closed watcher may have dropped (#1852).
-        self._watched_project_paths: dict[str, str] = {}
+        # The root each project was last indexed at, by project identity. Startup
+        # already schedules these projects' initial scans. A project whose current
+        # root differs was moved: `bm project move` rewrites config before the
+        # files move, so scanning the new root would index every old path as
+        # deleted. Such a project stays unscanned until it leaves the watch set.
+        self._indexed_project_roots = {
+            project.external_id: project.path for project in initial_projects
+        }
+        # False until the first cycle starts; every later cycle is a restart.
+        self._restarting = False
         self._catch_up_in_progress = False
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
@@ -202,23 +203,26 @@ class WatchService:
         """Run one watchfiles cycle and route batches into project-local indexing."""
         project_paths = [project.path for project in projects]
         projects_by_id = {project.external_id: project for project in projects}
-        self._indexed_project_ids.intersection_update(projects_by_id)
-        previous_project_paths = self._watched_project_paths
-        self._watched_project_paths = {project.external_id: project.path for project in projects}
-        # Trigger: this watcher never indexed the project, or the previous cycle
-        #   watched it at the same root.
+        self._indexed_project_roots = {
+            external_id: root
+            for external_id, root in self._indexed_project_roots.items()
+            if external_id in projects_by_id
+        }
+        restarting = self._restarting
+        self._restarting = True
+        # Trigger: this watcher never indexed the project, or this cycle is a
+        #   restart and the project is still at the root it was indexed at.
         # Why: files under a new project produced no events before its watch, and
         #      a restart drops the events pending in the closed watcher and the
         #      writes made before this one attaches (#1852). Startup owns the first
-        #      scan, and a changed root must not be scanned: `bm project move`
-        #      rewrites the path before the files move, so a scan would delete the
-        #      project's index.
+        #      scan, and a moved project's new root must not be scanned (see
+        #      `_indexed_project_roots`).
         # Outcome: one incremental, checksum-planned scan per project after attach.
         catch_up_projects = {
             external_id: project
             for external_id, project in projects_by_id.items()
-            if external_id not in self._indexed_project_ids
-            or previous_project_paths.get(external_id) == project.path
+            if external_id not in self._indexed_project_roots
+            or (restarting and self._indexed_project_roots[external_id] == project.path)
         }
         catch_up_needs_drain = bool(catch_up_projects)
         watch_unfiltered = bool(catch_up_projects)
@@ -263,7 +267,7 @@ class WatchService:
                             project, runtime_factory=self._project_index_runtime_factory
                         )
                         if not stop_event.is_set():
-                            self._indexed_project_ids.add(external_id)
+                            self._indexed_project_roots[external_id] = project.path
                         self.state.last_scan = datetime.now()
                         logger.info(
                             "Caught up a watched project",

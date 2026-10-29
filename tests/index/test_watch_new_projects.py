@@ -436,6 +436,66 @@ async def test_changing_a_project_root_does_not_run_a_full_scan(
 
 
 @pytest.mark.asyncio
+async def test_a_moved_project_stays_unscanned_across_later_restarts(
+    app_config,
+    config_manager,
+    project_repository,
+    session_maker,
+    test_project,
+    tmp_path_factory,
+    monkeypatch,
+):
+    """A later restart must not scan a moved project's still-empty destination.
+
+    Another project joining restarts the cycle while the moved project's files are
+    still at the old root. A scan there would plan every entity as deleted.
+    """
+    original_index = watch_module.run_local_project_index_for_project
+    (Path(test_project.path) / "kept.md").write_text("# Kept\n", encoding="utf-8")
+    await original_index(test_project, runtime_factory=LocalProjectIndexRuntimeFactory())
+    watcher = WatchService(
+        app_config, project_repository, session_maker, initial_projects=[test_project]
+    )
+    scanned: list[int] = []
+
+    async def record_index(project, **kwargs):
+        scanned.append(project.id)
+        return await original_index(project, **kwargs)
+
+    async def ready_watch(*_paths, **_kwargs):
+        yield set()
+
+    monkeypatch.setattr(watch_module, "run_local_project_index_for_project", record_index)
+    monkeypatch.setattr(watch_module, "awatch", ready_watch)
+    await watcher._watch_projects_cycle([test_project], asyncio.Event())
+
+    destination = tmp_path_factory.mktemp("moved-destination")
+    async with db.scoped_session(session_maker) as session:
+        moved = await project_repository.update(
+            session, test_project.id, {"path": str(destination)}
+        )
+    assert moved is not None
+    config = config_manager.config.model_copy(deep=True)
+    config.projects[test_project.name] = ProjectEntry(path=str(destination))
+    config_manager.save_config(config)
+    await watcher._watch_projects_cycle([moved], asyncio.Event())
+
+    added = await _register_project(
+        "joins-after-move",
+        tmp_path_factory.mktemp("joins-after-move-root"),
+        config_manager,
+        project_repository,
+        session_maker,
+    )
+    await watcher._watch_projects_cycle([moved, added], asyncio.Event())
+
+    assert scanned == [added.id]
+    async with db.scoped_session(session_maker) as session:
+        assert await EntityRepository(test_project.id).get_by_file_path(session, "kept.md")
+    assert watcher.state.error_count == 0
+
+
+@pytest.mark.asyncio
 async def test_reload_waits_for_catch_up_and_buffered_changes(
     app_config, project_repository, session_maker, test_project
 ):
