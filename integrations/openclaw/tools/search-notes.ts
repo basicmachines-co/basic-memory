@@ -15,8 +15,9 @@ export function registerSearchTool(
         "Search the Basic Memory knowledge graph for relevant notes, concepts, and connections. " +
         "Returns matching notes with titles, content previews, and relevance scores. " +
         "Optionally filter by frontmatter metadata fields, tags, or status, or target " +
-        "another project. For a quick cross-source recall that also covers MEMORY.md " +
-        "and active tasks, use memory_search.",
+        "another project. This is the search for long-term memory and earlier " +
+        "conversations; memory_search covers only the workspace MEMORY.md and memory/ " +
+        "files. Read a result in full with read_note, or follow its links with build_context.",
       parameters: Type.Object({
         query: Type.String({ description: "Search query" }),
         limit: Type.Optional(

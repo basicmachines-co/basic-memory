@@ -27,6 +27,8 @@ describe("Basic Memory memory capability", () => {
     search: jest.Mock
     readNote: jest.Mock
     listProjects: jest.Mock
+    isServiceRunning: jest.Mock
+    stop: jest.Mock
   }
 
   beforeEach(() => {
@@ -54,6 +56,8 @@ describe("Basic Memory memory capability", () => {
         file_path: "pets/quillfeather.md",
       }),
       listProjects: jest.fn().mockResolvedValue([]),
+      isServiceRunning: jest.fn().mockReturnValue(true),
+      stop: jest.fn().mockResolvedValue(undefined),
     }
   })
 
@@ -165,6 +169,24 @@ describe("Basic Memory memory capability", () => {
       status: "unavailable",
       message: "Basic Memory is not reachable",
     })
+  })
+
+  it("leaves the shared gateway session open when a reader closes", async () => {
+    await reader().close()
+
+    expect(client.stop).not.toHaveBeenCalled()
+  })
+
+  // Regression: `openclaw memory status` loads the plugin without starting its
+  // service, and the lazily spawned `bm mcp` child kept the CLI from exiting.
+  it("stops a connection it opened outside the plugin service", async () => {
+    client.isServiceRunning.mockReturnValue(false)
+    const handle = reader()
+
+    await expect(handle.health()).resolves.toEqual({ status: "ready" })
+    await handle.close()
+
+    expect(client.stop).toHaveBeenCalledTimes(1)
   })
 
   it("registers recall tools, a tools-arm flush, and Basic Memory prompt guidance", async () => {

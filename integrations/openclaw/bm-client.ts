@@ -305,6 +305,10 @@ export class BmClient {
   private cwd?: string
   private env?: Record<string, string>
   private shouldRun = false
+  // True only between start() and stop(), i.e. while the plugin service owns
+  // the BM MCP session. A lazy connection opened by a tool or memory call in a
+  // one-shot CLI process leaves this false.
+  private serviceRunning = false
 
   private client: Client | null = null
   private transport: StdioClientTransport | null = null
@@ -324,6 +328,7 @@ export class BmClient {
     env?: Record<string, string>
   }): Promise<void> {
     this.shouldRun = true
+    this.serviceRunning = true
     if (options?.cwd) {
       this.cwd = options.cwd
     }
@@ -334,8 +339,13 @@ export class BmClient {
     await this.connectWithRetries()
   }
 
+  isServiceRunning(): boolean {
+    return this.serviceRunning
+  }
+
   async stop(): Promise<void> {
     this.shouldRun = false
+    this.serviceRunning = false
     await this.disconnectCurrent(this.client, this.transport)
     this.client = null
     this.transport = null

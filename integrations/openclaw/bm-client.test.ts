@@ -943,6 +943,22 @@ describe("BmClient MCP behavior", () => {
     expect(args[4]).toBeUndefined() // overwrite
   })
 
+  it("reports the service as running only between start() and stop()", async () => {
+    ;(client as any).connectWithRetries = jest.fn().mockResolvedValue(undefined)
+    ;(client as any).disconnectCurrent = jest.fn().mockResolvedValue(undefined)
+
+    expect(client.isServiceRunning()).toBe(false)
+    // A lazy connection from a tool call is not service ownership.
+    setConnected(client, jest.fn())
+    expect(client.isServiceRunning()).toBe(false)
+
+    await client.start()
+    expect(client.isServiceRunning()).toBe(true)
+
+    await client.stop()
+    expect(client.isServiceRunning()).toBe(false)
+  })
+
   describe("indexConversation with a turn key", () => {
     // In-memory stand-in for the conversation notes so the duplicate check,
     // append, and create paths run against shared state.
