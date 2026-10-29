@@ -154,6 +154,19 @@ async def test_call_query_error(mock_response, status_code):
 
 
 @pytest.mark.asyncio
+async def test_call_query_wraps_in_process_timeout_in_tool_error():
+    """An asyncio deadline outside httpx surfaces as a ToolError, not a bare TimeoutError (#1886)."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise TimeoutError
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        with pytest.raises(ToolError, match="Request timed out \\(TimeoutError\\)"):
+            await call_query(client, "/v2/projects/project-uuid/search/", json={"text": "q"})
+
+
+@pytest.mark.asyncio
 async def test_call_put_success(mock_response):
     """Test successful PUT request."""
     client = _Client()

@@ -339,6 +339,25 @@ async def test_a_failed_probe_does_not_fail_the_write(client, test_project, monk
     assert result["similar_notes"] == []
 
 
+@pytest.mark.asyncio
+async def test_a_timed_out_probe_does_not_fail_the_write(client, test_project, monkeypatch):
+    """An in-process TimeoutError in the advisory search keeps the accepted write (#1886)."""
+    original_request = httpx.AsyncClient.request
+
+    async def search_times_out(self, method, url, *args, **kwargs):
+        if method == "QUERY" and "/search" in str(url):
+            raise TimeoutError
+        return await original_request(self, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "request", search_times_out)
+    result = await write_json(identifier="notes/a.md", content="Body", project=test_project.name)
+
+    assert result["action"] == "created"
+    assert result["similar_notes"] == []
+    read_back = await bm_read(identifier="notes/a.md", project=test_project.name)
+    assert "Body" in str(read_back)
+
+
 # --- Refusals ---
 
 
