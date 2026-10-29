@@ -1402,9 +1402,14 @@ class ProjectService:
 
             entities_with_chunks_result = await self.repository.execute_query(
                 session,
+                # Coverage counts entities that are searchable and embedded, the same
+                # set the indexed count uses, so vectors that outlived their search
+                # rows (#1826) do not show as full coverage.
                 text(
                     "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id {entity_exists}"
+                    f"WHERE project_id = :project_id {entity_exists} "
+                    "AND entity_id IN (SELECT id FROM search_index "
+                    "WHERE project_id = :project_id AND type = 'entity')"
                 ),
                 {"project_id": project_id},
             )

@@ -349,3 +349,30 @@ async def test_one_unreadable_file_does_not_stop_the_repair(
         {"project_id": test_project.id, "path": "notes/good.md"},
     )
     assert good_rows == 1
+
+
+@pytest.mark.asyncio
+async def test_vectors_without_search_rows_do_not_count_as_coverage(
+    test_project: Project,
+    project_config,
+    engine_factory,
+    config_manager: ConfigManager,
+) -> None:
+    """Search rows dropped while vector chunks survive must not read as full coverage."""
+    _engine, session_maker = engine_factory
+    (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
+    (project_config.home / NOTE_PATH).write_text(NOTE_CONTENT, encoding="utf-8")
+    await _index_project(test_project, embeddings=True)
+    entity_id = await _indexed_note_entity_id(session_maker, test_project)
+    assert await _chunk_count(session_maker, test_project, entity_id) > 0
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("DELETE FROM search_index WHERE project_id = :project_id"),
+            {"project_id": test_project.id},
+        )
+
+    project_service = ProjectService(ProjectRepository(), session_maker)
+    status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.entities_missing_search_rows == 1
+    assert status.total_entities_with_chunks == 0
