@@ -1272,7 +1272,7 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
         coding_context,
     )
 
-    # Deferred import (#886); same internal write path as `bm tool write-note`.
+    # Deferred import (#886); same internal write path the legacy write tool uses.
     from basic_memory.hooks.project_ref import split_project_ref
     from basic_memory.mcp.tools import write_note
 

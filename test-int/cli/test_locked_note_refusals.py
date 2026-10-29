@@ -15,11 +15,12 @@ def test_overwrite_reports_lock_and_exits_nonzero(app: FastAPI, test_project: Pr
     arguments = [
         "tool",
         "write",
+        "--json",
         "--project",
         test_project.name,
         "--title",
         "Protected Runbook",
-        "--folder",
+        "--directory",
         "protected",
     ]
     created = runner.invoke(

@@ -100,9 +100,10 @@ async def test_export_real_project(tmp_path):
     cli(
         "tool",
         "write",
+        "--json",
         "--title",
         "Target",
-        "--folder",
+        "--directory",
         ".",
         "--content",
         "# Target\n",

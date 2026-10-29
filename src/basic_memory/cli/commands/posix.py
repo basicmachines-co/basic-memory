@@ -30,13 +30,13 @@ from rich.tree import Tree
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.cli.commands.tool import (
-    _display_read_note,
-    _display_search_results,
-    _plain_search_results,
-    _print_json,
-    _resolve_output_mode,
-    _validate_output_flags,
+from basic_memory.cli.commands.output import (
+    display_read_note,
+    display_search_results,
+    plain_search_results,
+    print_json,
+    resolve_output_mode,
+    validate_output_flags,
     console,
 )
 
@@ -172,9 +172,9 @@ def _render_cat(
     result: dict[str, Any], *, json_output: bool, plain: bool, include_frontmatter: bool
 ) -> None:
     """Render a cat/head payload in the resolved output mode."""
-    mode = _resolve_output_mode(json_output, plain)
+    mode = resolve_output_mode(json_output, plain)
     if mode == "json":
-        _print_json(result)
+        print_json(result)
         return
     if mode == "plain":
         # Plain stdout is the content and nothing else — exact bytes, no added
@@ -186,7 +186,7 @@ def _render_cat(
         _write_slice_footer(result, plain=True, content_terminated=text.endswith("\n") or not text)
         return
     # cat's payload is the read_note JSON shape, so the read-note renderer applies.
-    _display_read_note(result, include_frontmatter=include_frontmatter)
+    display_read_note(result, include_frontmatter=include_frontmatter)
     _write_slice_footer(result, plain=False)
 
 
@@ -545,7 +545,7 @@ def cat(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
         start_line, end_line = _parse_lines(lines) if lines is not None else (None, None)
 
         with force_routing(local=local, cloud=cloud):
@@ -610,7 +610,7 @@ def head(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -683,7 +683,7 @@ def grep(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -699,15 +699,15 @@ def grep(
                 )
             )
         # grep returns the search-notes response shape, so those renderers apply.
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
-            _print_json(result)
+            print_json(result)
         elif context_lines is not None:
             _display_grep_lines(result, plain=mode == "plain")
         elif mode == "plain":
-            _plain_search_results(result, query=pattern)
+            plain_search_results(result, query=pattern)
         else:
-            _display_search_results(result, query=pattern)
+            display_search_results(result, query=pattern)
     except (ValueError, ToolError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -748,7 +748,7 @@ def ls(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -760,9 +760,9 @@ def ls(
                     project_id=project_id,
                 )
             )
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
-            _print_json(result)
+            print_json(result)
         elif mode == "plain":
             _plain_ls(result)
             _write_plain_page_footer(result)
@@ -835,7 +835,7 @@ def find(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
         # The CLI only splits the comma form; validation (non-empty names,
         # requires --meta) lives in the shared tool layer.
         field_list = [item.strip() for item in fields.split(",")] if fields is not None else None
@@ -854,9 +854,9 @@ def find(
                     project_id=project_id,
                 )
             )
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
-            _print_json(result)
+            print_json(result)
         elif "results" in result:
             # --meta flips the payload to the search response shape: projected
             # fields get the dedicated renderers, otherwise grep's search
@@ -868,10 +868,10 @@ def find(
                 else:
                     _display_find_fields(result, path, meta or [], field_list)
             elif mode == "plain":
-                _plain_search_results(result, query=" AND ".join(meta or []))
+                plain_search_results(result, query=" AND ".join(meta or []))
                 _write_plain_page_footer(result, search=True)
             else:
-                _display_search_results(result, query=" AND ".join(meta or []))
+                display_search_results(result, query=" AND ".join(meta or []))
         elif mode == "plain":
             _plain_find(result)
             _write_plain_page_footer(result)
@@ -916,7 +916,7 @@ def tail(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -927,9 +927,9 @@ def tail(
                     project_id=project_id,
                 )
             )
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
-            _print_json(result)
+            print_json(result)
         elif mode == "plain":
             _plain_tail(result)
         else:
@@ -981,7 +981,7 @@ def tree(
 
     try:
         validate_routing_flags(local, cloud)
-        _validate_output_flags(json_output, plain)
+        validate_output_flags(json_output, plain)
 
         # find returns the listing and the root its node paths are relative to
         # from one resolution. Resolving here as well cost a second project-list
@@ -999,9 +999,9 @@ def tree(
                     project_id=project_id,
                 )
             )
-        mode = _resolve_output_mode(json_output, plain)
+        mode = resolve_output_mode(json_output, plain)
         if mode == "json":
-            _print_json(result)
+            print_json(result)
         elif mode == "plain":
             _plain_tree(result, path, root)
         else:

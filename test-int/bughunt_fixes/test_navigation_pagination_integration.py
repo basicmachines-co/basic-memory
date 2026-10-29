@@ -134,9 +134,10 @@ def _write_cli(title, folder="pgcli"):
         [
             "tool",
             "write",
+            "--json",
             "--title",
             title,
-            "--folder",
+            "--directory",
             folder,
             "--content",
             f"# {title}\n\nclipagination probe body.",
@@ -158,7 +159,7 @@ def test_cli_search_notes_page_size_zero(app, app_config, test_project, config_m
     # The fix raises ValueError, which the CLI maps to a non-zero exit with a clear
     # message — the faithful "no misleading pagination signal" outcome at the CLI.
     assert res.exit_code != 0, res.output
-    assert "page_size" in res.output
+    assert "--page-size" in res.output
 
 
 # --- Bug #10: build_context must always return the requested primary entity ---

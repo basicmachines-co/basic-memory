@@ -19,10 +19,9 @@ export class BmCommandError extends Error {
 }
 
 export function projectArgs(cfg: BasicMemoryPiConfig): string[] {
-  const args: string[] = [];
-  if (cfg.projectId) args.push("--project-id", cfg.projectId);
-  else if (cfg.project) args.push("--project", cfg.project);
-  return args;
+  // `bm tool --project` takes a project name or id; the id wins when both are set.
+  const project = cfg.projectId ?? cfg.project;
+  return project ? ["--project", project] : [];
 }
 
 export function bmCommandParts(cfg: BasicMemoryPiConfig): { command: string; argsPrefix: string[] } {

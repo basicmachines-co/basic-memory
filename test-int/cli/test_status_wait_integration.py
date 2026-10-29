@@ -17,9 +17,10 @@ def test_status_wait_returns_once_indexed(app, app_config, test_project, config_
         [
             "tool",
             "write",
+            "--json",
             "--title",
             "Wait Test Note",
-            "--folder",
+            "--directory",
             "test-notes",
             "--content",
             "# Wait Test\n\nContent that should be indexed.",
