@@ -7,19 +7,19 @@ from pathlib import Path
 import pytest
 
 from basic_memory.mcp.tools import (
+    bm_write,
     build_context,
     create_memory_project,
     edit_note,
     list_memory_projects,
     read_note,
     recent_activity,
-    write_note,
 )
 
 
 @pytest.mark.asyncio
 async def test_write_note_text_and_json_modes(app, test_project):
-    text_result = await write_note(
+    text_result = await bm_write(
         project=test_project.name,
         title="Mode Write Note",
         directory="mode-tests",
@@ -29,7 +29,7 @@ async def test_write_note_text_and_json_modes(app, test_project):
     assert isinstance(text_result, str)
     assert "note" in text_result.lower()
 
-    json_result = await write_note(
+    json_result = await bm_write(
         project=test_project.name,
         title="Mode Write Note",
         directory="mode-tests",
@@ -47,7 +47,7 @@ async def test_write_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_read_note_text_and_json_modes(app, test_project, indexed_project):
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Mode Read Note",
         directory="mode-tests",
@@ -87,7 +87,7 @@ async def test_read_note_text_and_json_modes(app, test_project, indexed_project)
 
 @pytest.mark.asyncio
 async def test_edit_note_text_and_json_modes(app, test_project):
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Mode Edit Note",
         directory="mode-tests",
@@ -121,7 +121,7 @@ async def test_edit_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_recent_activity_text_and_json_modes(app, test_project):
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Mode Activity Note",
         directory="mode-tests",
@@ -149,7 +149,7 @@ async def test_recent_activity_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_recent_activity_json_preserves_relation_and_observation_types(app, test_project):
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Activity Type Source",
         directory="mode-tests",
@@ -159,7 +159,7 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
             "- links_to [[Activity Type Target]]"
         ),
     )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Activity Type Target",
         directory="mode-tests",

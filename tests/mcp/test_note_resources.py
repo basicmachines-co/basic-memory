@@ -13,7 +13,7 @@ import basic_memory.mcp.resources.notes as notes_module
 from basic_memory.mcp.project_context import DetectedProjectRoute
 from basic_memory.mcp.resources.notes import NOTE_TEMPLATE, note_resource
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools import bm_write
 
 
 async def _read(uri: str) -> str:
@@ -35,7 +35,7 @@ async def test_note_template_is_registered() -> None:
 
 @pytest.mark.asyncio
 async def test_note_reads_as_raw_markdown(app, test_project) -> None:
-    await write_note(
+    await bm_write(
         title="Resource Read Test",
         directory="specs",
         content="# Resource Read Test\n\n- [design] notes are resources #mcp\n",
@@ -63,7 +63,7 @@ async def test_unprefixed_permalink_reads_in_default_project(app, test_project) 
     # With permalinks_include_project=False (or legacy notes) the URI's first
     # segment is a directory, not a project; routing must fall back to the
     # active/default project with the whole path as the identifier.
-    await write_note(
+    await bm_write(
         title="Roadmap",
         directory="docs",
         content="# Roadmap\n\nUnprefixed permalink read.\n",
@@ -140,7 +140,7 @@ async def test_client_is_opened_for_the_uris_own_project(
 
     monkeypatch.setattr(notes_module, "get_project_client", recording_get_project_client)
 
-    await write_note(
+    await bm_write(
         title="Routed",
         directory="specs",
         content="# Routed\n",
@@ -184,7 +184,7 @@ async def test_info_shaped_uris_delegate_to_project_info(app, test_project) -> N
 
 @pytest.mark.asyncio
 async def test_note_actually_named_info_still_reads(app, test_project) -> None:
-    await write_note(
+    await bm_write(
         title="Info",
         directory="sub",
         content="# Info\n\nA note that happens to be called info.\n",
@@ -286,7 +286,7 @@ async def test_unprefixed_permalinks_ignore_project_name_collisions(
         return real_get_project_client(project, context, project_id=project_id)
 
     monkeypatch.setattr(notes_module, "get_project_client", recording)
-    await write_note(
+    await bm_write(
         title="Roadmap",
         directory="docs",
         content="# Roadmap\n\nActive project wins.\n",
@@ -323,7 +323,7 @@ async def test_info_uri_that_is_neither_project_nor_note_reports_the_route(
 async def test_binary_content_is_steered_to_bm_read(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await write_note(
+    await bm_write(
         title="Binary Decoy",
         directory="specs",
         content="# Binary Decoy\n",
@@ -345,7 +345,7 @@ async def test_info_fallback_runs_when_forced_local_reports_project_not_found(
 ) -> None:
     # Forced-local transports surface an unknown compound route as ToolError
     # ("Project not found"), not ValueError — the note fallback must still run.
-    await write_note(
+    await bm_write(
         title="Info",
         directory="sub",
         content="# Info\n\nStill readable under forced-local routing.\n",

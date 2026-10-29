@@ -11,7 +11,7 @@ from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import db
-from basic_memory.mcp.tools import write_note, read_note
+from basic_memory.mcp.tools import bm_write, read_note
 from basic_memory.mcp.note_reads import format_note_metadata
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
@@ -44,7 +44,7 @@ def test_parse_opening_frontmatter_handles_crlf():
 async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Special Note",
         directory="test",
@@ -59,7 +59,7 @@ async def test_read_note_by_title(app, test_project):
 @pytest.mark.asyncio
 async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch, app, test_project):
     """Force direct resolve to fail so we exercise the title-search + fetch fallback path."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Fallback Title Note",
         directory="test",
@@ -144,7 +144,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 async def test_read_note_direct_match_returns_full_content_regardless_of_paging(app, test_project):
     """page/page_size never chunk note content — a direct match returns the whole note."""
     content = "Line one of the note\nLine two of the note\nLine three of the note"
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Paging Direct Note",
         directory="test",
@@ -214,7 +214,7 @@ async def test_read_note_title_fallback_finds_exact_match_on_later_page(
     read_note("Exact Title", page=2) would page past the match and return
     unrelated suggestions instead of the note.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Paged Title Note",
         directory="test",
@@ -253,13 +253,13 @@ async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
     out of a page_size=1 window and read_note("Foo Bar", page_size=1) would
     return suggestions instead of the note.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Foo Bar Foo Bar",
         directory="test",
         content="fuzzy decoy content",
     )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Foo Bar",
         directory="test",
@@ -302,13 +302,13 @@ async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
     from basic_memory.mcp.tools.search import search_notes
 
     for index in range(1, _TITLE_LOOKUP_PAGE_SIZE + 2):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title=f"Deep Page Note Deep Page Note Deep Page Note {index:02d}",
             directory="test",
             content=f"fuzzy decoy content {index}",
         )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Deep Page Note",
         directory="test",
@@ -449,7 +449,7 @@ async def test_read_note_related_results_list_full_search_page(monkeypatch, app,
 @pytest.mark.asyncio
 async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, app, test_project):
     """Do not fetch note content when title-search returns only fuzzy matches."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Existing Note",
         directory="test",
@@ -623,16 +623,18 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
 async def test_note_unicode_content(app, test_project):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await write_note(
-        project=test_project.name, title="Unicode Test", directory="test", content=content
+    created = await bm_write(
+        project=test_project.name,
+        title="Unicode Test",
+        directory="test",
+        content=content,
+        output_format="json",
     )
 
-    # Check that note was created (checksum is now "unknown" in v2)
-    assert "# Created note" in result
-    assert f"project: {test_project.name}" in result
-    assert "file_path: test/Unicode Test.md" in result
-    assert f"permalink: {test_project.name}/test/unicode-test" in result
-    assert "checksum:" in result  # Checksum exists but may be "unknown"
+    assert isinstance(created, dict)
+    assert created["action"] == "created"
+    assert created["file_path"] == "test/Unicode Test.md"
+    assert created["permalink"] == f"{test_project.name}/test/unicode-test"
 
     # Read back should preserve unicode
     result = await read_note("test/unicode-test", project=test_project.name)
@@ -650,7 +652,7 @@ async def test_multiple_notes(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note(
+        await bm_write(
             project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
@@ -674,7 +676,7 @@ async def test_read_multiple_notes_individually(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note(
+        await bm_write(
             project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
@@ -696,7 +698,7 @@ async def test_read_note_memory_url(app, test_project):
     - Return the note content
     """
     # First create a note
-    result = await write_note(
+    result = await bm_write(
         project=test_project.name,
         title="Memory URL Test",
         directory="test",
@@ -713,7 +715,7 @@ async def test_read_note_memory_url(app, test_project):
 @pytest.mark.asyncio
 async def test_read_note_memory_url_with_project_prefix(app, test_project):
     """Test reading a note using a memory:// URL with explicit project prefix."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Project Prefixed Memory URL Test",
         directory="test",
@@ -732,7 +734,7 @@ async def test_read_note_skips_url_detection_when_project_id_provided(
     test_project,
 ):
     """project_id is authoritative, so memory URL discovery must not run first."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Project ID Memory URL Read",
         directory="test",
@@ -769,7 +771,7 @@ async def test_team_workspace_write_stores_complete_canonical_permalink(
     expected_permalink = f"team-paul/{test_project.name}/team/team-workspace-note"
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
-        write_result = await write_note(
+        write_result = await bm_write(
             project=test_project.name,
             title="Team Workspace Note",
             directory="team",
@@ -811,7 +813,7 @@ async def test_team_workspace_write_stores_complete_permalink_when_project_prefi
     expected_permalink = f"team-paul/{test_project.name}/team/team-no-project-prefix-note"
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
-        write_result = await write_note(
+        write_result = await bm_write(
             project=test_project.name,
             title="Team No Project Prefix Note",
             directory="team",
@@ -848,7 +850,7 @@ async def test_personal_workspace_write_stores_complete_canonical_permalink(
     expected_permalink = f"personal/{test_project.name}/personal/personal-workspace-note"
 
     with workspace_permalink_context(workspace_slug="personal", workspace_type="personal"):
-        write_result = await write_note(
+        write_result = await bm_write(
             project=test_project.name,
             title="Personal Workspace Note",
             directory="personal",
@@ -872,7 +874,7 @@ async def test_read_note_personal_workspace_keeps_short_project_permalink_workin
 
     legacy_permalink = f"{test_project.name}/personal/short-personal-note"
 
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Short Personal Note",
         directory="personal",
@@ -903,7 +905,7 @@ async def test_read_note_workspace_qualified_personal_url_finds_legacy_short_per
     legacy_permalink = f"{test_project.name}/personal/legacy-personal-note"
     qualified_permalink = f"personal/{legacy_permalink}"
 
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Legacy Personal Note",
         directory="personal",
@@ -937,7 +939,7 @@ async def test_read_note_workspace_qualified_memory_url_uses_complete_permalink(
     expected_permalink = f"team-paul/{test_project.name}/team/tool-read-note"
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Tool Read Note",
             directory="team",
@@ -960,7 +962,7 @@ async def test_read_note_memory_url_fallback_uses_search_tool_normalization(
     monkeypatch, app, test_project
 ):
     """Fallback search should go back through search_notes for memory:// normalization."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Memory URL Fallback Note",
         directory="test",
@@ -1177,7 +1179,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_allows_legitimate_titles(self, app, test_project):
         """Test that legitimate note titles work normally."""
         # Create a test note first
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Security Test Note",
             directory="security-tests",
@@ -1233,7 +1235,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_preserves_functionality_with_security(self, app, test_project):
         """Test that security validation doesn't break normal note reading functionality."""
         # Create a note with complex content to ensure security validation doesn't interfere
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Full Feature Security Test Note",
             directory="security-tests",
@@ -1359,7 +1361,7 @@ async def test_missing_uuid_line_scan_returns_not_found_guidance(app, test_proje
 async def test_missing_markdown_path_in_unindexed_project_is_not_found(
     implementation_server, app, test_project
 ):
-    await write_note(
+    await bm_write(
         project=test_project.name, title="Readable", directory="notes", content="Visible body"
     )
     async with Client(implementation_server) as mcp_client:
@@ -1467,7 +1469,7 @@ async def test_unavailable_resolver_does_not_prove_markdown_path_missing(
 @pytest.mark.asyncio
 async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
     """The checksum read_note returns is the revision write_note's expected_checksum checks."""
-    written = await write_note(
+    written = await bm_write(
         project=test_project.name,
         title="Guarded Note",
         directory="test",
@@ -1480,7 +1482,7 @@ async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
     assert isinstance(read, dict)
     assert read["checksum"] == written["checksum"]
 
-    replaced = await write_note(
+    replaced = await bm_write(
         project=test_project.name,
         title="Guarded Note",
         directory="test",
@@ -1492,8 +1494,8 @@ async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
     assert isinstance(replaced, dict)
     assert replaced["action"] == "updated"
 
-    with pytest.raises(ToolError, match="revision conflict"):
-        await write_note(
+    with pytest.raises(ToolError, match="REVISION_CONFLICT"):
+        await bm_write(
             project=test_project.name,
             title="Guarded Note",
             directory="test",
@@ -1512,7 +1514,7 @@ async def test_line_scan_past_end_reports_document_length(
     app, test_project, entity_repository, session_maker, output_format
 ):
     """A start_line past the last line raises a clear error instead of 'Lines 500-N'."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Short Lines",
         directory="notes",

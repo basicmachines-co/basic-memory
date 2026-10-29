@@ -9,11 +9,12 @@ import logfire
 import pytest
 from typing import Any
 
+from basic_memory.mcp.tools import bm_write
+
 build_context_module = importlib.import_module("basic_memory.mcp.tools.build_context")
 edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
 read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
 search_module = importlib.import_module("basic_memory.mcp.tools.search")
-write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 
 
 class _NoopSpan:
@@ -46,55 +47,10 @@ def _contains_span_attrs(
 
 
 @pytest.mark.asyncio
-async def test_write_note_emits_root_operation_and_project_context(
-    app, test_project, monkeypatch
-) -> None:
-    spans, fake_span = _recording_spans()
-    monkeypatch.setattr(logfire, "span", fake_span)
-
-    await write_note_module.write_note(
-        project=test_project.name,
-        title="Telemetry Note",
-        directory="notes",
-        content="Telemetry content",
-        output_format="json",
-    )
-
-    assert spans[0] == (
-        "mcp.tool.write_note",
-        {
-            "entrypoint": "mcp",
-            "tool_name": "write_note",
-            "requested_project": test_project.name,
-            "requested_project_id": None,
-            "note_type": "note",
-            "overwrite": False,
-            "conditional_overwrite": False,
-            "output_format": "json",
-        },
-    )
-    span_names = [name for name, _ in spans]
-    assert "mcp.client.knowledge.write_note" in span_names
-    assert _contains_span_attrs(
-        spans,
-        "api.request.knowledge.write_note",
-        {"entrypoint": "api", "domain": "knowledge", "action": "write_note"},
-    )
-    assert _contains_span_attrs(
-        spans,
-        "routing.client_session",
-        {
-            "project_name": test_project.name,
-            "route_mode": "local_asgi",
-        },
-    )
-
-
-@pytest.mark.asyncio
 async def test_read_note_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
-    await write_note_module.write_note(
+    await bm_write(
         project=test_project.name,
         title="Readable Telemetry Note",
         directory="notes",
@@ -143,7 +99,7 @@ async def test_read_note_emits_root_operation_and_project_context(
 async def test_search_notes_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
-    await write_note_module.write_note(
+    await bm_write(
         project=test_project.name,
         title="Searchable Telemetry Note",
         directory="notes",
@@ -200,7 +156,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
 async def test_edit_note_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
-    await write_note_module.write_note(
+    await bm_write(
         project=test_project.name,
         title="Editable Telemetry Note",
         directory="notes",
@@ -252,7 +208,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
 async def test_build_context_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
 ) -> None:
-    await write_note_module.write_note(
+    await bm_write(
         project=test_project.name,
         title="Context Telemetry Note",
         directory="notes",

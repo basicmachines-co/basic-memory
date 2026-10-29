@@ -10,7 +10,6 @@ from basic_memory.mcp.tools.build_context import build_context as build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity
 from basic_memory.mcp.tools.read_note import read_note as read_note
 
-from basic_memory.mcp.tools.write_note import write_note as write_note
 from basic_memory.mcp.tools.search import search_notes as search_notes
 from basic_memory.mcp.tools.edit_note import edit_note as edit_note
 from basic_memory.mcp.tools.workspaces import list_workspaces as list_workspaces

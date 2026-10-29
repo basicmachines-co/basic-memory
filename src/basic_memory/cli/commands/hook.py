@@ -1056,10 +1056,10 @@ def _checkpoint_note(
     Extractive cut: the opening request and most recent turns lifted straight
     from the transcript — no LLM call. Frontmatter carries status/started so
     structured recall (session-start) finds it with metadata filters, and is
-    returned as a dict for write_note to serialize (``metadata=``): a value with
+    returned as a dict for bm_write to serialize (``metadata=``): a value with
     YAML-special characters — e.g. a cwd like ``/tmp/client: acme`` — would break
     a hand-built frontmatter block and, via fail-open, silently drop the
-    checkpoint. ``type`` is supplied to write_note separately (``note_type``).
+    checkpoint. ``type`` is supplied to bm_write separately (``note_type``).
     """
     user_messages = [text for role, text in conversation if role == "user"]
     opening = user_messages[0]

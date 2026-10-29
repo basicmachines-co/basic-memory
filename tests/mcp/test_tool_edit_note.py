@@ -15,7 +15,7 @@ from basic_memory.mcp.tools.edit_note import (
     edit_note,
 )
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools.write_note import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.schemas.v2.entity import EntityResolveResponse
 
 
@@ -85,7 +85,7 @@ def test_edit_note_workspace_project_route_helper_rejects_invalid_inputs(
 async def test_edit_note_append_operation(client, test_project):
     """Test appending content to an existing note."""
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -113,7 +113,7 @@ async def test_edit_note_append_operation(client, test_project):
 async def test_edit_note_prepend_operation(client, test_project):
     """Test prepending content to an existing note."""
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Meeting Notes",
         directory="meetings",
@@ -141,7 +141,7 @@ async def test_edit_note_prepend_operation(client, test_project):
 async def test_edit_note_find_replace_operation(client, test_project):
     """Test find and replace operation."""
     # Create initial note with version info
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Config Document",
         directory="config",
@@ -170,7 +170,7 @@ async def test_edit_note_find_replace_operation(client, test_project):
 async def test_edit_note_replace_section_operation(client, test_project):
     """Test replacing content under a specific section."""
     # Create initial note with sections
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="API Specification",
         directory="specs",
@@ -197,7 +197,7 @@ async def test_edit_note_replace_section_operation(client, test_project):
 @pytest.mark.asyncio
 async def test_edit_note_replace_section_consumes_subsections_by_default(client, test_project):
     """replace_section is level-aware by default: h3 subsections go with their h2 (#1012)."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Level Aware Spec",
         directory="specs",
@@ -236,7 +236,7 @@ async def test_edit_note_replace_section_consumes_subsections_by_default(client,
 @pytest.mark.asyncio
 async def test_edit_note_replace_section_opt_out_preserves_subsections(client, test_project):
     """replace_subsections=False keeps h3 subsections, replacing only the immediate body."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Opt Out Spec",
         directory="specs",
@@ -527,7 +527,7 @@ async def test_edit_note_cross_project_resolution_stops_before_patch(
 async def test_edit_note_existing_note_json_includes_file_created_false(client, test_project):
     """JSON output for editing an existing note should include fileCreated: false."""
     # Create the note first
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Existing JSON Note",
         directory="test",
@@ -552,7 +552,7 @@ async def test_edit_note_existing_note_json_includes_file_created_false(client, 
 async def test_edit_note_invalid_operation(client, test_project):
     """Test using an invalid operation."""
     # Create a note first
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -574,7 +574,7 @@ async def test_edit_note_invalid_operation(client, test_project):
 async def test_edit_note_find_replace_missing_find_text(client, test_project):
     """Test find_replace operation without find_text parameter."""
     # Create a note first
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -596,7 +596,7 @@ async def test_edit_note_find_replace_missing_find_text(client, test_project):
 async def test_edit_note_replace_section_missing_section(client, test_project):
     """Test replace_section operation without section parameter."""
     # Create a note first
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -618,7 +618,7 @@ async def test_edit_note_replace_section_missing_section(client, test_project):
 async def test_edit_note_replace_section_nonexistent_section(client, test_project):
     """A missing section returns an error and leaves the note unchanged."""
     # Create initial note without the target section
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Document",
         directory="docs",
@@ -651,7 +651,7 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
 async def test_edit_note_with_observations_and_relations(client, test_project):
     """Test editing a note that contains observations and relations."""
     # Create note with semantic content
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Feature Spec",
         directory="features",
@@ -676,7 +676,7 @@ async def test_edit_note_with_observations_and_relations(client, test_project):
 async def test_edit_note_identifier_variations(client, test_project):
     """Test that various identifier formats work."""
     # Create a note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Document",
         directory="docs",
@@ -708,7 +708,7 @@ async def test_edit_note_identifier_variations(client, test_project):
 async def test_edit_note_find_replace_no_matches(client, test_project):
     """Test find_replace when the find_text doesn't exist - should return error."""
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -736,7 +736,7 @@ async def test_edit_note_find_replace_no_matches(client, test_project):
 async def test_edit_note_empty_content_operations(client, test_project):
     """Test operations with empty content."""
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -757,7 +757,7 @@ async def test_edit_note_empty_content_operations(client, test_project):
 async def test_edit_note_find_replace_wrong_count(client, test_project):
     """Test find_replace when replacement count doesn't match expected."""
     # Create initial note with version info
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Config Document",
         directory="config",
@@ -788,7 +788,7 @@ async def test_edit_note_find_replace_wrong_count(client, test_project):
 async def test_edit_note_replace_section_multiple_sections(client, test_project):
     """Test replace_section with multiple sections having same header - should return helpful error."""
     # Create note with duplicate section headers
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Sample Note",
         directory="docs",
@@ -817,7 +817,7 @@ async def test_edit_note_replace_section_multiple_sections(client, test_project)
 async def test_edit_note_find_replace_empty_find_text(client, test_project):
     """Test find_replace with empty/whitespace find_text - should return helpful error."""
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -848,7 +848,7 @@ async def test_edit_note_append_with_null_optional_fields(client, test_project):
     for an append operation, the tool should accept them without validation errors.
     """
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Null Fields Test",
         directory="test",
@@ -882,7 +882,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     in its frontmatter.
     """
     # Create initial note
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -921,13 +921,13 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
 async def test_edit_note_find_replace_rejects_fuzzy_match(client, test_project):
     """find_replace must reject nonexistent identifiers, not fuzzy-match to a similar note."""
     # Create two notes that could be fuzzy-matched
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Routing Test A",
         directory="test",
         content="# Routing Test A\nContent A.",
     )
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Routing Test B",
         directory="test",
@@ -958,7 +958,7 @@ async def test_edit_note_find_replace_rejects_fuzzy_match(client, test_project):
 @pytest.mark.asyncio
 async def test_edit_note_append_autocreate_not_fuzzy_match(client, test_project):
     """append to a nonexistent note should auto-create it, not fuzzy-match an existing note."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Existing Note Alpha",
         directory="test",
@@ -987,7 +987,7 @@ async def test_edit_note_append_autocreate_not_fuzzy_match(client, test_project)
 async def test_edit_note_insert_before_section_operation(client, test_project):
     """Test inserting content before a section heading."""
     # Create initial note with sections
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Insert Before Doc",
         directory="docs",
@@ -1013,7 +1013,7 @@ async def test_edit_note_insert_before_section_operation(client, test_project):
 async def test_edit_note_insert_after_section_operation(client, test_project):
     """Test inserting content after a section heading."""
     # Create initial note with sections
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Insert After Doc",
         directory="docs",
@@ -1038,7 +1038,7 @@ async def test_edit_note_insert_after_section_operation(client, test_project):
 @pytest.mark.asyncio
 async def test_edit_note_insert_before_section_missing_section(client, test_project):
     """Test insert_before_section without section parameter raises ValueError."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -1057,7 +1057,7 @@ async def test_edit_note_insert_before_section_missing_section(client, test_proj
 @pytest.mark.asyncio
 async def test_edit_note_insert_before_section_not_found(client, test_project):
     """Test insert_before_section when section doesn't exist returns error."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Test Note",
         directory="test",
@@ -1082,7 +1082,7 @@ async def test_edit_note_insert_before_section_not_found(client, test_project):
 async def test_edit_note_detects_project_from_memory_url(client, test_project):
     """edit_note should detect project from memory:// URL prefix when project=None."""
     # Create a note first
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="URL Detection Note",
         directory="test",
@@ -1113,7 +1113,7 @@ async def test_edit_note_workspace_qualified_memory_url_keeps_complete_permalink
     expected_permalink = f"team-paul/{test_project.name}/team/tool-edit-note"
 
     with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Tool Edit Note",
             directory="team",
@@ -1389,7 +1389,7 @@ async def test_edit_note_three_segment_plain_path_stays_local_without_workspace_
 
     edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
 
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Local Three Segment",
         directory="folder/subdir",
@@ -1480,7 +1480,7 @@ async def test_edit_note_skips_detection_when_project_id_provided(
     test_project,
 ):
     """project_id is authoritative, so memory URL discovery must not run first."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Project ID Memory URL Edit",
         directory="test",
@@ -1657,7 +1657,7 @@ async def test_edit_note_append_creates_inside_an_existing_folder_named_like_the
 ):
     """A real folder named like the project is evidence the caller meant it, even though
     permalinks carry the project prefix and would otherwise strip it (#1775)."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Anchor",
         directory=f"{test_project.permalink}/logs",
@@ -1705,7 +1705,7 @@ async def test_edit_note_append_counts_an_accepted_note_not_yet_on_storage(clien
     """Codex review on #1782: production accepts a write before materializing its file,
     so a folder holding only an accepted note is not on storage yet. It still decides
     placement, or the next note in it lands below the prefix for good (#1775)."""
-    anchor = await write_note(
+    anchor = await bm_write(
         project=test_project.name,
         title="Anchor",
         directory=f"{test_project.permalink}/logs",
@@ -1735,7 +1735,7 @@ async def test_edit_note_append_refuses_when_both_folders_hold_notes(client, tes
     nothing says which one the caller meant, so append refuses instead of guessing and
     names the spelling that picks each (#1775)."""
     for directory in ("logs", f"{test_project.permalink}/logs"):
-        await write_note(
+        await bm_write(
             project=test_project.name,
             title="Anchor",
             directory=directory,
@@ -1950,7 +1950,7 @@ async def test_edit_note_reports_the_accepted_db_checksum(
     The PATCH response is replaced to inject a not-yet-materialized file and a
     drifted file checksum, which the inline test environment never produces.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Deferred Edit Note",
         directory="test",
@@ -1984,7 +1984,7 @@ async def test_edit_note_reports_unknown_outcome_when_no_response_arrives(
     client, test_project, monkeypatch
 ):
     """A PATCH that got no response may have committed; the error must say to read first."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Unknown Outcome",
         directory="notes",
@@ -2029,7 +2029,7 @@ async def test_edit_note_reports_a_4xx_as_a_refusal_not_an_unknown_outcome(
     client, test_project, monkeypatch
 ):
     """The API answered no, so nothing was written and the plain failure stands."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Refused Edit",
         directory="notes",

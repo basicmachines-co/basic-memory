@@ -257,20 +257,6 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "compact",
     ],
     "tail": ["timeframe", "lines", "project", "project_id"],
-    "write_note": [
-        "title",
-        "content",
-        "directory",
-        "project",
-        "workspace",
-        "project_id",
-        "tags",
-        "note_type",
-        "metadata",
-        "overwrite",
-        "expected_checksum",
-        "output_format",
-    ],
 }
 
 
@@ -307,7 +293,6 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     # edit_note's find_replace/replace_section overwrite existing content, so it is
     # destructive even though append/prepend are additive.
     "edit_note": {"readOnlyHint": False, "destructiveHint": True},
-    "write_note": {"readOnlyHint": False, "destructiveHint": True},
 }
 
 # The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
@@ -375,7 +360,6 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "search": tools.search,
     "search_notes": tools.search_notes,
     "tail": tools.tail,
-    "write_note": tools.write_note,
 }
 
 

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from basic_memory.mcp.tools import write_note
+from basic_memory.mcp.tools import bm_write
 from basic_memory.mcp.tools.search import SearchProjectRef, search_notes
 
 # The spec's worked example, verbatim: one note, two decisions, adjacent half-open
@@ -49,7 +49,7 @@ UNDATED_NOTE = """\
 
 
 async def _write_cache_layer_note(project_name: str) -> None:
-    await write_note(
+    await bm_write(
         project=project_name,
         title="Cache Layer",
         directory="decisions",
@@ -112,7 +112,7 @@ async def test_point_qualifier_answers_the_cutover_like_a_range(client, test_pro
     spec's two questions exactly as the explicit `[2026-07-27,)` range does -- and it
     must not expire at midnight, which is what a closed single-day range would do.
     """
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Cache Layer",
         directory="decisions",
@@ -186,7 +186,7 @@ async def test_valid_overlaps_returns_both_decisions(client, test_project):
 @pytest.mark.asyncio
 async def test_undated_note_search_is_unchanged(client, test_project):
     """Acceptance 1: a note with no qualifier searches exactly as it always did."""
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Queue Layer",
         directory="decisions",
@@ -208,7 +208,7 @@ async def test_undated_note_search_is_unchanged(client, test_project):
 async def test_valid_at_excludes_undated_observations(client, test_project):
     """Acceptance 8: an undated statement cannot answer "what was true then"."""
     await _write_cache_layer_note(test_project.name)
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Queue Layer",
         directory="decisions",
@@ -279,7 +279,7 @@ async def test_markdown_output_labels_the_time_kind(client, test_project):
 async def test_kind_only_filter_finds_every_source_of_that_kind(client, test_project):
     """A kind with no point or range is a legal question: who asserts this kind?"""
     await _write_cache_layer_note(test_project.name)
-    await write_note(
+    await bm_write(
         project=test_project.name,
         title="Queue Layer",
         directory="decisions",

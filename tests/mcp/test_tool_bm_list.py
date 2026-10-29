@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import bm_list, bm_read, write_note
+from basic_memory.mcp.tools import bm_list, bm_read, bm_write
 
 
 async def list_text(**arguments: Any) -> str:
@@ -25,10 +25,8 @@ async def list_json(**arguments: Any) -> dict[str, Any]:
 
 async def _seed(project_name: str) -> None:
     for title in ("Alpha", "Beta", "Gamma"):
-        await write_note(title=title, directory="notes", content=f"# {title}", project=project_name)
-    await write_note(
-        title="Deep", directory="notes/archive", content="# Deep", project=project_name
-    )
+        await bm_write(title=title, directory="notes", content=f"# {title}", project=project_name)
+    await bm_write(title="Deep", directory="notes/archive", content="# Deep", project=project_name)
 
 
 # --- Root listings ---
@@ -127,6 +125,6 @@ async def test_listing_outside_the_project_is_refused(client, test_project):
 async def test_project_root_accepts_file_filters(client, test_project, arguments):
     """'/' is now the named project's root; its files accept globs and sorting."""
     await _seed(test_project.name)
-    await write_note(title="Root", directory="", content="# Root", project=test_project.name)
+    await bm_write(title="Root", directory="", content="# Root", project=test_project.name)
     payload = await list_json(path="/", project=test_project.name, **arguments)
     assert "Root.md" in {node["name"] for node in payload["nodes"]}
