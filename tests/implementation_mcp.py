@@ -21,13 +21,10 @@ from basic_memory.mcp.server import mcp
 IMPLEMENTATION_NAMES = (
     "build_context",
     "cat",
-    "create_memory_project",
-    "delete_project",
     "edit_note",
     "fetch",
     "find",
     "grep",
-    "list_memory_projects",
     "list_workspaces",
     "ls",
     "man",

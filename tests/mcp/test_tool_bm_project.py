@@ -1,14 +1,16 @@
 """bm_project and bm_schema: one name per group, commands delegate (#1832)."""
 
+import json
 from typing import Any
 
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.server import lifespan, mcp, set_project_delete_visibility
-from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_schema, bm_write
+from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_read, bm_schema, bm_write
 from basic_memory.mcp.tools import projects as projects_module
-from basic_memory.mcp.tools.project_management import delete_project
 
 
 async def _listed_names() -> set[str]:
@@ -140,12 +142,17 @@ async def test_project_argument_refusals(arguments, message):
 
 @pytest.mark.asyncio
 async def test_constrained_server_refuses_project_changes(monkeypatch):
+    """The refusal comes first, before a workspace selector is resolved or routed."""
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "only-this")
 
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project creation disabled"):
         await bm_project(command="create", name="x", path="/tmp/x")
+    with pytest.raises(ToolError, match="^UNSUPPORTED: Project creation disabled.*'only-this'"):
+        await bm_project(command="create", name="x", path="/tmp/x", workspace="missing-team")
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled"):
         await bm_project_delete(name="x")
+    with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled.*'only-this'"):
+        await bm_project_delete(name="x", workspace="missing-team")
     with pytest.raises(ToolError, match='"error": "UNSUPPORTED"'):
         await bm_project_delete(name="x", output_format="json")
 
@@ -157,6 +164,196 @@ async def test_create_api_refusals_honor_the_output_format(app, test_project):
 
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
         await bm_project(command="create", name="Nested", path=nested, output_format="json")
+
+
+# --- Local projects ---
+
+
+@pytest.mark.asyncio
+async def test_list_text_names_local_projects(app, test_project):
+    result = await bm_project(command="list")
+
+    assert isinstance(result, str)
+    assert result.startswith("Available projects:")
+    assert f"- {test_project.name} (local)" in result
+    assert "cloud)" not in result
+
+
+@pytest.mark.asyncio
+async def test_constrained_server_lists_only_its_project(
+    monkeypatch, app, test_project, tmp_path_factory
+):
+    await bm_project(command="create", name="other", path=str(tmp_path_factory.mktemp("other")))
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
+
+    text = await bm_project(command="list")
+    payload = await bm_project(command="list", output_format="json")
+
+    assert text == (
+        f"Project: {test_project.name}\n\n"
+        "Note: This MCP server is constrained to a single project.\n"
+        "All operations will automatically use this project."
+    )
+    assert isinstance(payload, dict)
+    assert [project["name"] for project in payload["projects"]] == [test_project.name]
+    assert payload["constrained_project"] == test_project.name
+
+
+@pytest.mark.asyncio
+async def test_create_can_set_the_default_project(app, test_project, tmp_path_factory):
+    project_root = tmp_path_factory.mktemp("new-default-project-home")
+
+    created = await bm_project(
+        command="create", name="New Default", path=str(project_root), set_default=True
+    )
+    listed = await bm_project(command="list", output_format="json")
+
+    assert isinstance(created, str)
+    assert "• Set as default project\n" in created
+    assert isinstance(listed, dict)
+    assert listed["default_project"] == "New Default"
+
+
+@pytest.mark.asyncio
+async def test_delete_keeps_note_files_by_default(app, tmp_path_factory):
+    project_root = tmp_path_factory.mktemp("kept-project-home")
+    await bm_project(command="create", name="Kept", path=str(project_root))
+
+    deleted = await bm_project_delete(name="Kept")
+
+    assert isinstance(deleted, str)
+    assert "• Name: Kept" in deleted
+    assert "Note files remain on disk" in deleted
+    assert "Re-add the project" in deleted
+    assert project_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_notes_removes_local_files(app, tmp_path_factory):
+    """delete_notes=true reaches the API, which removes the directory before answering (#1034)."""
+    project_root = tmp_path_factory.mktemp("delete-notes-project-home")
+    (project_root / "note.md").write_text("# Note\n\ncontent\n")
+    await bm_project(command="create", name="Delete Notes Project", path=str(project_root))
+
+    deleted = await bm_project_delete(name="Delete Notes Project", delete_notes=True)
+
+    assert isinstance(deleted, str)
+    assert "Note files on disk were deleted along with the project" in deleted
+    assert "Re-add the project" not in deleted
+    assert not project_root.exists()
+
+
+@pytest.mark.asyncio
+async def test_create_repeated_for_the_same_directory_is_idempotent(app, tmp_path_factory):
+    """The same directory, with a trailing slash and another name case, is not a new project."""
+    project_root = tmp_path_factory.mktemp("same-path-project-home")
+    created = await bm_project(
+        command="create", name="Same Path", path=str(project_root), output_format="json"
+    )
+    retry = await bm_project(
+        command="create", name="same path", path=f"{project_root}/", output_format="json"
+    )
+    retry_text = await bm_project(command="create", name="Same Path", path=str(project_root))
+
+    assert isinstance(created, dict) and isinstance(retry, dict)
+    assert (created["created"], created["already_exists"]) == (True, False)
+    assert created["indexing"]["state"] == "completed"
+    assert (retry["created"], retry["already_exists"]) == (False, True)
+    assert (retry["name"], retry["path"]) == ("Same Path", created["path"])
+    assert isinstance(retry_text, str)
+    assert retry_text.startswith("✓ Project already exists: Same Path")
+    assert "Project is already available for use in tool calls" in retry_text
+
+
+@pytest.mark.asyncio
+async def test_create_retry_indexes_a_project_that_was_never_indexed(app, tmp_path_factory):
+    """A create whose indexing never ran is repaired by repeating the create."""
+    project_root = tmp_path_factory.mktemp("partial-create-project-home")
+    (project_root / "kept.md").write_text("# Kept\n\n- [fact] retained before the retry\n")
+    # The project row exists but nothing indexed it: what a create leaves behind when
+    # its indexing request fails.
+    async with get_client() as client:
+        await ProjectClient(client).create_project(
+            {"name": "Partial", "path": str(project_root), "set_default": False}
+        )
+
+    retry = await bm_project(
+        command="create", name="Partial", path=str(project_root), output_format="json"
+    )
+    note = await bm_read(identifier="kept.md", project="Partial")
+
+    assert isinstance(retry, dict)
+    assert retry["already_exists"] is True
+    assert retry["indexing"]["state"] == "completed"
+    assert "retained before the retry" in str(note)
+
+
+@pytest.mark.asyncio
+async def test_create_refuses_the_same_name_in_another_directory(app, tmp_path_factory):
+    """A repeated name with another directory is refused, in either format (#1811)."""
+    existing_root = tmp_path_factory.mktemp("mismatch-existing-home")
+    requested_root = tmp_path_factory.mktemp("mismatch-requested-home")
+    await bm_project(command="create", name="Mismatch", path=str(existing_root))
+
+    with pytest.raises(ToolError) as refused:
+        await bm_project(command="create", name="Mismatch", path=str(requested_root))
+    with pytest.raises(ToolError) as refused_json:
+        await bm_project(
+            command="create", name="Mismatch", path=str(requested_root), output_format="json"
+        )
+
+    # Project paths are serialized with '/', while requested paths may use '\\' on Windows.
+    assert str(refused.value).replace("\\", "/") == (
+        f"ALREADY_EXISTS: Project 'Mismatch' already exists at "
+        f"{existing_root.as_posix()}, not {requested_root.as_posix()}.\n"
+        f"Try instead: another name, or bm_project(command='create', "
+        f"name='Mismatch', path='{existing_root.as_posix()}')"
+    )
+    payload = json.loads(str(refused_json.value))
+    assert payload["error"] == "ALREADY_EXISTS"
+    assert payload["message"].replace("\\", "/") == (
+        f"Project 'Mismatch' already exists at "
+        f"{existing_root.as_posix()}, not {requested_root.as_posix()}."
+    )
+
+
+@pytest.mark.asyncio
+async def test_workspace_without_cloud_credentials_fails_fast(app, test_project, tmp_path_factory):
+    """A workspace selector names a Cloud tenant; without credentials nothing happens locally."""
+    project_root = tmp_path_factory.mktemp("ws-local-project-home")
+
+    with pytest.raises(RuntimeError, match="cloud workspace was requested \\('team-paul'\\)"):
+        await bm_project(
+            command="create", name="WS Local", path=str(project_root), workspace="team-paul"
+        )
+    with pytest.raises(RuntimeError, match="cloud workspace was requested \\('team-paul'\\)"):
+        await bm_project_delete(name=test_project.name, workspace="team-paul")
+
+    listed = await bm_project(command="list")
+    assert isinstance(listed, str)
+    assert "WS Local" not in listed and f"- {test_project.name}" in listed
+
+
+@pytest.mark.asyncio
+async def test_explicit_local_routing_keeps_a_workspace_create_local(
+    monkeypatch, app, tmp_path_factory
+):
+    """--local wins over a workspace selector: the create runs and indexes locally."""
+    monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+    project_root = tmp_path_factory.mktemp("explicit-local-project-home")
+
+    created = await bm_project(
+        command="create",
+        name="Explicit Local",
+        path=str(project_root),
+        workspace="some-workspace",
+        output_format="json",
+    )
+
+    assert isinstance(created, dict)
+    assert created["created"] is True
+    assert created["indexing"]["state"] == "completed"
 
 
 # --- bm_schema ---
@@ -309,11 +506,6 @@ async def test_recent_guidance_keeps_the_json_shape(client, test_project, monkey
 
 @pytest.mark.asyncio
 async def test_api_refusals_honor_the_output_format(app, test_project):
-    """Deleting the default project is refused by the API; JSON keeps the refusal shape.
-
-    The legacy delete_project runs the same implementation, so it honors the format too.
-    """
+    """Deleting the default project is refused by the API; JSON keeps the refusal shape."""
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
         await bm_project_delete(name=test_project.name, output_format="json")
-    with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
-        await delete_project(project_name=test_project.name, output_format="json")

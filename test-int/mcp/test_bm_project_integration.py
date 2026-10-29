@@ -1,12 +1,18 @@
-"""
-Integration tests for project_management MCP tools.
+"""Integration tests for bm_project and bm_project_delete.
 
-Tests the complete project management workflow: MCP client -> MCP server -> FastAPI -> project service
+MCP client -> MCP server -> FastAPI -> project service.
 """
+
+from contextlib import asynccontextmanager
 
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
+from httpx import ASGITransport, AsyncClient
+
+from basic_memory.mcp import async_client, project_context
+from basic_memory.mcp.project_context import set_workspace_provider
+from basic_memory.schemas.cloud import WorkspaceInfo
 
 # These tests delete projects through the MCP client, which needs the opt-in.
 pytestmark = pytest.mark.usefixtures("project_delete_enabled")
@@ -32,30 +38,6 @@ async def test_list_projects_basic_operation(mcp_server, app, test_project):
         assert "test-project" in list_text  # Our test project
         assert "Pass a project name (or its [external_id] as project_id)" in list_text
         assert "Calls without one use the default project." in list_text
-
-
-@pytest.mark.asyncio
-async def test_project_management_workflow(mcp_server, app, test_project):
-    """Test basic project management workflow."""
-
-    async with Client(mcp_server) as client:
-        # List all projects
-        list_result = await client.call_tool("bm_project", {"command": "list"})
-        assert "Available projects:" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "test-project" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-
-@pytest.mark.asyncio
-async def test_project_metadata_consistency(mcp_server, app, test_project):
-    """Test that project management tools work correctly."""
-
-    async with Client(mcp_server) as client:
-        # Test basic project management tools
-
-        # list_projects
-        list_result = await client.call_tool("bm_project", {"command": "list"})
-        assert "Available projects:" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-        assert "test-project" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
 @pytest.mark.asyncio
@@ -600,8 +582,6 @@ async def test_create_project_workspace_without_credentials_fails_fast(
     MCP wire), but the create must error with auth guidance and leave no
     project behind.
     """
-    from fastmcp.exceptions import ToolError
-
     async with Client(mcp_server) as client:
         with pytest.raises(ToolError, match="cloud workspace was requested"):
             await client.call_tool(
@@ -632,17 +612,8 @@ async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
     no project_id exists yet, so workspace is the only way to target a
     non-default workspace at create time.
     """
-    from contextlib import asynccontextmanager
-    from unittest.mock import AsyncMock, patch
-
-    from httpx import ASGITransport, AsyncClient as HttpxAsyncClient
-
-    from basic_memory.mcp import async_client
-    from basic_memory.mcp.tools import project_management
-    from basic_memory.schemas.cloud import WorkspaceInfo
-
     captured_workspaces: list[str | None] = []
-    resolved_workspace = WorkspaceInfo(
+    team_workspace = WorkspaceInfo(
         tenant_id="tenant-cloud-test",
         name="Team Paul",
         workspace_type="organization",
@@ -658,45 +629,36 @@ async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
         captured_workspaces.append(workspace)
         # Yield an ASGI-backed httpx client so the create_project HTTP call
         # actually reaches the FastAPI app and the project is created in the DB.
-        async with HttpxAsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as inner:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as inner:
             yield inner
 
-    original_factory = async_client._client_factory
+    async def workspaces() -> list[WorkspaceInfo]:
+        return [team_workspace]
+
     async_client.set_client_factory(fake_factory)
+    set_workspace_provider(workspaces)
     try:
-        with patch.object(
-            project_management,
-            "resolve_workspace_parameter",
-            new_callable=AsyncMock,
-            return_value=resolved_workspace,
-        ) as mock_resolve_workspace:
-            async with Client(mcp_server) as mcp_client:
-                create_result = await mcp_client.call_tool(
-                    "bm_project",
-                    {
-                        "name": "ws-routed-project",
-                        "path": str(
-                            tmp_path.parent
-                            / (tmp_path.name + "-projects")
-                            / "project-ws-routed-project"
-                        ),
-                        "workspace": "team-paul",
-                        "command": "create",
-                    },
-                )
+        async with Client(mcp_server) as mcp_client:
+            create_result = await mcp_client.call_tool(
+                "bm_project",
+                {
+                    "name": "ws-routed-project",
+                    "path": str(
+                        tmp_path.parent
+                        / (tmp_path.name + "-projects")
+                        / "project-ws-routed-project"
+                    ),
+                    "workspace": "team-paul",
+                    "command": "create",
+                },
+            )
 
         create_text = create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "✓" in create_text
         assert "ws-routed-project" in create_text
 
-        mock_resolve_workspace.assert_awaited_once()
-        await_args = mock_resolve_workspace.await_args
-        assert await_args is not None
-        assert await_args.kwargs["workspace"] == "team-paul"
         # The factory must have been invoked with the tenant id resolved from the slug.
-        # create_memory_project opens one get_client() context, so the factory is
+        # A create opens one get_client() context, so the factory is
         # called once per tool invocation; both list_projects and create_project
         # share that single client.
         assert captured_workspaces, "Factory was never invoked"
@@ -705,4 +667,5 @@ async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
             f"got {captured_workspaces}"
         )
     finally:
-        async_client._client_factory = original_factory
+        async_client._client_factory = None
+        project_context._workspace_provider = None

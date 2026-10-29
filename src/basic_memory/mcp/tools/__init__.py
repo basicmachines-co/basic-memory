@@ -13,11 +13,6 @@ from basic_memory.mcp.tools.read_note import read_note as read_note
 from basic_memory.mcp.tools.search import search_notes as search_notes
 from basic_memory.mcp.tools.edit_note import edit_note as edit_note
 from basic_memory.mcp.tools.workspaces import list_workspaces as list_workspaces
-from basic_memory.mcp.tools.project_management import (
-    list_memory_projects as list_memory_projects,
-    create_memory_project as create_memory_project,
-    delete_project as delete_project,
-)
 
 # ChatGPT adapter implementations; Cloud owns their registration.
 from basic_memory.mcp.tools.chatgpt_tools import search as search, fetch as fetch
