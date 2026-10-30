@@ -9,14 +9,15 @@ files bundled in the package, so every install has the same manual: local, Cloud
 - `src/basic_memory/man/man1/` — shell commands run against a project (`ls(1)`, `grep(1)`, ...)
   and `bm` subcommands (`okf-export(1)`, `okf-check(1)`).
 - `src/basic_memory/man/man3/` — one page per MCP tool a server registers: the `bm_*` tools,
-  plus the Cloud-registered `bm_agent` and ChatGPT `search`/`fetch` adapters.
+  plus the Cloud-registered `bm_agent`, `bm_log`, `bm_open` and `bm_review` and the ChatGPT
+  `search`/`fetch` adapters.
 - `src/basic_memory/man/man7/` — concepts an agent needs, such as `comark(7)`, and
   `tools-migration(7)`, which maps pre-1.0 tools and `bm tool` commands to 1.0.
 - `src/basic_memory/man/bm.1` — the groff system page that `bm man install` copies for
   `man bm`. It is not a `bm man` page.
 
 A test holds section 3 equal to the local tool registry plus a hard-coded list of the
-Cloud-registered tools (`bm_agent`, `search`, `fetch`). It does not read Cloud's registry, so
+Cloud-registered tools (`bm_agent`, `bm_log`, `bm_open`, `bm_review`, `search`, `fetch`). It does not read Cloud's registry, so
 renaming or removing a Cloud tool needs a matching change to its page and to that list.
 
 ## Reading it
@@ -60,8 +61,8 @@ of the section 1 pages (`generated: cli`) from the Typer command tree. Drift tes
 blocks byte-equal to the rendering, so changing a local tool or a command without regenerating
 fails CI. Everything else on a page is hand-owned.
 
-The pages for Cloud-registered tools (`bm-agent(3)`, `chatgpt-search(3)`, `chatgpt-fetch(3)`) are
-maintained by hand: the local registry does not have those tools, so neither the generator nor
+The pages for Cloud-registered tools (`bm-agent(3)`, `bm-log(3)`, `bm-open(3)`, `bm-review(3)`,
+`chatgpt-search(3)`, `chatgpt-fetch(3)`) are maintained by hand: the local registry does not have those tools, so neither the generator nor
 the drift tests cover them. Update them when the Cloud tool's parameters change.
 
 ## Adding a page

@@ -135,6 +135,9 @@ TOOLS_WITHOUT_PAGES: set[str] = set()
 PAGES_WITHOUT_LOCAL_TOOLS = {
     # Cloud registers these; core ships their pages so the manual is one corpus.
     "bm_agent",
+    "bm_log",
+    "bm_open",
+    "bm_review",
     "fetch",
     "search",
 }

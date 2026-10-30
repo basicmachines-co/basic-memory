@@ -37,6 +37,25 @@ bm_project(command, name=None, path=None, set_default=False, workspace=None,
 bm_project never deletes; bm_project_delete does, and only when the server
 enables it.
 
+**Hosted server only.** The hosted Basic Memory Cloud server replaces this
+tool with one that has two more commands and three more parameters. A local
+server has neither.
+
+- `info` — how to register for Basic Memory Cloud and start a trial. If
+  project or note tools fail, send the person to the Basic Memory app, then
+  retry.
+- `usage` — the workspace's credit usage, for owners and admins. `workspace`
+  picks the workspace and `project` must be left out, because usage is
+  counted per workspace. `since` is the first UTC day (`YYYY-MM-DD`) or a
+  lookback such as `30d`. For `usage` it defaults to the start of the current
+  billing period, not the `7d` shown in PARAMETERS above, which applies to
+  `recent`. `until` is the last UTC day (`YYYY-MM-DD`) and
+  defaults to today. `group_by` is `actor` (who used credits, and background
+  job types; the default), `day` (credits per day and who used them) or
+  `job_type` (background work by job type, per day). `customer` is for
+  partner staff only: a managed customer's slug, id or name, or `all` for
+  every managed customer this month.
+
 While the local server is running, its watcher picks up a new project's folder
 at the next project reload. Once the watch is attached, a one-time index pass
 includes files copied in before attachment; later changes use normal file events.
