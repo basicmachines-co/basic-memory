@@ -9,6 +9,7 @@ note against an empty knowledge base, without ever writing one unprompted:
 """
 
 import pytest
+from sqlalchemy import text
 
 from basic_memory.mcp.prompts.getting_started import getting_started
 from basic_memory.mcp.server import mcp
@@ -55,6 +56,62 @@ async def test_recent_activity_empty_project_offers_first_note(
     assert 'directory="notes"' in result
     assert 'bm_project(command="recent", project=' in result
     assert 'since="30d"' in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_quiet_populated_project_has_no_first_note_offer(
+    client, test_project, indexed_project, session_maker
+):
+    """A project with notes, none changed in the window, gets the hint but no onboarding."""
+    await bm_write(
+        project=test_project.name,
+        title="Old note",
+        content="This project already contains useful context.",
+        directory="notes",
+    )
+    # Move the note out of the 7d window in both the entity table and the search index.
+    old = "2020-01-01T00:00:00+00:00"
+    async with session_maker() as session:
+        await session.execute(
+            text("UPDATE entity SET created_at = :old, updated_at = :old"), {"old": old}
+        )
+        await session.execute(
+            text("UPDATE search_index SET created_at = :old, updated_at = :old"), {"old": old}
+        )
+        await session.commit()
+
+    result = await bm_project(command="recent", project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert isinstance(result, str)
+    assert "No recent activity" in result
+    assert "If the user is just getting started" not in result
+    assert "first note" not in result
+    assert "bm_write(" not in result
+    assert f'bm_project(command="recent", project="{test_project.external_id}"' in result
+    assert 'since="30d"' in result
+    assert f'bm_search(project="{test_project.external_id}"' in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_empty_path_makes_one_status_request(
+    client, test_project, indexed_project, monkeypatch
+):
+    """The note count comes from the status call the empty path already made."""
+    from basic_memory.mcp.clients.project import ProjectClient
+
+    calls = 0
+    original = ProjectClient.get_status
+
+    async def counting(self, project_external_id):
+        nonlocal calls
+        calls += 1
+        return await original(self, project_external_id)
+
+    monkeypatch.setattr(ProjectClient, "get_status", counting)
+
+    await bm_project(command="recent", project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert calls == 1
 
 
 @pytest.mark.asyncio

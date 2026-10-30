@@ -11,7 +11,7 @@ from typing import Any, Literal
 from fastmcp import Context
 from loguru import logger
 
-from basic_memory.mcp.index_readiness import project_index_required
+from basic_memory.mcp.index_readiness import project_index_required, project_index_status
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.tool_params import ItemKind, search_item_types
 from basic_memory.mcp.tools.utils import call_get
@@ -74,9 +74,14 @@ async def recent_activity_page(
         )
         activity_data = GraphContext.model_validate(response.json())
 
-        # Do not offer first-note onboarding before the project was indexed.
+        # Do not offer first-note onboarding before the project was indexed. The same
+        # status response says whether the project holds any notes, so one request
+        # answers both questions.
+        project_has_notes = True
         if not activity_data.results:
-            guidance = await project_index_required(client, active_project)
+            status = await project_index_status(client, active_project)
+            project_has_notes = status.readiness.indexed_entities > 0
+            guidance = await project_index_required(client, active_project, status=status)
             if guidance is not None:
                 return guidance
 
@@ -97,6 +102,7 @@ async def recent_activity_page(
         page=page,
         project_id=active_project.external_id,
         type_filter_applied=bool(items),
+        project_has_notes=project_has_notes,
     )
 
 
@@ -125,12 +131,14 @@ def _format_project_output(
     page: int,
     project_id: str,
     type_filter_applied: bool,
+    project_has_notes: bool,
 ) -> str:
     """Format one project's recent activity as human-readable text.
 
     `project_id` is the project's route-safe external id. Onboarding examples use it
     instead of the display name so a model following them cannot land in a different
-    same-named project in another cloud workspace.
+    same-named project in another cloud workspace. `project_has_notes` is only
+    consulted for an empty unfiltered first page; it gates first-note onboarding.
     """
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
 
@@ -156,22 +164,27 @@ def _format_project_output(
 
         lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
         # Recent activity is the orientation call a model makes at session start, so an empty
-        # result is the natural moment to help. Stay offer-not-act, and cover both a brand-new
-        # (empty) knowledge base and an established one that is merely quiet in this window.
+        # result is the natural moment to help. Stay offer-not-act. Onboarding is for a project
+        # with no notes; an established project that is merely quiet in this window only gets
+        # the widen-or-search hint, so the model does not offer its user a "first note".
         # Examples name the external id: names collide across cloud workspaces, ids do not.
         route = f'project="{project_id}"'
         lines.append("")
+        if not project_has_notes:
+            lines.append(
+                "If the user is just getting started and has no notes yet, briefly explain that "
+                "Basic Memory keeps notes that persist across conversations and are shared between "
+                "the user and their AI, then offer to save something useful from this conversation "
+                "as their first note — wait for them to agree before writing:"
+            )
+            lines.append("```")
+            lines.append(f'bm_write({route}, title="...", content="...", directory="notes")')
+            lines.append("```")
+            lead = "Otherwise, widen"
+        else:
+            lead = "Widen"
         lines.append(
-            "If the user is just getting started and has no notes yet, briefly explain that "
-            "Basic Memory keeps notes that persist across conversations and are shared between "
-            "the user and their AI, then offer to save something useful from this conversation "
-            "as their first note — wait for them to agree before writing:"
-        )
-        lines.append("```")
-        lines.append(f'bm_write({route}, title="...", content="...", directory="notes")')
-        lines.append("```")
-        lines.append(
-            f"Otherwise, widen the window with "
+            f"{lead} the window with "
             f'bm_project(command="recent", {route}, since="30d") or find a topic '
             f'with bm_search({route}, query="...").'
         )
