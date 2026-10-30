@@ -8,6 +8,8 @@ note against an empty knowledge base, without ever writing one unprompted:
 - the `getting_started` prompt.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import text
 
@@ -70,7 +72,7 @@ async def test_recent_activity_quiet_populated_project_has_no_first_note_offer(
         directory="notes",
     )
     # Move the note out of the 7d window in both the entity table and the search index.
-    old = "2020-01-01T00:00:00+00:00"
+    old = datetime(2020, 1, 1, tzinfo=timezone.utc)
     async with session_maker() as session:
         await session.execute(
             text("UPDATE entity SET created_at = :old, updated_at = :old"), {"old": old}
