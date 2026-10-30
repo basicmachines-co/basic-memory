@@ -1,0 +1,6 @@
+# DCO app settings (https://github.com/dcoapp/app).
+# Allow a contributor to fix a missing Signed-off-by with a remediation commit instead of
+# rewriting a pushed branch. The commit's body must read:
+#   I, Name <email>, hereby add my Signed-off-by to this commit: <sha>
+allowRemediationCommits:
+  individual: true
