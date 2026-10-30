@@ -29,7 +29,7 @@ async def test_explicit_write_in_default_project(mcp_server, app, test_project):
 
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
-            with pytest.raises(ToolError, match="Missing required keyword only argument"):
+            with pytest.raises(ToolError, match="INVALID_ARGUMENTS: bm_write needs `project`"):
                 await client.call_tool(
                     "bm_write",
                     {"title": "Unscoped write", "content": "Must select the default explicitly."},
@@ -334,7 +334,7 @@ async def test_project_resolution_hierarchy(
     # Multiple addressable projects require an explicit scope even with a default.
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
-            with pytest.raises(ToolError, match="Missing required keyword only argument"):
+            with pytest.raises(ToolError, match="INVALID_ARGUMENTS: bm_write needs `project`"):
                 await client.call_tool(
                     "bm_write",
                     {

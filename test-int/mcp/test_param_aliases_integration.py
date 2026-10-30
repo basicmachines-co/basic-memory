@@ -25,7 +25,9 @@ async def test_read_rejects_removed_pagination(mcp_server, app, test_project):
     """Exact reads use line bounds, not fuzzy-search pagination."""
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "bm_read", {"identifier": "missing", "page": 1}, raise_on_error=False
+            "bm_read",
+            {"identifier": "missing", "project": test_project.name, "page": 1},
+            raise_on_error=False,
         )
         assert result.is_error
         assert "unexpected_keyword_argument" in result.content[0].text

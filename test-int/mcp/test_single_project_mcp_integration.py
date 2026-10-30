@@ -311,8 +311,8 @@ async def test_constraint_with_invalid_project_override(mcp_server, app, test_pr
 
     try:
         async with Client(mcp_server) as client:
-            # Blank scope fails validation even when the server is constrained.
-            with pytest.raises(ToolError, match="at least 1 character"):
+            # Blank scope is refused even when the server is constrained.
+            with pytest.raises(ToolError, match="INVALID_ARGUMENTS: bm_write needs `project`"):
                 await client.call_tool(
                     "bm_write", {"project": "", "title": "Blank scope", "content": "Rejected"}
                 )
