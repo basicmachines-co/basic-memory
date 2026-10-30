@@ -6,6 +6,21 @@ import { log } from "./logger.ts"
 
 const DEFAULT_RETRY_DELAYS_MS = [500, 1000, 2000]
 
+// Thrown for calls to the plugin's project after BM refused to create it.
+// Deliberately not a BmToolError: note methods read a BmToolError's refusal
+// payload as their own, and would report this ALREADY_EXISTS as an existing
+// note.
+export class ProjectUnavailableError extends Error {
+  readonly project: string
+  readonly reason: string
+  constructor(project: string, reason: string) {
+    super(`Basic Memory project "${project}" is unavailable: ${reason}`)
+    this.name = "ProjectUnavailableError"
+    this.project = project
+    this.reason = reason
+  }
+}
+
 export class NoteAlreadyExistsError extends Error {
   readonly permalink: string
   constructor(title: string, permalink: string, message?: string) {
@@ -367,9 +382,9 @@ export class BmClient {
   private startupRetry: Promise<void> | null = null
   private projectPath?: string
   private adoptExistingProject = false
-  // BM's refusal to create the plugin's project, kept so project-scoped
-  // calls report it while project listing still works.
-  private projectSetupError: BmToolError | null = null
+  // BM's refusal to create the plugin's project, kept so calls to that
+  // project report it while listing and other projects still work.
+  private projectSetupError: ProjectUnavailableError | null = null
   private prepare?: () => Promise<void>
 
   private client: Client | null = null
@@ -441,17 +456,19 @@ export class BmClient {
       //   and failing startup would also fail project listing, the call a
       //   user needs to see the stored path. Other failures still fail
       //   startup so the next tool call retries them.
-      // Outcome: project-scoped calls throw this refusal; listing still works.
+      // Outcome: calls to the plugin's project throw this refusal; listing
+      //   and calls naming another project still work.
       if (
         !(err instanceof BmToolError) ||
         parseRefusalPayload(err.toolMessage) === null
       ) {
         throw err
       }
-      this.projectSetupError = err
-      log.error(
-        `Basic Memory project "${this.project}" is unavailable: ${describeToolError(err)}`,
+      this.projectSetupError = new ProjectUnavailableError(
+        this.project,
+        describeToolError(err),
       )
+      log.error(this.projectSetupError.message)
     }
   }
 
@@ -492,9 +509,7 @@ export class BmClient {
   // The refusal from the last project setup, or null when the project is
   // usable. Status checks report it, since listing projects still succeeds.
   projectUnavailableReason(): string | null {
-    return this.projectSetupError
-      ? describeToolError(this.projectSetupError)
-      : null
+    return this.projectSetupError?.reason ?? null
   }
 
   private async waitForStartup(): Promise<void> {
@@ -731,7 +746,13 @@ export class BmClient {
     args: Record<string, unknown>,
   ): Promise<unknown> {
     await this.waitForStartup()
-    if (this.projectSetupError) throw this.projectSetupError
+    // Trigger: BM refused the plugin's project at startup.
+    // Why: the refusal concerns that project only; a call that names another
+    //   project by name or id must still reach BM.
+    // Outcome: only calls routed to the plugin's project report the refusal.
+    if (this.projectSetupError && this.targetsPluginProject(args)) {
+      throw this.projectSetupError
+    }
     return this.callStructured(name, args)
   }
 
@@ -752,6 +773,15 @@ export class BmClient {
     }
 
     return structuredPayload
+  }
+
+  // Project names match case-insensitively in BM, so "Test-Project" routes
+  // to the plugin's "test-project" too.
+  private targetsPluginProject(args: Record<string, unknown>): boolean {
+    return (
+      typeof args.project === "string" &&
+      args.project.toLowerCase() === this.project.toLowerCase()
+    )
   }
 
   private routedProject(project?: string): string {

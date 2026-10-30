@@ -1029,6 +1029,8 @@ describe("BmClient MCP behavior", () => {
     // from where a project of that name is stored. With projectPath left at
     // its workspace-root default, startup must use the stored folder.
     describe("an existing project at another folder", () => {
+      const projectUnavailable =
+        'Basic Memory project "test-project" is unavailable: ALREADY_EXISTS'
       const pathMismatch = new BmToolError(
         "bm_project",
         JSON.stringify({
@@ -1191,7 +1193,58 @@ describe("BmClient MCP behavior", () => {
           },
         ])
         await expect(client.listWorkspaces()).resolves.toEqual([])
-        await expect(client.readNote("t")).rejects.toBe(pathMismatch)
+        await expect(client.readNote("t")).rejects.toThrow(projectUnavailable)
+      })
+
+      it("lets calls that name another project through after a refusal", async () => {
+        const callToolRaw = serveStoredProject("/ws/test-project")
+        callToolRaw.mockImplementation(
+          async (name: string, args: Record<string, unknown>) => {
+            if (args.command === "create") throw pathMismatch
+            if (name === "bm_read") {
+              return structured({
+                result: {
+                  title: "other",
+                  permalink: "other",
+                  content: "healthy",
+                  file_path: "other.md",
+                },
+              })
+            }
+            return structured({
+              result: { title: "n", permalink: "n", file_path: "n.md" },
+            })
+          },
+        )
+
+        await client.start({ projectPath: "/ws" })
+
+        // The refusal belongs to the plugin's project only: explicit reads
+        // and writes elsewhere reach BM, by id or by name.
+        await expect(
+          client.readNote("other", { projectId: "other-project-uuid" }),
+        ).resolves.toMatchObject({ content: "healthy" })
+        await expect(
+          client.writeNote("n", "body", "notes", "other-project"),
+        ).resolves.toMatchObject({ file_path: "n.md" })
+        expect(
+          callToolRaw.mock.calls
+            .filter(([name]) => name !== "bm_project")
+            .map(([name, args]) => [name, args.project]),
+        ).toEqual([
+          ["bm_read", "other-project-uuid"],
+          ["bm_write", "other-project"],
+        ])
+
+        // Calls routed to the plugin's project, by default or by name in any
+        // case, still report the refusal without reaching BM.
+        await expect(client.readNote("t")).rejects.toThrow(projectUnavailable)
+        await expect(
+          client.writeNote("n", "body", "notes", "TEST-PROJECT"),
+        ).rejects.toThrow(projectUnavailable)
+        expect(
+          callToolRaw.mock.calls.filter(([name]) => name !== "bm_project"),
+        ).toHaveLength(2)
       })
 
       it("still retries a create that failed without a refusal", async () => {
