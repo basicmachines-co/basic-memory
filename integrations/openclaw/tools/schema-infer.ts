@@ -47,7 +47,7 @@ export function registerSchemaInferTool(
           )
 
           const lines: string[] = [
-            `**Type:** ${result.entity_type}`,
+            `**Type:** ${result.note_type}`,
             `**Notes analyzed:** ${result.notes_analyzed}`,
           ]
 

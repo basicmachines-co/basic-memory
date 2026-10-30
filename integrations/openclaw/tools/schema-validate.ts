@@ -58,8 +58,8 @@ export function registerSchemaValidateTool(
           }
 
           const lines: string[] = []
-          if (result.entity_type) {
-            lines.push(`**Type:** ${result.entity_type}`)
+          if (result.note_type) {
+            lines.push(`**Type:** ${result.note_type}`)
           }
           lines.push(
             `**Notes:** ${result.total_notes ?? 0} | **Valid:** ${result.valid_count ?? 0} | **Warnings:** ${result.warning_count ?? 0} | **Errors:** ${result.error_count ?? 0}`,
@@ -68,8 +68,9 @@ export function registerSchemaValidateTool(
           if (result.results && result.results.length > 0) {
             lines.push("")
             for (const r of result.results) {
-              const status = r.valid ? "valid" : "invalid"
-              lines.push(`- **${r.identifier}** — ${status}`)
+              // passed is true when there are no errors; warnings still pass.
+              const status = r.passed ? "valid" : "invalid"
+              lines.push(`- **${r.note_identifier}** — ${status}`)
               for (const w of r.warnings) {
                 lines.push(`  - warning: ${w}`)
               }

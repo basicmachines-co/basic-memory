@@ -39,7 +39,7 @@ describe("schema-diff tool", () => {
 
     it("should show drift when fields differ", async () => {
       ;(mockClient.schemaDiff as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "person",
+        note_type: "person",
         schema_found: true,
         new_fields: [
           {
@@ -50,23 +50,35 @@ describe("schema-diff tool", () => {
             percentage: 0.6,
           },
         ],
+        // BM's DriftFieldResponse has no declared_in (#1997).
         dropped_fields: [
-          { name: "fax", source: "observation", declared_in: "schema" },
+          {
+            name: "fax",
+            source: "observation",
+            count: 1,
+            total: 10,
+            percentage: 0.1,
+          },
         ],
         cardinality_changes: [],
+        notes_compared: 10,
       })
 
       const result = await execute("call-1", { noteType: "person" })
 
       expect(mockClient.schemaDiff).toHaveBeenCalledWith("person", undefined)
+      expect(result.content[0].text).toContain("**Type:** person")
       expect(result.content[0].text).toContain("phone")
-      expect(result.content[0].text).toContain("fax")
+      expect(result.content[0].text).toContain(
+        "- **fax** (observation) — 10% (1/10)",
+      )
+      expect(result.content[0].text).not.toContain("undefined")
       expect(result.details.new_fields).toHaveLength(1)
     })
 
     it("should show no drift when in sync", async () => {
       ;(mockClient.schemaDiff as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "person",
+        note_type: "person",
         schema_found: true,
         new_fields: [],
         dropped_fields: [],
@@ -80,7 +92,7 @@ describe("schema-diff tool", () => {
 
     it("should handle missing schema", async () => {
       ;(mockClient.schemaDiff as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "unknown",
+        note_type: "unknown",
         schema_found: false,
         new_fields: [],
         dropped_fields: [],
@@ -95,7 +107,7 @@ describe("schema-diff tool", () => {
 
     it("should pass project to client.schemaDiff", async () => {
       ;(mockClient.schemaDiff as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "person",
+        note_type: "person",
         schema_found: true,
         new_fields: [],
         dropped_fields: [],

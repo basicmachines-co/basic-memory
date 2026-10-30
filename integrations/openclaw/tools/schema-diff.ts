@@ -50,7 +50,7 @@ export function registerSchemaDiffTool(
             }
           }
 
-          const lines: string[] = [`**Type:** ${result.entity_type}`]
+          const lines: string[] = [`**Type:** ${result.note_type}`]
 
           if (
             result.new_fields.length === 0 &&
@@ -69,9 +69,13 @@ export function registerSchemaDiffTool(
             }
 
             if (result.dropped_fields.length > 0) {
-              lines.push("", "### Dropped Fields (in schema, not in notes)")
+              // A dropped field can still appear in a few notes, so report how
+              // often it does, as BM's own drift report does.
+              lines.push("", "### Dropped Fields (in schema, rare in notes)")
               for (const f of result.dropped_fields) {
-                lines.push(`- **${f.name}** — declared in ${f.declared_in}`)
+                lines.push(
+                  `- **${f.name}** (${f.source}) — ${(f.percentage * 100).toFixed(0)}% (${f.count}/${f.total})`,
+                )
               }
             }
 

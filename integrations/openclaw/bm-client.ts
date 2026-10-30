@@ -202,23 +202,39 @@ export interface WorkspaceResult {
   workspace_type: string | null
 }
 
+// The bm_schema response shapes. They mirror the backend models in
+// src/basic_memory/schemas/schema.py (ValidationReport, InferenceReport,
+// DriftReport); the client casts the payload without translating fields, so
+// a name that drifts from the backend renders as undefined (#1997).
+// JSON responses drop null fields, so nullable backend fields are optional.
+export interface SchemaNoteValidation {
+  note_identifier: string
+  schema_entity: string
+  passed: boolean
+  warnings: string[]
+  errors: string[]
+}
+
 export interface SchemaValidationResult {
-  entity_type: string | null
+  note_type?: string | null
   total_notes: number
   total_entities: number
   valid_count: number
   warning_count: number
   error_count: number
-  results: Array<{
-    identifier: string
-    valid: boolean
-    warnings: string[]
-    errors: string[]
+  results: SchemaNoteValidation[]
+  type_summaries?: Array<{
+    note_type: string
+    total_notes: number
+    total_entities: number
+    valid_count: number
+    warning_count: number
+    error_count: number
   }>
 }
 
 export interface SchemaInferResult {
-  entity_type: string
+  note_type: string
   notes_analyzed: number
   field_frequencies: Array<{
     name: string
@@ -236,18 +252,21 @@ export interface SchemaInferResult {
   excluded: string[]
 }
 
+export interface SchemaDriftField {
+  name: string
+  source: string
+  count: number
+  total: number
+  percentage: number
+}
+
 export interface SchemaDiffResult {
-  entity_type: string
+  note_type: string
   schema_found: boolean
-  new_fields: Array<{
-    name: string
-    source: string
-    count: number
-    total: number
-    percentage: number
-  }>
-  dropped_fields: Array<{ name: string; source: string; declared_in?: string }>
+  new_fields: SchemaDriftField[]
+  dropped_fields: SchemaDriftField[]
   cardinality_changes: string[]
+  notes_compared?: number | null
 }
 
 function getErrorMessage(err: unknown): string {

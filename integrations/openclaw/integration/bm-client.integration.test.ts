@@ -9,6 +9,9 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry"
 import { BmClient } from "../bm-client.ts"
 import { registerProjectListTool } from "../tools/list-memory-projects.ts"
 import { registerReadTool } from "../tools/read-note.ts"
+import { registerSchemaDiffTool } from "../tools/schema-diff.ts"
+import { registerSchemaInferTool } from "../tools/schema-infer.ts"
+import { registerSchemaValidateTool } from "../tools/schema-validate.ts"
 import { registerWriteTool } from "../tools/write-note.ts"
 
 const RUN_INTEGRATION = process.env.BM_INTEGRATION === "1"
@@ -367,6 +370,93 @@ if (!RUN_INTEGRATION) {
         "MQ-TEST-0000-0002",
       )
       expect(after.details.checksum).not.toBe(checksum)
+    })
+
+    // Regression (#1997): the schema tools read field names BM never sent
+    // (entity_type, identifier, valid, declared_in), so every note rendered as
+    // "**undefined** — invalid". Unit fixtures are hand-written; this checks
+    // the plugin against a real bm_schema response.
+    it("renders schema tool results from real bm_schema responses", async () => {
+      const { client } = getHarness()
+      const tools = new Map<
+        string,
+        (
+          id: string,
+          params: Record<string, unknown>,
+        ) => Promise<{ content: Array<{ text: string }> }>
+      >()
+      const api = {
+        registerTool: (tool: { name: string; execute: any }) => {
+          tools.set(tool.name, tool.execute)
+        },
+      } as unknown as OpenClawPluginApi
+      registerSchemaValidateTool(api, client)
+      registerSchemaInferTool(api, client)
+      registerSchemaDiffTool(api, client)
+      const text = async (name: string, params: Record<string, unknown>) => {
+        const execute = tools.get(name)
+        if (!execute) throw new Error(`tool ${name} was not registered`)
+        return (await execute("integration", params)).content[0].text
+      }
+
+      await client.writeNote(
+        "Contact",
+        "# Contact",
+        "schema",
+        undefined,
+        false,
+        {
+          noteType: "schema",
+          metadata: {
+            entity: "contact",
+            version: 1,
+            schema: { name: "string, full name", "fax?": "string, legacy" },
+            settings: { validation: "warn" },
+          },
+        },
+      )
+      await client.writeNote(
+        "Ada",
+        "# Ada\n\n- [name] Ada Lovelace",
+        "contacts",
+        undefined,
+        false,
+        { noteType: "contact" },
+      )
+      await client.writeNote(
+        "Bob",
+        "# Bob\n\n- [role] Analyst",
+        "contacts",
+        undefined,
+        false,
+        { noteType: "contact" },
+      )
+
+      // The raw payload carries every field the plugin's types declare.
+      const raw = await client.schemaValidate("contact")
+      expect(raw.note_type).toBe("contact")
+      expect(raw.results.map((r) => [r.note_identifier, r.passed])).toEqual(
+        expect.arrayContaining([
+          ["Ada", true],
+          ["Bob", true],
+        ]),
+      )
+
+      const validated = await text("schema_validate", { noteType: "contact" })
+      expect(validated).toContain("**Type:** contact")
+      expect(validated).toMatch(/- \*\*Ada\*\* — valid/)
+      // Warn mode: a missing required field is a warning, and the note passes.
+      expect(validated).toMatch(/- \*\*Bob\*\* — valid\n {2}- warning: /)
+      expect(validated).not.toContain("undefined")
+
+      const inferred = await text("schema_infer", { noteType: "contact" })
+      expect(inferred).toContain("**Type:** contact")
+      expect(inferred).not.toContain("undefined")
+
+      const drift = await text("schema_diff", { noteType: "contact" })
+      expect(drift).toContain("**Type:** contact")
+      expect(drift).toContain("- **fax** (")
+      expect(drift).not.toContain("undefined")
     })
 
     it("lists the integration project through real BM MCP", async () => {

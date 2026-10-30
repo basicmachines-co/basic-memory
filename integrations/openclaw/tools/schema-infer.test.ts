@@ -39,7 +39,7 @@ describe("schema-infer tool", () => {
 
     it("should infer schema for a note type", async () => {
       ;(mockClient.schemaInfer as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "person",
+        note_type: "person",
         notes_analyzed: 12,
         field_frequencies: [
           {
@@ -70,7 +70,9 @@ describe("schema-infer tool", () => {
         undefined,
         undefined,
       )
-      expect(result.content[0].text).toContain("person")
+      // Regression (#1997): the type heading reads BM's note_type.
+      expect(result.content[0].text).toContain("**Type:** person")
+      expect(result.content[0].text).not.toContain("undefined")
       expect(result.content[0].text).toContain("12")
       expect(result.content[0].text).toContain("name")
       expect(result.details.suggested_required).toContain("name")
@@ -78,7 +80,7 @@ describe("schema-infer tool", () => {
 
     it("should pass custom threshold", async () => {
       ;(mockClient.schemaInfer as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "task",
+        note_type: "task",
         notes_analyzed: 5,
         field_frequencies: [],
         suggested_schema: {},
@@ -98,7 +100,7 @@ describe("schema-infer tool", () => {
 
     it("should pass project to client.schemaInfer", async () => {
       ;(mockClient.schemaInfer as jest.MockedFunction<any>).mockResolvedValue({
-        entity_type: "person",
+        note_type: "person",
         notes_analyzed: 1,
         field_frequencies: [],
         suggested_schema: {},
