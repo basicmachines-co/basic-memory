@@ -68,11 +68,14 @@ describe("config", () => {
     it("should use provided projectPath", () => {
       const config = parseConfig({ projectPath: "/custom/project/path" })
       expect(config.projectPath).toBe("/custom/project/path")
+      expect(config.projectPathConfigured).toBe(true)
     })
 
     it("should default projectPath to workspace root", () => {
       const config = parseConfig({ memoryDir: "notes/" })
       expect(config.projectPath).toBe(".")
+      // Lets startup adopt an existing project stored elsewhere (#1988).
+      expect(config.projectPathConfigured).toBe(false)
     })
 
     it("should use provided autoCapture", () => {

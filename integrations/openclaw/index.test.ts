@@ -92,6 +92,7 @@ describe("plugin service lifecycle", () => {
     expect(startSpy).toHaveBeenCalledWith({
       cwd: workspace,
       projectPath: join(workspace, "memory"),
+      adoptExistingProject: false,
       prepare: expect.any(Function),
     })
     expect(readNoteSpy).not.toHaveBeenCalled()

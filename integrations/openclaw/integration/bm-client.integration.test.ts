@@ -21,6 +21,7 @@ type Harness = {
   workspaceDir: string
   projectPath: string
   projectName: string
+  env: Record<string, string>
 }
 
 let harness: Harness | null = null
@@ -180,6 +181,7 @@ if (!RUN_INTEGRATION) {
         workspaceDir,
         projectPath,
         projectName,
+        env: childEnv,
       }
     })
 
@@ -369,6 +371,61 @@ if (!RUN_INTEGRATION) {
       expect(projects.some((project) => project.name === projectName)).toBe(
         true,
       )
+    })
+
+    // Regression (#1988): the harness project is stored at <workspace>/memory,
+    // and BM 1.0 refuses a same-name create at the workspace root (#1846).
+    describe("startup against a project stored at another folder", () => {
+      async function startAtWorkspaceRoot(
+        adoptExistingProject: boolean,
+      ): Promise<BmClient> {
+        const { projectName, workspaceDir, env } = getHarness()
+        const client = new BmClient(BM_BIN, projectName)
+        await client.start({
+          cwd: workspaceDir,
+          env,
+          projectPath: workspaceDir,
+          adoptExistingProject,
+        })
+        return client
+      }
+
+      it("adopts the stored folder when projectPath is the default", async () => {
+        const { projectPath } = getHarness()
+        const client = await startAtWorkspaceRoot(true)
+        try {
+          expect(client.projectUnavailableReason()).toBeNull()
+
+          const created = await client.writeNote(
+            "Adopted Project Note",
+            "Written after adopting the stored project.",
+            "adopted",
+          )
+          await waitForFile(resolve(projectPath, created.file_path), true)
+          await client.deleteNote("adopted/adopted-project-note")
+        } finally {
+          await client.stop()
+        }
+      })
+
+      it("reports the refusal for a configured path but still lists projects", async () => {
+        const { projectName, projectPath } = getHarness()
+        const client = await startAtWorkspaceRoot(false)
+        try {
+          expect(client.projectUnavailableReason()).toContain("ALREADY_EXISTS")
+
+          const listed = (await client.listProjects()).find(
+            (project) => project.name === projectName,
+          )
+          expect(listed?.path).toBe(projectPath)
+
+          await expect(client.recentActivity("7d")).rejects.toThrow(
+            "ALREADY_EXISTS",
+          )
+        } finally {
+          await client.stop()
+        }
+      })
     })
   })
 }

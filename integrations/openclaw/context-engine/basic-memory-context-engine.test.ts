@@ -17,6 +17,7 @@ function makeConfig(overrides?: Partial<BasicMemoryConfig>): BasicMemoryConfig {
     memoryDir: "memory/",
     memoryFile: "MEMORY.md",
     projectPath: "/tmp/test-project",
+    projectPathConfigured: true,
     autoCapture: true,
     captureMinChars: 10,
     autoRecall: true,

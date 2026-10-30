@@ -27,6 +27,7 @@ describe("Basic Memory memory capability", () => {
     search: jest.Mock
     readNote: jest.Mock
     listProjects: jest.Mock
+    projectUnavailableReason: jest.Mock
     isServiceRunning: jest.Mock
     stop: jest.Mock
   }
@@ -56,6 +57,7 @@ describe("Basic Memory memory capability", () => {
         file_path: "pets/quillfeather.md",
       }),
       listProjects: jest.fn().mockResolvedValue([]),
+      projectUnavailableReason: jest.fn().mockReturnValue(null),
       isServiceRunning: jest.fn().mockReturnValue(true),
       stop: jest.fn().mockResolvedValue(undefined),
     }
@@ -168,6 +170,20 @@ describe("Basic Memory memory capability", () => {
     await expect(reader().health()).resolves.toEqual({
       status: "unavailable",
       message: "Basic Memory is not reachable",
+    })
+  })
+
+  // Regression (#1988): listing still works when BM refused the plugin's
+  // project, so health must report the refusal instead of "ready".
+  it("reports the plugin's project as unavailable when BM refused it", async () => {
+    client.projectUnavailableReason.mockReturnValue(
+      "ALREADY_EXISTS: Project 'openclaw-beru' already exists at /ws/openclaw-beru, not /ws.",
+    )
+
+    await expect(reader().health()).resolves.toEqual({
+      status: "unavailable",
+      message:
+        "ALREADY_EXISTS: Project 'openclaw-beru' already exists at /ws/openclaw-beru, not /ws.",
     })
   })
 
