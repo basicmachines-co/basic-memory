@@ -1016,3 +1016,9 @@ beta version:
 # List all available recipes
 default:
     @just --list
+
+# Package latest combined skills using an existing ChatGPT plugin export.
+# Preserves plugin identity, MCP connections, metadata, and unrelated files.
+[positional-arguments]
+chatgpt-plugin export:
+    python3 scripts/build_chatgpt_plugin.py "$1"
