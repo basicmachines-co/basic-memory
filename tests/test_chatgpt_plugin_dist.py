@@ -64,7 +64,7 @@ def test_rejects_invalid_export(tmp_path: Path, files: dict[str, str], message: 
     assert not output.exists()
 
 
-def test_rebuilds_output_without_source_argument(tmp_path: Path) -> None:
+def test_rebuilds_output_in_place(tmp_path: Path) -> None:
     output = tmp_path / "plugin.zip"
     manifest = b'{"name":"existing","version":"1.0.0"}'
     connection = b'{"mcpServers":{"memory":{"url":"https://example.com/mcp"}}}'
@@ -72,8 +72,21 @@ def test_rebuilds_output_without_source_argument(tmp_path: Path) -> None:
         archive.writestr("plugin.json", manifest)
         archive.writestr("mcp.json", connection)
         archive.writestr("skills/basic-memory/SKILL.md", "old skill")
-    subprocess.run([sys.executable, str(SCRIPT), "--output", str(output)], check=True)
+    subprocess.run([sys.executable, str(SCRIPT), str(output), "--output", str(output)], check=True)
     with zipfile.ZipFile(output) as archive:
         assert archive.read("plugin.json") == manifest
         assert archive.read("mcp.json") == connection
         assert b"name: basic-memory" in archive.read("skills/basic-memory/SKILL.md")
+
+
+def test_builds_from_checked_in_configuration_without_existing_output(tmp_path: Path) -> None:
+    output = tmp_path / "clean-dist" / "plugin.zip"
+    subprocess.run([sys.executable, str(SCRIPT), "--output", str(output)], check=True)
+    source = SCRIPT.parents[1] / "plugins/chatgpt"
+    with zipfile.ZipFile(output) as archive:
+        for name in [".codex-plugin/plugin.json", ".mcp.json", "assets/app-icon.png"]:
+            assert archive.read(name) == (source / name).read_bytes()
+        manifest = json.loads(archive.read(".codex-plugin/plugin.json"))
+        assert manifest["name"] == "app-6a49590bf6348191a16c0b87ca6b01b4"
+        assert manifest["mcpServers"] == "./.mcp.json"
+        assert "skills/basic-memory/SKILL.md" in archive.namelist()

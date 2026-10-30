@@ -1,0 +1,29 @@
+{
+  "author": {
+    "name": "Basic Memory"
+  },
+  "description": "Basic Memory gives you a persistent knowledge base: your notes, decisions, research, and project context, stored as plain Markdown files you own. Anything your AI saves to Basic Memory, you can open and edit. Anything you write, your AI can find and build on.\n\nSave what matters. \"Save our pricing decision and link it to the roadmap.\" Notes you save in one conversation are available everywhere.\n\nRetrieve context from anywhere. \"What did we decide about pricing? Check my notes first.\" Never re-explain a project.\n\nSearch by meaning. Semantic and hybrid search across everything you and your AI have saved.\n\nStructured search. Filter by status, type, tags, or priority. \"Show my open tasks, sorted by priority.\"\n\nFollow connections. Linked notes let your AI traverse related context and surface relationships in a living knowledge graph.\n\nShare a workspace with your team. Teammates and their AI tools read and write to one shared source of truth.\n\nNotes are stored as ordinary Markdown that you own. Any AI tool can use and build on it, so your shared context follows you across the assistants and agents you use.\n\nRequires a Basic Memory Cloud account.\n\nUse the Basic Memory Cloud app to view and edit your notes at: https://app.basicmemory.com",
+  "interface": {
+    "capabilities": [],
+    "category": "Productivity",
+    "defaultPrompt": [
+      "Help me create my first note",
+      "What do you know about my current projects?",
+      "Show me the notes we saved about yesterday\u2019s meeting"
+    ],
+    "developerName": "Basic Memory",
+    "displayName": "Basic Memory Cloud",
+    "longDescription": "Basic Memory gives you a persistent knowledge base: your notes, decisions, research, and project context, stored as plain Markdown files you own. Anything your AI saves to Basic Memory, you can open and edit. Anything you write, your AI can find and build on.\n\nSave what matters. \"Save our pricing decision and link it to the roadmap.\" Notes you save in one conversation are available everywhere.\n\nRetrieve context from anywhere. \"What did we decide about pricing? Check my notes first.\" Never re-explain a project.\n\nSearch by meaning. Semantic and hybrid search across everything you and your AI have saved.\n\nStructured search. Filter by status, type, tags, or priority. \"Show my open tasks, sorted by priority.\"\n\nFollow connections. Linked notes let your AI traverse related context and surface relationships in a living knowledge graph.\n\nShare a workspace with your team. Teammates and their AI tools read and write to one shared source of truth.\n\nNotes are stored as ordinary Markdown that you own. Any AI tool can use and build on it, so your shared context follows you across the assistants and agents you use.\n\nRequires a Basic Memory Cloud account.\n\nUse the Basic Memory Cloud app to view and edit your notes at: https://app.basicmemory.com",
+    "privacyPolicyURL": "https://basicmemory.com/privacy",
+    "shortDescription": "One memory for your AI tools",
+    "supportURL": "https://basicmemory.com/support",
+    "termsOfServiceURL": "https://basicmemory.com/terms",
+    "websiteURL": "https://basicmemory.com",
+    "logo": "./assets/app-icon.png",
+    "composerIcon": "./assets/app-icon.png"
+  },
+  "name": "app-6a49590bf6348191a16c0b87ca6b01b4",
+  "skills": "./skills",
+  "version": "3.0.2",
+  "mcpServers": "./.mcp.json"
+}
