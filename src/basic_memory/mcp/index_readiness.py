@@ -3,21 +3,36 @@
 from httpx import AsyncClient
 
 from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.schemas.project_readiness import ProjectIndexPhase
 from basic_memory.utils import shell_command
 
 
-async def project_index_required(client: AsyncClient, project: ProjectItem) -> str | None:
+async def project_index_status(
+    client: AsyncClient, project: ProjectItem
+) -> ProjectIndexStatusResponse:
+    """Fetch the project's index status, for callers that need more than the guidance."""
+    # Match the tools' deferred client imports to keep CLI startup lightweight.
+    from basic_memory.mcp.clients.project import ProjectClient
+
+    return await ProjectClient(client).get_status(project.external_id)
+
+
+async def project_index_required(
+    client: AsyncClient,
+    project: ProjectItem,
+    *,
+    status: ProjectIndexStatusResponse | None = None,
+) -> str | None:
     """Distinguish an unsearched project from an honest empty result.
 
     Call only after an empty read: the status endpoint observes project files,
     so successful reads should not pay for an extra directory scan. Let status
     failures propagate rather than interpreting unknown readiness as an empty index.
+    A caller that already fetched the status passes it to avoid a second request.
     """
-    # Match the tools' deferred client imports to keep CLI startup lightweight.
-    from basic_memory.mcp.clients.project import ProjectClient
-
-    status = await ProjectClient(client).get_status(project.external_id)
+    if status is None:
+        status = await project_index_status(client, project)
     readiness = status.readiness
     if readiness.phase is not ProjectIndexPhase.NEVER_INDEXED:
         return None

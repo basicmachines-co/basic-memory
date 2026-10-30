@@ -194,7 +194,13 @@ def _entity_result(index: int, title: str) -> ContextResult:
     )
 
 
-def _format(activity: GraphContext, *, page: int = 1, type_filter_applied: bool = False) -> str:
+def _format(
+    activity: GraphContext,
+    *,
+    page: int = 1,
+    type_filter_applied: bool = False,
+    project_has_notes: bool = False,
+) -> str:
     return _format_project_output(
         "proj",
         activity,
@@ -202,7 +208,28 @@ def _format(activity: GraphContext, *, page: int = 1, type_filter_applied: bool 
         page=page,
         project_id="ext-123",
         type_filter_applied=type_filter_applied,
+        project_has_notes=project_has_notes,
     )
+
+
+def test_empty_project_offers_first_note():
+    out = _format(_empty_graph(), project_has_notes=False)
+
+    assert "No recent activity in 'proj' within 7d." in out
+    assert "wait for them to agree" in out
+    assert 'bm_write(project="ext-123"' in out
+    assert "Otherwise, widen the window" in out
+
+
+def test_quiet_populated_project_has_hint_only():
+    out = _format(_empty_graph(), project_has_notes=True)
+
+    assert "No recent activity in 'proj' within 7d." in out
+    assert "If the user is just getting started" not in out
+    assert "first note" not in out
+    assert "bm_write(" not in out
+    assert 'bm_project(command="recent", project="ext-123", since="30d")' in out
+    assert 'bm_search(project="ext-123", query="...")' in out
 
 
 def test_filtered_empty_page_has_no_first_note_offer():
