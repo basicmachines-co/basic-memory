@@ -314,7 +314,11 @@ if (!RUN_INTEGRATION) {
       // overwrite=false refuses a second write instead of replacing the note.
       const refused = await call("write_note", writeArgs)
       expect(refused.details.error).toBe("note_already_exists")
-      expect(refused.content[0].text).toContain("Note already exists")
+      // Since #1838 the agent sees bm_write's own refusal text, not the
+      // plugin's fallback message.
+      expect(refused.content[0].text).toContain(
+        "A note already exists at 'memory-quest/Memory Master.md'. Nothing was written.",
+      )
 
       // read_note by project_id surfaces the metadata as frontmatter and the
       // checksum that guards a replacement.
