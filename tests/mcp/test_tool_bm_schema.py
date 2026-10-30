@@ -707,6 +707,9 @@ async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project
     assert "person" in result
     assert "bm_schema(command='infer'" in result
     assert "How to Create a Schema" in result
+    assert "bm_write" in result
+    assert "bm reindex" not in result
+    assert "file watcher" not in result
 
 
 @pytest.mark.asyncio
@@ -738,6 +741,49 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
     assert "person" in result
     assert "bm_schema(command='infer'" in result
     assert "How to Create a Schema" in result
+    assert "bm_write" in result
+    assert "bm reindex" not in result
+    assert "file watcher" not in result
+
+
+@pytest.mark.asyncio
+async def test_schema_note_from_bm_write_found_without_reindex(app, test_project, index_project):
+    """A schema note saved with bm_write is found at once; no reindex between write and validate."""
+    project_path = Path(test_project.path)
+    for name in ["Alice", "Bob"]:
+        _write_schema_file(
+            project_path,
+            f"people/{name}.md",
+            PERSON_NOTE.format(name=name, permalink=name.lower()),
+        )
+    await index_project()
+
+    with pytest.raises(ToolError) as refused:
+        await bm_schema(command="validate", note_type="person", project=test_project.name)
+    assert "No Schema Found" in str(refused.value)
+
+    # Follow the guidance: create the schema note with bm_write. No index_project() after this.
+    await bm_write(
+        identifier="schemas/person.md",
+        content=(
+            "---\n"
+            "title: Person\n"
+            "type: schema\n"
+            "entity: person\n"
+            "version: 1\n"
+            "schema:\n"
+            "  name: string\n"
+            "  role?: string\n"
+            "settings:\n"
+            "  validation: warn\n"
+            "---\n"
+        ),
+        project=test_project.name,
+    )
+
+    result = await bm_schema(command="validate", note_type="person", project=test_project.name)
+    assert isinstance(result, str)
+    assert "Schema Validation: person" in result
 
 
 # --- Report rendering ---

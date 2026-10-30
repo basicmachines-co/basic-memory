@@ -240,7 +240,8 @@ def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) ->
         f"## How to Create a Schema\n\n"
         f"1. **Infer from existing notes** — run `bm_schema(command='infer', note_type={note_type!r})` to "
         f"analyze your notes and get a suggested schema\n"
-        f"2. **Create a schema note** — write a markdown file with this frontmatter:\n\n"
+        f"2. **Create a schema note** — call `bm_write(identifier='schemas/{note_type}.md', "
+        f"content=..., project=...)` with this frontmatter at the start of `content`:\n\n"
         f"```yaml\n"
         f"---\n"
         f"title: {note_type.title()}\n"
@@ -258,9 +259,9 @@ def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) ->
         f"- `field_name: type, description` — required field\n"
         f"- `field_name?: type, description` — optional field\n"
         f"- Supported types: `string`, `number`, `boolean`, `string[]`\n\n"
-        f"3. **Index** — run `bm reindex --search` or wait for the "
-        f"file watcher to pick up the new schema note\n"
-        f"4. **Re-run** — call `bm_schema(command={command!r}, note_type={note_type!r})` again\n"
+        f"A note saved with `bm_write` is available to `bm_schema` at once.\n\n"
+        f"3. **Re-run** — call `bm_schema(command={command!r}, note_type={note_type!r}, "
+        f"project=...)` again\n"
     )
 
 
