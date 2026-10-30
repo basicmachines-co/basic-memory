@@ -166,6 +166,8 @@ export interface RecentResult {
 export interface ProjectListResult {
   name: string
   path: string
+  // Set only on the row attached to a local project; null on cloud-only rows.
+  local_path?: string | null
   external_id?: string | null
   source?: string | null
   qualified_name?: string | null
@@ -464,21 +466,27 @@ export class BmClient {
     // Outcome: create at the stored folder, which BM treats as idempotent.
     if (!this.adoptExistingProject) return configured
 
+    // With cloud credentials the listing holds one row per workspace for a
+    // name, and only the row attached to the local project carries
+    // local_path; a cloud-only row's path is tenant-relative. BM compares a
+    // local create against the local project, so only local_path qualifies.
     const name = this.project.toLowerCase()
-    const existing = parseProjectList(
+    const localPath = parseProjectList(
       await this.callStructured("bm_project", {
         command: "list",
         output_format: "json",
       }),
-    ).find((project) => project.name.toLowerCase() === name)
-    if (!existing) return configured
+    ).find(
+      (project) => project.name.toLowerCase() === name && project.local_path,
+    )?.local_path
+    if (!localPath) return configured
 
-    if (existing.path !== configured) {
+    if (localPath !== configured) {
       log.info(
-        `using existing project "${existing.name}" at ${existing.path}; set projectPath to use another folder`,
+        `using existing project "${this.project}" at ${localPath}; set projectPath to use another folder`,
       )
     }
-    return existing.path
+    return localPath
   }
 
   // The refusal from the last project setup, or null when the project is

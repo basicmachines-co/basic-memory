@@ -1041,7 +1041,9 @@ describe("BmClient MCP behavior", () => {
       // A stand-in BM holding one project, refusing creates at another path
       // the way the 1.0 server does.
       function serveStoredProject(storedPath: string) {
-        const projects = [{ name: "Test-Project", path: storedPath }]
+        const projects = [
+          { name: "Test-Project", path: storedPath, local_path: storedPath },
+        ]
         const callToolRaw = jest.fn(
           async (name: string, args: Record<string, unknown>) => {
             if (name === "bm_read") {
@@ -1104,6 +1106,68 @@ describe("BmClient MCP behavior", () => {
         expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
       })
 
+      // With cloud credentials, a cloud-only row for the same name can sort
+      // ahead of the row attached to the local project. Its path is
+      // tenant-relative, and a local create there would be refused.
+      it("adopts the local row, not a cloud-only row of the same name", async () => {
+        const callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "list"
+              ? structured({
+                  projects: [
+                    {
+                      name: "test-project",
+                      path: "/test-project",
+                      local_path: null,
+                      source: "cloud",
+                    },
+                    {
+                      name: "test-project",
+                      path: "/ws",
+                      local_path: "/ws",
+                      source: "local+cloud",
+                    },
+                  ],
+                })
+              : structured({ name: DEFAULT_PROJECT, already_exists: true }),
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)).toHaveLength(1)
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+      })
+
+      it("creates at the default path when only a cloud row has the name", async () => {
+        const callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "list"
+              ? structured({
+                  projects: [
+                    {
+                      name: "test-project",
+                      path: "/test-project",
+                      local_path: null,
+                      source: "cloud",
+                    },
+                  ],
+                })
+              : structured({ name: DEFAULT_PROJECT, created: true }),
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+      })
+
       it("keeps a configured projectPath and reports BM's refusal", async () => {
         const callToolRaw = serveStoredProject("/ws/test-project")
 
@@ -1120,7 +1184,11 @@ describe("BmClient MCP behavior", () => {
         // Listing still works so the user can see where the project lives;
         // project-scoped calls report the refusal instead of a dead plugin.
         await expect(client.listProjects()).resolves.toEqual([
-          { name: "Test-Project", path: "/ws/test-project" },
+          {
+            name: "Test-Project",
+            path: "/ws/test-project",
+            local_path: "/ws/test-project",
+          },
         ])
         await expect(client.listWorkspaces()).resolves.toEqual([])
         await expect(client.readNote("t")).rejects.toBe(pathMismatch)
