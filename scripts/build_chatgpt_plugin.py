@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Update an exported ChatGPT plugin with the latest combined Basic Memory skill.
 
-Usage: just chatgpt-plugin current-plugin.zip
+Usage: just chatgpt-plugin
+Rebuilds the existing ZIP in dist/chatgpt-plugin/ in place.
+For initial setup, pass the current plugin export once.
 The export must contain a portable plugin.json at its root or in one wrapper
 folder. All existing files outside skills/basic-memory/ are preserved verbatim,
 including MCP connections, manifests, assets, and other skills.
@@ -20,8 +22,6 @@ from build_skills_dist import CHATGPT, REPO_ROOT, discover_skills, stage_combine
 
 def build_plugin(source: Path, output: Path) -> None:
     """Replace the combined skill while preserving the exported plugin configuration."""
-    if source.resolve() == output.resolve():
-        raise ValueError("Output must differ from the existing plugin export")
     with zipfile.ZipFile(source) as archive:
         files = {
             entry.filename: archive.read(entry)
@@ -70,14 +70,26 @@ def build_plugin(source: Path, output: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help="Current plugin ZIP exported from ChatGPT")
+    parser.add_argument(
+        "source",
+        type=Path,
+        nargs="?",
+        help="Initial plugin export (defaults to rebuilding the output ZIP)",
+    )
     parser.add_argument(
         "--output",
         type=Path,
         default=REPO_ROOT / "dist/chatgpt-plugin/basic-memory-chatgpt-plugin.zip",
     )
     args = parser.parse_args()
-    build_plugin(args.source, args.output)
+    source = args.source if args.source is not None else args.output
+    if not source.exists():
+        parser.error(
+            f"No plugin ZIP at {source}. Initialize once with "
+            "just chatgpt-plugin /path/to/current-plugin-export.zip; "
+            "subsequent builds need no arguments."
+        )
+    build_plugin(source, args.output)
 
 
 if __name__ == "__main__":
