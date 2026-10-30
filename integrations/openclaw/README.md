@@ -107,7 +107,7 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
         enabled: true,
         config: {
           project: "my-agent",        // BM project name (default: "openclaw-{hostname}")
-          projectPath: ".",            // Project directory (default: workspace root)
+          projectPath: ".",            // Project directory (default: workspace root, or an existing project's folder)
           memoryDir: "memory/",        // Where task notes live
           memoryFile: "MEMORY.md",     // Working memory file
           autoCapture: true,           // Record conversations as daily notes
@@ -128,7 +128,7 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
 |--------|---------|-------------|
 | `project` | `"openclaw-{hostname}"` | Basic Memory project name |
 | `bmPath` | `"bm"` | Path to BM CLI binary |
-| `projectPath` | `"."` | Project data directory |
+| `projectPath` | `"."` | Project data directory, relative to the workspace or absolute. When unset and a project named `project` already exists, the plugin uses that project's stored folder. When set, it must match the stored folder; otherwise Basic Memory refuses the project and the plugin logs where it is stored |
 | `memoryDir` | `"memory/"` | Relative path for task scanning |
 | `memoryFile` | `"MEMORY.md"` | Working memory file for text search |
 | `autoCapture` | `true` | Auto-index agent conversations |

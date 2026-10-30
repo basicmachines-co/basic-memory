@@ -170,7 +170,6 @@ export function openBasicMemoryReader(
       // any note content, so it is safe for status-only callers.
       try {
         await guarded(() => client.listProjects())
-        return { status: "ready" }
       } catch (err) {
         log.warn(
           `memory health check failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -180,6 +179,13 @@ export function openBasicMemoryReader(
           message: "Basic Memory is not reachable",
         }
       }
+      // Listing works even when BM refused the plugin's project, so the
+      // refusal is checked separately; every search and read would fail.
+      const projectProblem = client.projectUnavailableReason()
+      if (projectProblem) {
+        return { status: "unavailable", message: projectProblem }
+      }
+      return { status: "ready" }
     },
 
     // In the gateway the BM MCP session is shared by the whole plugin and

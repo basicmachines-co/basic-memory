@@ -166,6 +166,7 @@ export default definePluginEntry({
           .start({
             cwd: workspace,
             projectPath,
+            adoptExistingProject: !cfg.projectPathConfigured,
             prepare: () => installBasicMemoryIfMissing(cfg.bmPath || "bm"),
           })
           .then(async () => {

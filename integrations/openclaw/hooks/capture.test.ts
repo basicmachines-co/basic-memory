@@ -17,6 +17,7 @@ describe("capture hook", () => {
       memoryDir: "memory/",
       memoryFile: "MEMORY.md",
       projectPath: "/tmp/test",
+      projectPathConfigured: true,
       autoCapture: true,
       captureMinChars: 10,
       autoRecall: true,

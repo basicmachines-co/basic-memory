@@ -6,6 +6,21 @@ import { log } from "./logger.ts"
 
 const DEFAULT_RETRY_DELAYS_MS = [500, 1000, 2000]
 
+// Thrown for calls to the plugin's project after BM refused to create it.
+// Deliberately not a BmToolError: note methods read a BmToolError's refusal
+// payload as their own, and would report this ALREADY_EXISTS as an existing
+// note.
+export class ProjectUnavailableError extends Error {
+  readonly project: string
+  readonly reason: string
+  constructor(project: string, reason: string) {
+    super(`Basic Memory project "${project}" is unavailable: ${reason}`)
+    this.name = "ProjectUnavailableError"
+    this.project = project
+    this.reason = reason
+  }
+}
+
 export class NoteAlreadyExistsError extends Error {
   readonly permalink: string
   constructor(title: string, permalink: string, message?: string) {
@@ -166,6 +181,8 @@ export interface RecentResult {
 export interface ProjectListResult {
   name: string
   path: string
+  // Set only on the row attached to a local project; null on cloud-only rows.
+  local_path?: string | null
   external_id?: string | null
   source?: string | null
   qualified_name?: string | null
@@ -341,6 +358,13 @@ function projectMatchesWorkspace(
   )
 }
 
+function parseProjectList(payload: unknown): ProjectListResult[] {
+  if (isRecord(payload) && Array.isArray(payload.projects)) {
+    return payload.projects as ProjectListResult[]
+  }
+  throw new Error("invalid bm_project response")
+}
+
 export class BmClient {
   private bmPath: string
   private project: string
@@ -357,6 +381,10 @@ export class BmClient {
   private startup: Promise<void> | null = null
   private startupRetry: Promise<void> | null = null
   private projectPath?: string
+  private adoptExistingProject = false
+  // BM's refusal to create the plugin's project, kept so calls to that
+  // project report it while listing and other projects still work.
+  private projectSetupError: ProjectUnavailableError | null = null
   private prepare?: () => Promise<void>
 
   private client: Client | null = null
@@ -384,6 +412,9 @@ export class BmClient {
     cwd?: string
     env?: Record<string, string>
     projectPath?: string
+    // True when projectPath is only the default: an existing project of the
+    // plugin's name is then used at its stored folder.
+    adoptExistingProject?: boolean
     // Runs before each connect attempt, e.g. installing the bm CLI.
     prepare?: () => Promise<void>
   }): Promise<void> {
@@ -398,6 +429,9 @@ export class BmClient {
     if (options?.projectPath) {
       this.projectPath = options.projectPath
     }
+    if (options?.adoptExistingProject !== undefined) {
+      this.adoptExistingProject = options.adoptExistingProject
+    }
     if (options?.prepare) {
       this.prepare = options.prepare
     }
@@ -409,7 +443,73 @@ export class BmClient {
   private async runStartup(): Promise<void> {
     await this.prepare?.()
     await this.connectWithRetries()
-    if (this.projectPath) await this.createProject(this.projectPath)
+    if (!this.projectPath) return
+
+    this.projectSetupError = null
+    const projectPath = await this.startupProjectPath(this.projectPath)
+    try {
+      await this.createProject(projectPath)
+    } catch (err) {
+      // Trigger: BM refused the project, e.g. a configured projectPath that
+      //   differs from where a project of this name is stored (#1846).
+      // Why: a refusal is deterministic, so retrying startup cannot fix it,
+      //   and failing startup would also fail project listing, the call a
+      //   user needs to see the stored path. Other failures still fail
+      //   startup so the next tool call retries them.
+      // Outcome: calls to the plugin's project throw this refusal; listing
+      //   and calls naming another project still work.
+      if (
+        !(err instanceof BmToolError) ||
+        parseRefusalPayload(err.toolMessage) === null
+      ) {
+        throw err
+      }
+      this.projectSetupError = new ProjectUnavailableError(
+        this.project,
+        describeToolError(err),
+      )
+      log.error(this.projectSetupError.message)
+    }
+  }
+
+  // The folder startup creates the project at. Since #1846, BM refuses a
+  // create whose path differs from the stored one instead of reusing the
+  // project by name.
+  private async startupProjectPath(configured: string): Promise<string> {
+    // Trigger: projectPath was not configured.
+    // Why: its default has changed between plugin releases ("." and
+    //   ~/.basic-memory/openclaw/), and users create projects by hand, so an
+    //   existing project may sit somewhere other than the default.
+    // Outcome: create at the stored folder, which BM treats as idempotent.
+    if (!this.adoptExistingProject) return configured
+
+    // With cloud credentials the listing holds one row per workspace for a
+    // name, and only the row attached to the local project carries
+    // local_path; a cloud-only row's path is tenant-relative. BM compares a
+    // local create against the local project, so only local_path qualifies.
+    const name = this.project.toLowerCase()
+    const localPath = parseProjectList(
+      await this.callStructured("bm_project", {
+        command: "list",
+        output_format: "json",
+      }),
+    ).find(
+      (project) => project.name.toLowerCase() === name && project.local_path,
+    )?.local_path
+    if (!localPath) return configured
+
+    if (localPath !== configured) {
+      log.info(
+        `using existing project "${this.project}" at ${localPath}; set projectPath to use another folder`,
+      )
+    }
+    return localPath
+  }
+
+  // The refusal from the last project setup, or null when the project is
+  // usable. Status checks report it, since listing projects still succeeds.
+  projectUnavailableReason(): string | null {
+    return this.projectSetupError?.reason ?? null
   }
 
   private async waitForStartup(): Promise<void> {
@@ -646,6 +746,13 @@ export class BmClient {
     args: Record<string, unknown>,
   ): Promise<unknown> {
     await this.waitForStartup()
+    // Trigger: BM refused the plugin's project at startup.
+    // Why: the refusal concerns that project only; a call that names another
+    //   project by name or id must still reach BM.
+    // Outcome: only calls routed to the plugin's project report the refusal.
+    if (this.projectSetupError && this.targetsPluginProject(args)) {
+      throw this.projectSetupError
+    }
     return this.callStructured(name, args)
   }
 
@@ -666,6 +773,15 @@ export class BmClient {
     }
 
     return structuredPayload
+  }
+
+  // Project names match case-insensitively in BM, so "Test-Project" routes
+  // to the plugin's "test-project" too.
+  private targetsPluginProject(args: Record<string, unknown>): boolean {
+    return (
+      typeof args.project === "string" &&
+      args.project.toLowerCase() === this.project.toLowerCase()
+    )
   }
 
   private routedProject(project?: string): string {
@@ -713,22 +829,21 @@ export class BmClient {
   }
 
   async listProjects(workspace?: string): Promise<ProjectListResult[]> {
-    const payload = await this.callTool("bm_project", {
-      command: "list",
-      output_format: "json",
-    })
-
-    if (isRecord(payload) && Array.isArray(payload.projects)) {
-      const projects = payload.projects as ProjectListResult[]
-      if (workspace) {
-        return projects.filter((project) =>
-          projectMatchesWorkspace(project, workspace),
-        )
-      }
-      return projects
+    // Waits for startup but not for the plugin's project: when BM refused
+    // it, the listing is how the user finds where it is actually stored.
+    await this.waitForStartup()
+    const projects = parseProjectList(
+      await this.callStructured("bm_project", {
+        command: "list",
+        output_format: "json",
+      }),
+    )
+    if (workspace) {
+      return projects.filter((project) =>
+        projectMatchesWorkspace(project, workspace),
+      )
     }
-
-    throw new Error("invalid bm_project response")
+    return projects
   }
 
   async search(

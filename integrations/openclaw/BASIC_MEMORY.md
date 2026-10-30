@@ -200,7 +200,7 @@ The plugin accepts these config fields in `openclaw.config.json`:
 | `bmPath` | `bm` | Path to BM CLI binary |
 | `memoryDir` | `memory/` | Relative path for memory files |
 | `memoryFile` | `MEMORY.md` | Working memory file name |
-| `projectPath` | same as `memoryDir` | Absolute path to project root |
+| `projectPath` | workspace root | Project root, relative to the workspace or absolute. When unset, an existing project of the same name is used at its stored folder |
 | `autoCapture` | `true` | Auto-index conversations after each turn |
 | `captureMinChars` | `10` | Min chars to trigger capture |
 | `autoRecall` | `true` | Inject context (active tasks, recent activity) at session start |

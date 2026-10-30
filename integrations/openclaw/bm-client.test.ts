@@ -1025,6 +1025,254 @@ describe("BmClient MCP behavior", () => {
       expect(connect).toHaveBeenCalledTimes(2)
     })
 
+    // Regression (#1988): since #1846, BM refuses a create whose path differs
+    // from where a project of that name is stored. With projectPath left at
+    // its workspace-root default, startup must use the stored folder.
+    describe("an existing project at another folder", () => {
+      const projectUnavailable =
+        'Basic Memory project "test-project" is unavailable: ALREADY_EXISTS'
+      const pathMismatch = new BmToolError(
+        "bm_project",
+        JSON.stringify({
+          error: "ALREADY_EXISTS",
+          message:
+            "Project 'test-project' already exists at /ws/test-project, not /ws.",
+        }),
+      )
+
+      // A stand-in BM holding one project, refusing creates at another path
+      // the way the 1.0 server does.
+      function serveStoredProject(storedPath: string) {
+        const projects = [
+          { name: "Test-Project", path: storedPath, local_path: storedPath },
+        ]
+        const callToolRaw = jest.fn(
+          async (name: string, args: Record<string, unknown>) => {
+            if (name === "bm_read") {
+              return structured({
+                result: {
+                  title: "t",
+                  permalink: "t",
+                  content: "body",
+                  file_path: "t.md",
+                },
+              })
+            }
+            if (args.command === "list") return structured({ projects })
+            if (args.path !== storedPath) throw pathMismatch
+            return structured({ name: "Test-Project", already_exists: true })
+          },
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+        return callToolRaw
+      }
+
+      const createCalls = (callToolRaw: jest.Mock) =>
+        callToolRaw.mock.calls.filter(([, args]) => args.command === "create")
+
+      it("adopts the stored folder when projectPath is the default", async () => {
+        const callToolRaw = serveStoredProject("/ws/test-project")
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)).toHaveLength(1)
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({
+          name: DEFAULT_PROJECT,
+          path: "/ws/test-project",
+        })
+        expect(client.projectUnavailableReason()).toBeNull()
+        await expect(client.readNote("t")).resolves.toMatchObject({
+          content: "body",
+        })
+      })
+
+      it("creates at the default path when no project has the name", async () => {
+        const callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "list"
+              ? structured({
+                  projects: [{ name: "other", path: "/elsewhere" }],
+                })
+              : structured({ name: DEFAULT_PROJECT, created: true }),
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+      })
+
+      // With cloud credentials, a cloud-only row for the same name can sort
+      // ahead of the row attached to the local project. Its path is
+      // tenant-relative, and a local create there would be refused.
+      it("adopts the local row, not a cloud-only row of the same name", async () => {
+        const callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "list"
+              ? structured({
+                  projects: [
+                    {
+                      name: "test-project",
+                      path: "/test-project",
+                      local_path: null,
+                      source: "cloud",
+                    },
+                    {
+                      name: "test-project",
+                      path: "/ws",
+                      local_path: "/ws",
+                      source: "local+cloud",
+                    },
+                  ],
+                })
+              : structured({ name: DEFAULT_PROJECT, already_exists: true }),
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)).toHaveLength(1)
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+      })
+
+      it("creates at the default path when only a cloud row has the name", async () => {
+        const callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "list"
+              ? structured({
+                  projects: [
+                    {
+                      name: "test-project",
+                      path: "/test-project",
+                      local_path: null,
+                      source: "cloud",
+                    },
+                  ],
+                })
+              : structured({ name: DEFAULT_PROJECT, created: true }),
+        )
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = callToolRaw
+
+        await client.start({ projectPath: "/ws", adoptExistingProject: true })
+
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+      })
+
+      it("keeps a configured projectPath and reports BM's refusal", async () => {
+        const callToolRaw = serveStoredProject("/ws/test-project")
+
+        // A configured path is the user's choice, so startup must not
+        // silently swap in the stored one; it still finishes connecting.
+        await client.start({ projectPath: "/ws" })
+
+        expect(createCalls(callToolRaw)).toHaveLength(1)
+        expect(createCalls(callToolRaw)[0][1]).toMatchObject({ path: "/ws" })
+        expect(client.projectUnavailableReason()).toBe(
+          "ALREADY_EXISTS: Project 'test-project' already exists at /ws/test-project, not /ws.",
+        )
+
+        // Listing still works so the user can see where the project lives;
+        // project-scoped calls report the refusal instead of a dead plugin.
+        await expect(client.listProjects()).resolves.toEqual([
+          {
+            name: "Test-Project",
+            path: "/ws/test-project",
+            local_path: "/ws/test-project",
+          },
+        ])
+        await expect(client.listWorkspaces()).resolves.toEqual([])
+        await expect(client.readNote("t")).rejects.toThrow(projectUnavailable)
+      })
+
+      it("lets calls that name another project through after a refusal", async () => {
+        const callToolRaw = serveStoredProject("/ws/test-project")
+        callToolRaw.mockImplementation(
+          async (name: string, args: Record<string, unknown>) => {
+            if (args.command === "create") throw pathMismatch
+            if (name === "bm_read") {
+              return structured({
+                result: {
+                  title: "other",
+                  permalink: "other",
+                  content: "healthy",
+                  file_path: "other.md",
+                },
+              })
+            }
+            return structured({
+              result: { title: "n", permalink: "n", file_path: "n.md" },
+            })
+          },
+        )
+
+        await client.start({ projectPath: "/ws" })
+
+        // The refusal belongs to the plugin's project only: explicit reads
+        // and writes elsewhere reach BM, by id or by name.
+        await expect(
+          client.readNote("other", { projectId: "other-project-uuid" }),
+        ).resolves.toMatchObject({ content: "healthy" })
+        await expect(
+          client.writeNote("n", "body", "notes", "other-project"),
+        ).resolves.toMatchObject({ file_path: "n.md" })
+        expect(
+          callToolRaw.mock.calls
+            .filter(([name]) => name !== "bm_project")
+            .map(([name, args]) => [name, args.project]),
+        ).toEqual([
+          ["bm_read", "other-project-uuid"],
+          ["bm_write", "other-project"],
+        ])
+
+        // Calls routed to the plugin's project, by default or by name in any
+        // case, still report the refusal without reaching BM.
+        await expect(client.readNote("t")).rejects.toThrow(projectUnavailable)
+        await expect(
+          client.writeNote("n", "body", "notes", "TEST-PROJECT"),
+        ).rejects.toThrow(projectUnavailable)
+        expect(
+          callToolRaw.mock.calls.filter(([name]) => name !== "bm_project"),
+        ).toHaveLength(2)
+      })
+
+      it("still retries a create that failed without a refusal", async () => {
+        const create = jest
+          .fn()
+          .mockRejectedValueOnce(
+            new BmToolError("bm_project", "database is locked"),
+          )
+          .mockResolvedValue(structured({ name: DEFAULT_PROJECT }))
+        ;(client as any).connectWithRetries = jest
+          .fn()
+          .mockResolvedValue(undefined)
+        ;(client as any).callToolRaw = jest.fn(
+          async (_name: string, args: Record<string, unknown>) =>
+            args.command === "create" ? create() : structured({ projects: [] }),
+        )
+
+        // A transient failure is not kept as the project's state: startup
+        // fails, and the next tool call's retry creates the project.
+        await expect(client.start({ projectPath: "/ws" })).rejects.toThrow(
+          "database is locked",
+        )
+        expect(client.projectUnavailableReason()).toBeNull()
+        await expect(client.listProjects()).resolves.toEqual([])
+        expect(create).toHaveBeenCalledTimes(2)
+      })
+    })
+
     it("surfaces the retry's error when startup keeps failing", async () => {
       ;(client as any).connectWithRetries = jest
         .fn()

@@ -7,6 +7,9 @@ export type BasicMemoryConfig = {
   memoryDir: string
   memoryFile: string
   projectPath: string
+  // False when projectPath fell back to the workspace-root default, so
+  // startup may adopt an existing project of the same name where it lives.
+  projectPathConfigured: boolean
   autoCapture: boolean
   captureMinChars: number
   autoRecall: boolean
@@ -100,6 +103,8 @@ export function parseConfig(raw: unknown): BasicMemoryConfig {
       typeof cfg.projectPath === "string" && cfg.projectPath.length > 0
         ? cfg.projectPath
         : ".",
+    projectPathConfigured:
+      typeof cfg.projectPath === "string" && cfg.projectPath.length > 0,
     bmPath:
       typeof cfg.bmPath === "string" && cfg.bmPath.length > 0
         ? cfg.bmPath
