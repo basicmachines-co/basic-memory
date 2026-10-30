@@ -25,3 +25,9 @@ dist: validate
 # Show available recipes
 default:
     @just --list
+
+# Update a ChatGPT plugin export, preserving its identity and MCP connection.
+# Output: dist/chatgpt-plugin/basic-memory-chatgpt-plugin.zip (relative to repo).
+[positional-arguments]
+chatgpt-plugin export:
+    python3 {{repo_root}}/scripts/build_chatgpt_plugin.py "$1"
