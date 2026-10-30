@@ -62,3 +62,18 @@ def test_rejects_invalid_export(tmp_path: Path, files: dict[str, str], message: 
     assert result.returncode != 0
     assert message in result.stderr
     assert not output.exists()
+
+
+def test_rebuilds_output_without_source_argument(tmp_path: Path) -> None:
+    output = tmp_path / "plugin.zip"
+    manifest = b'{"name":"existing","version":"1.0.0"}'
+    connection = b'{"mcpServers":{"memory":{"url":"https://example.com/mcp"}}}'
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("plugin.json", manifest)
+        archive.writestr("mcp.json", connection)
+        archive.writestr("skills/basic-memory/SKILL.md", "old skill")
+    subprocess.run([sys.executable, str(SCRIPT), "--output", str(output)], check=True)
+    with zipfile.ZipFile(output) as archive:
+        assert archive.read("plugin.json") == manifest
+        assert archive.read("mcp.json") == connection
+        assert b"name: basic-memory" in archive.read("skills/basic-memory/SKILL.md")

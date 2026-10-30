@@ -1020,5 +1020,5 @@ default:
 # Package latest combined skills using an existing ChatGPT plugin export.
 # Preserves plugin identity, MCP connections, metadata, and unrelated files.
 [positional-arguments]
-chatgpt-plugin export:
-    python3 scripts/build_chatgpt_plugin.py "$1"
+chatgpt-plugin *args:
+    python3 scripts/build_chatgpt_plugin.py "$@"
