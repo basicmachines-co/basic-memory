@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "basic-memory": {
+      "type": "http",
+      "url": "https://cloud.basicmemory.com/mcp"
+    }
+  }
+}
