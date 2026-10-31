@@ -43,6 +43,7 @@ The CLI examples retain their `bm cat`, `bm find`, and other CLI command shapes.
 | Skill | Description | When to use |
 |-------|-------------|-------------|
 | **memory-tasks** | Structured task tracking that survives context compaction. Creates typed `Task` notes with steps, status, and context. | Multi-step work (3+ steps), anything that might outlast a context window, or after compaction to resume. |
+| **memory-infra** | Operational fact registry — servers, deployed projects, produced artifacts, and an append-only change log as typed notes. | Before/after deployment or config work, when multiple agents share a host, or when a new server or project needs registering. |
 | **memory-schema** | Schema lifecycle management — discover unschemaed notes, infer schemas, create/edit definitions, validate, and detect drift. | When structured note types emerge (Task, Person, Meeting, etc.) and you want consistency. |
 | **memory-reflect** | Sleep-time reflection. Reviews recent activity in a project and folds lasting decisions, lessons, and facts into the notes they belong in, with a dated reflection note. Inspired by [sleep-time compute](https://www.letta.com/blog/sleep-time-compute). | Schedule 1-2x daily, trigger from a heartbeat, or run on demand. |
 | **memory-capture** | Capture the current state of a working thread into a single coherent note — synthesize where it landed, not an append-log. Re-captures rewrite the same note in place via a `thread_id` key. | Mid-thread or end-of-thread, when decisions, insights, or context are worth preserving. |

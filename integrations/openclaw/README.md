@@ -229,6 +229,7 @@ These skills ship with the plugin — no installation needed:
 - **memory-comark** — charts, tables, boards, and live views in notes with `::bm-*` components
 - **memory-defrag** — cleanup and reorganization of a project's notes
 - **memory-ingest** — import existing material into Basic Memory
+- **memory-infra** — operational fact registry: servers, deployments, artifacts, change log
 - **memory-lifecycle** — manage note/project lifecycle workflows
 - **memory-literary-analysis** — analyze texts and reading notes
 - **memory-metadata-search** — query notes by frontmatter fields

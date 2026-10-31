@@ -21,6 +21,7 @@
     "skills/memory-comark",
     "skills/memory-defrag",
     "skills/memory-ingest",
+    "skills/memory-infra",
     "skills/memory-lifecycle",
     "skills/memory-literary-analysis",
     "skills/memory-metadata-search",
