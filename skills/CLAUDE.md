@@ -24,6 +24,7 @@ memory-defrag/SKILL.md          # Memory reorganization and cleanup
 memory-metadata-search/SKILL.md # Structured metadata filtering and queries
 memory-lifecycle/SKILL.md       # Entity status transitions and folder-based archival
 memory-ingest/SKILL.md          # Process external input into structured entities
+memory-infra/SKILL.md            # Operational fact registry: servers, projects, artifacts, changelog
 memory-research/SKILL.md        # Web research synthesized into Basic Memory entities
 memory-literary-analysis/SKILL.md # Literary analysis knowledge graph pipeline
 memory-curate/SKILL.md          # Knowledge-graph curation: orphans, relations, tags, hub notes

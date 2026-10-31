@@ -21,6 +21,7 @@
     "skills/memory-comark",
     "skills/memory-defrag",
     "skills/memory-ingest",
+    "skills/memory-infra",
     "skills/memory-lifecycle",
     "skills/memory-literary-analysis",
     "skills/memory-metadata-search",
@@ -90,21 +91,53 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "project": { "type": "string" },
-      "memoryDir": { "type": "string" },
-      "memory_dir": { "type": "string" },
-      "memoryFile": { "type": "string" },
-      "memory_file": { "type": "string" },
-      "bmPath": { "type": "string" },
-      "autoCapture": { "type": "boolean" },
-      "captureMinChars": { "type": "number", "minimum": 0 },
-      "capture_min_chars": { "type": "number", "minimum": 0 },
-      "autoRecall": { "type": "boolean" },
-      "auto_recall": { "type": "boolean" },
-      "recallPrompt": { "type": "string" },
-      "recall_prompt": { "type": "string" },
-      "debug": { "type": "boolean" },
-      "projectPath": { "type": "string" }
+      "project": {
+        "type": "string"
+      },
+      "memoryDir": {
+        "type": "string"
+      },
+      "memory_dir": {
+        "type": "string"
+      },
+      "memoryFile": {
+        "type": "string"
+      },
+      "memory_file": {
+        "type": "string"
+      },
+      "bmPath": {
+        "type": "string"
+      },
+      "autoCapture": {
+        "type": "boolean"
+      },
+      "captureMinChars": {
+        "type": "number",
+        "minimum": 0
+      },
+      "capture_min_chars": {
+        "type": "number",
+        "minimum": 0
+      },
+      "autoRecall": {
+        "type": "boolean"
+      },
+      "auto_recall": {
+        "type": "boolean"
+      },
+      "recallPrompt": {
+        "type": "string"
+      },
+      "recall_prompt": {
+        "type": "string"
+      },
+      "debug": {
+        "type": "boolean"
+      },
+      "projectPath": {
+        "type": "string"
+      }
     },
     "required": []
   }

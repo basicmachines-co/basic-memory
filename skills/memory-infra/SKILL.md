@@ -1,6 +1,6 @@
 ---
 name: memory-infra
-description: "Infrastructure registry: which server hosts which project, which artifacts tasks produced, and an append-only change log. Use before and after deployment or ops work so every agent shares the same operational facts and never touches an unregistered target."
+description: "Operational fact registry: which server hosts which project, produced artifacts, and an append-only change log. Read before deployments so agents share one answer."
 ---
 
 # Memory Infra
@@ -37,7 +37,7 @@ Three rules follow from that:
 
 ## Entities
 
-Four note types. Create each one the first time its subject appears; keep them short and factual.
+Four note types. Create each one the first time its subject appears; keep them short and factual. Observation categories carry the structured fields, so schema validation (below) can read them — `host` is stored as `- [host] value`, not as prose.
 
 ### Server — `infra/servers/<server-slug>.md`
 
@@ -53,10 +53,13 @@ type: Server
 Primary host for the marketing site and the internal dashboard.
 
 ## Observations
-- [fact] Host `203.0.113.10`, SSH user `deploy` #infra
-- [fact] Ubuntu 24.04, 4 vCPU / 8 GB
-- [constraint] `/etc/nginx/sites-enabled/` is hand-edited, no config management #risk
-- [fact] Firewall allows 22, 80, 443 only
+- [host] 203.0.113.10
+- [ssh_user] deploy
+- [purpose] Marketing site and internal dashboard
+- [os] Ubuntu 24.04, 4 vCPU / 8 GB
+- [caveat] `/etc/nginx/sites-enabled/` is hand-edited, no config management
+- [caveat] Firewall allows 22, 80, 443 only
+- [status] active
 
 ## Relations
 - hosts [[Project A]]
@@ -77,10 +80,12 @@ type: DeployedProject
 Customer-facing site.
 
 ## Observations
-- [fact] Deployed at `/opt/app-a`, released by `systemd` unit `app-a` #deploy
-- [fact] Env file `/opt/app-a/.env`, secrets are not in git
-- [fact] Health check `GET /healthz` returns 200 when the release is good
-- [decision] Blue/green is overkill for this traffic; restart in place
+- [path] `/opt/app-a`
+- [service] systemd unit `app-a`
+- [config] `/opt/app-a/.env`, secrets stay out of git
+- [health] `GET /healthz` returns 200 on a good release
+- [decision] Blue/green is overkill at this traffic; restart in place
+- [status] active
 
 ## Relations
 - deployed_on [[Server A]]
@@ -101,9 +106,10 @@ type: Artifact
 # deploy-app-a.sh
 
 ## Observations
-- [fact] `scripts/deploy-app-a.sh`, pull + install + restart, idempotent
-- [fact] Written by the 2026-10-30 release task
+- [path] `./scripts/deploy-app-a.sh` in the app-a repository
+- [origin] Written by the 2026-10-30 release task
 - [usage] Run from the repo root; needs SSH access to Server A
+- [behavior] Pull, install, restart — idempotent
 
 ## Relations
 - targets [[Server A]]
@@ -124,7 +130,7 @@ type: ChangeLog
 # Infra Change Log
 
 ## Observations
-- [fact] Append-only. Never rewrite or delete a row.
+- [rule] Append-only. Never rewrite or delete a row.
 
 | Date | Who | What | Impact |
 |---|---|---|---|
@@ -184,7 +190,9 @@ Two agents and a shared host:
 
 Optional but useful — validate the types so drift is caught. The schema notes live at `schema/Server.md`, `schema/DeployedProject.md`, `schema/Artifact.md`, `schema/ChangeLog.md`; see **memory-schema** for definitions, validation, and inference.
 
-```yaml
+Schema fields are matched against observation categories, so each field name below must also appear as `- [field] value` in the note.
+
+```markdown
 ---
 title: Server
 type: schema
@@ -194,10 +202,13 @@ schema:
   host: string, address used for SSH or the API
   ssh_user?: string
   purpose?: string
-  caveats?(array): string, things a deployer must not break
+  caveat?(array): string, things a deployer must not break
   status?(enum, current state): [active, maintenance, retired]
 settings:
   validation: warn
+---
+
+# Server
 ```
 
 ## Relation to other skills
