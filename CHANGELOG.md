@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## v1.0.1 (2026-11-01)
+
+A patch release with bug fixes for the hosted and local MCP servers, the read cache,
+and the OpenClaw integration.
+
+### Bug Fixes
+
+- **Read-cache hits no longer show up as exceptions.** A cache hit used to be served by
+  raising `CacheHitException` while FastAPI solved dependencies, so FastAPI
+  instrumentation recorded an exception on every cached read (about 76k spans a day in
+  Basic Memory Cloud). Cached routes now use `ReadCacheRoute`, which serves a hit
+  before dependency solving. Responses, ETags, invalidation and the
+  `read_cache.read_through` span are unchanged (#2006).
+- **A missing project is refused with a recovery hint** instead of a bare error (#1984,
+  #1990).
+- **`bm_schema` guidance for a project with no schemas works without the `bm` CLI**
+  (#1991).
+- **First-note onboarding in `bm_project(command="recent")` appears only for empty
+  projects** (#1994).
+- **Integrations read the `bm_schema` fields the backend returns** (#1998).
+- **OpenClaw reuses an existing project stored elsewhere** instead of creating a
+  duplicate (#1989).
+
+### Documentation
+
+- Added the `bm-log`, `bm-open` and `bm-review` pages and the hosted `bm_project`
+  info and usage docs (#1987, #1995).
+
+### Internal
+
+- Tests: deterministic coverage for ignored watcher activity, removed a flaky
+  new-project watch test, and updated the OpenClaw integration test for the 1.0
+  `bm_write` refusal (#1992). CI accepts DCO remediation commits (#1993).
+
 ## v1.0.0 (2026-10-29)
 
 Basic Memory 1.0 is a clean-house release. The MCP server exposes only the `bm_*`
