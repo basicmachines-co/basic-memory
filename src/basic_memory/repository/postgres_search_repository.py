@@ -1,5 +1,6 @@
 """PostgreSQL tsvector-based search repository implementation."""
 
+import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any, override, List
@@ -44,6 +45,21 @@ def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
     Primary sanitization happens in SearchService.index_entity_markdown().
     """
     return {k: v.replace("\x00", "") if isinstance(v, str) else v for k, v in row_data.items()}
+
+
+def _fts_chunk_params(search_index_rows: Sequence[SearchIndexRow]) -> list[dict[str, Any]]:
+    """Build bounded full-content FTS chunk rows, with script n-grams, for one batch."""
+    return [
+        {
+            "search_index_id": row.id,
+            "search_index_type": row.type,
+            "chunk_index": chunk_index,
+            "chunk_text": chunk_text.replace("\x00", ""),
+            "script_ngrams": build_script_ngrams(chunk_text.replace("\x00", "")),
+        }
+        for row in search_index_rows
+        for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
+    ]
 
 
 async def _vector_chunk_tables_ready(session: AsyncSession) -> bool:
@@ -245,17 +261,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             },
         )
 
-        chunks = [
-            {
-                "search_index_id": row.id,
-                "search_index_type": row.type,
-                "chunk_index": chunk_index,
-                "chunk_text": chunk_text.replace("\x00", ""),
-                "script_ngrams": build_script_ngrams(chunk_text.replace("\x00", "")),
-            }
-            for row in search_index_rows
-            for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
-        ]
+        # Script n-grams scale with note size and are pure CPU work. Building them in a
+        # worker thread keeps a large indexing batch from stalling every request on the loop.
+        chunks = await asyncio.to_thread(_fts_chunk_params, search_index_rows)
         if not chunks:
             return
 

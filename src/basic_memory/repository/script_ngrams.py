@@ -1,5 +1,6 @@
 """Application-owned lexical analysis for scripts without reliable word boundaries."""
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -15,61 +16,88 @@ class ScriptQuery:
     gram_phrases: tuple[tuple[str, ...], ...]
 
 
+# Inclusive codepoint ranges for scripts that are written without reliable word boundaries.
+_SCRIPT_SEARCH_RANGES: tuple[tuple[int, int], ...] = (
+    (0x1100, 0x11FF),  # Hangul Jamo
+    (0x0E00, 0x0EFF),  # Thai and Lao
+    (0x0F00, 0x0FFF),  # Tibetan
+    (0x1000, 0x109F),  # Myanmar
+    (0x1780, 0x17FF),  # Khmer
+    (0x19E0, 0x19FF),  # Khmer symbols
+    (0x3005, 0x3007),  # Ideographic iteration, closing, and zero marks
+    (0x3021, 0x3029),  # Hangzhou numerals
+    (0x3031, 0x3035),  # Vertical kana repeat marks
+    (0x3038, 0x303B),  # Hangzhou tens and vertical iteration mark
+    (0x3040, 0x30FF),  # Hiragana and Katakana
+    (0x3100, 0x318F),  # Bopomofo and Hangul compatibility Jamo
+    (0x31A0, 0x31BF),  # Bopomofo extended
+    (0x31F0, 0x31FF),  # Katakana phonetic extensions
+    (0x3400, 0x4DBF),  # CJK unified ideographs extension A
+    (0x4E00, 0x9FFF),  # CJK unified ideographs
+    (0xA960, 0xA97F),  # Hangul Jamo extended A
+    (0xA9E0, 0xA9FF),  # Myanmar extended B
+    (0xAA60, 0xAA7F),  # Myanmar extended A
+    (0xAC00, 0xD7AF),  # Hangul syllables
+    (0xD7B0, 0xD7FF),  # Hangul Jamo extended B
+    (0xF900, 0xFAFF),  # CJK compatibility ideographs
+    (0x1AFF0, 0x1AFFF),  # Katakana extended B
+    (0x1B000, 0x1B16F),  # Kana supplements and extensions
+    (0x20000, 0x2FFFF),  # Supplementary CJK ideographs
+    (0x30000, 0x323AF),  # CJK unified ideographs extensions G-H
+)
+
+# Constraint: indexing runs on the event loop for every note edit, so classifying text one
+# Python character at a time stalls every other request in the process on large notes.
+# A compiled character class lets the regex engine skip non-script text in C.
+_SCRIPT_CHARACTER_CLASS = "".join(
+    f"\\U{lower:08x}-\\U{upper:08x}" for lower, upper in _SCRIPT_SEARCH_RANGES
+)
+_SCRIPT_CHARACTER = re.compile(f"[{_SCRIPT_CHARACTER_CLASS}]")
+# Join controls shape neighboring script characters without introducing a searchable unit.
+_JOIN_CONTROLS = "\u200c\u200d"
+_SCRIPT_RUN_BODY = re.compile(f"[{_SCRIPT_CHARACTER_CLASS}{_JOIN_CONTROLS}]+")
+_COMBINING_MARK_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
+
+
 def is_script_search_character(character: str) -> bool:
-    codepoint = ord(character)
-    return any(
-        lower <= codepoint <= upper
-        for lower, upper in (
-            (0x1100, 0x11FF),  # Hangul Jamo
-            (0x0E00, 0x0EFF),  # Thai and Lao
-            (0x0F00, 0x0FFF),  # Tibetan
-            (0x1000, 0x109F),  # Myanmar
-            (0x1780, 0x17FF),  # Khmer
-            (0x19E0, 0x19FF),  # Khmer symbols
-            (0x3005, 0x3007),  # Ideographic iteration, closing, and zero marks
-            (0x3021, 0x3029),  # Hangzhou numerals
-            (0x3031, 0x3035),  # Vertical kana repeat marks
-            (0x3038, 0x303B),  # Hangzhou tens and vertical iteration mark
-            (0x3040, 0x30FF),  # Hiragana and Katakana
-            (0x3100, 0x318F),  # Bopomofo and Hangul compatibility Jamo
-            (0x31A0, 0x31BF),  # Bopomofo extended
-            (0x31F0, 0x31FF),  # Katakana phonetic extensions
-            (0x3400, 0x4DBF),  # CJK unified ideographs extension A
-            (0x4E00, 0x9FFF),  # CJK unified ideographs
-            (0xA960, 0xA97F),  # Hangul Jamo extended A
-            (0xA9E0, 0xA9FF),  # Myanmar extended B
-            (0xAA60, 0xAA7F),  # Myanmar extended A
-            (0xAC00, 0xD7AF),  # Hangul syllables
-            (0xD7B0, 0xD7FF),  # Hangul Jamo extended B
-            (0xF900, 0xFAFF),  # CJK compatibility ideographs
-            (0x1AFF0, 0x1AFFF),  # Katakana extended B
-            (0x1B000, 0x1B16F),  # Kana supplements and extensions
-            (0x20000, 0x2FFFF),  # Supplementary CJK ideographs
-            (0x30000, 0x323AF),  # CJK unified ideographs extensions G-H
-        )
-    )
+    return _SCRIPT_CHARACTER.match(character) is not None
 
 
 def script_runs(text: str) -> tuple[tuple[str, ...], ...]:
     """Return normalized script runs as grapheme-like searchable units."""
+    normalized = unicodedata.normalize("NFKC", text)
+    text_length = len(normalized)
     runs: list[tuple[str, ...]] = []
-    current: list[str] = []
-    for character in unicodedata.normalize("NFKC", text):
-        # Join controls shape neighboring script characters without introducing a searchable
-        # unit. Keeping the current run open preserves ordered matching across the control.
-        if character in {"\u200c", "\u200d"}:
-            continue
-        if current and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
-            current[-1] += character
-            continue
-        if is_script_search_character(character):
-            current.append(character)
-            continue
-        if current:
-            runs.append(tuple(current))
-            current = []
-    if current:
+
+    # Characters outside a run never contribute a unit, so jump straight to each run start.
+    run_start = _SCRIPT_CHARACTER.search(normalized)
+    while run_start is not None:
+        current: list[str] = []
+        position = run_start.start()
+        while position < text_length:
+            # Consume script characters and join controls in one regex step. A combining mark
+            # inside that span still attaches to the previous unit, as it does after the span.
+            body = _SCRIPT_RUN_BODY.match(normalized, position)
+            if body is not None:
+                for character in body.group():
+                    if character in _JOIN_CONTROLS:
+                        continue
+                    if current and unicodedata.category(character) in _COMBINING_MARK_CATEGORIES:
+                        current[-1] += character
+                    else:
+                        current.append(character)
+                position = body.end()
+                continue
+
+            # A combining mark outside the script ranges extends the run, for example a Latin
+            # accent after a Thai consonant. Any other character closes the run.
+            if unicodedata.category(normalized[position]) not in _COMBINING_MARK_CATEGORIES:
+                break
+            current[-1] += normalized[position]
+            position += 1
+
         runs.append(tuple(current))
+        run_start = _SCRIPT_CHARACTER.search(normalized, position)
     return tuple(runs)
 
 
