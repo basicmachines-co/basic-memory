@@ -17,7 +17,7 @@ from basic_memory.api.v2.utils import (
 )
 from basic_memory.read_cache import ReadCacheOperation
 from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
-from basic_memory.read_cache.routes import cached_read, content_group
+from basic_memory.read_cache.routes import ReadCacheRoute, cached_read, content_group
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     MemoryTimeIndexRepositoryV2ExternalDep,
@@ -33,7 +33,7 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.services.search_guidance import unspaced_script_query_hint
 
 # App registration mounts this router at /v2/projects/{project_id}.
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["search"], route_class=ReadCacheRoute)
 
 
 async def _search_with_exact_count(

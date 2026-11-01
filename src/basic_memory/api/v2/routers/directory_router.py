@@ -13,7 +13,12 @@ from fastapi import APIRouter, Path, Query
 
 from basic_memory.read_cache import ReadCacheOperation
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
-from basic_memory.read_cache.routes import cached_read, content_group, project_group
+from basic_memory.read_cache.routes import (
+    ReadCacheRoute,
+    cached_read,
+    content_group,
+    project_group,
+)
 from basic_memory.deps import DirectoryServiceV2ExternalDep
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -23,7 +28,7 @@ from basic_memory.schemas.directory import (
     DirectorySortOrder,
 )
 
-router = APIRouter(prefix="/directory", tags=["directory-v2"])
+router = APIRouter(prefix="/directory", tags=["directory-v2"], route_class=ReadCacheRoute)
 
 
 @router.get(

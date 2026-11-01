@@ -46,7 +46,8 @@ dependencies = [
     "fastembed>=0.7.4",
     "sqlite-vec>=0.1.6",
     "openai>=1.100.2",
-    "logfire>=4.19.0",
+    # The fastapi extra lets read-cache tests instrument the app as production does.
+    "logfire[fastapi]>=4.19.0",
     "psutil>=5.9.0",
     # uvloop's C event loop has no self._ready.popleft() codepath, so the
     # asyncpg engine-dispose race ("IndexError: pop from an empty deque") that
@@ -136,7 +137,8 @@ select = ["E4", "E7", "E9", "F"]
 
 [dependency-groups]
 dev = [
-    "logfire>=4.19.0",
+    # The fastapi extra lets read-cache tests instrument the app as production does.
+    "logfire[fastapi]>=4.19.0",
     "gevent>=24.11.1",
     "icecream>=2.1.3",
     "pytest>=8.3.4",

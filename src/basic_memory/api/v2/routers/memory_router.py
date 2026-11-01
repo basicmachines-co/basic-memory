@@ -13,7 +13,7 @@ import logfire
 from basic_memory import db
 from basic_memory.read_cache import ReadCacheOperation
 from basic_memory.read_cache.policy import RECENT_ACTIVITY_READ_CACHE_TTL_SECONDS
-from basic_memory.read_cache.routes import cached_read, content_group
+from basic_memory.read_cache.routes import ReadCacheRoute, cached_read, content_group
 from basic_memory.deps import (
     ContextServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
@@ -35,7 +35,7 @@ from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.api.v2.utils import to_graph_context
 
 # Note: No prefix here - it's added during registration as /v2/{project_id}/memory
-router = APIRouter(tags=["memory"])
+router = APIRouter(tags=["memory"], route_class=ReadCacheRoute)
 
 
 @router.get(
