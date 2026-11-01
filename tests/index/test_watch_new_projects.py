@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -323,8 +324,16 @@ async def test_a_restart_during_backfill_keeps_the_project_pending(
     assert attempts == 3
 
 
+async def _write_ignored_activity(path: Path) -> None:
+    """Keep hidden-file events flowing for the whole watch cycle."""
+    while True:
+        path.write_bytes(b"ignored activity\n")
+        await asyncio.sleep(0.05)
+
+
 @pytest.mark.asyncio
-async def test_real_quiet_watcher_backfills_then_handles_live_writes(
+@pytest.mark.parametrize("ignored_activity", [False, True], ids=["quiet", "ignored-activity"])
+async def test_real_watcher_backfills_then_handles_live_writes(
     app_config,
     config_manager,
     project_repository,
@@ -332,12 +341,23 @@ async def test_real_quiet_watcher_backfills_then_handles_live_writes(
     test_project,
     tmp_path_factory,
     monkeypatch,
+    ignored_activity,
 ):
     root = tmp_path_factory.mktemp("native-watch-root")
     added = await _register_project(
         "native", root, config_manager, project_repository, session_maker
     )
     (root / "before.md").write_text("# Before\n", encoding="utf-8")
+    # Trigger: hidden files keep changing while the new project attaches (#1866).
+    # Why: a filtered awatch suppresses all-ignored batches and its timeouts, so
+    #      the catch-up scan would never start.
+    # Outcome: the scan and live-write signals below time out if the cycle
+    #          stops observing raw batches.
+    noise = (
+        asyncio.create_task(_write_ignored_activity(root / ".watch-noise"))
+        if ignored_activity
+        else None
+    )
     watcher = WatchService(
         app_config, project_repository, session_maker, initial_projects=[test_project]
     )
@@ -370,9 +390,16 @@ async def test_real_quiet_watcher_backfills_then_handles_live_writes(
         await asyncio.wait_for(live_done.wait(), timeout=15)
         async with db.scoped_session(session_maker) as session:
             assert await EntityRepository(added.id).get_by_file_path(session, "live.md") is not None
+            assert (
+                await EntityRepository(added.id).get_by_file_path(session, ".watch-noise") is None
+            )
     finally:
         stop_event.set()
         await asyncio.wait_for(task, timeout=5)
+        if noise is not None:
+            noise.cancel()
+            with suppress(asyncio.CancelledError):
+                await noise
 
 
 @pytest.mark.asyncio
