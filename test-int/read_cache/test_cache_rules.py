@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 import pytest
 from fastapi import FastAPI
+import logfire
 from httpx import AsyncClient, Response
 from logfire.testing import CaptureLogfire, capfire as capfire
 
@@ -417,6 +418,50 @@ async def test_each_cached_read_reports_one_span_with_its_outcome(
     for span in spans:
         assert not [event for event in span.get("events", []) if event["name"] == "exception"]
         assert span["attributes"].get("logfire.level_num", 9) < 17
+
+
+@pytest.mark.asyncio
+async def test_a_cache_hit_is_not_recorded_as_an_exception_on_the_request_span(
+    cached_app: CachedApp, client: AsyncClient, project_url: str, capfire: CaptureLogfire
+) -> None:
+    """Rule: a hit is a response, not an error, on the route span production records.
+
+    fastapi-redis-sdk signals a hit by raising CacheHitException. Raised while FastAPI
+    solves dependencies, the FastAPI instrumentation records it on the request span,
+    which in production meant one exception per cache hit.
+    """
+    note = await _create(client, project_url, "Hit Without Exception")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+
+    # The shared app has already served requests, so Starlette has built its
+    # middleware stack. Drop it so the next request rebuilds it with (and, after
+    # the block, without) the OpenTelemetry middleware.
+    cached_app.app.middleware_stack = None
+    try:
+        with logfire.instrument_fastapi(cached_app.app):
+            first = await client.get(url)
+            capfire.exporter.clear()
+            hit = await client.get(url)
+    finally:
+        cached_app.app.middleware_stack = None
+
+    assert (_status(first), _status(hit)) == ("MISS", "HIT")
+    assert hit.json() == first.json()
+    spans = capfire.exporter.exported_spans_as_dict()
+    request_spans = [
+        span
+        for span in spans
+        if span["attributes"].get("http.route")
+        == "/v2/projects/{project_id}/knowledge/entities/{entity_id}"
+    ]
+    assert request_spans, [span["name"] for span in spans]
+    recorded = [
+        event["attributes"].get("exception.type")
+        for span in spans
+        for event in span.get("events", [])
+        if event["name"] == "exception"
+    ]
+    assert recorded == []
 
 
 @pytest.mark.asyncio

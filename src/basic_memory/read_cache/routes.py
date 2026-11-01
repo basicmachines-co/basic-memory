@@ -9,19 +9,25 @@ leaves to the application:
 - QUERY support, which the SDK's ``cache()`` bypasses (it caches GET only)
 - a no-op when the host has no cache configured
 
-Attach with ``dependencies=[cached_read(...)]``. Route-level dependencies resolve
-before the endpoint's own parameters, so a hit returns before any dependency that
-opens a database connection.
+Attach with ``dependencies=[cached_read(...)]`` on a router built with
+``route_class=ReadCacheRoute``. The route class serves the read before FastAPI solves
+any dependency, so a hit returns before anything opens a database connection.
+
+The SDK signals a hit by raising ``CacheHitException`` from its dependency. Raised
+inside FastAPI's dependency solving, FastAPI instrumentation records it on the
+request span as an exception, once per hit. ``ReadCacheRoute`` runs the SDK step
+itself and catches the hit before the instrumented route code runs, so a hit is
+returned as a response and never raised through the app.
 """
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, override
 
 import logfire
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from pydantic import TypeAdapter
@@ -42,6 +48,7 @@ from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 _PENDING_STATE = "redis_cache_pending"
+_SERVED_STATE = "basic_memory_read_cache_served"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +65,8 @@ class ReadCacheScope:
 
 type ReadCacheScopeResolver = Callable[[Request], Awaitable[ReadCacheScope | None]]
 type GroupForRequest = Callable[[Request], ReadCacheGroup]
+type RouteHandler = Callable[[Request], Coroutine[Any, Any, Response]]
+type SdkCacheDependency = Callable[..., AsyncGenerator[None]]
 
 
 async def _resolve_scope(request: Request) -> ReadCacheScope | None:
@@ -110,6 +119,99 @@ class _AsGet(Request):
         return "GET"
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class _ReadThrough:
+    """One route's read cache, served by ``ReadCacheRoute`` around the endpoint.
+
+    ``eq=False`` keeps identity hashing: FastAPI caches dependencies by their
+    callable, and ``hit_headers`` is a dict.
+    """
+
+    operation: ReadCacheOperation
+    group: GroupForRequest
+    ttl_seconds: int
+    hit_headers: Mapping[str, str]
+    sdk_dependency: SdkCacheDependency
+
+    async def __call__(self, request: Request) -> None:
+        """Fail fast when the route was built without ``ReadCacheRoute``.
+
+        Without the route class nothing would serve or fill the cache, and the
+        route would silently run uncached.
+        """
+        if not getattr(request.state, _SERVED_STATE, False):
+            raise TypeError("cached_read routes need a router with route_class=ReadCacheRoute")
+
+    async def serve(self, request: Request, endpoint: RouteHandler) -> Response:
+        """Answer from the cache, or run the endpoint and let the SDK store its response."""
+        setattr(request.state, _SERVED_STATE, True)
+        target = await _cached_target(request, self.group)
+        if target is None:
+            return await endpoint(request)
+
+        request.state.basic_memory_read_cache_target = target
+        sdk_request = (
+            _AsGet(request.scope, request.receive) if request.method == "QUERY" else request
+        )
+        steps = self.sdk_dependency(sdk_request, target.scope.cache.client)
+        with logfire.span(
+            "read_cache.read_through",
+            operation=self.operation.value,
+        ) as span:
+            span.set_attributes(
+                {
+                    "cache.operation": self.operation.value,
+                    "cache.group": group_kind(target.group),
+                    "cache.configured_ttl_seconds": self.ttl_seconds,
+                }
+            )
+            try:
+                await anext(steps)
+            except CacheHitException as hit:
+                # The SDK raises on a hit. It is caught here, before FastAPI solves
+                # dependencies, so instrumentation never records a hit as an error.
+                span.set_attribute("cache.lookup.outcome", "hit")
+                hit.response.headers.update(self.hit_headers)
+                return hit.response
+            except ReadCacheUnavailable:
+                # Version lookup failed: Redis is down, so the database answers
+                # and nothing is stored under a version we could not read.
+                span.set_attribute("cache.lookup.outcome", "unavailable")
+                skip_read_cache_store(request)
+            else:
+                await _track_pending_entry(request, target, ttl_seconds=self.ttl_seconds, span=span)
+        try:
+            return await endpoint(request)
+        finally:
+            await steps.aclose()
+
+
+class ReadCacheRoute(APIRoute):
+    """An API route that serves its ``cached_read`` before solving dependencies.
+
+    Routes without a ``cached_read`` dependency get FastAPI's handler unchanged.
+    """
+
+    @override
+    def get_route_handler(self) -> RouteHandler:
+        endpoint = super().get_route_handler()
+        read_through = next(
+            (
+                depends.dependency
+                for depends in self.dependencies
+                if isinstance(depends.dependency, _ReadThrough)
+            ),
+            None,
+        )
+        if read_through is None:
+            return endpoint
+
+        async def handler(request: Request) -> Response:
+            return await read_through.serve(request, endpoint)
+
+        return handler
+
+
 def cached_read(
     operation: ReadCacheOperation,
     *,
@@ -117,7 +219,9 @@ def cached_read(
     ttl_seconds: int,
     hit_headers: Mapping[str, str] | None = None,
 ) -> Any:
-    """A route dependency that serves and fills the read cache for ``operation``.
+    """A route dependency that marks the route's reads as cached under ``operation``.
+
+    The router must use ``route_class=ReadCacheRoute``, which does the serving.
 
     ``hit_headers`` are response headers the route always sets. A hit returns before
     the route runs, and fastapi-redis-sdk 0.8.1 does not replay stored headers, so
@@ -140,60 +244,15 @@ def cached_read(
         request.state.basic_memory_read_cache_entry = _LookedUpEntry(versions=versions, key=key)
         return key
 
-    sdk_dependency = cache(ttl=ttl_seconds, key_builder=key_builder, cache_prefix="")
-
-    async def dependency(request: Request) -> AsyncIterator[None]:
-        target = await _cached_target(request, group)
-        if target is None:
-            yield
-            return
-
-        request.state.basic_memory_read_cache_target = target
-        sdk_request = (
-            _AsGet(request.scope, request.receive) if request.method == "QUERY" else request
+    return Depends(
+        _ReadThrough(
+            operation=operation,
+            group=group,
+            ttl_seconds=ttl_seconds,
+            hit_headers=dict(hit_headers or {}),
+            sdk_dependency=cache(ttl=ttl_seconds, key_builder=key_builder, cache_prefix=""),
         )
-        steps = sdk_dependency(sdk_request, target.scope.cache.client)
-        cache_hit: CacheHitException | None = None
-        with logfire.span(
-            "read_cache.read_through",
-            operation=operation.value,
-        ) as span:
-            span.set_attributes(
-                {
-                    "cache.operation": operation.value,
-                    "cache.group": group_kind(target.group),
-                    "cache.configured_ttl_seconds": ttl_seconds,
-                }
-            )
-            try:
-                # Raises the SDK's CacheHitException on a hit; its handler turns
-                # it into the cached response before the endpoint runs.
-                await anext(steps)
-            except CacheHitException as hit:
-                span.set_attribute("cache.lookup.outcome", "hit")
-                hit.response.headers.update(hit_headers or {})
-                cache_hit = hit
-            except ReadCacheUnavailable:
-                # Version lookup failed: Redis is down, so the database answers
-                # and nothing is stored under a version we could not read.
-                span.set_attribute("cache.lookup.outcome", "unavailable")
-                skip_read_cache_store(request)
-                target = None
-            else:
-                await _track_pending_entry(request, target, ttl_seconds, span)
-        # The hit is control flow, not a failure. Raise it after the span has
-        # closed so Logfire does not record every cache hit as an error.
-        if cache_hit is not None:
-            raise cache_hit
-        if target is None:
-            yield
-            return
-        try:
-            yield
-        finally:
-            await steps.aclose()
-
-    return Depends(dependency)
+    )
 
 
 async def _track_pending_entry(
@@ -362,6 +421,7 @@ def project_group(request: Request) -> ReadCacheGroup:
 
 
 __all__ = [
+    "ReadCacheRoute",
     "ReadCacheScope",
     "ReadCacheScopeResolver",
     "cached_read",

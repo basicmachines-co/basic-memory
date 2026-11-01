@@ -66,6 +66,7 @@ from basic_memory.deps import (
 from basic_memory.read_cache import ReadCacheOperation, invalidate_cache
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 from basic_memory.read_cache.routes import (
+    ReadCacheRoute,
     cached_read,
     note_group,
     project_group,
@@ -117,7 +118,7 @@ from basic_memory.utils import (
     validate_project_path,
 )
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
+router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"], route_class=ReadCacheRoute)
 
 
 def _schedule_post_write_followups(

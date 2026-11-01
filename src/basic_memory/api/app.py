@@ -104,9 +104,11 @@ app = FastAPI(
 )
 
 
-# fastapi-redis-sdk's hit handler and response capture. Registered before the
-# workspace middleware so capture runs inside it; cached routes opt in with
-# ``cached_read`` dependencies, and every other response passes straight through.
+# fastapi-redis-sdk's response capture. Registered before the workspace middleware
+# so capture runs inside it; cached routes opt in with ``cached_read`` dependencies,
+# and every other response passes straight through. The SDK's hit handler is
+# registered too but never reached: ``ReadCacheRoute`` returns hits instead of
+# raising them through the app.
 add_redis_caching(app)
 # fastapi-redis-sdk reads this module constant on every capture and defaults it
 # to 10 MiB. The package re-exports a function named ``cache``, which shadows the
