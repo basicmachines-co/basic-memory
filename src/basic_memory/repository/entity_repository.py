@@ -22,6 +22,7 @@ from basic_memory.runtime.storage import (
     RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_file_path_is_markdown_note,
 )
+from basic_memory.utils import ExistingFilePermalink
 
 type EntityMetadata = dict[str, Any] | None
 
@@ -673,6 +674,21 @@ class EntityRepository(Repository[Entity]):
 
         result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
+
+    async def get_file_path_permalinks(self, session: AsyncSession) -> List[ExistingFilePermalink]:
+        """Get every file path in this project with its stored permalink, if any.
+
+        Conflict detection compares against stored permalinks so it only has to generate
+        a permalink for files that do not have one yet.
+        """
+        query = select(Entity.file_path, Entity.permalink)
+        query = self._add_project_filter(query)
+
+        result = await self.execute_query(session, query, use_query_options=False)
+        return [
+            ExistingFilePermalink(file_path=file_path, permalink=permalink)
+            for file_path, permalink in result.all()
+        ]
 
     async def find_without_relations(self, session: AsyncSession) -> Sequence[Entity]:
         """Find entities that have no incoming or outgoing relations."""
