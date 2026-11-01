@@ -2,19 +2,36 @@
 
 `configure_telemetry()` wires up the Logfire SDK and returns the loguru
 handler. Call sites use `logfire.span(...)` and `logfire.metric_counter(...)`
-directly — there are no wrappers here.
+directly. The one exception is `debug_span(...)`, which marks a step span as
+diagnostic detail.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 import logfire
 
 REPOSITORY_URL = "https://github.com/basicmachines-co/basic-memory"
 ROOT_PATH = "src/basic_memory"
 
+# Step spans that only narrate a request (routing steps, typed-client wrappers,
+# cache lookups) are created at this level. Logfire returns a no-op span when it is
+# below the configured min_level, so a host exporting at info (Basic Memory Cloud
+# production) pays nothing for them, while a debug host still sees the full tree.
+# Spans opened inside a no-op span attach to the next recording span up.
+DEBUG_SPAN_LEVEL: Final = "debug"
+
 _LOGFIRE_HANDLER: dict[str, Any] | None = None
+
+
+def debug_span(msg_template: str, /, **attributes: Any) -> logfire.LogfireSpan:
+    """Open a span that is exported only when Logfire's min_level is debug.
+
+    Attributes set on the span are dropped when it is not recorded. Anything a
+    dashboard or alert reads belongs on an enclosing info span or in a metric.
+    """
+    return logfire.span(msg_template, _level=DEBUG_SPAN_LEVEL, **attributes)
 
 
 def configure_telemetry(
@@ -61,4 +78,4 @@ def get_logfire_handler() -> dict[str, Any] | None:
     return _LOGFIRE_HANDLER
 
 
-__all__ = ["configure_telemetry", "get_logfire_handler"]
+__all__ = ["DEBUG_SPAN_LEVEL", "configure_telemetry", "debug_span", "get_logfire_handler"]

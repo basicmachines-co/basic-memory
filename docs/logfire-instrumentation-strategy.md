@@ -203,6 +203,27 @@ Examples:
 - `db.init`
 - `db.migrate`
 
+### Debug-level step spans
+
+Some step spans only narrate a request and cost one record per call. They are
+opened with `basic_memory.telemetry.debug_span(...)`, which passes
+`_level="debug"` to Logfire. When the host's Logfire `min_level` is above debug
+(Basic Memory Cloud production runs at info), Logfire returns a no-op span: no
+record is exported, attributes set on it are dropped, and spans opened inside it
+attach to the next recording span up. A host at debug sees the full tree.
+
+Current debug spans:
+
+- `routing.resolve_project`, `routing.validate_project`, `routing.client_session`
+- `mcp.client.*` typed-client wrappers (each wraps exactly one `mcp.http.request`,
+  which stays at info and carries `client_name`, `operation`, `path_template` and
+  the HTTP outcome)
+- `read_cache.read_through` (the lookup outcome is on the request span and in the
+  `read_cache.lookups` counter instead)
+
+Anything a dashboard, alert or investigation reads must not live only on a debug
+span. Put it on an enclosing info span or in a metric.
+
 ### Span naming rules
 
 - Use dot-separated names

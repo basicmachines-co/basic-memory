@@ -48,6 +48,7 @@ from basic_memory.schemas.cloud import (
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.memory import memory_url_path
+from basic_memory.telemetry import debug_span
 from basic_memory.utils import generate_permalink, normalize_project_reference
 from basic_memory.workspace_context import (
     current_workspace_permalink_context,
@@ -157,7 +158,7 @@ async def resolve_project_parameter(
     Returns:
         Resolved project name or None if no resolution possible
     """
-    with logfire.span("routing.resolve_project", requested_project=project):
+    with debug_span("routing.resolve_project", requested_project=project):
         config = ConfigManager().config
 
         # Trigger: project already resolved earlier in the same MCP request
@@ -729,7 +730,7 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    with logfire.span(
+    with debug_span(
         "routing.validate_project",
         requested_project=project,
         has_context=context is not None,
@@ -1951,7 +1952,7 @@ async def get_project_client(
     if _explicit_routing() and _force_local_mode():
         route_mode = "explicit_local"
         await _clear_cached_active_workspace_for_local_route(context)
-        with logfire.span(
+        with debug_span(
             "routing.client_session",
             project_name=resolved_project,
             route_mode=route_mode,
@@ -2020,7 +2021,7 @@ async def get_project_client(
                     else:
                         route_mode = "local_asgi"
                         await _clear_cached_active_workspace_for_local_route(context)
-                        with logfire.span(
+                        with debug_span(
                             "routing.client_session",
                             project_name=active_project.name,
                             route_mode=route_mode,
@@ -2065,7 +2066,7 @@ async def get_project_client(
                 and cached_project.external_id != resolved_entry.project.external_id
             ):
                 await _clear_cached_active_project(context)
-        with logfire.span(
+        with debug_span(
             "routing.client_session",
             project_name=project_for_api,
             route_mode=route_mode,
@@ -2089,7 +2090,7 @@ async def get_project_client(
     # Step 4: Local routing (default)
     route_mode = "local_asgi"
     await _clear_cached_active_workspace_for_local_route(context)
-    with logfire.span(
+    with debug_span(
         "routing.client_session",
         project_name=resolved_project,
         route_mode=route_mode,

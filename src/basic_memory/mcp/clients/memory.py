@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 from httpx import AsyncClient
 
-import logfire
 
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
@@ -17,6 +16,7 @@ from basic_memory.schemas.memory import (
     DEFAULT_CONTEXT_RELATED_RESULTS,
     GraphContext,
 )
+from basic_memory.telemetry import debug_span
 
 
 class MemoryClient:
@@ -85,7 +85,7 @@ class MemoryClient:
         if timeframe:
             params["timeframe"] = timeframe
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.memory.build_context",
             client_name="memory",
             operation="build_context",
@@ -138,7 +138,7 @@ class MemoryClient:
             # Join types as comma-separated string if provided
             params["type"] = ",".join(types) if isinstance(types, list) else types
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.memory.recent_activity",
             client_name="memory",
             operation="recent_activity",

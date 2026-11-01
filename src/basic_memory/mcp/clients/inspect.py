@@ -2,7 +2,7 @@
 
 from httpx import AsyncClient
 
-import logfire
+from basic_memory.telemetry import debug_span
 from basic_memory.schemas.inspect import (
     InspectChunksRequest,
     InspectChunksResponse,
@@ -24,7 +24,7 @@ class InspectClient:
         from basic_memory.mcp.tools.utils import call_post
 
         request = InspectChunksRequest(identifier=identifier)
-        with logfire.span(
+        with debug_span(
             "mcp.client.inspect.chunks",
             client_name="inspect",
             operation="chunks",
@@ -50,7 +50,7 @@ class InspectClient:
         from basic_memory.mcp.tools.utils import call_post
 
         request = InspectQueryRequest(query=query, limit=limit, offset=offset)
-        with logfire.span(
+        with debug_span(
             "mcp.client.inspect.query",
             client_name="inspect",
             operation="query",
