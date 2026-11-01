@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -153,6 +154,20 @@ def accepted_note_search_insert_params(
     }
 
 
+def accepted_note_fts_chunk_params(row: AcceptedNoteSearchRow) -> list[SearchIndexSqlParams]:
+    """Build bounded full-content FTS chunk rows for one accepted-note search row."""
+    return [
+        {
+            "search_index_id": row.id,
+            "search_index_type": row.item_type,
+            "chunk_index": chunk_index,
+            "chunk_text": chunk_text,
+            "script_ngrams": build_script_ngrams(chunk_text),
+        }
+        for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
+    ]
+
+
 class AcceptedNoteSearchRepository:
     """Explicit-session repository for accepted-note hot search refreshes."""
 
@@ -182,13 +197,14 @@ class AcceptedNoteSearchRepository:
             {"entity_id": row.entity_id, "project_id": row.project_id},
         )
         is_sqlite = session.get_bind().dialect.name == "sqlite"
-        await session.execute(
-            accepted_note_search_insert_statement(session),
-            accepted_note_search_insert_params(
-                row,
-                include_full_content_grams=is_sqlite,
-            ),
+        # Script n-grams scale with note size and are pure CPU work. Building them in a
+        # worker thread keeps one large edit from stalling every other request on the loop.
+        insert_params = await asyncio.to_thread(
+            accepted_note_search_insert_params,
+            row,
+            include_full_content_grams=is_sqlite,
         )
+        await session.execute(accepted_note_search_insert_statement(session), insert_params)
         if is_sqlite:
             return
 
@@ -202,16 +218,7 @@ class AcceptedNoteSearchRepository:
                 "search_index_type": row.item_type,
             },
         )
-        chunks = [
-            {
-                "search_index_id": row.id,
-                "search_index_type": row.item_type,
-                "chunk_index": chunk_index,
-                "chunk_text": chunk_text,
-                "script_ngrams": build_script_ngrams(chunk_text),
-            }
-            for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
-        ]
+        chunks = await asyncio.to_thread(accepted_note_fts_chunk_params, row)
         if chunks:
             await session.execute(
                 INSERT_ACCEPTED_NOTE_FTS_CHUNKS_SQL,
