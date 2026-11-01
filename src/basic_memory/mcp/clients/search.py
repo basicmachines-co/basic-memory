@@ -9,7 +9,7 @@ from typing import Any
 
 from httpx import AsyncClient
 
-import logfire
+from basic_memory.telemetry import debug_span
 
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
@@ -64,7 +64,7 @@ class ScopedSearchClient:
         """Search the named projects; results carry ``project_id`` and ``project_external_id``."""
         from basic_memory.mcp.tools.utils import call_query
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.search.search_scope",
             client_name="search",
             operation="search_scope",
@@ -134,7 +134,7 @@ class SearchClient:
         """
         from basic_memory.mcp.tools.utils import call_query
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.search.search",
             client_name="search",
             operation="search",

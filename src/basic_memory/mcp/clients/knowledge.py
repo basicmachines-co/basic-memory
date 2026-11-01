@@ -9,7 +9,7 @@ from typing import Any
 
 from httpx import AsyncClient, HTTPStatusError
 
-import logfire
+from basic_memory.telemetry import debug_span
 
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
@@ -76,7 +76,7 @@ class KnowledgeClient:
         """Write at an exact path and preserve the service's expected outcomes."""
         from basic_memory.mcp.tools.utils import call_post
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.write_note",
             client_name="knowledge",
             operation="write_note",
@@ -113,7 +113,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_post
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.create_entity",
             client_name="knowledge",
             operation="create_entity",
@@ -148,7 +148,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_put
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.update_entity",
             client_name="knowledge",
             operation="update_entity",
@@ -198,7 +198,7 @@ class KnowledgeClient:
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.get_entity",
             client_name="knowledge",
             operation="get_entity",
@@ -220,7 +220,7 @@ class KnowledgeClient:
         """Get accepted Markdown for one bounded note batch."""
         from basic_memory.mcp.tools.utils import call_query
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.get_accepted_note_contents",
             client_name="knowledge",
             operation="get_accepted_note_contents",
@@ -274,7 +274,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_patch
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.patch_entity",
             client_name="knowledge",
             operation="patch_entity",
@@ -308,7 +308,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_delete
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.delete_entity",
             client_name="knowledge",
             operation="delete_entity",
@@ -343,7 +343,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_put
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.move_entity",
             client_name="knowledge",
             operation="move_entity",
@@ -376,7 +376,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_post
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.move_directory",
             client_name="knowledge",
             operation="move_directory",
@@ -408,7 +408,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_post
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.delete_directory",
             client_name="knowledge",
             operation="delete_directory",
@@ -439,7 +439,7 @@ class KnowledgeClient:
         """
         from basic_memory.mcp.tools.utils import call_post
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.index_file",
             client_name="knowledge",
             operation="index_file",
@@ -460,7 +460,7 @@ class KnowledgeClient:
         """Get entities that have no incoming or outgoing relations."""
         from basic_memory.mcp.tools.utils import call_get
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.get_orphans",
             client_name="knowledge",
             operation="get_orphans",
@@ -485,7 +485,7 @@ class KnowledgeClient:
         """Request the complete entity-resolution payload."""
         from basic_memory.mcp.tools.utils import call_query
 
-        with logfire.span(
+        with debug_span(
             "mcp.client.knowledge.resolve_entity",
             client_name="knowledge",
             operation="resolve_entity",

@@ -24,12 +24,14 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, override
+from typing import Any, Literal, override
 
 import logfire
 from fastapi import Depends, Request, Response
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
+from opentelemetry import trace
+from opentelemetry.trace import Span
 from pydantic import TypeAdapter
 from redis_fastapi.cache import CacheHitException, cache
 
@@ -45,6 +47,7 @@ from basic_memory.read_cache.contract import (
 )
 from basic_memory.read_cache.keys import entry_key, read_cache_request_digest
 from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
+from basic_memory.telemetry import debug_span
 from basic_memory.workspace_context import current_workspace_permalink_context
 
 _PENDING_STATE = "redis_cache_pending"
@@ -67,6 +70,13 @@ type ReadCacheScopeResolver = Callable[[Request], Awaitable[ReadCacheScope | Non
 type GroupForRequest = Callable[[Request], ReadCacheGroup]
 type RouteHandler = Callable[[Request], Coroutine[Any, Any, Response]]
 type SdkCacheDependency = Callable[..., AsyncGenerator[None]]
+type LookupOutcome = Literal["hit", "miss", "bypass", "unavailable"]
+
+_read_cache_lookups = logfire.metric_counter(
+    "read_cache.lookups",
+    unit="1",
+    description="Cached-read lookups by operation, group kind and outcome",
+)
 
 
 async def _resolve_scope(request: Request) -> ReadCacheScope | None:
@@ -154,32 +164,40 @@ class _ReadThrough:
             _AsGet(request.scope, request.receive) if request.method == "QUERY" else request
         )
         steps = self.sdk_dependency(sdk_request, target.scope.cache.client)
-        with logfire.span(
-            "read_cache.read_through",
+        # The lookup outcome lives on the request span (FastAPI's route span when
+        # the app is instrumented) and in a counter. The step span below is debug
+        # only, so a host exporting at info still sees every outcome without
+        # paying for one extra record per cached read.
+        lookup = _LookupRecord(
+            request_span=trace.get_current_span(),
             operation=self.operation.value,
-        ) as span:
-            span.set_attributes(
-                {
-                    "cache.operation": self.operation.value,
-                    "cache.group": group_kind(target.group),
-                    "cache.configured_ttl_seconds": self.ttl_seconds,
-                }
-            )
+            group=group_kind(target.group),
+        )
+        lookup.request_span.set_attributes(
+            {
+                "cache.operation": lookup.operation,
+                "cache.group": lookup.group,
+                "cache.configured_ttl_seconds": self.ttl_seconds,
+            }
+        )
+        with debug_span("read_cache.read_through", operation=lookup.operation):
             try:
                 await anext(steps)
             except CacheHitException as hit:
                 # The SDK raises on a hit. It is caught here, before FastAPI solves
                 # dependencies, so instrumentation never records a hit as an error.
-                span.set_attribute("cache.lookup.outcome", "hit")
+                lookup.record("hit")
                 hit.response.headers.update(self.hit_headers)
                 return hit.response
             except ReadCacheUnavailable:
                 # Version lookup failed: Redis is down, so the database answers
                 # and nothing is stored under a version we could not read.
-                span.set_attribute("cache.lookup.outcome", "unavailable")
+                lookup.record("unavailable")
                 skip_read_cache_store(request)
             else:
-                await _track_pending_entry(request, target, ttl_seconds=self.ttl_seconds, span=span)
+                lookup.record(
+                    await _track_pending_entry(request, target, ttl_seconds=self.ttl_seconds)
+                )
         try:
             return await endpoint(request)
         finally:
@@ -256,14 +274,13 @@ def cached_read(
 
 
 async def _track_pending_entry(
-    request: Request, target: "_CachedTarget", ttl_seconds: int, span: logfire.LogfireSpan
-) -> None:
+    request: Request, target: "_CachedTarget", ttl_seconds: int
+) -> LookupOutcome:
     """Record the entry a miss is about to store, or keep the response uncached."""
     # The SDK bypasses requests that send ``Cache-Control: no-store`` without
     # building a key, so there is nothing to store and nothing to record.
     if not hasattr(request.state, _PENDING_STATE):
-        span.set_attribute("cache.lookup.outcome", "bypass")
-        return
+        return "bypass"
     looked_up: _LookedUpEntry = request.state.basic_memory_read_cache_entry
     try:
         await target.scope.cache.track_entry(
@@ -272,10 +289,26 @@ async def _track_pending_entry(
     except ReadCacheUnavailable:
         # An entry invalidation cannot find would hold its memory for the whole
         # TTL, so an untracked response is served uncached.
-        span.set_attribute("cache.lookup.outcome", "unavailable")
         skip_read_cache_store(request)
-        return
-    span.set_attribute("cache.lookup.outcome", "miss")
+        return "unavailable"
+    return "miss"
+
+
+@dataclass(frozen=True, slots=True)
+class _LookupRecord:
+    """Where one cached read reports its lookup outcome."""
+
+    request_span: Span
+    operation: str
+    group: str
+
+    def record(self, outcome: LookupOutcome) -> None:
+        self.request_span.set_attribute("cache.lookup.outcome", outcome)
+        # No ids in the labels: operation and group kind are small fixed sets.
+        _read_cache_lookups.add(
+            1,
+            {"cache.operation": self.operation, "cache.group": self.group, "outcome": outcome},
+        )
 
 
 @dataclass(frozen=True, slots=True)

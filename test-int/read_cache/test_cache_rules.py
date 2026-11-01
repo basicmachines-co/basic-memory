@@ -8,13 +8,16 @@ reports whether a response came from the cache.
 from __future__ import annotations
 
 import importlib
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 import pytest
 from fastapi import FastAPI
 import logfire
 from httpx import AsyncClient, Response
-from logfire.testing import CaptureLogfire, capfire as capfire
+from logfire.testing import CaptureLogfire, TestExporter, capfire as capfire, get_collected_metrics
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
@@ -393,31 +396,113 @@ async def test_each_slice_of_a_note_is_its_own_entry(
     assert section.json()["content"].strip() == "## Ops\no1"
 
 
+@dataclass(frozen=True, slots=True)
+class Exported:
+    """What Logfire exported while configured at one min_level."""
+
+    spans: TestExporter
+    metrics: InMemoryMetricReader
+
+
+def _export_at(min_level: Literal["info", "debug"]) -> Exported:
+    spans = TestExporter()
+    metrics = InMemoryMetricReader()
+    logfire.configure(
+        send_to_logfire=False,
+        console=False,
+        min_level=min_level,
+        additional_span_processors=[SimpleSpanProcessor(spans)],
+        metrics=logfire.MetricsOptions(additional_readers=[metrics]),
+    )
+    return Exported(spans=spans, metrics=metrics)
+
+
+async def _read_twice_instrumented(cached_app: CachedApp, client: AsyncClient, url: str) -> None:
+    # The shared app has already served requests, so Starlette has built its
+    # middleware stack. Drop it so the next request rebuilds it with (and, after
+    # the block, without) the OpenTelemetry middleware.
+    cached_app.app.middleware_stack = None
+    try:
+        with logfire.instrument_fastapi(cached_app.app):
+            await client.get(url)
+            await client.get(url)
+    finally:
+        cached_app.app.middleware_stack = None
+
+
+def _route_spans(exported: Exported, route: str) -> list[dict[str, Any]]:
+    return [
+        span
+        for span in exported.spans.exported_spans_as_dict()
+        if span["attributes"].get("http.route") == route
+        and span["attributes"].get("logfire.span_type") == "span"
+    ]
+
+
+def _lookup_counts(exported: Exported) -> dict[tuple[str, str, str], int]:
+    [lookups] = [
+        metric
+        for metric in get_collected_metrics(exported.metrics)
+        if metric["name"] == "read_cache.lookups"
+    ]
+    return {
+        (
+            point["attributes"]["cache.operation"],
+            point["attributes"]["cache.group"],
+            point["attributes"]["outcome"],
+        ): point["value"]
+        for point in lookups["data"]["data_points"]
+    }
+
+
+ENTITY_ROUTE = "/v2/projects/{project_id}/knowledge/entities/{entity_id}"
+
+
 @pytest.mark.asyncio
-async def test_each_cached_read_reports_one_span_with_its_outcome(
-    cached_app: CachedApp, client: AsyncClient, project_url: str, capfire: CaptureLogfire
+@pytest.mark.parametrize("min_level", ["info", "debug"])
+async def test_each_cached_read_reports_its_outcome_on_the_request_span(
+    cached_app: CachedApp,
+    client: AsyncClient,
+    project_url: str,
+    min_level: Literal["info", "debug"],
 ) -> None:
-    """Rule: every cached read is observable as one span with outcome and group kind."""
+    """Rule: every cached read is observable on its request span and in a counter.
+
+    Basic Memory Cloud production exports at info, where the read_through step
+    span is a no-op, so the outcome must not depend on it.
+    """
     note = await _create(client, project_url, "Observed Read")
     url = f"{project_url}/knowledge/entities/{note['external_id']}"
-    capfire.exporter.clear()
+    exported = _export_at(min_level)
 
-    await client.get(url)
-    await client.get(url)
+    await _read_twice_instrumented(cached_app, client, url)
 
-    spans = [
-        span
-        for span in capfire.exporter.exported_spans_as_dict()
-        if span["name"] == "read_cache.read_through"
+    request_spans = _route_spans(exported, ENTITY_ROUTE)
+    assert [span["attributes"]["cache.lookup.outcome"] for span in request_spans] == [
+        "miss",
+        "hit",
     ]
-    assert [span["attributes"]["cache.lookup.outcome"] for span in spans] == ["miss", "hit"]
-    assert {span["attributes"]["cache.group"] for span in spans} == {"note"}
-    assert {span["attributes"]["cache.operation"] for span in spans} == {"entity"}
+    assert {span["attributes"]["cache.group"] for span in request_spans} == {"note"}
+    assert {span["attributes"]["cache.operation"] for span in request_spans} == {"entity"}
+    assert _lookup_counts(exported) == {("entity", "note", "miss"): 1, ("entity", "note", "hit"): 1}
     # The SDK signals a hit by raising CacheHitException. That is control flow,
-    # so a hit span must not record an exception or an error level.
-    for span in spans:
+    # so a hit must not record an exception or an error level.
+    for span in request_spans:
         assert not [event for event in span.get("events", []) if event["name"] == "exception"]
         assert span["attributes"].get("logfire.level_num", 9) < 17
+
+    step_spans = [
+        span
+        for span in exported.spans.exported_spans_as_dict()
+        if span["name"] == "read_cache.read_through"
+        and span["attributes"].get("logfire.span_type") == "span"
+    ]
+    if min_level == "info":
+        assert step_spans == []
+    else:
+        request_ids = {span["context"]["span_id"] for span in request_spans}
+        assert len(step_spans) == 2
+        assert {span["parent"]["span_id"] for span in step_spans} <= request_ids
 
 
 @pytest.mark.asyncio
