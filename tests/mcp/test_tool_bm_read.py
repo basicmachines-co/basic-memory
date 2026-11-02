@@ -4,6 +4,7 @@ These run the real ASGI stack through the shared `client` fixture.
 """
 
 import io
+from contextlib import nullcontext
 import json
 from typing import Any
 
@@ -541,3 +542,81 @@ async def test_read_checksum_guards_an_overwrite(client, test_project):
             expected_checksum=read["checksum"],
             project=test_project.name,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace_slug", [None, "team-paul"])
+async def test_folder_named_like_the_project_reads_the_folder_note(
+    client, test_project, workspace_slug
+):
+    """A folder named like the project must not resolve to the root note of the same name (#2024).
+
+    The leading project name is read as a qualifier once, so the folder note is
+    `<project>/<project>/Plan.md`. Resolution used to drop the folder segment a
+    second time and return the root `Plan.md`, which a bm_edit would then change.
+    """
+    project = test_project.name
+    scope = (
+        workspace_permalink_context(workspace_slug=workspace_slug, workspace_type="organization")
+        if workspace_slug
+        else nullcontext()
+    )
+    with scope:
+        await _write(project, "Plan", "# Plan\n\nIn the folder", directory=project)
+        await _write(project, "Plan", "# Plan\n\nAt the root", directory="/")
+
+        identifiers = [f"{project}/{project}/Plan.md"]
+        if workspace_slug:
+            # Without a workspace prefix the root note's own permalink is `<project>/plan`,
+            # so the extensionless folder form is that permalink; only the .md path is exact.
+            identifiers.append(f"{project}/{project}/plan")
+        for identifier in identifiers:
+            folder = await read_json(identifier, project=project)
+            assert folder["content"].rstrip().endswith("In the folder"), identifier
+
+        root = await read_json(f"{project}/Plan.md", project=project)
+        assert root["content"].rstrip().endswith("At the root")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permalink", ["foo.md", "foo"])
+async def test_filename_shaped_custom_permalink_still_beats_a_file_path(
+    client, test_project, permalink
+):
+    """A verbatim stored permalink wins over a same-named file path (#2024 review).
+
+    `owner.md` declares permalink `foo.md` while another note lives at `foo.md`.
+    Reading `foo.md` must keep returning the permalink owner, as the bulk resolver
+    and the OKF export do, so a strict edit cannot land on the other note.
+    """
+    project = test_project.name
+    await bm_write(identifier="foo.md", content="# foo\n\nThe file", project=project)
+    await bm_write(
+        identifier="owner.md",
+        content=f"---\npermalink: {permalink}\n---\n# Owner\n\nThe permalink owner",
+        project=project,
+    )
+
+    payload = await read_json("foo.md", project=project)
+
+    assert payload["content"].rstrip().endswith("The permalink owner")
+
+
+@pytest.mark.asyncio
+async def test_verbatim_custom_permalink_beats_a_folder_named_like_the_project(
+    client, test_project
+):
+    """Under the folder rule, a stored permalink equal to the identifier still wins (#2024 review)."""
+    project = test_project.name
+    await bm_write(
+        identifier=f"{project}/{project}/foo.md", content="# foo\n\nIn the folder", project=project
+    )
+    await bm_write(
+        identifier="owner.md",
+        content=f"---\npermalink: {project}/foo.md\n---\n# Owner\n\nThe permalink owner",
+        project=project,
+    )
+
+    payload = await read_json(f"{project}/{project}/foo.md", project=project)
+
+    assert payload["content"].rstrip().endswith("The permalink owner")
