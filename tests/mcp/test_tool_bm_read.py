@@ -576,3 +576,47 @@ async def test_folder_named_like_the_project_reads_the_folder_note(
 
         root = await read_json(f"{project}/Plan.md", project=project)
         assert root["content"].rstrip().endswith("At the root")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permalink", ["foo.md", "foo"])
+async def test_filename_shaped_custom_permalink_still_beats_a_file_path(
+    client, test_project, permalink
+):
+    """A verbatim stored permalink wins over a same-named file path (#2024 review).
+
+    `owner.md` declares permalink `foo.md` while another note lives at `foo.md`.
+    Reading `foo.md` must keep returning the permalink owner, as the bulk resolver
+    and the OKF export do, so a strict edit cannot land on the other note.
+    """
+    project = test_project.name
+    await bm_write(identifier="foo.md", content="# foo\n\nThe file", project=project)
+    await bm_write(
+        identifier="owner.md",
+        content=f"---\npermalink: {permalink}\n---\n# Owner\n\nThe permalink owner",
+        project=project,
+    )
+
+    payload = await read_json("foo.md", project=project)
+
+    assert payload["content"].rstrip().endswith("The permalink owner")
+
+
+@pytest.mark.asyncio
+async def test_verbatim_custom_permalink_beats_a_folder_named_like_the_project(
+    client, test_project
+):
+    """Under the folder rule, a stored permalink equal to the identifier still wins (#2024 review)."""
+    project = test_project.name
+    await bm_write(
+        identifier=f"{project}/{project}/foo.md", content="# foo\n\nIn the folder", project=project
+    )
+    await bm_write(
+        identifier="owner.md",
+        content=f"---\npermalink: {project}/foo.md\n---\n# Owner\n\nThe permalink owner",
+        project=project,
+    )
+
+    payload = await read_json(f"{project}/{project}/foo.md", project=project)
+
+    assert payload["content"].rstrip().endswith("The permalink owner")

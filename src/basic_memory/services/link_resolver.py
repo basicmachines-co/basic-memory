@@ -462,11 +462,26 @@ class LinkResolver:
         # duplicate-title guard below (#1148).
         exact_identifier = normalize_project_reference(clean_text).strip("/")
 
-        # 0. An identifier ending in .md names a file. Its exact path is the most precise
-        # match, and permalink candidates can point elsewhere: in project `cabinet`, the local
-        # permalink of a root `plan.md` is `cabinet/plan`, which is also the slug of the folder
-        # note `cabinet/plan.md` (#2024).
-        if clean_text.casefold().endswith(".md"):
+        # 0. A `.md` path under a top-level folder named like the project (`cabinet/plan.md`
+        # in project `cabinet`) is the folder note's exact file path. The generated permalink
+        # candidates below read the same text as project-qualified and reach a root `plan.md`
+        # instead, because its local permalink is `cabinet/plan` (#2024). Elsewhere the usual
+        # permalink-first order stands, as the bulk resolver and OKF export expect. A stored
+        # permalink equal to the identifier verbatim still wins, since a custom frontmatter
+        # permalink may itself look like a file name.
+        project_slug = generate_permalink(project_permalink) if project_permalink else None
+        if (
+            project_slug
+            and clean_text.casefold().endswith(".md")
+            and generate_permalink(clean_text).startswith(f"{project_slug}/")
+        ):
+            verbatim_permalink = await entity_repository.get_by_permalink(
+                session,
+                normalize_project_reference(clean_text).strip("/"),
+                load_relations=load_relations,
+            )
+            if verbatim_permalink:
+                return verbatim_permalink
             exact_file = await entity_repository.get_by_file_path(
                 session,
                 clean_text,
