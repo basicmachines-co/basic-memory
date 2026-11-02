@@ -169,7 +169,7 @@ def test_initialize_does_not_resurrect_actor_detached_during_start(bm, monkeypat
         def start(self, timeout: float = 25.0) -> None:
             self.started = True
             self.alive = True
-            monkeypatch.setattr(bm, "_active_providers", [p])
+            monkeypatch.setattr(bm, "_all_providers", bm.weakref.WeakSet([p]))
             bm._atexit_cleanup()
 
     monkeypatch.setattr(bm, "_BmMcpActor", CleanupDuringStartActor)
@@ -210,7 +210,7 @@ def test_sigterm_handler_chains_to_previous_python_handler(bm, monkeypatch):
     original = signal.getsignal(signal.SIGTERM)
     provider = _provider_with_fake_actor(bm)
     monkeypatch.setattr(bm, "_sigterm_installed", False)
-    monkeypatch.setattr(bm, "_active_providers", [provider])
+    monkeypatch.setattr(bm, "_all_providers", bm.weakref.WeakSet([provider]))
     try:
         signal.signal(signal.SIGTERM, host_handler)
         bm._install_sigterm_cleanup()
@@ -230,7 +230,7 @@ def test_sigterm_handler_with_sig_dfl_restores_and_redelivers(bm, monkeypatch):
     original = signal.getsignal(signal.SIGTERM)
     provider = _provider_with_fake_actor(bm)
     monkeypatch.setattr(bm, "_sigterm_installed", False)
-    monkeypatch.setattr(bm, "_active_providers", [provider])
+    monkeypatch.setattr(bm, "_all_providers", bm.weakref.WeakSet([provider]))
     monkeypatch.setattr(bm.os, "kill", lambda pid, sig: kills.append((pid, sig)))
     try:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)

@@ -29,6 +29,7 @@ import socket
 import subprocess
 import threading
 import time
+import weakref
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
@@ -36,8 +37,28 @@ from typing import Any, Callable
 
 # Hermes ABC + helpers — these resolve because Hermes adds its tree to sys.path
 # when loading plugins (same pattern as plugins/memory/mem0/__init__.py:21).
-from agent.memory_provider import MemoryProvider
+from agent.memory_provider import MemoryProvider, RecallStatus
 from tools.registry import tool_error
+
+# Constraint: Hermes v0.22 requires every memory-provider background job to run
+# through `spawn_context_thread`, so the profile-scoped HERMES_HOME and secret
+# scope follow the work onto the new thread. The supported floor (v0.20) has no
+# such helper and no context-scoped profiles, where a plain thread is equivalent.
+try:
+    from agent.memory_provider import spawn_context_thread as _hermes_spawn_context_thread
+except ImportError:
+    _hermes_spawn_context_thread = None
+
+
+def _spawn_thread(target: Callable[[], None], *, name: str) -> threading.Thread:
+    """Start a daemon thread under the caller's Hermes profile context."""
+    if _hermes_spawn_context_thread is not None:
+        thread = _hermes_spawn_context_thread(target, name=name, daemon=True)
+    else:
+        thread = threading.Thread(target=target, name=name, daemon=True)
+    thread.start()
+    return thread
+
 
 __version__ = "1.0.0"
 
@@ -594,6 +615,35 @@ def _coerce_bool(v: Any) -> Any:
     return v
 
 
+_SNIPPET_STOPWORDS = frozenset(
+    "the and for with that this what when where which who why how did does was were "
+    "are about from into have has had you your our they them their then than there "
+    "can could would should will just also some any all not but".split()
+)
+
+
+def _snippet_around(text: str, query: str, width: int = 240) -> str:
+    """One-line excerpt of `text` that starts just before the first query term it contains.
+
+    Recall runs bm_search in text mode, which returns whole note content but no
+    matched chunk; a note's opening lines (a transcript header) rarely show why
+    it matched. Falls back to the opening when no term occurs.
+    """
+    flat = re.sub(r"\s+", " ", text or "").strip()
+    terms = [
+        t
+        for t in re.findall(r"[a-z0-9][a-z0-9_-]{2,}", (query or "").lower())
+        if t not in _SNIPPET_STOPWORDS
+    ]
+    lowered = flat.lower()
+    hits = [i for i in (lowered.find(t) for t in terms) if i >= 0]
+    if not hits:
+        return flat[:width]
+    start = max(0, min(hits) - width // 6)
+    end = min(len(flat), start + width)
+    return ("…" if start else "") + flat[start:end].strip() + ("…" if end < len(flat) else "")
+
+
 def _extract_mcp_text(result: Any) -> str:
     """
     Extract text from an MCP CallToolResult.
@@ -969,6 +1019,44 @@ def _translate_args(
 # ---------------------------------------------------------------------------
 
 
+# --- Live-provider registry ---
+# Hermes v0.22 gives every agent its own provider instance, bound to one profile
+# (HERMES_HOME) at initialize(). Human-invoked /bm-* commands run outside any
+# agent, so they look up the initialized instance for the caller's profile here
+# instead of closing over whichever (possibly never-initialized) instance
+# register() created. Lookup only: an instance is never rebound to another
+# profile. Weak references let Hermes drop an agent's provider normally.
+_registry_lock = threading.Lock()
+_live_providers: dict[str, weakref.ref[BasicMemoryProvider]] = {}
+
+
+def _home_key(home: str | Path) -> str:
+    return str(Path(home).expanduser().resolve())
+
+
+def _live_provider_for(home: str | Path) -> BasicMemoryProvider | None:
+    with _registry_lock:
+        ref = _live_providers.get(_home_key(home))
+    provider = ref() if ref is not None else None
+    if provider is not None and provider._initialized and provider._actor is not None:
+        return provider
+    return None
+
+
+def _is_connection_lost(exc: BaseException, actor: _BmMcpActor) -> bool:
+    """True when a call failed because the `bm mcp` child is gone."""
+    if not actor.is_alive():
+        return True
+    return type(exc).__name__ in {"ClosedResourceError", "BrokenResourceError"} or (
+        "connection closed" in str(exc).lower()
+    )
+
+
+# Minimum gap between restarts of a dead `bm mcp`, so a server that dies on
+# every start is not respawned on every call.
+_RESTART_BACKOFF_SECONDS = 10.0
+
+
 class BasicMemoryProvider(MemoryProvider):
     """Hermes Memory Provider backed by the basic-memory MCP server."""
 
@@ -983,16 +1071,25 @@ class BasicMemoryProvider(MemoryProvider):
         self._remember_folder: str = "bm-remember"
         self._session_id: str = ""
         self._hermes_home: str = ""
+        self._agent_context: str = "primary"
         self._session_note_id: str | None = None
+        self._continues_note_id: str | None = None
         self._session_started_at: datetime | None = None
-        self._sync_thread: threading.Thread | None = None
         self._prefetch_thread: threading.Thread | None = None
         self._prefetch_lock = threading.Lock()
         self._pending_prefetch: str = ""
+        self._pending_prefetch_count: int = 0
+        self._last_recall_count: int = 0
+        # Serializes session-scoped capture state (note id, opener) between turn
+        # capture, session-end summaries and session switches.
+        self._state_lock = threading.RLock()
+        self._restart_lock = threading.Lock()
+        self._last_restart_at: float = 0.0
         self._failure_count: int = 0
         self._failure_pause_until: float = 0.0
         self._initialized: bool = False
         self._first_user_msg: str | None = None
+        _all_providers.add(self)
 
     # ---- Identity ----
     @property
@@ -1015,6 +1112,9 @@ class BasicMemoryProvider(MemoryProvider):
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         requested_session_id = session_id or ""
         self._hermes_home = kwargs.get("hermes_home") or os.path.expanduser("~/.hermes")
+        # Hermes passes "cron", "subagent" or "flush" for non-conversational
+        # agents; their prompts must not land in the user's transcripts.
+        self._agent_context = kwargs.get("agent_context") or "primary"
         cfg = _load_config(self._hermes_home)
         self._mode = cfg.get("mode") or "local"
         self._project = cfg.get("project") or _default_project()
@@ -1152,8 +1252,17 @@ class BasicMemoryProvider(MemoryProvider):
         elif self._session_started_at is None:
             self._session_started_at = datetime.now(timezone.utc)
         self._initialized = True
+        with _registry_lock:
+            _live_providers[_home_key(self._hermes_home)] = weakref.ref(self)
 
     def _ensure_local_project(self) -> None:
+        # Trigger: the project is already in bm's registry.
+        # Why: `bm project add` costs a full bm start and can stall for its whole
+        # 15s timeout, on every initialize (Hermes builds one per agent).
+        # Outcome: only first-time setups pay for registration.
+        projects = _bm_known_projects()
+        if projects is not None and self._project in projects:
+            return
         bm = _bm_binary_path()
         if not bm:
             return
@@ -1205,6 +1314,12 @@ class BasicMemoryProvider(MemoryProvider):
         return [bm, "mcp"]
 
     def shutdown(self) -> None:
+        if self._hermes_home:
+            key = _home_key(self._hermes_home)
+            with _registry_lock:
+                ref = _live_providers.get(key)
+                if ref is not None and ref() is self:
+                    del _live_providers[key]
         if self._actor is not None:
             try:
                 self._actor.shutdown(timeout=5.0)
@@ -1212,6 +1327,47 @@ class BasicMemoryProvider(MemoryProvider):
                 logger.debug("actor shutdown: %s", e)
         self._actor = None
         self._initialized = False
+
+    # ---- Calling Basic Memory ----
+    def _call(self, bm_tool: str, bm_args: dict[str, Any], timeout: float) -> str:
+        """Call a bm MCP tool, restarting a dead `bm mcp` once and retrying.
+
+        Trigger: the child exited mid-session ("Connection closed").
+        Why: the actor never reconnects on its own, so every later call failed
+        until the gateway restarted.
+        Outcome: re-run initialize(), which replaces a dead actor and keeps the
+        same session's capture state, then retry the call once.
+        """
+        actor = self._actor
+        if actor is None:
+            raise RuntimeError("basic-memory MCP actor not started")
+        try:
+            return actor.call(bm_tool, bm_args, timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            raise
+        except Exception as e:
+            if not _is_connection_lost(e, actor) or not self._restart(actor):
+                raise
+            logger.warning("basic-memory: bm mcp connection lost (%s); restarted it", e)
+            assert self._actor is not None
+            return self._actor.call(bm_tool, bm_args, timeout=timeout)
+
+    def _restart(self, dead: _BmMcpActor) -> bool:
+        with self._restart_lock:
+            if self._actor is not dead:
+                return self._actor is not None and self._actor.is_alive()
+            now = time.monotonic()
+            if now - self._last_restart_at < _RESTART_BACKOFF_SECONDS:
+                return False
+            self._last_restart_at = now
+            dead.shutdown(timeout=2.0)
+            self._initialized = False
+            self.initialize(
+                self._session_id,
+                hermes_home=self._hermes_home,
+                agent_context=self._agent_context,
+            )
+            return self._initialized and self._actor is not None and self._actor is not dead
 
     # ---- Tool surface ----
     def system_prompt_block(self) -> str:
@@ -1262,44 +1418,55 @@ class BasicMemoryProvider(MemoryProvider):
         except KeyError as e:
             return tool_error(f"{tool_name}: missing required arg {e}")
         try:
-            return self._actor.call(bm_tool, bm_args, timeout=30.0)
+            result = self._call(bm_tool, bm_args, timeout=30.0)
         except Exception as e:
             self._record_failure(e)
             logger.exception("bm tool call failed: %s", tool_name)
             return tool_error(f"{tool_name}: {e}")
+        self._record_success()
+        return result
 
     # ---- Recall (retrieve step) ----
+    def _recall(self, query: str, timeout: float) -> tuple[str, int]:
+        """Keyword recall for a turn: (formatted block, number of notes)."""
+        # mode="text" — bypass BM's "hybrid" default which mixes FTS
+        # with vector search. Vector indexing is scheduled asynchronously
+        # in BM (see services/search_service.py:_schedule_vector_sync_if_enabled),
+        # so hybrid search can miss notes that were just written, especially
+        # under cold-start or load. Prefetch is a recall hot path with a
+        # 3s budget and the queries are usually keyword-like — FTS-only is
+        # both faster and more deterministic.
+        raw = self._call(
+            "bm_search",
+            {
+                "project": self._project,
+                "query": _truncate(query, 500),
+                "page_size": 5,
+                "mode": "text",
+                "output_format": "json",
+            },
+            timeout=timeout,
+        )
+        return self._format_prefetch_counted(raw, query)
+
     def prefetch(self, query: str, *, session_id: str = "") -> str:
+        # recall_status() must describe only this prefetch, never a prior one.
+        self._last_recall_count = 0
         with self._prefetch_lock:
-            cached = self._pending_prefetch
-            self._pending_prefetch = ""
+            cached, cached_count = self._pending_prefetch, self._pending_prefetch_count
+            self._pending_prefetch, self._pending_prefetch_count = "", 0
         if cached:
+            self._last_recall_count = cached_count
             return cached
         if not self._initialized or self._actor is None or self._is_circuit_open():
             return ""
         try:
-            # mode="text" — bypass BM's "hybrid" default which mixes FTS
-            # with vector search. Vector indexing is scheduled asynchronously
-            # in BM (see services/search_service.py:_schedule_vector_sync_if_enabled),
-            # so hybrid search can miss notes that were just written, especially
-            # under cold-start or load. Prefetch is a recall hot path with a
-            # 3s budget and the queries are usually keyword-like — FTS-only is
-            # both faster and more deterministic.
-            raw = self._actor.call(
-                "bm_search",
-                {
-                    "project": self._project,
-                    "query": query,
-                    "page_size": 5,
-                    "mode": "text",
-                    "output_format": "json",
-                },
-                timeout=3.0,
-            )
-            return self._format_prefetch(raw)
+            text, self._last_recall_count = self._recall(query, timeout=3.0)
         except Exception as e:
             self._record_failure(e)
             return ""
+        self._record_success()
+        return text
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         if not self._initialized or self._actor is None or self._is_circuit_open():
@@ -1309,43 +1476,40 @@ class BasicMemoryProvider(MemoryProvider):
 
         def _bg() -> None:
             try:
-                # mode="text" mirrors prefetch() — see note there. The
-                # background path can afford a longer timeout but the
-                # async-vector-indexing race still applies.
-                raw = self._actor.call(  # type: ignore[union-attr]
-                    "bm_search",
-                    {
-                        "project": self._project,
-                        "query": query,
-                        "page_size": 5,
-                        "mode": "text",
-                        "output_format": "json",
-                    },
-                    timeout=10.0,
-                )
-                with self._prefetch_lock:
-                    self._pending_prefetch = self._format_prefetch(raw)
+                # The background path can afford a longer timeout than prefetch().
+                text, count = self._recall(query, timeout=10.0)
             except Exception as e:
                 self._record_failure(e)
                 logger.debug("queue_prefetch bg failed: %s", e)
+                return
+            with self._prefetch_lock:
+                self._pending_prefetch, self._pending_prefetch_count = text, count
 
-        self._prefetch_thread = threading.Thread(target=_bg, daemon=True, name="bm-prefetch")
-        self._prefetch_thread.start()
+        self._prefetch_thread = _spawn_thread(_bg, name="bm-prefetch")
+
+    def recall_status(self) -> RecallStatus | None:
+        """What the most recent prefetch injected, for Hermes's recall indicator."""
+        if not self._last_recall_count:
+            return None
+        return RecallStatus(provider_label="Basic Memory", count=self._last_recall_count)
 
     def _format_prefetch(self, raw_json: str) -> str:
+        return self._format_prefetch_counted(raw_json, "")[0]
+
+    def _format_prefetch_counted(self, raw_json: str, query: str) -> tuple[str, int]:
         try:
             data = json.loads(raw_json)
         except Exception:
-            return ""
+            return "", 0
         # BM may return JSON directly or wrapped {"text": "..."}
         if isinstance(data, dict) and "text" in data and "results" not in data:
             try:
                 data = json.loads(data["text"])
             except Exception:
-                return ""
+                return "", 0
         results = data.get("results") if isinstance(data, dict) else None
         if not results:
-            return ""
+            return "", 0
         lines = ["## Basic Memory Recall"]
         for r in list(results)[:5]:
             if not isinstance(r, dict):
@@ -1355,48 +1519,65 @@ class BasicMemoryProvider(MemoryProvider):
             preview_raw = r.get("content") or r.get("preview") or ""
             if not isinstance(preview_raw, str):
                 preview_raw = str(preview_raw)
-            preview = re.sub(r"\s+", " ", preview_raw)[:200]
+            preview = _snippet_around(preview_raw, query, width=240)
             lines.append(f"- **{title}** (`{permalink}`) — {preview}")
-        return "\n".join(lines)
+        count = len(lines) - 1
+        return ("\n".join(lines), count) if count else ("", 0)
 
     # ---- Per-turn capture (extract step) ----
-    def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+    def sync_turn(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        messages: list[dict[str, Any]] | None = None,
+        turn_author: dict[str, Any] | None = None,
+    ) -> None:
+        # Constraint: Hermes v0.22 runs sync_turn on the memory manager's single
+        # background worker, which orders it against session switches and other
+        # writes. A thread of our own would let a turn land after a /new in the
+        # previous session's transcript, so the capture runs inline.
         if (
             not self._capture_per_turn
             or not self._initialized
             or self._actor is None
+            or self._agent_context != "primary"
             or self._is_circuit_open()
         ):
             return
-        if self._first_user_msg is None and user_content:
-            self._first_user_msg = _truncate(_public_text(user_content), 240)
-        if self._sync_thread and self._sync_thread.is_alive():
-            self._sync_thread.join(timeout=3.0)
+        author = turn_author.get("name") if turn_author else None
+        try:
+            with self._state_lock:
+                if self._first_user_msg is None and user_content:
+                    self._first_user_msg = _truncate(_public_text(user_content), 240)
+                self._capture_turn(user_content, assistant_content, author=author)
+        except Exception as e:
+            self._record_failure(e)
+            logger.warning("basic-memory sync_turn failed: %s", e)
+            return
+        self._record_success()
 
-        def _bg() -> None:
-            try:
-                self._capture_turn(user_content, assistant_content)
-            except Exception as e:
-                self._record_failure(e)
-                logger.warning("basic-memory sync_turn failed: %s", e)
-
-        self._sync_thread = threading.Thread(target=_bg, daemon=True, name="bm-sync-turn")
-        self._sync_thread.start()
-
-    def _capture_turn(self, user: str, asst: str) -> None:
+    def _capture_turn(self, user: str, asst: str, *, author: str | None = None) -> None:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        # A shared channel has several participants; name who wrote this turn.
+        who = f"User ({author})" if author else "User"
         block = (
             f"### {ts}\n\n"
-            f"**User:** {_truncate(_public_text(user), 4000)}\n\n"
+            f"**{who}:** {_truncate(_public_text(user), 4000)}\n\n"
             f"**Assistant:** {_truncate(_public_text(asst), 4000)}\n"
         )
         if not self._session_note_id:
             title = self._session_note_title()
+            relations = ""
+            if self._continues_note_id:
+                relations = f"## Relations\n\n- continues [[{self._continues_note_id}]]\n\n"
             content = (
                 f"# {title}\n\n"
                 f"Live transcript of Hermes session "
                 f"`{self._session_id or '(no-id)'}`. "
                 f"Auto-captured by basic-memory provider.\n\n"
+                f"{relations}"
                 f"## Turns\n\n{block}\n"
             )
             args = {
@@ -1407,16 +1588,21 @@ class BasicMemoryProvider(MemoryProvider):
                 "tags": ["hermes-session", _hostname()],
                 "output_format": "json",
             }
-            raw = self._actor.call("bm_write", args, timeout=15.0)  # type: ignore[union-attr]
-            self._session_note_id = _extract_permalink(raw, fallback=title)
-        else:
-            args = {
-                "project": self._project,
-                "identifier": self._session_note_id,
-                "command": "append",
-                "content": "\n" + block,
-            }
-            self._actor.call("bm_edit", args, timeout=15.0)  # type: ignore[union-attr]
+            raw = self._call("bm_write", args, timeout=15.0)
+            if "ALREADY_EXISTS" not in raw:
+                self._session_note_id = _extract_permalink(raw, fallback=title)
+                return
+            # Trigger: a note with this title exists (a restart within the same
+            # minute and session). Why: bm 1.0 refuses to overwrite and the turn
+            # would be lost. Outcome: append to the existing transcript instead.
+            self._session_note_id = f"{self._capture_folder}/{title}.md"
+        args = {
+            "project": self._project,
+            "identifier": self._session_note_id,
+            "command": "append",
+            "content": "\n" + block,
+        }
+        self._call("bm_edit", args, timeout=15.0)
 
     def _session_note_title(self) -> str:
         ts = (self._session_started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H%M")
@@ -1429,18 +1615,63 @@ class BasicMemoryProvider(MemoryProvider):
             suffix = (self._session_started_at or datetime.now(timezone.utc)).strftime("%S")
         return f"Hermes Session {ts} {suffix}"
 
+    def on_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+        rewound: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        """Rebind capture state when Hermes rotates the session id without teardown.
+
+        Fires on /new, /reset, /resume, /branch and context compression. Any new
+        id starts a new transcript note, so later turns never land in the previous
+        session's record. When the conversation continues under the new id
+        (compression, /branch) the new note links back with a `continues`
+        relation. A rewind (/undo) keeps the current note.
+        """
+        if rewound or not new_session_id:
+            return
+        with self._state_lock:
+            if new_session_id == self._session_id and not reset:
+                return
+            previous_note = self._session_note_id
+            continues = (
+                not reset
+                and previous_note is not None
+                and parent_session_id in ("", self._session_id)
+            )
+            self._session_id = new_session_id
+            self._session_note_id = None
+            self._continues_note_id = previous_note if continues else None
+            self._first_user_msg = None
+            self._session_started_at = datetime.now(timezone.utc)
+        with self._prefetch_lock:
+            self._pending_prefetch, self._pending_prefetch_count = "", 0
+
     # ---- Session-end summary ----
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
-        if not self._capture_session_end or not self._initialized or self._actor is None:
+        if (
+            not self._capture_session_end
+            or not self._initialized
+            or self._actor is None
+            or self._agent_context != "primary"
+        ):
             return
         try:
-            self._write_summary(messages)
+            with self._state_lock:
+                self._write_summary(messages)
         except Exception as e:
             logger.warning("basic-memory on_session_end summary failed: %s", e)
 
     def _write_summary(self, messages: list[dict[str, Any]]) -> None:
         user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
         asst_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "assistant"]
+        if not user_msgs and not self._session_note_id:
+            # Gateway expiry ends idle sessions too; a summary of nothing is noise.
+            return
         first_user = self._first_user_msg or ""
         if not first_user and user_msgs:
             first_user = _truncate(
@@ -1491,9 +1722,12 @@ class BasicMemoryProvider(MemoryProvider):
             "content": "\n".join(lines),
             "tags": ["hermes-session-summary", _hostname()],
             "output_format": "json",
+            # A session can end more than once (gateway expiry after /new); the
+            # newest summary replaces the earlier one.
+            "overwrite": True,
         }
         try:
-            self._actor.call("bm_write", args, timeout=15.0)  # type: ignore[union-attr]
+            self._call("bm_write", args, timeout=15.0)
         except Exception as e:
             logger.warning("basic-memory: summary write failed: %s", e)
 
@@ -1563,6 +1797,11 @@ class BasicMemoryProvider(MemoryProvider):
                 self._failure_count,
                 exc,
             )
+
+    def _record_success(self) -> None:
+        """A call worked, so earlier failures were not consecutive: forget them."""
+        if self._failure_pause_until == 0.0:
+            self._failure_count = 0
 
     def _is_circuit_open(self) -> bool:
         if self._failure_pause_until and time.monotonic() < self._failure_pause_until:
@@ -1648,6 +1887,45 @@ def _format_result_rows(items: list[Any], header: str, empty_msg: str) -> str:
 
 _slash_init_lock = threading.Lock()
 
+# Providers started on demand for /bm-* commands, one per profile home, used only
+# when that profile has no initialized agent provider to borrow.
+_slash_providers: dict[str, BasicMemoryProvider] = {}
+
+
+def _current_hermes_home() -> str:
+    """The caller's Hermes profile home.
+
+    Hermes v0.22 scopes HERMES_HOME per profile with a context variable, which
+    `hermes_constants.get_hermes_home()` honors; v0.20 reads the environment.
+    """
+    try:
+        from hermes_constants import get_hermes_home  # type: ignore
+    except ImportError:
+        return os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes")
+    return str(get_hermes_home())
+
+
+def _resolve_slash_provider(cmd: str) -> tuple[BasicMemoryProvider | None, str | None]:
+    """The provider a /bm-* command uses: the profile's live agent provider if
+    one exists (sharing its `bm mcp`), else one started once for that profile."""
+    home = _current_hermes_home()
+    live = _live_provider_for(home)
+    if live is not None:
+        return live, None
+    with _slash_init_lock:
+        provider = _slash_providers.setdefault(_home_key(home), BasicMemoryProvider())
+        provider._hermes_home = provider._hermes_home or home
+    err = _ensure_slash_ready(provider, cmd)
+    return (None, err) if err else (provider, None)
+
+
+def _peek_slash_provider() -> BasicMemoryProvider:
+    """A provider describing the caller's profile, without starting bm."""
+    home = _current_hermes_home()
+    return (
+        _live_provider_for(home) or _slash_providers.get(_home_key(home)) or BasicMemoryProvider()
+    )
+
 
 def _slash_uninit(cmd: str) -> str:
     return f"{cmd}: basic-memory provider not initialized. Run `hermes memory status` to diagnose."
@@ -1669,7 +1947,8 @@ def _ensure_slash_ready(provider: "BasicMemoryProvider", cmd: str) -> str | None
         try:
             provider.initialize(
                 session_id=f"slash:{cmd}:{int(time.time())}",
-                hermes_home=os.path.expanduser("~/.hermes"),
+                hermes_home=provider._hermes_home or _current_hermes_home(),
+                agent_context="slash",
             )
         except Exception as e:
             logger.warning("basic-memory: slash init for /%s failed: %s", cmd, e)
@@ -1690,24 +1969,34 @@ def _remember_title(text: str) -> str:
 
 
 def _build_slash_commands(
-    provider: "BasicMemoryProvider",
+    provider: BasicMemoryProvider | None = None,
 ) -> list[tuple[str, Callable[[str], str], str, str]]:
     """
     Return (name, handler, description, args_hint) tuples for each /bm-* command.
-    Handlers close over `provider` to access the live actor and config.
+
+    With `provider`, handlers use that instance. Without it (production), each
+    call resolves the caller's profile provider, which Hermes v0.22's
+    per-agent, per-profile instances require.
     """
+
+    def _get(cmd: str) -> tuple[BasicMemoryProvider | None, str | None]:
+        if provider is not None:
+            err = _ensure_slash_ready(provider, cmd)
+            return (None, err) if err else (provider, None)
+        return _resolve_slash_provider(cmd)
 
     def _bm_search(raw_args: str) -> str:
         args = raw_args.strip()
         if not args or _is_help_arg(args):
             return _SLASH_USAGE["bm-search"]
-        if err := _ensure_slash_ready(provider, "bm-search"):
+        p, err = _get("bm-search")
+        if err:
             return err
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_search",
                 {
-                    "project": provider._project,
+                    "project": p._project,
                     "query": args,
                     "page_size": 10,
                     "output_format": "json",
@@ -1728,13 +2017,14 @@ def _build_slash_commands(
         args = raw_args.strip()
         if not args or _is_help_arg(args):
             return _SLASH_USAGE["bm-read"]
-        if err := _ensure_slash_ready(provider, "bm-read"):
+        p, err = _get("bm-read")
+        if err:
             return err
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_read",
                 {
-                    "project": provider._project,
+                    "project": p._project,
                     "identifier": args,
                     "include_frontmatter": False,
                     "output_format": "text",
@@ -1752,13 +2042,14 @@ def _build_slash_commands(
         args = raw_args.strip()
         if not args or _is_help_arg(args):
             return _SLASH_USAGE["bm-context"]
-        if err := _ensure_slash_ready(provider, "bm-context"):
+        p, err = _get("bm-context")
+        if err:
             return err
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_context",
                 {
-                    "project": provider._project,
+                    "project": p._project,
                     "identifier": args,
                     "depth": 1,
                     "output_format": "text",
@@ -1777,13 +2068,14 @@ def _build_slash_commands(
         if _is_help_arg(args):
             return _SLASH_USAGE["bm-recent"]
         timeframe = args or "7d"
-        if err := _ensure_slash_ready(provider, "bm-recent"):
+        p, err = _get("bm-recent")
+        if err:
             return err
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_project",
                 {
-                    "project": provider._project,
+                    "project": p._project,
                     "command": "recent",
                     "since": timeframe,
                     "page_size": 10,
@@ -1806,42 +2098,44 @@ def _build_slash_commands(
     def _bm_status(raw_args: str) -> str:
         if _is_help_arg(raw_args):
             return _SLASH_USAGE["bm-status"]
+        p = provider if provider is not None else _peek_slash_provider()
         lines = [
             "Basic Memory plugin status",
-            f"  Provider:    {provider.name}",
-            f"  Mode:        {provider._mode}",
-            f"  Project:     {provider._project}",
+            f"  Provider:    {p.name}",
+            f"  Mode:        {p._mode}",
+            f"  Project:     {p._project}",
         ]
-        if provider._mode == "local":
-            lines.append(f"  Path:        {provider._project_path}")
+        if p._mode == "local":
+            lines.append(f"  Path:        {p._project_path}")
         bm_bin = _bm_binary_path()
         lines.append(f"  bm CLI:      {bm_bin or '(not found)'}")
         lines.append(f"  MCP module:  {'available' if _MCP_AVAILABLE else 'missing'}")
-        lines.append(f"  Initialized: {'yes' if provider._initialized else 'no'}")
+        lines.append(f"  Initialized: {'yes' if p._initialized else 'no'}")
         lines.append(
-            f"  Capture:     per-turn={provider._capture_per_turn}, "
-            f"session-end={provider._capture_session_end}, "
-            f"folder={provider._capture_folder!r}"
+            f"  Capture:     per-turn={p._capture_per_turn}, "
+            f"session-end={p._capture_session_end}, "
+            f"folder={p._capture_folder!r}"
         )
-        lines.append(f"  Remember folder: {provider._remember_folder!r}")
-        if provider._failure_count:
-            circuit = "open" if provider._is_circuit_open() else "closed"
-            lines.append(f"  Failures:    {provider._failure_count} (circuit {circuit})")
+        lines.append(f"  Remember folder: {p._remember_folder!r}")
+        if p._failure_count:
+            circuit = "open" if p._is_circuit_open() else "closed"
+            lines.append(f"  Failures:    {p._failure_count} (circuit {circuit})")
         return "\n".join(lines)
 
     def _bm_remember(raw_args: str) -> str:
         text = raw_args.strip()
         if not text or _is_help_arg(text):
             return _SLASH_USAGE["bm-remember"]
-        if err := _ensure_slash_ready(provider, "bm-remember"):
+        p, err = _get("bm-remember")
+        if err:
             return err
         title = _remember_title(text)
-        folder = provider._remember_folder or "bm-remember"
+        folder = p._remember_folder or "bm-remember"
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_write",
                 {
-                    "project": provider._project,
+                    "project": p._project,
                     "title": title,
                     "directory": folder,
                     "content": text,
@@ -1858,10 +2152,11 @@ def _build_slash_commands(
     def _bm_project(raw_args: str) -> str:
         if _is_help_arg(raw_args):
             return _SLASH_USAGE["bm-project"]
-        if err := _ensure_slash_ready(provider, "bm-project"):
+        p, err = _get("bm-project")
+        if err:
             return err
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_project",
                 {"command": "list", "output_format": "json"},
                 timeout=15.0,
@@ -1881,13 +2176,13 @@ def _build_slash_commands(
         if not projects:
             return "No Basic Memory projects found."
         lines = ["Basic Memory projects:"]
-        for p in projects:
-            if isinstance(p, dict):
-                name = str(p.get("name") or p.get("permalink") or "(unnamed)")
-                src = p.get("source") or p.get("workspace") or ""
+        for proj in projects:
+            if isinstance(proj, dict):
+                name = str(proj.get("name") or proj.get("permalink") or "(unnamed)")
+                src = proj.get("source") or proj.get("workspace") or ""
             else:
-                name, src = str(p), ""
-            marker = "  (active)" if name == provider._project else ""
+                name, src = str(proj), ""
+            marker = "  (active)" if name == p._project else ""
             tag = f" [{src}]" if src else ""
             lines.append(f"- {name}{tag}{marker}")
         return "\n".join(lines)
@@ -1895,15 +2190,16 @@ def _build_slash_commands(
     def _bm_workspace(raw_args: str) -> str:
         if _is_help_arg(raw_args):
             return _SLASH_USAGE["bm-workspace"]
-        if err := _ensure_slash_ready(provider, "bm-workspace"):
+        p, err = _get("bm-workspace")
+        if err:
             return err
-        if provider._mode != "cloud":
+        if p._mode != "cloud":
             return (
                 "Workspaces are a Basic Memory Cloud concept. "
-                f"This plugin is in '{provider._mode}' mode — no workspaces to list."
+                f"This plugin is in '{p._mode}' mode — no workspaces to list."
             )
         try:
-            raw = provider._actor.call(
+            raw = p._call(
                 "bm_project",
                 {"command": "list", "output_format": "json"},
                 timeout=15.0,
@@ -1984,7 +2280,7 @@ _SKILL_DESCRIPTION = (
 
 
 def _register_via_plugin_manager(
-    provider: "BasicMemoryProvider",
+    provider: BasicMemoryProvider | None,
     skill_path: Path | None = None,
     *,
     register_commands: bool = True,
@@ -2064,11 +2360,13 @@ def _register_via_plugin_manager(
 # atexit + SIGTERM safety nets (mirrors plugins/memory/openviking pattern)
 # ---------------------------------------------------------------------------
 
-_active_providers: list[BasicMemoryProvider] = []
+# Weak: Hermes v0.22 constructs a provider per agent build, so a strong list
+# grew for the life of the gateway. Live instances still get cleaned up.
+_all_providers: weakref.WeakSet[BasicMemoryProvider] = weakref.WeakSet()
 
 
 def _atexit_cleanup() -> None:
-    for p in list(_active_providers):
+    for p in list(_all_providers):
         try:
             p.shutdown()
         except Exception:
@@ -2138,9 +2436,13 @@ _install_sigterm_cleanup()
 
 
 def register(ctx: Any) -> None:
-    """Register basic-memory as a memory provider plugin."""
+    """Register basic-memory as a memory provider plugin.
+
+    Hermes v0.22 calls this once per load and refuses an instance another
+    profile's manager already bound, so every call creates a fresh provider;
+    the instance binds its profile in initialize(), never here.
+    """
     provider = BasicMemoryProvider()
-    _active_providers.append(provider)
     ctx.register_memory_provider(provider)
 
     # Bundle the user-facing skill so `hermes plugins install` wires it up
@@ -2170,7 +2472,9 @@ def register(ctx: Any) -> None:
     # the reach-in below.
     supports_command_registration = hasattr(ctx, "register_command")
     if supports_command_registration:
-        for name, handler, description, args_hint in _build_slash_commands(provider):
+        # Handlers resolve the caller's profile provider per call, so they are
+        # not tied to this (possibly never-initialized) instance.
+        for name, handler, description, args_hint in _build_slash_commands():
             try:
                 ctx.register_command(
                     name,
@@ -2186,7 +2490,7 @@ def register(ctx: Any) -> None:
     # modern contexts retain ownership metadata and can clean up registrations.
     if not supports_command_registration or not supports_skill_registration:
         _register_via_plugin_manager(
-            provider,
+            None,
             skill_path=skill_path if skill_path.exists() else None,
             register_commands=not supports_command_registration,
             register_skill=not supports_skill_registration,

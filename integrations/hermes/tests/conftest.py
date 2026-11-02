@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from dataclasses import dataclass
 import os
 import sys
 import types
@@ -27,7 +28,16 @@ def _stub_hermes_modules() -> None:
     class _StubMemoryProvider:
         """Stand-in for `agent.memory_provider.MemoryProvider`."""
 
+    @dataclass(frozen=True)
+    class _StubRecallStatus:
+        """Stand-in for `agent.memory_provider.RecallStatus` (Hermes >= v0.20)."""
+
+        provider_label: str
+        count: int
+        glyph: str = "🧠"
+
     agent_mp_mod.MemoryProvider = _StubMemoryProvider
+    agent_mp_mod.RecallStatus = _StubRecallStatus
     sys.modules.setdefault("agent", agent_mod)
     sys.modules.setdefault("agent.memory_provider", agent_mp_mod)
 

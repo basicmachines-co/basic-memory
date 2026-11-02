@@ -320,7 +320,9 @@ def test_bm_delete_removes_note(provider, bm):
     raw = provider.handle_tool_call("bm_read", {"identifier": permalink})
     d = _parse_tool_result(raw)
     text = (d or {}).get("text") or json.dumps(d or {})
-    assert "not found" in text.lower() or "no notes found" in text.lower(), (
+    lowered = text.lower()
+    # basic-memory 1.0 reports NOT_FOUND; earlier releases said "not found".
+    assert any(m in lowered for m in ("not found", "not_found", "no notes found")), (
         f"expected a 'not found' indication, got: {text[:200]}"
     )
 
@@ -409,8 +411,7 @@ def test_memory_quest_fields_round_trip(provider, bm):
 def test_sync_turn_writes_then_appends_to_same_session_note(provider, bm):
     # First turn — creates the session note
     provider.sync_turn("integration turn-1 user", "integration turn-1 assistant")
-    if provider._sync_thread:
-        provider._sync_thread.join(timeout=20.0)
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
     sid_1 = provider._session_note_id
     assert sid_1, "first sync_turn should set _session_note_id"
     assert sid_1.startswith(provider._project + "/"), (
@@ -420,8 +421,7 @@ def test_sync_turn_writes_then_appends_to_same_session_note(provider, bm):
     # Second turn — should append to the same note
     marker = f"TURN-2-MARKER-{uuid.uuid4().hex}"
     provider.sync_turn("integration turn-2 user", marker)
-    if provider._sync_thread:
-        provider._sync_thread.join(timeout=20.0)
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
     sid_2 = provider._session_note_id
     assert sid_2 == sid_1, "session_note_id should NOT change between turns"
 
@@ -436,8 +436,7 @@ def test_sync_turn_writes_then_appends_to_same_session_note(provider, bm):
 def test_on_session_end_writes_summary_with_relations(provider, bm):
     # Seed a session note via sync_turn
     provider.sync_turn("first message", "first reply")
-    if provider._sync_thread:
-        provider._sync_thread.join(timeout=20.0)
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
     sid = provider._session_note_id
     assert sid
 

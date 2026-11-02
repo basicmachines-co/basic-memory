@@ -157,16 +157,16 @@ def test_register_wires_up_all_slash_commands_on_modern_ctx(bm):
     upstream collector patch lands, or for plugins loaded via PluginContext),
     every /bm-* command is registered through that path."""
     ctx = MagicMock()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     names = {call.args[0] for call in ctx.register_command.call_args_list}
     assert names == _EXPECTED_COMMANDS
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_register_command_calls_include_description_and_args_hint(bm):
     ctx = MagicMock()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     for call in ctx.register_command.call_args_list:
         _, handler = call.args[0], call.args[1]
@@ -174,7 +174,7 @@ def test_register_command_calls_include_description_and_args_hint(bm):
         assert callable(handler)
         assert "description" in kwargs and kwargs["description"]
         assert "args_hint" in kwargs  # may be empty string for no-arg commands
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_modern_context_keeps_lifecycle_owned_registrations(bm, monkeypatch):
@@ -182,7 +182,7 @@ def test_modern_context_keeps_lifecycle_owned_registrations(bm, monkeypatch):
     PluginManager's private registries, or Hermes cannot later dispose it."""
     fake_mgr = _install_fake_hermes_cli(monkeypatch)
     ctx = _LifecycleAwareContext()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         assert set(ctx.commands) == _EXPECTED_COMMANDS
@@ -194,20 +194,20 @@ def test_modern_context_keeps_lifecycle_owned_registrations(bm, monkeypatch):
         assert ctx.commands == {}
         assert ctx.skills == {}
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_legacy_fallback_is_gated_per_registration_capability(bm, monkeypatch):
     fake_mgr = _install_fake_hermes_cli(monkeypatch)
     ctx = _CommandsOnlyContext()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         assert set(ctx.commands) == _EXPECTED_COMMANDS
         assert fake_mgr._plugin_commands == {}
         assert set(fake_mgr._plugin_skills) == {"basic-memory:basic-memory"}
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_register_tolerates_old_hermes_without_register_command(bm):
@@ -221,10 +221,10 @@ def test_register_tolerates_old_hermes_without_register_command(bm):
             self.memory_calls.append(provider)
 
     ctx = _OldCtx()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)  # must not raise
     assert len(ctx.memory_calls) == 1
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_register_swallows_register_command_errors(bm, caplog):
@@ -232,13 +232,13 @@ def test_register_swallows_register_command_errors(bm, caplog):
     registration — still proceed."""
     ctx = MagicMock()
     ctx.register_command.side_effect = ValueError("name collision with builtin")
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     with caplog.at_level("WARNING"):
         bm.register(ctx)
     ctx.register_memory_provider.assert_called_once()
     assert ctx.register_command.call_count == len(_EXPECTED_COMMANDS)
     assert "register_command" in caplog.text
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def test_reach_in_writes_all_commands_to_plugin_manager(bm, monkeypatch):
         "test collector must mirror real _ProviderCollector — no register_command"
     )
 
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         assert ctx.provider is not None  # memory provider still registered
@@ -268,7 +268,7 @@ def test_reach_in_writes_all_commands_to_plugin_manager(bm, monkeypatch):
             assert "description" in entry
             assert "args_hint" in entry
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_reach_in_writes_skill_to_plugin_manager(bm, monkeypatch):
@@ -277,7 +277,7 @@ def test_reach_in_writes_skill_to_plugin_manager(bm, monkeypatch):
     entry directly."""
     fake_mgr = _install_fake_hermes_cli(monkeypatch)
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         assert "basic-memory:basic-memory" in fake_mgr._plugin_skills
@@ -287,7 +287,7 @@ def test_reach_in_writes_skill_to_plugin_manager(bm, monkeypatch):
         assert isinstance(skill["path"], Path)
         assert skill["path"].name == "SKILL.md"
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_reach_in_skips_command_conflicting_with_builtin(bm, monkeypatch, caplog):
@@ -297,7 +297,7 @@ def test_reach_in_skips_command_conflicting_with_builtin(bm, monkeypatch, caplog
     # Simulate /bm-search colliding with a built-in.
     fake_mgr = _install_fake_hermes_cli(monkeypatch, resolve_returns={"bm-search": object()})
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     with caplog.at_level("WARNING"):
         bm.register(ctx)
     try:
@@ -306,7 +306,7 @@ def test_reach_in_skips_command_conflicting_with_builtin(bm, monkeypatch, caplog
         assert "bm-read" in fake_mgr._plugin_commands
         assert "conflicts with a built-in" in caplog.text
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_reach_in_degrades_when_hermes_cli_missing(bm, monkeypatch, caplog):
@@ -316,14 +316,14 @@ def test_reach_in_degrades_when_hermes_cli_missing(bm, monkeypatch, caplog):
     # Don't install fake modules; force import to fail.
     monkeypatch.setitem(sys.modules, "hermes_cli.plugins", None)  # type: ignore[arg-type]
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     with caplog.at_level("DEBUG"):
         bm.register(ctx)  # must not raise
     try:
         assert ctx.provider is not None
         # Either DEBUG message logged or nothing — both acceptable degrade modes.
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_reach_in_degrades_when_plugin_manager_missing_attrs(bm, monkeypatch):
@@ -339,9 +339,9 @@ def test_reach_in_degrades_when_plugin_manager_missing_attrs(bm, monkeypatch):
     monkeypatch.setitem(sys.modules, "hermes_cli.plugins", plugins_mod)
 
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)  # must not raise
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_reach_in_normalizes_command_names(bm, monkeypatch):
@@ -350,7 +350,7 @@ def test_reach_in_normalizes_command_names(bm, monkeypatch):
     canonical, so this is a defensive check on the transform itself."""
     fake_mgr = _install_fake_hermes_cli(monkeypatch)
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         for name in fake_mgr._plugin_commands:
@@ -358,7 +358,7 @@ def test_reach_in_normalizes_command_names(bm, monkeypatch):
             assert not name.startswith("/")
             assert " " not in name
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 def test_reach_in_entries_match_hermes_internal_shape(bm, monkeypatch):
@@ -367,7 +367,7 @@ def test_reach_in_entries_match_hermes_internal_shape(bm, monkeypatch):
     reach-in must produce byte-identical entries."""
     fake_mgr = _install_fake_hermes_cli(monkeypatch)
     ctx = _ProviderCollectorLike()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)
     try:
         entry = fake_mgr._plugin_commands["bm-search"]
@@ -377,7 +377,7 @@ def test_reach_in_entries_match_hermes_internal_shape(bm, monkeypatch):
         assert entry["plugin"] == "basic-memory"
         assert isinstance(entry["args_hint"], str)
     finally:
-        bm._active_providers.clear()
+        bm._all_providers.clear()
 
 
 # ---------------------------------------------------------------------------

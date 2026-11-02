@@ -25,7 +25,9 @@ def _provider_with_mock_actor(bm, *, project="test-proj", capture_folder="hermes
 
 
 def _wait_for_thread(p, attr="_sync_thread", timeout=5.0):
-    t = getattr(p, attr)
+    # sync_turn captures inline (Hermes v0.22 runs it on the memory manager's
+    # worker), so there may be no thread to wait for.
+    t = getattr(p, attr, None)
     if t is not None:
         t.join(timeout=timeout)
         assert not t.is_alive(), f"{attr} did not finish within {timeout}s"
@@ -171,13 +173,14 @@ def test_sync_turn_records_failure_on_actor_exception(bm):
     assert p._failure_count >= 1
 
 
-def test_sync_turn_thread_is_daemonic(bm):
+def test_sync_turn_writes_inline_before_returning(bm):
+    """Hermes v0.22 orders sync_turn against session switches on its own worker;
+    a thread of ours could land a turn after /new in the previous transcript."""
     p, actor = _provider_with_mock_actor(bm)
     actor.call.return_value = json.dumps({"permalink": "x"})
     p.sync_turn("u", "a")
-    assert p._sync_thread is not None
-    assert p._sync_thread.daemon is True
-    _wait_for_thread(p, "_sync_thread")
+    actor.call.assert_called_once()
+    assert not hasattr(p, "_sync_thread")
 
 
 # ---- _capture_turn directly (no thread) ----
@@ -274,8 +277,17 @@ def test_on_session_end_uses_first_user_msg_when_set(bm):
     assert "captured-via-sync_turn" in bm_args["content"]
 
 
+def test_on_session_end_skips_summary_for_an_empty_session(bm):
+    """No turns and no transcript: gateway expiry fires this for idle sessions,
+    and a summary of nothing is noise."""
+    p, actor = _provider_with_mock_actor(bm)
+    p.on_session_end([])
+    actor.call.assert_not_called()
+
+
 def test_on_session_end_handles_empty_messages(bm):
     p, actor = _provider_with_mock_actor(bm)
+    p._session_note_id = "p/hermes-sessions/transcript"
     actor.call.return_value = json.dumps({"permalink": "p/x"})
     p.on_session_end([])
     bm_args = actor.call.call_args[0][1]

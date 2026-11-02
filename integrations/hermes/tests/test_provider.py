@@ -299,20 +299,23 @@ def test_get_config_schema_shape(bm):
     }.issubset(keys)
 
 
-def test_register_appends_to_active_providers(bm):
-    fake_ctx = MagicMock()
-    bm._active_providers.clear()
-    bm.register(fake_ctx)
-    fake_ctx.register_memory_provider.assert_called_once()
-    assert len(bm._active_providers) == 1
-    bm._active_providers.clear()
+def test_register_hands_hermes_a_new_tracked_instance_each_load(bm):
+    """Hermes v0.22 refuses an instance another profile's manager already bound,
+    so every load gets a fresh provider; atexit cleanup still tracks each one."""
+    first_ctx, second_ctx = MagicMock(), MagicMock()
+    bm.register(first_ctx)
+    bm.register(second_ctx)
+    first = first_ctx.register_memory_provider.call_args.args[0]
+    second = second_ctx.register_memory_provider.call_args.args[0]
+    assert first is not second
+    assert first in bm._all_providers and second in bm._all_providers
 
 
 def test_register_also_registers_bundled_skill(bm):
     """Plugin's bundled SKILL.md should auto-register when `hermes plugins install`
     drops the repo into ~/.hermes/plugins/. Avoids the manual symlink step."""
     fake_ctx = MagicMock()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(fake_ctx)
     fake_ctx.register_skill.assert_called_once()
     args, kwargs = fake_ctx.register_skill.call_args
@@ -321,7 +324,7 @@ def test_register_also_registers_bundled_skill(bm):
     # Second positional arg is the SKILL.md path; it should resolve to a real file
     assert args[1].name == "SKILL.md"
     assert args[1].is_file()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_register_tolerates_old_hermes_without_register_skill(bm):
@@ -335,10 +338,10 @@ def test_register_tolerates_old_hermes_without_register_skill(bm):
             self.calls.append(("memory", provider))
 
     ctx = _OldCtx()
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     bm.register(ctx)  # must not raise
     assert any(c[0] == "memory" for c in ctx.calls)
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 def test_register_swallows_register_skill_errors(bm, caplog):
@@ -346,12 +349,12 @@ def test_register_swallows_register_skill_errors(bm, caplog):
     and continue — don't break the memory-provider registration."""
     fake_ctx = MagicMock()
     fake_ctx.register_skill.side_effect = ValueError("invalid skill name")
-    bm._active_providers.clear()
+    bm._all_providers.clear()
     with caplog.at_level("WARNING"):
         bm.register(fake_ctx)
     fake_ctx.register_memory_provider.assert_called_once()
     assert "register_skill failed" in caplog.text
-    bm._active_providers.clear()
+    bm._all_providers.clear()
 
 
 # ---- Edge cases ----
