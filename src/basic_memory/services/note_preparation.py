@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from copy import deepcopy
 from itertools import dropwhile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import frontmatter
@@ -216,8 +219,20 @@ async def detect_file_path_conflicts(
     from basic_memory.utils import detect_potential_file_conflicts
 
     async with db.scoped_session(dependencies.session_maker, session) as active_session:
-        existing_paths = await dependencies.entity_repository.get_all_file_paths(active_session)
-    return detect_potential_file_conflicts(file_path, existing_paths)
+        existing_files = await dependencies.entity_repository.get_file_path_permalinks(
+            active_session
+        )
+        # Stored permalinks carry the project (and workspace) prefix when configured, so
+        # paths must be compared in that same canonical form as well.
+        canonical_permalink = await _canonical_permalink_builder(dependencies, active_session)
+    # The comparison still walks every project path. On large projects that is enough pure
+    # CPU work to stall other requests, so it runs off the event loop.
+    return await asyncio.to_thread(
+        detect_potential_file_conflicts,
+        file_path,
+        existing_files,
+        canonical_permalink=canonical_permalink,
+    )
 
 
 async def _project_permalink(
@@ -229,6 +244,28 @@ async def _project_permalink(
         return None
     project = await ProjectRepository().get_by_id(session, project_id)
     return project.permalink if project else None
+
+
+async def _canonical_permalink_builder(
+    dependencies: NotePreparationDependencies,
+    session: AsyncSession,
+) -> Callable[[str], str]:
+    """Return the rule that names a note at a path when nothing else names it."""
+    include_project = (
+        dependencies.app_config.permalinks_include_project
+        if dependencies.app_config is not None
+        else True
+    )
+    workspace_permalink = workspace_slug_for_canonical_permalinks()
+    project_permalink = None
+    if include_project or workspace_permalink:
+        project_permalink = await _project_permalink(dependencies, session)
+    return partial(
+        build_canonical_permalink,
+        project_permalink,
+        include_project=include_project,
+        workspace_permalink=workspace_permalink,
+    )
 
 
 async def resolve_permalink(
@@ -275,21 +312,8 @@ async def resolve_permalink(
         if markdown and markdown.frontmatter.permalink:
             desired_permalink = markdown.frontmatter.permalink
         else:
-            include_project = (
-                dependencies.app_config.permalinks_include_project
-                if dependencies.app_config is not None
-                else True
-            )
-            workspace_permalink = workspace_slug_for_canonical_permalinks()
-            project_permalink = None
-            if include_project or workspace_permalink:
-                project_permalink = await _project_permalink(dependencies, active_session)
-            desired_permalink = build_canonical_permalink(
-                project_permalink,
-                file_path_str,
-                include_project=include_project,
-                workspace_permalink=workspace_permalink,
-            )
+            canonical_permalink = await _canonical_permalink_builder(dependencies, active_session)
+            desired_permalink = canonical_permalink(file_path_str)
 
         permalink = desired_permalink
         suffix = 1
