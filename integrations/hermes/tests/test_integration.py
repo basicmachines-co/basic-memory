@@ -405,101 +405,6 @@ def test_memory_quest_fields_round_trip(provider, bm):
     assert after["checksum"] != checksum
 
 
-# ---- Capture pipeline ----
-
-
-def test_sync_turn_writes_then_appends_to_same_session_note(provider, bm):
-    # First turn — creates the session note
-    provider.sync_turn("integration turn-1 user", "integration turn-1 assistant")
-    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
-    sid_1 = provider._session_note_id
-    assert sid_1, "first sync_turn should set _session_note_id"
-    assert sid_1.startswith(provider._project + "/"), (
-        f"session_note_id should include project prefix, got: {sid_1}"
-    )
-
-    # Second turn — should append to the same note
-    marker = f"TURN-2-MARKER-{uuid.uuid4().hex}"
-    provider.sync_turn("integration turn-2 user", marker)
-    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
-    sid_2 = provider._session_note_id
-    assert sid_2 == sid_1, "session_note_id should NOT change between turns"
-
-    # Verify both turn markers are present in the persisted note
-    raw = provider.handle_tool_call("bm_read", {"identifier": sid_1})
-    d = _parse_tool_result(raw)
-    text = (d or {}).get("text") or json.dumps(d or {})
-    assert "integration turn-1 user" in text
-    assert marker in text
-
-
-def test_on_session_end_writes_summary_with_relations(provider, bm):
-    # Seed a session note via sync_turn
-    provider.sync_turn("first message", "first reply")
-    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
-    sid = provider._session_note_id
-    assert sid
-
-    provider.on_session_end(
-        [
-            {"role": "user", "content": "first message"},
-            {"role": "assistant", "content": "first reply"},
-        ]
-    )
-
-    # Search for the summary
-    raw = provider.handle_tool_call(
-        "bm_search",
-        {
-            "query": "Hermes Session Summary",
-            "limit": 5,
-        },
-    )
-    d = _parse_tool_result(raw)
-    text = (d or {}).get("text") or json.dumps(d or {})
-    assert "Hermes Session Summary" in text
-
-
-def test_prefetch_against_real_bm(provider, bm):
-    # Seed a recognizable note
-    unique = f"PREFETCH-MARKER-{uuid.uuid4().hex}"
-    provider.handle_tool_call(
-        "bm_write",
-        {
-            "title": f"Prefetch Test {unique}",
-            "content": f"# Prefetch Test\n{unique}\n",
-            "folder": "tests",
-        },
-    )
-
-    # BM's FTS index is updated synchronously inside the write_note API
-    # path (knowledge_router.py:272), so this loop is really only smoothing
-    # over the round-trip cost of a few RPCs on a slow runner. prefetch
-    # explicitly requests search_type="text" so we don't get pulled onto
-    # BM's hybrid path, where vector indexing is async and would race the
-    # search.
-    budget_secs = 10.0
-    deadline = time.monotonic() + budget_secs
-    out = ""
-    attempts = 0
-    while time.monotonic() < deadline:
-        attempts += 1
-        out = provider.prefetch(unique)
-        if out:
-            break
-        time.sleep(0.25)
-
-    assert out, (
-        f"prefetch returned nothing after {attempts} attempt(s) over "
-        f"{budget_secs}s; provider._failure_count={provider._failure_count}, "
-        f"circuit_open={provider._is_circuit_open()}. "
-        f"Either BM didn't index the note in time or prefetch's actor.call "
-        f"is timing out internally."
-    )
-    assert "Basic Memory Recall" in out
-    assert unique in out or "Prefetch Test" in out
-
-
 # ---- Project registry authority (#2019) ----
 
 
@@ -598,3 +503,98 @@ def test_unlisted_cloud_project_fails_with_a_clear_reason(bm, tmp_path):
     reason = bm._init_failures[bm._home_key(tmp_path)]
     assert f"project {project_name!r} is not in Basic Memory's project list" in reason
     assert f"bm project add {project_name} --cloud" in reason
+
+
+# ---- Capture pipeline ----
+
+
+def test_sync_turn_writes_then_appends_to_same_session_note(provider, bm):
+    # First turn — creates the session note
+    provider.sync_turn("integration turn-1 user", "integration turn-1 assistant")
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
+    sid_1 = provider._session_note_id
+    assert sid_1, "first sync_turn should set _session_note_id"
+    assert sid_1.startswith(provider._project + "/"), (
+        f"session_note_id should include project prefix, got: {sid_1}"
+    )
+
+    # Second turn — should append to the same note
+    marker = f"TURN-2-MARKER-{uuid.uuid4().hex}"
+    provider.sync_turn("integration turn-2 user", marker)
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
+    sid_2 = provider._session_note_id
+    assert sid_2 == sid_1, "session_note_id should NOT change between turns"
+
+    # Verify both turn markers are present in the persisted note
+    raw = provider.handle_tool_call("bm_read", {"identifier": sid_1})
+    d = _parse_tool_result(raw)
+    text = (d or {}).get("text") or json.dumps(d or {})
+    assert "integration turn-1 user" in text
+    assert marker in text
+
+
+def test_on_session_end_writes_summary_with_relations(provider, bm):
+    # Seed a session note via sync_turn
+    provider.sync_turn("first message", "first reply")
+    # sync_turn writes inline (Hermes v0.22 runs it on the manager's worker).
+    sid = provider._session_note_id
+    assert sid
+
+    provider.on_session_end(
+        [
+            {"role": "user", "content": "first message"},
+            {"role": "assistant", "content": "first reply"},
+        ]
+    )
+
+    # Search for the summary
+    raw = provider.handle_tool_call(
+        "bm_search",
+        {
+            "query": "Hermes Session Summary",
+            "limit": 5,
+        },
+    )
+    d = _parse_tool_result(raw)
+    text = (d or {}).get("text") or json.dumps(d or {})
+    assert "Hermes Session Summary" in text
+
+
+def test_prefetch_against_real_bm(provider, bm):
+    # Seed a recognizable note
+    unique = f"PREFETCH-MARKER-{uuid.uuid4().hex}"
+    provider.handle_tool_call(
+        "bm_write",
+        {
+            "title": f"Prefetch Test {unique}",
+            "content": f"# Prefetch Test\n{unique}\n",
+            "folder": "tests",
+        },
+    )
+
+    # BM's FTS index is updated synchronously inside the write_note API
+    # path (knowledge_router.py:272), so this loop is really only smoothing
+    # over the round-trip cost of a few RPCs on a slow runner. prefetch
+    # explicitly requests search_type="text" so we don't get pulled onto
+    # BM's hybrid path, where vector indexing is async and would race the
+    # search.
+    budget_secs = 10.0
+    deadline = time.monotonic() + budget_secs
+    out = ""
+    attempts = 0
+    while time.monotonic() < deadline:
+        attempts += 1
+        out = provider.prefetch(unique)
+        if out:
+            break
+        time.sleep(0.25)
+
+    assert out, (
+        f"prefetch returned nothing after {attempts} attempt(s) over "
+        f"{budget_secs}s; provider._failure_count={provider._failure_count}, "
+        f"circuit_open={provider._is_circuit_open()}. "
+        f"Either BM didn't index the note in time or prefetch's actor.call "
+        f"is timing out internally."
+    )
+    assert "Basic Memory Recall" in out
+    assert unique in out or "Prefetch Test" in out
