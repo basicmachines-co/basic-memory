@@ -516,14 +516,28 @@ def _config_path(hermes_home: str) -> Path:
     return Path(hermes_home) / "basic-memory.json"
 
 
-def _project_listed(projects: list[dict[str, Any]], project: str) -> bool:
+# `source` values in `bm_project list` rows that mean the project is registered
+# in this machine's local config. A local project sharing a permalink with cloud
+# projects is attached to one of them and listed as "local+cloud".
+_LOCALLY_REGISTERED_SOURCES = frozenset({"local", "local+cloud"})
+
+
+def _project_listed(projects: list[dict[str, Any]], project: str, *, local: bool) -> bool:
     """True when `bm_project list` rows include `project`.
 
     Accepts every spelling Basic Memory routes by: the name, the
-    workspace-qualified name, or the external id.
+    workspace-qualified name, or the external id. With `local`, only rows
+    registered in the local config count.
     """
     wanted = project.casefold()
     for row in projects:
+        # Trigger: Hermes runs in local mode and the only match is a cloud project.
+        # Why: Basic Memory routes a name absent from local config to the cloud
+        #   (BasicMemoryConfig.get_project_mode), so accepting that match would
+        #   upload local-mode transcripts to the cloud project.
+        # Outcome: the row does not count, and the caller creates the local project.
+        if local and row["source"] not in _LOCALLY_REGISTERED_SOURCES:
+            continue
         if row.get("external_id") == project:
             return True
         if wanted in {str(row.get(key) or "").casefold() for key in ("name", "qualified_name")}:
@@ -1280,8 +1294,8 @@ class BasicMemoryProvider(MemoryProvider):
           XDG_CONFIG_HOME), and a stale copy rejected registered projects
           (#2019). Probing with `bm project add` rebuilt the indexes of an
           existing project and outlived its timeout.
-        Outcome: True when the project is listed, or was missing in local mode
-          and is now created. Otherwise the failure is logged and recorded,
+        Outcome: True when the project is listed (in local mode, registered in
+          the local config), or was missing in local mode and is now created. Otherwise the failure is logged and recorded,
           the `bm mcp` child is stopped, and the provider stays uninitialized.
         """
         try:
@@ -1292,7 +1306,7 @@ class BasicMemoryProvider(MemoryProvider):
                 return self._project_check_failed(
                     f"could not list Basic Memory projects: {listing['error']}"
                 )
-            if _project_listed(listing["projects"], self._project):
+            if _project_listed(listing["projects"], self._project, local=self._mode == "local"):
                 return True
 
             # Trigger: the project is missing in cloud mode.

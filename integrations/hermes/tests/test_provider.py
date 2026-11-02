@@ -691,9 +691,40 @@ def test_failed_project_check_survives_a_shutdown_that_raises(bm, startable, tmp
 )
 def test_project_listed_matches_every_routable_spelling(bm, spelling):
     rows = json.loads(project_listing("main", "hermes-memory"))["projects"]
-    assert bm._project_listed(rows, spelling)
+    assert bm._project_listed(rows, spelling, local=True)
 
 
 def test_project_listed_rejects_an_absent_project(bm):
     rows = json.loads(project_listing("main"))["projects"]
-    assert not bm._project_listed(rows, "hermes-memory")
+    assert not bm._project_listed(rows, "hermes-memory", local=False)
+
+
+@pytest.mark.parametrize(
+    ("source", "local", "listed"),
+    [
+        ("cloud", True, False),  # a cloud-only twin is not a local registration
+        ("cloud", False, True),
+        ("local+cloud", True, True),  # a local project attached to a cloud one
+        ("local", True, True),
+    ],
+)
+def test_project_listed_counts_only_local_registrations_in_local_mode(bm, source, local, listed):
+    rows = json.loads(project_listing("hermes-memory", sources={"hermes-memory": source}))
+    assert bm._project_listed(rows["projects"], "hermes-memory", local=local) is listed
+
+
+def test_local_mode_creates_the_project_when_only_a_cloud_twin_exists(bm, startable, tmp_path):
+    """A cloud-only project with the configured name must not satisfy local
+    mode: Basic Memory would route the name to the cloud and upload local-mode
+    transcripts there."""
+    actor = ProjectActor(project_listing("hermes-memory", sources={"hermes-memory": "cloud"}))
+    p = _start(startable(actor, project_path=str(tmp_path / "notes")), tmp_path)
+    assert p._initialized
+    assert actor.commands() == ["list", "create"]
+
+
+def test_cloud_mode_accepts_a_cloud_only_project(bm, startable, tmp_path):
+    actor = ProjectActor(project_listing("team-cloud", sources={"team-cloud": "cloud"}))
+    p = _start(startable(actor, mode="cloud", project="team-cloud"), tmp_path)
+    assert p._initialized
+    assert actor.commands() == ["list"]

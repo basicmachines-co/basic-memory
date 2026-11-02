@@ -180,8 +180,13 @@ def make_scripted_actor(
 # ---- bm_project answers, in bm 1.0's JSON shape ----
 
 
-def project_listing(*names: str) -> str:
-    """What `bm_project(command="list", output_format="json")` returns for `names`."""
+def project_listing(*names: str, sources: dict[str, str] | None = None) -> str:
+    """What `bm_project(command="list", output_format="json")` returns for `names`.
+
+    Every project is local unless `sources` maps its name to "cloud" or
+    "local+cloud".
+    """
+    sources = sources or {}
     return json.dumps(
         {
             "projects": [
@@ -189,7 +194,7 @@ def project_listing(*names: str) -> str:
                     "name": name,
                     "qualified_name": f"personal/{name}",
                     "external_id": f"00000000-0000-4000-8000-{index:012d}",
-                    "source": "local",
+                    "source": sources.get(name, "local"),
                 }
                 for index, name in enumerate(names)
             ],
