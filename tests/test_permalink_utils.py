@@ -98,7 +98,14 @@ def test_prefixed_candidates_keep_the_callers_spelling_of_the_remainder():
     project_prefixed = build_permalink_resolution_candidates(
         "main/s/ses_AbCdEf", "main", include_project=True
     )
-    assert project_prefixed == ["main/s/ses_AbCdEf", "main/s/ses-ab-cd-ef", *expected_remainders]
+    # The literal folder reading (a top-level `main/` folder, #2024) is tried before the
+    # project prefix is stripped.
+    assert project_prefixed == [
+        "main/s/ses_AbCdEf",
+        "main/s/ses-ab-cd-ef",
+        "main/main/s/ses-ab-cd-ef",
+        *expected_remainders,
+    ]
 
     unprefixed_route = build_permalink_resolution_candidates(
         "main/s/ses_AbCdEf", "main", include_project=False
