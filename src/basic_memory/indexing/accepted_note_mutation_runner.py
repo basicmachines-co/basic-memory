@@ -285,6 +285,12 @@ class AcceptedNoteMutationEntityRepository(Protocol):
         session: AsyncSession,
     ) -> list[str]: ...
 
+    async def find_file_path_conflicts(
+        self,
+        session: AsyncSession,
+        file_path: str,
+    ) -> list[str]: ...
+
 
 class AcceptedNoteMutationNoteContentRepository(Protocol):
     """note_content lookup capability for accepted-note mutations."""
@@ -1006,6 +1012,14 @@ async def _run_accepted_note_update(
         allowed_entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    if existing_file_path is not None and data.file_path != existing_file_path:
+        await reject_equivalent_note_file_path_on_rename(
+            session,
+            project_id=project.id,
+            file_path=data.file_path,
+            source_file_path=existing_file_path,
+            dependencies=dependencies,
+        )
 
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     if entity is None:
@@ -1350,6 +1364,13 @@ async def _run_accepted_note_move(
         allowed_entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    await reject_equivalent_note_file_path_on_rename(
+        session,
+        project_id=project.id,
+        file_path=accepted_file_path,
+        source_file_path=existing_file_path,
+        dependencies=dependencies,
+    )
     should_update_permalink = dependencies.move_policy.should_update_permalink(entity)
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     # Local source-of-truth guard: reject a move onto a destination file that exists
@@ -1561,6 +1582,42 @@ async def reject_conflicting_accepted_note_file_path(
     )
 
 
+def equivalent_note_file_path_message(conflicting_note_paths: list[str]) -> str:
+    joined_paths = ", ".join(sorted(conflicting_note_paths))
+    return (
+        "A note with an equivalent filename already exists: "
+        f"{joined_paths}. Address the existing note explicitly to modify it."
+    )
+
+
+async def reject_equivalent_note_file_path_on_rename(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    file_path: RuntimeFilePath,
+    source_file_path: RuntimeFilePath,
+    dependencies: AcceptedNoteMutationDependencies,
+) -> None:
+    """Reject renaming a note onto a path that names another note.
+
+    The exact-path check misses 'notes/A.md' beside 'notes/a.md': distinct keys in
+    storage, one file on a case-insensitive filesystem, so a synced checkout would
+    lose one of them. Create rejects the same equivalence. The note's own source path
+    is excluded so a case-only rename of a single note still works.
+    """
+    entity_repository = dependencies.lookup_repositories.entity_repository(project_id)
+    conflicting_note_paths = [
+        path
+        for path in await entity_repository.find_file_path_conflicts(session, file_path)
+        if path != source_file_path and runtime_file_path_is_markdown_note(path)
+    ]
+    if conflicting_note_paths:
+        reject_accepted_note_mutation(
+            AcceptedNoteMutationRejectKind.conflict,
+            equivalent_note_file_path_message(conflicting_note_paths),
+        )
+
+
 async def prepare_create_or_reject(
     preparer: AcceptedNoteMutationPreparer,
     data: EntitySchema,
@@ -1580,11 +1637,9 @@ async def prepare_create_or_reject(
             if runtime_file_path_is_markdown_note(path)
         ]
         if conflicting_note_paths:
-            joined_paths = ", ".join(sorted(conflicting_note_paths))
             reject_accepted_note_mutation(
                 AcceptedNoteMutationRejectKind.conflict,
-                "A note with an equivalent filename already exists: "
-                f"{joined_paths}. Address the existing note explicitly to modify it.",
+                equivalent_note_file_path_message(conflicting_note_paths),
             )
 
         return await prepare_accepted_note_create(
