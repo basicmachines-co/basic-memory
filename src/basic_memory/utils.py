@@ -843,12 +843,6 @@ def detect_potential_file_conflicts(
         List of existing paths that might conflict with the given file path
     """
 
-    def path_permalinks(path: str) -> set[str]:
-        permalinks = {generate_permalink(path)}
-        if canonical_permalink is not None:
-            permalinks.add(canonical_permalink(path))
-        return permalinks
-
     conflicts = []
 
     # Normalize the input file path
@@ -876,11 +870,17 @@ def detect_potential_file_conflicts(
         # Outcome: a set lookup per file. A candidate counts only while its stored permalink
         # is still the one its own path produces, so a note that kept its permalink after a
         # move or carries a frontmatter permalink does not block that name for a new file.
+        # The few candidates that match are then held to the previous rule, equal generated
+        # permalinks, so a path inside the project slug ("test-project/notes/foo.md" next to
+        # "notes/foo.md") is still suffixed on create rather than rejected.
         if existing.permalink is not None:
-            if existing.permalink in claimed_permalinks and existing.permalink in path_permalinks(
-                existing_path
-            ):
-                conflicts.append(existing_path)
+            if existing.permalink in claimed_permalinks:
+                existing_permalink = generate_permalink(existing_path)
+                own_permalinks = {existing_permalink}
+                if canonical_permalink is not None:
+                    own_permalinks.add(canonical_permalink(existing_path))
+                if existing.permalink in own_permalinks and existing_permalink == input_permalink:
+                    conflicts.append(existing_path)
             continue
 
         # Check for permalink conflicts

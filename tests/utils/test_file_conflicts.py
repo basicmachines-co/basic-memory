@@ -104,11 +104,11 @@ def test_new_file_conflicts_with_stored_and_generated_permalinks(
     assert conflicts == expected
 
 
-def test_path_inside_project_slug_conflicts_with_its_unprefixed_twin() -> None:
+def test_path_inside_project_slug_is_not_a_conflict_with_its_unprefixed_twin() -> None:
     """Both paths build the canonical permalink test-project/notes/foo.
 
-    The previous detector compared only unprefixed generated permalinks and let the second
-    note through with a suffixed permalink. Comparing canonical permalinks flags it.
+    The previous detector compared only unprefixed generated permalinks, so the second note
+    was created with a suffixed permalink instead of being rejected. That behaviour is kept.
     """
     existing = [stored("notes/foo.md", project_canonical("notes/foo.md"))]
 
@@ -116,7 +116,7 @@ def test_path_inside_project_slug_conflicts_with_its_unprefixed_twin() -> None:
         "test-project/notes/foo.md", existing, canonical_permalink=project_canonical
     )
 
-    assert conflicts == ["notes/foo.md"]
+    assert conflicts == []
     assert reference_detect_conflicts("test-project/notes/foo.md", ["notes/foo.md"]) == []
 
 
@@ -140,7 +140,10 @@ def test_conflicts_are_detected_in_both_directions() -> None:
 
 def test_matches_previous_detector_when_stored_permalinks_come_from_paths() -> None:
     """With canonical stored permalinks, the result equals regenerating every permalink."""
+    # "test-project" covers paths inside the project slug: they share a canonical permalink
+    # with their unprefixed twin but were never a conflict.
     segments = ["notes", "Notes", "a b", "a_b", "a-b", "Café", "café", "中文", "v2.0", "x"]
+    segments.append("test-project")
     names = ["Foo Bar", "foo_bar", "foo-bar", "FOO", "测试文档", "Résumé", "API (v2)", "1.0.0"]
     extensions = [".md", ".MD", ".png", ""]
     randomizer = random.Random(20261101)
