@@ -516,28 +516,19 @@ def _config_path(hermes_home: str) -> Path:
     return Path(hermes_home) / "basic-memory.json"
 
 
-def _bm_config_path() -> Path:
-    """Location of bm's own project registry."""
-    return Path.home() / ".basic-memory" / "config.json"
+def _project_listed(projects: list[dict[str, Any]], project: str) -> bool:
+    """True when `bm_project list` rows include `project`.
 
-
-def _bm_known_projects() -> dict[str, Any] | None:
+    Accepts every spelling Basic Memory routes by: the name, the
+    workspace-qualified name, or the external id.
     """
-    Read bm's project registry. Returns None if the file is absent or
-    unparseable — callers should treat that as "can't prove anything"
-    rather than "project is missing".
-    """
-    path = _bm_config_path()
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    projects = data.get("projects")
-    return projects if isinstance(projects, dict) else None
+    wanted = project.casefold()
+    for row in projects:
+        if row.get("external_id") == project:
+            return True
+        if wanted in {str(row.get(key) or "").casefold() for key in ("name", "qualified_name")}:
+            return True
+    return False
 
 
 def _load_config(hermes_home: str) -> dict[str, Any]:
@@ -1160,17 +1151,6 @@ class BasicMemoryProvider(MemoryProvider):
                 )
                 return
 
-        if self._mode == "local":
-            self._ensure_local_project()
-
-        if not self._verify_project_registered():
-            self._log_missing_project()
-            self._record_init_failure(
-                f"project {self._project!r} is not registered with bm. "
-                f"Run {self._missing_project_hint()}"
-            )
-            return
-
         # Trigger: initialize() called while a previous actor is still running
         # (Hermes re-initializes providers per session; _ensure_slash_ready's
         # lazy init can also precede a later session initialize).
@@ -1182,6 +1162,8 @@ class BasicMemoryProvider(MemoryProvider):
         # invalidates the connection. A dead actor is shut down first (joining
         # its thread reaps the child) and then replaced below.
         if self._actor is not None and self._actor.is_alive():
+            if not self._ensure_project(self._actor):
+                return
             self._mark_session_ready(requested_session_id)
             logger.info(
                 "basic-memory provider ready (reusing running MCP actor): mode=%s project=%s",
@@ -1242,6 +1224,8 @@ class BasicMemoryProvider(MemoryProvider):
                 sorted(names),
             )
 
+        if not self._ensure_project(actor):
+            return
         self._mark_session_ready(requested_session_id)
         logger.info(
             "basic-memory provider ready: mode=%s project=%s tools=%d",
@@ -1286,63 +1270,87 @@ class BasicMemoryProvider(MemoryProvider):
         self._capture_folder = cfg.get("capture_folder") or "hermes-sessions"
         self._remember_folder = cfg.get("remember_folder") or "bm-remember"
 
-    def _ensure_local_project(self) -> None:
-        # Trigger: the project is already in bm's registry.
-        # Why: `bm project add` costs a full bm start and can stall for its whole
-        # 15s timeout, on every initialize (Hermes builds one per agent).
-        # Outcome: only first-time setups pay for registration.
-        projects = _bm_known_projects()
-        if projects is not None and self._project in projects:
-            return
-        bm = _bm_binary_path()
-        if not bm:
-            return
-        os.makedirs(self._project_path, exist_ok=True)
+    def _ensure_project(self, actor: _BmMcpActor) -> bool:
+        """Make sure Basic Memory knows the configured project, through `bm mcp`.
+
+        Trigger: every initialize(), once a live `bm mcp` is in hand.
+        Why: Basic Memory owns its project registry (docs/DOMAIN_MODEL.md,
+          "Project Registry Authority"). Reading its config file from here
+          meant copying its directory rules (BASIC_MEMORY_CONFIG_DIR,
+          XDG_CONFIG_HOME), and a stale copy rejected registered projects
+          (#2019). Probing with `bm project add` rebuilt the indexes of an
+          existing project and outlived its timeout.
+        Outcome: True when the project is listed, or was missing in local mode
+          and is now created. Otherwise the failure is logged and recorded,
+          the `bm mcp` child is stopped, and the provider stays uninitialized.
+        """
         try:
-            subprocess.run(
-                [bm, "project", "add", self._project, self._project_path],
-                check=False,
-                capture_output=True,
-                timeout=15,
-                env=_clean_child_env(),
+            listing = json.loads(
+                actor.call("bm_project", {"command": "list", "output_format": "json"}, timeout=60.0)
+            )
+            if "error" in listing:
+                return self._project_check_failed(
+                    f"could not list Basic Memory projects: {listing['error']}"
+                )
+            if _project_listed(listing["projects"], self._project):
+                return True
+
+            # Trigger: the project is missing in cloud mode.
+            # Why: a cloud project lives in a workspace the user chooses; creating
+            #   one silently could put notes in the wrong place.
+            # Outcome: refuse with the command that registers it.
+            if self._mode != "local":
+                return self._project_check_failed(
+                    f"project {self._project!r} is not in Basic Memory's project list. "
+                    f"Run `bm project add {self._project} --cloud` "
+                    "(optionally with --local-path) first"
+                )
+
+            os.makedirs(self._project_path, exist_ok=True)
+            created = json.loads(
+                actor.call(
+                    "bm_project",
+                    {
+                        "command": "create",
+                        "name": self._project,
+                        "path": self._project_path,
+                        "output_format": "json",
+                    },
+                    timeout=60.0,
+                )
             )
         except Exception as e:
-            logger.debug("bm project add: %s", e)
+            return self._project_check_failed(f"could not check project {self._project!r}: {e}")
+        if "error" in created:
+            return self._project_check_failed(
+                f"could not create project {self._project!r} at {self._project_path}: "
+                f"{created['error']}"
+            )
+        logger.info("basic-memory: created project %r at %s", self._project, self._project_path)
+        return True
 
-    def _verify_project_registered(self) -> bool:
-        """
-        Confirm the configured project is registered with bm.
-
-        Returns False only when we can prove the project is missing
-        (bm config exists, parses, and the project name is absent).
-        Otherwise returns True — including when bm's config doesn't exist
-        yet — so we don't false-positive-reject on first-run setups.
-        """
-        projects = _bm_known_projects()
-        if projects is None:
-            return True
-        return self._project in projects
-
-    def _missing_project_hint(self) -> str:
-        if self._mode == "cloud":
-            return f"`bm project add {self._project} --cloud` (optionally with --local-path) first"
-        return f"`bm project add {self._project} {self._project_path}` first"
-
-    def _log_missing_project(self) -> None:
-        logger.error(
-            "basic-memory: project %r is not registered with bm. Run %s. "
-            "Provider will not initialize.",
-            self._project,
-            self._missing_project_hint(),
-        )
+    def _project_check_failed(self, reason: str) -> bool:
+        """Record why the project check failed and release the `bm mcp` child."""
+        logger.error("basic-memory: %s. Provider will not initialize.", reason)
+        self._record_init_failure(reason)
+        # A reused actor can belong to a provider that served an earlier session.
+        self._initialized = False
+        actor, self._actor = self._actor, None
+        if actor is not None:
+            try:
+                actor.shutdown(timeout=5.0)
+            except Exception as e:
+                logger.debug("actor shutdown after failed project check: %s", e)
+        return False
 
     def _server_argv(self) -> list[str]:
         bm = _bm_binary_path()
         if not bm:
             raise RuntimeError("bm CLI not found on PATH")
-        # `bm mcp` works the same in local and cloud modes — bm reads
-        # ~/.basic-memory/config.json to know whether the active project is local
-        # or cloud-routed. We pass --project on each tool call.
+        # `bm mcp` works the same in local and cloud modes — bm reads its own
+        # config (honoring BASIC_MEMORY_CONFIG_DIR and XDG_CONFIG_HOME, which
+        # the child inherits) to know whether a project is local or
+        # cloud-routed. We pass --project on each tool call.
         return [bm, "mcp"]
 
     def shutdown(self) -> None:
@@ -1990,18 +1998,14 @@ def _start_blocker(provider: BasicMemoryProvider) -> str | None:
     """The reason initialize() is certain to fail, from local checks only.
 
     Mirrors initialize()'s preconditions without its side effects: no install,
-    no `bm project add`, no subprocess. A local project that is not registered
-    yet is not a blocker, because initialize() registers it.
+    no subprocess. Project registration is not checked here: only a running
+    `bm mcp` can answer that, and a failed check is reported as the last
+    start's failure instead.
     """
     if not _MCP_AVAILABLE:
         return "the mcp Python package is not installed"
     if not _bm_binary_path() and not _uv_binary_path():
         return "bm CLI not found, and uv is not installed to add it"
-    if provider._mode != "local" and not provider._verify_project_registered():
-        return (
-            f"project {provider._project!r} is not registered with bm. "
-            f"Run {provider._missing_project_hint()}"
-        )
     return None
 
 
@@ -2034,10 +2038,6 @@ def _readiness(provider: BasicMemoryProvider, home: str) -> _Readiness:
     notes: list[str] = []
     if not _bm_binary_path():
         notes.append("bm CLI is installed with uv on first use")
-    if provider._mode == "local" and not provider._verify_project_registered():
-        notes.append(
-            f"project {provider._project!r} is registered at {provider._project_path} on first use"
-        )
     return _Readiness(
         "ready",
         "idle (starts on the next /bm-* command or agent session)",

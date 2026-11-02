@@ -15,6 +15,8 @@ import json
 import signal
 import threading
 
+from .conftest import project_listing
+
 
 class TrackingActor:
     """Stand-in for _BmMcpActor that records lifecycle calls, no threads."""
@@ -46,6 +48,8 @@ class TrackingActor:
             raise RuntimeError("shutdown boom")
 
     def call(self, tool_name, arguments, timeout: float = 30.0) -> str:
+        if tool_name == "bm_project" and arguments.get("command") == "list":
+            return project_listing("test-proj")
         return json.dumps({"ok": True})
 
 
@@ -54,9 +58,7 @@ def _make_initializable_provider(bm, monkeypatch, tmp_path):
     TrackingActor.instances = []
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bm")
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: None)
     monkeypatch.setattr(bm, "_BmMcpActor", TrackingActor)
-    # Cloud mode skips _ensure_local_project's `bm project add` subprocess.
     (tmp_path / "basic-memory.json").write_text(
         json.dumps({"mode": "cloud", "project": "test-proj"})
     )

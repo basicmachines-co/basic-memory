@@ -262,16 +262,6 @@ def test_success_clears_scattered_failures(bm):
     assert p._failure_count == 0
 
 
-def test_ensure_local_project_skips_bm_when_already_registered(bm, monkeypatch, tmp_path):
-    cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({"projects": {"hermes-memory": {}}}))
-    monkeypatch.setattr(bm, "_bm_config_path", lambda: cfg)
-    monkeypatch.setattr(bm.subprocess, "run", lambda *a, **k: pytest.fail("ran bm project add"))
-    p = bm.BasicMemoryProvider()
-    p._project = "hermes-memory"
-    p._ensure_local_project()
-
-
 # --- Registration and per-profile slash commands ---
 
 
@@ -344,7 +334,6 @@ def test_status_without_a_live_provider_does_not_start_bm(bm, monkeypatch, tmp_p
     )
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"hermes-memory": {}})
     out = {n: h for n, h, _, _ in bm._build_slash_commands()}["bm-status"]("")
     assert "Status:      ready" in out
     assert "MCP process: idle (starts on the next /bm-* command or agent session)" in out

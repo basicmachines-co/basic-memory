@@ -175,3 +175,75 @@ def make_scripted_actor(
     actor._main = _fake_main  # type: ignore[assignment]
     actor._test_session = sess  # convenience handle for assertions
     return actor
+
+
+# ---- bm_project answers, in bm 1.0's JSON shape ----
+
+
+def project_listing(*names: str) -> str:
+    """What `bm_project(command="list", output_format="json")` returns for `names`."""
+    return json.dumps(
+        {
+            "projects": [
+                {
+                    "name": name,
+                    "qualified_name": f"personal/{name}",
+                    "external_id": f"00000000-0000-4000-8000-{index:012d}",
+                    "source": "local",
+                }
+                for index, name in enumerate(names)
+            ],
+            "default_project": names[0] if names else None,
+            "constrained_project": None,
+        }
+    )
+
+
+class ProjectActor:
+    """Stand-in for _BmMcpActor that answers bm_project like bm 1.0.
+
+    `listing` and `create` are the raw JSON strings the actor returns;
+    `raises` makes every call raise instead.
+    """
+
+    def __init__(self, listing: str, create: str = '{"ok": true}', raises=None):
+        self.listing = listing
+        self.create = create
+        self.raises = raises
+        self.calls: list[tuple[str, dict]] = []
+        self.alive = False
+        self.shutdowns = 0
+        self.shutdown_raises = False
+
+    def __call__(self, argv):
+        """Lets a test pass the instance where _BmMcpActor(argv) is constructed."""
+        self.argv = list(argv)
+        return self
+
+    def start(self, timeout: float = 25.0) -> None:
+        self.alive = True
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def list_tools(self):
+        return [{"name": "bm_project", "description": ""}]
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        self.shutdowns += 1
+        self.alive = False
+        if self.shutdown_raises:
+            raise RuntimeError("shutdown boom")
+
+    def call(self, tool_name, arguments, timeout: float = 30.0) -> str:
+        self.calls.append((tool_name, dict(arguments)))
+        if self.raises is not None:
+            raise self.raises
+        if tool_name == "bm_project" and arguments.get("command") == "list":
+            return self.listing
+        if tool_name == "bm_project" and arguments.get("command") == "create":
+            return self.create
+        return json.dumps({"ok": True})
+
+    def commands(self) -> list[str]:
+        return [args.get("command") for tool, args in self.calls if tool == "bm_project"]

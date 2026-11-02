@@ -13,7 +13,7 @@ import weakref
 
 import pytest
 
-from .conftest import FakeSession, make_scripted_actor
+from .conftest import FakeSession, ProjectActor, make_scripted_actor, project_listing
 
 
 @pytest.fixture
@@ -25,7 +25,6 @@ def profile(bm, monkeypatch, tmp_path):
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
     monkeypatch.setattr(bm, "_uv_binary_path", lambda: None)
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"hermes-memory": {}})
     monkeypatch.setattr(
         bm.BasicMemoryProvider, "initialize", lambda *a, **k: pytest.fail("status started bm")
     )
@@ -51,7 +50,6 @@ def test_idle_status_reports_the_profiles_configured_project(bm, profile, monkey
     (profile / "basic-memory.json").write_text(
         json.dumps({"project": "team-notes", "project_path": "/srv/team-notes"})
     )
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"team-notes": {}})
     out = _status(bm)
     assert "Project:     team-notes" in out
     assert "Path:        /srv/team-notes" in out
@@ -85,15 +83,12 @@ def test_provider_whose_bm_mcp_exited_reports_stopped(bm, profile, monkeypatch):
 
 
 def test_setup_the_first_start_will_do_is_noted(bm, profile, monkeypatch):
-    """A missing bm with uv present, or an unregistered local project, is not a
-    failure: initialize() installs and registers them."""
+    """A missing bm with uv present is not a failure: initialize() installs it."""
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: None)
     monkeypatch.setattr(bm, "_uv_binary_path", lambda: "/fake/bin/uv")
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {})
     out = _status(bm)
     assert "Status:      ready" in out
     assert "Note:        bm CLI is installed with uv on first use" in out
-    assert "Note:        project 'hermes-memory' is registered at" in out
 
 
 # ---- Unavailable ----
@@ -114,13 +109,27 @@ def test_missing_bm_and_uv_is_unavailable(bm, profile, monkeypatch):
     assert "Reason:      bm CLI not found, and uv is not installed to add it" in out
 
 
-def test_unregistered_cloud_project_is_unavailable(bm, profile, monkeypatch):
-    (profile / "basic-memory.json").write_text(
+def test_unlisted_cloud_project_is_reported_from_the_failed_start(bm, monkeypatch, tmp_path):
+    """Only a running bm mcp knows the project list (#2019), so status reports
+    an unlisted cloud project through the start that found it missing."""
+    monkeypatch.setattr(bm, "_live_providers", {})
+    monkeypatch.setattr(bm, "_init_failures", {})
+    monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
+    monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
+    monkeypatch.setattr(bm, "_current_hermes_home", lambda: str(tmp_path))
+    monkeypatch.setattr(bm, "_BmMcpActor", ProjectActor(project_listing("main")))
+    (tmp_path / "basic-memory.json").write_text(
         json.dumps({"mode": "cloud", "project": "hermes-memory-cloud"})
     )
+
+    bm.BasicMemoryProvider().initialize("s1", hermes_home=str(tmp_path))
     out = _status(bm)
+
     assert "Status:      unavailable" in out
-    assert "Reason:      project 'hermes-memory-cloud' is not registered with bm." in out
+    assert (
+        "Reason:      last start failed: project 'hermes-memory-cloud' is not in "
+        "Basic Memory's project list" in out
+    )
     assert "bm project add hermes-memory-cloud --cloud" in out
 
 
@@ -143,7 +152,6 @@ def test_failed_start_is_reported_until_a_start_succeeds(bm, monkeypatch, tmp_pa
     monkeypatch.setattr(bm, "_init_failures", {})
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"hermes-memory": {}})
     monkeypatch.setattr(bm, "_current_hermes_home", lambda: str(tmp_path))
     monkeypatch.setattr(bm, "_BmMcpActor", _ActorThatFailsToStart)
 
@@ -182,7 +190,10 @@ def test_failed_start_is_reported_until_a_start_succeeds(bm, monkeypatch, tmp_pa
             ),
             "uv tool install basic-memory",
         ),
-        (lambda bm, mp: mp.setattr(bm, "_bm_known_projects", lambda: {}), "is not registered"),
+        (
+            lambda bm, mp: mp.setattr(bm, "_BmMcpActor", ProjectActor(project_listing("main"))),
+            "is not in Basic Memory's project list",
+        ),
         (
             lambda bm, mp: mp.setattr(
                 bm.BasicMemoryProvider,
@@ -197,8 +208,8 @@ def test_every_initialize_failure_path_records_its_reason(bm, monkeypatch, tmp_p
     monkeypatch.setattr(bm, "_init_failures", {})
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
-    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"hermes-memory": {}})
-    # Local mode would register a missing project; cloud mode refuses it.
+    monkeypatch.setattr(bm, "_BmMcpActor", ProjectActor(project_listing("hermes-memory")))
+    # Local mode would create a missing project; cloud mode refuses it.
     (tmp_path / "basic-memory.json").write_text(json.dumps({"mode": "cloud"}))
     setup(bm, monkeypatch)
 
