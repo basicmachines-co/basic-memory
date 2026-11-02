@@ -35,8 +35,13 @@ def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
 
     The last visibility mark appended wins, so this is safe
     to call at import, at each lifespan start, and in tests.
+
+    The mark goes on the local provider, which owns the tools, not on the server:
+    the Skills extension (resources/skills.py) refuses servers with server-level
+    transforms, because a transform could hide or rename skill files after
+    skills/list has already advertised their digests.
     """
-    server.add_transform(Visibility(enabled, tags={PROJECT_DELETE_TAG}))
+    server.local_provider.add_transform(Visibility(enabled, tags={PROJECT_DELETE_TAG}))
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
