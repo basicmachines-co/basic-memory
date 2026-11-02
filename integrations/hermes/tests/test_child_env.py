@@ -133,6 +133,9 @@ def test_uv_install_gets_a_sanitized_env(bm, monkeypatch):
 def test_project_add_gets_a_sanitized_env(bm, monkeypatch, tmp_path):
     monkeypatch.setenv("PYTHONPATH", "/hermes/py311/site-packages")
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/home/u/.local/bin/bm")
+    # No readable registry, so registration runs whatever the developer's own bm
+    # config holds (an already-registered project skips `bm project add`).
+    monkeypatch.setattr(bm, "_bm_known_projects", lambda: None)
     seen: dict = {}
 
     def fake_run(argv, **kwargs):
