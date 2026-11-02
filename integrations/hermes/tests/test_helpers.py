@@ -225,17 +225,22 @@ def test_translate_read(bm):
     assert args == {"include_frontmatter": False, "project": "proj", "identifier": "x/y"}
 
 
-def test_translate_read_workspace_qualified_identifier_self_routes(bm):
+def test_translate_read_workspace_qualified_identifier_passes_its_project(bm):
+    """BM 1.0 requires `project`; a qualified identifier supplies its own (#2015)."""
     tool, args = bm._translate_args(
         "bm_read",
         {"identifier": "personal/main/scratch/note"},
         "hermes-memory",
     )
     assert tool == "bm_read"
-    assert args == {"include_frontmatter": False, "identifier": "personal/main/scratch/note"}
+    assert args == {
+        "include_frontmatter": False,
+        "project": "personal/main",
+        "identifier": "personal/main/scratch/note",
+    }
 
 
-def test_translate_read_org_workspace_qualified_identifier_self_routes(bm):
+def test_translate_read_org_workspace_qualified_identifier_passes_its_project(bm):
     tool, args = bm._translate_args(
         "bm_read",
         {"identifier": "basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note"},
@@ -244,8 +249,78 @@ def test_translate_read_org_workspace_qualified_identifier_self_routes(bm):
     assert tool == "bm_read"
     assert args == {
         "include_frontmatter": False,
+        "project": "basic-memory-7020de4e925843c68c9056c60d101d9e/main",
         "identifier": "basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
     }
+
+
+def test_translate_read_qualified_memory_url_passes_its_project(bm):
+    """The live #2015 reproduction: a memory:// URL with no explicit project."""
+    _, args = bm._translate_args(
+        "bm_read", {"identifier": "memory://personal/main/todo"}, "hermes-memory"
+    )
+    assert args["project"] == "personal/main"
+    assert args["identifier"] == "memory://personal/main/todo"
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "scratch/note",  # project-relative path
+        "main/scratch/note",  # project-qualified, not workspace-qualified
+        "personal/note",  # two segments: a folder named 'personal'
+        "team/main/scratch/note",  # 'team' is not a workspace slug
+        "memory://scratch/note",
+    ],
+)
+def test_translate_read_unqualified_identifier_uses_default_project(bm, identifier):
+    _, args = bm._translate_args("bm_read", {"identifier": identifier}, "hermes-memory")
+    assert args["project"] == "hermes-memory"
+
+
+def test_translate_read_explicit_project_beats_qualified_identifier(bm):
+    _, args = bm._translate_args(
+        "bm_read",
+        {"identifier": "personal/main/scratch/note", "project": "personal/other"},
+        "hermes-memory",
+    )
+    assert args["project"] == "personal/other"
+
+
+def test_translate_read_project_id_beats_project_and_qualified_identifier(bm):
+    _, args = bm._translate_args(
+        "bm_read",
+        {
+            "identifier": "personal/main/scratch/note",
+            "project": "personal/other",
+            "project_id": "bf2a4c1e-d77f-4c3b-9a61-000000000000",
+        },
+        "hermes-memory",
+    )
+    assert args["project"] == "bf2a4c1e-d77f-4c3b-9a61-000000000000"
+
+
+@pytest.mark.parametrize(
+    ("hermes_tool", "extra"),
+    [
+        ("bm_edit", {"operation": "append", "content": "x"}),
+        ("bm_delete", {}),
+        ("bm_move", {"new_folder": "archive"}),
+    ],
+)
+def test_translate_mutations_with_qualified_identifier_pass_its_project(bm, hermes_tool, extra):
+    for identifier, project in [
+        ("personal/main/scratch/note", "personal/main"),
+        (
+            "memory://basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
+            "basic-memory-7020de4e925843c68c9056c60d101d9e/main",
+        ),
+    ]:
+        _, args = bm._translate_args(
+            hermes_tool, {"identifier": identifier, **extra}, "hermes-memory"
+        )
+        assert args["project"] == project
+        assert args["identifier"] == identifier
 
 
 def test_translate_write(bm):
@@ -397,17 +472,21 @@ def test_translate_context(bm):
     assert args == {"project": "proj", "identifier": "memory://x", "depth": 2}
 
 
-def test_translate_context_workspace_qualified_url_self_routes(bm):
+def test_translate_context_workspace_qualified_url_passes_its_project(bm):
     tool, args = bm._translate_args(
         "bm_context",
         {"url": "memory://personal/main/scratch/note", "depth": 1},
         "hermes-memory",
     )
     assert tool == "bm_context"
-    assert args == {"identifier": "memory://personal/main/scratch/note", "depth": 1}
+    assert args == {
+        "project": "personal/main",
+        "identifier": "memory://personal/main/scratch/note",
+        "depth": 1,
+    }
 
 
-def test_translate_context_org_workspace_qualified_url_self_routes(bm):
+def test_translate_context_org_workspace_qualified_url_passes_its_project(bm):
     tool, args = bm._translate_args(
         "bm_context",
         {
@@ -418,6 +497,7 @@ def test_translate_context_org_workspace_qualified_url_self_routes(bm):
     )
     assert tool == "bm_context"
     assert args == {
+        "project": "basic-memory-7020de4e925843c68c9056c60d101d9e/main",
         "identifier": "memory://basic-memory-7020de4e925843c68c9056c60d101d9e/main/scratch/note",
         "depth": 1,
     }

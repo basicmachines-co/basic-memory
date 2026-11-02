@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Pass the project a workspace-qualified identifier names (#2015).** Basic Memory 1.0 requires `project` on one-project tools, so the 0.3.2 behavior of omitting it made `bm_read(identifier="memory://personal/main/todo")` fail with a raw "Missing required keyword only argument" error. `bm_read`, `bm_edit`, `bm_delete`, `bm_move`, and `bm_context` now derive `workspace/project` from a workspace-qualified identifier or URL (`personal/main/...`, or an organization slug with a 32-character hash suffix) and pass it as `project`. Explicit `project_id` and `project` still win; unqualified identifiers still use the configured Hermes project.
+
 ## [0.3.2] — 2026-05-23
 
 ### Fixed
