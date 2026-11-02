@@ -405,6 +405,106 @@ def test_memory_quest_fields_round_trip(provider, bm):
     assert after["checksum"] != checksum
 
 
+# ---- Project registry authority (#2019) ----
+
+
+def _bm_data_dir() -> str:
+    """The directory bm resolves for its config, by bm's own rules."""
+    return (
+        os.environ.get("BASIC_MEMORY_CONFIG_DIR")
+        or (
+            os.path.join(os.environ["XDG_CONFIG_HOME"], "basic-memory")
+            if os.environ.get("XDG_CONFIG_HOME")
+            else None
+        )
+        or os.path.expanduser("~/.basic-memory")
+    )
+
+
+def _bm_lists(project_name: str) -> bool:
+    out = subprocess.run(
+        [_BM_BIN, "project", "list", "--local", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return any(row.get("name") == project_name for row in json.loads(out.stdout)["projects"])
+
+
+def _start_provider(bm, home, cfg):
+    (home / "basic-memory.json").write_text(json.dumps(cfg))
+    p = bm.BasicMemoryProvider()
+    p.initialize(session_id=f"registry-{uuid.uuid4().hex[:6]}", hermes_home=str(home))
+    return p
+
+
+def test_project_registered_outside_the_legacy_config_initializes(
+    bm, temp_bm_project, monkeypatch, tmp_path
+):
+    """The setup behind #2019: bm keeps its registry in
+    BASIC_MEMORY_CONFIG_DIR, while a stale ~/.basic-memory/config.json lacks
+    the project. The plugin used to read only the stale file and refuse."""
+    project_name, project_dir = temp_bm_project
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", _bm_data_dir())
+    monkeypatch.setenv("HOME", str(tmp_path))
+    legacy = tmp_path / ".basic-memory" / "config.json"
+    legacy.parent.mkdir()
+    legacy.write_text(json.dumps({"projects": {"main": {"path": str(tmp_path / "main")}}}))
+
+    p = _start_provider(
+        bm, tmp_path, {"mode": "local", "project": project_name, "project_path": project_dir}
+    )
+    try:
+        assert p._initialized, bm._init_failures.get(bm._home_key(tmp_path))
+        raw = p.handle_tool_call("bm_search", {"query": "anything"})
+        assert "not initialized" not in raw
+    finally:
+        p.shutdown()
+
+
+def test_missing_local_project_is_created_once_then_reused(bm, monkeypatch, tmp_path):
+    project_name = f"hermes-bm-created-{uuid.uuid4().hex[:8]}"
+    project_dir = tmp_path / "notes"
+    cfg = {"mode": "local", "project": project_name, "project_path": str(project_dir)}
+    commands: list[str] = []
+    real_call = bm._BmMcpActor.call
+
+    def spy(self, tool_name, arguments, timeout=30.0):
+        if tool_name == "bm_project":
+            commands.append(arguments.get("command"))
+        return real_call(self, tool_name, arguments, timeout=timeout)
+
+    monkeypatch.setattr(bm._BmMcpActor, "call", spy)
+    try:
+        first = _start_provider(bm, tmp_path, cfg)
+        first.shutdown()
+        assert first._project == project_name
+        assert commands == ["list", "create"]
+        assert _bm_lists(project_name)
+
+        commands.clear()
+        second = _start_provider(bm, tmp_path, cfg)
+        second.shutdown()
+        assert commands == ["list"], "an existing project must not be created again"
+    finally:
+        subprocess.run(
+            [_BM_BIN, "project", "remove", project_name],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+
+
+def test_unlisted_cloud_project_fails_with_a_clear_reason(bm, tmp_path):
+    project_name = f"hermes-bm-absent-{uuid.uuid4().hex[:8]}"
+    p = _start_provider(bm, tmp_path, {"mode": "cloud", "project": project_name})
+    assert not p._initialized and p._actor is None
+    reason = bm._init_failures[bm._home_key(tmp_path)]
+    assert f"project {project_name!r} is not in Basic Memory's project list" in reason
+    assert f"bm project add {project_name} --cloud" in reason
+
+
 # ---- Capture pipeline ----
 
 
