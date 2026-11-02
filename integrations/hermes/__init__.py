@@ -857,31 +857,49 @@ def _strip_memory_url_prefix(value: str) -> str:
     return value
 
 
-def _looks_workspace_qualified(value: str) -> bool:
-    """Return True for BM Cloud workspace-qualified identifiers.
+def _workspace_qualified_project(value: str) -> str | None:
+    """Return 'workspace/project' when `value` is a workspace-qualified identifier.
 
-    Hermes normally injects its configured default project so calls operate on
-    the provider's project instead of Basic Memory's process default. But BM
-    Cloud routes fully-qualified identifiers itself; adding a default local
-    project makes `personal/main/...` resolve under that local project instead.
+    A workspace-qualified identifier is '<workspace>/<project>/<path>', bare or
+    as a memory:// URL, where the workspace is 'personal' or an organization
+    slug with a 32-character hash suffix. Anything else returns None.
     """
     path = _strip_memory_url_prefix(value).strip("/")
     parts = [part for part in path.split("/") if part]
     if len(parts) < 3:
-        return False
+        return None
 
     workspace_slug = parts[0]
-    return workspace_slug == "personal" or bool(_WORKSPACE_HASH_SLUG_RE.match(workspace_slug))
+    if workspace_slug != "personal" and not _WORKSPACE_HASH_SLUG_RE.match(workspace_slug):
+        return None
+    return f"{workspace_slug}/{parts[1]}"
 
 
-def _should_omit_default_project(hermes_tool: str, args: dict[str, Any]) -> bool:
-    if hermes_tool in {"bm_read", "bm_edit", "bm_delete", "bm_move"}:
-        identifier = args.get("identifier")
-        return isinstance(identifier, str) and _looks_workspace_qualified(identifier)
-    if hermes_tool == "bm_context":
-        url = args.get("url")
-        return isinstance(url, str) and _looks_workspace_qualified(url)
-    return False
+# The Hermes argument that holds the note identifier, per tool that takes one.
+_QUALIFIABLE_IDENTIFIER_ARG = {
+    "bm_read": "identifier",
+    "bm_edit": "identifier",
+    "bm_delete": "identifier",
+    "bm_move": "identifier",
+    "bm_context": "url",
+}
+
+
+def _project_from_qualified_identifier(hermes_tool: str, args: dict[str, Any]) -> str | None:
+    """The project a workspace-qualified identifier names, if the call has one.
+
+    Trigger: the identifier already says which workspace and project it lives in
+      (`personal/main/todo`, `memory://personal/main/todo`).
+    Why: Basic Memory 1.0 requires `project` on one-project tools and refuses a
+      call without it before routing ever sees the identifier (#1984). Injecting
+      Hermes's configured project instead would contradict the identifier and
+      route `personal/main/...` under the local project.
+    Outcome: the identifier's own 'workspace/project' becomes the `project`
+      argument, so the identifier and the project always agree.
+    """
+    key = _QUALIFIABLE_IDENTIFIER_ARG.get(hermes_tool)
+    value = args.get(key) if key else None
+    return _workspace_qualified_project(value) if isinstance(value, str) else None
 
 
 def _translate_args(
@@ -890,12 +908,14 @@ def _translate_args(
     bm_tool = _HERMES_TO_BM[hermes_tool]
     out: dict[str, Any] = {}
 
-    # Project routing: project_id > project > configured default.
-    # The agent passes one of these to operate on a project other than the
-    # one Hermes is configured for. project_id (UUID from bm_projects) is
-    # the unambiguous form across cloud workspaces — preferred when project
-    # names might collide between workspaces. Only one of the two reaches
-    # BM so server-side precedence rules don't enter the picture.
+    # Project routing: project_id > project > workspace-qualified identifier
+    # > configured default. The agent passes one of the first two to operate
+    # on a project other than the one Hermes is configured for. project_id
+    # (UUID from bm_projects) is the unambiguous form across cloud workspaces
+    # — preferred when project names might collide between workspaces. Only
+    # one value reaches BM so server-side precedence rules don't enter the
+    # picture, and every one-project call carries a `project`, which BM 1.0
+    # requires.
     #
     # Global discovery tools (bm_projects, bm_workspaces) list everything
     # and don't take routing args at all — skip the block for them.
@@ -906,8 +926,10 @@ def _translate_args(
             out["project"] = str(project_id_override)
         elif project_name_override:
             out["project"] = str(project_name_override)
-        elif not _should_omit_default_project(hermes_tool, args):
-            out["project"] = default_project
+        else:
+            out["project"] = (
+                _project_from_qualified_identifier(hermes_tool, args) or default_project
+            )
 
     if hermes_tool == "bm_search":
         out["query"] = args["query"]

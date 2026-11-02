@@ -499,3 +499,34 @@ def test_prefetch_against_real_bm(provider, bm):
     )
     assert "Basic Memory Recall" in out
     assert unique in out or "Prefetch Test" in out
+
+
+# ---- Workspace-qualified routing (#2015) ----
+
+
+@pytest.mark.parametrize(
+    ("hermes_tool", "extra"),
+    [
+        ("bm_read", {}),
+        ("bm_context", None),
+        ("bm_edit", {"operation": "append", "content": "x"}),
+        ("bm_delete", {}),
+        ("bm_move", {"new_folder": "archive"}),
+    ],
+)
+def test_workspace_qualified_identifier_reaches_routing_not_validation(
+    provider, hermes_tool, extra
+):
+    """BM 1.0 requires `project` on one-project tools, and refuses a call
+    without it before routing reads the identifier (#1984). The plugin used to
+    omit `project` for a workspace-qualified identifier, so the agent saw a raw
+    "Missing required keyword only argument" error. Now the identifier's own
+    'workspace/project' is passed, and an unknown project fails in routing."""
+    identifier = f"memory://personal/no-such-project-{uuid.uuid4().hex[:8]}/scratch/note"
+    args = {"url": identifier} if extra is None else {"identifier": identifier, **extra}
+
+    raw = provider.handle_tool_call(hermes_tool, args)
+
+    lowered = raw.lower()
+    assert "missing required" not in lowered, raw
+    assert "no-such-project" in lowered or "not found" in lowered, raw
