@@ -8,21 +8,27 @@ from pathlib import Path
 from typing import override, List, Optional, Sequence, Union, Any
 
 from loguru import logger
-from sqlalchemy import case, exists, func, or_, select, union_all
+from sqlalchemy import Select, case, exists, func, or_, select, union, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.engine import Row
 
-from basic_memory.models.knowledge import Entity, NoteContent, Observation, Relation
+from basic_memory.models.knowledge import (
+    Entity,
+    NoteContent,
+    Observation,
+    Relation,
+    file_path_conflict_columns,
+)
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 from basic_memory.runtime.storage import (
     RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_file_path_is_markdown_note,
 )
-from basic_memory.utils import ExistingFilePermalink
+from basic_memory.utils import file_path_conflict_keys
 
 type EntityMetadata = dict[str, Any] | None
 
@@ -675,20 +681,47 @@ class EntityRepository(Repository[Entity]):
         result = await self.execute_query(session, query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def get_file_path_permalinks(self, session: AsyncSession) -> List[ExistingFilePermalink]:
-        """Get every file path in this project with its stored permalink, if any.
+    async def find_file_path_conflicts(self, session: AsyncSession, file_path: str) -> List[str]:
+        """Return the other file paths in this project that name the same note as file_path.
 
-        Conflict detection compares against stored permalinks so it only has to generate
-        a permalink for files that do not have one yet.
+        A path conflicts when it equals file_path after case, Unicode, and separator
+        normalization, or when it generates the same permalink. Both forms are stored per
+        row and indexed, so this is one indexed lookup however large the project is.
         """
-        query = select(Entity.file_path, Entity.permalink)
-        query = self._add_project_filter(query)
+        keys = file_path_conflict_keys(file_path)
+
+        def matching(key_column: Any, key: str) -> Select[tuple[str]]:
+            return self._add_project_filter(
+                select(Entity.file_path).where(Entity.file_path != file_path, key_column == key)
+            )
+
+        # One SELECT per key, joined by UNION: an OR across two columns lets SQLite fall
+        # back to reading every row in the project, while each half here is a direct
+        # lookup on its (project_id, key) index on both SQLite and Postgres.
+        query = union(
+            matching(Entity.file_path_key, keys.path_key),
+            matching(Entity.file_path_permalink, keys.permalink),
+        )
 
         result = await self.execute_query(session, query, use_query_options=False)
-        return [
-            ExistingFilePermalink(file_path=file_path, permalink=permalink)
-            for file_path, permalink in result.all()
-        ]
+        # Sorted in Python: SQLite and Postgres collate differently, and callers (error
+        # messages, logs) should see the same order on both.
+        return sorted(result.scalars().all())
+
+    @override
+    async def update_fields(
+        self, session: AsyncSession, entity_id: Any, entity_data: dict[str, Any]
+    ) -> bool:
+        """Update columns with one UPDATE, keeping the file path conflict keys in step.
+
+        This is a Core statement, so the Entity file_path validator does not run here.
+        """
+        if "file_path" in entity_data:
+            entity_data = {
+                **entity_data,
+                **file_path_conflict_columns(entity_data["file_path"]),
+            }
+        return await super().update_fields(session, entity_id, entity_data)
 
     async def find_without_relations(self, session: AsyncSession) -> Sequence[Entity]:
         """Find entities that have no incoming or outgoing relations."""

@@ -121,8 +121,8 @@ async def test_directory_tree(directory_service: DirectoryService, test_graph):
     assert node_0.has_children is True
     assert len(node_0.children) == 5
 
-    # assert one file node
-    node_file = node_0.children[0]
+    # find_all has no ORDER BY, so pick the node by name instead of position.
+    node_file = next(child for child in node_0.children if child.name == "Deeper Entity.md")
     assert node_file.name == "Deeper Entity.md"
     assert node_file.type == "file"
     assert node_file.content_type == "text/markdown"

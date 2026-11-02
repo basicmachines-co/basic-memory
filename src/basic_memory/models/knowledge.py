@@ -26,7 +26,17 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from basic_memory.models.base import Base
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import file_path_conflict_keys, generate_permalink
+
+
+def file_path_conflict_columns(file_path: str) -> dict[str, str]:
+    """Return the derived entity columns that index ``file_path`` for conflict checks.
+
+    ORM writes get these from ``Entity``'s ``file_path`` validator. A Core statement that
+    sets ``entity.file_path`` (bulk moves, ``update_fields``) must set these columns with it.
+    """
+    keys = file_path_conflict_keys(file_path)
+    return {"file_path_key": keys.path_key, "file_path_permalink": keys.permalink}
 
 
 class Entity(Base):
@@ -63,6 +73,9 @@ class Entity(Base):
             "project_id",
             unique=True,
         ),
+        # File path conflict checks look up one project's rows by either conflict key.
+        Index("ix_entity_project_file_path_key", "project_id", "file_path_key"),
+        Index("ix_entity_project_file_path_permalink", "project_id", "file_path_permalink"),
     )
 
     # Core identity
@@ -81,6 +94,14 @@ class Entity(Base):
     permalink: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     # Actual filesystem relative path
     file_path: Mapped[str] = mapped_column(String, index=True)
+    # Derived from file_path by file_path_conflict_keys() and kept in step with it by the
+    # validator below: the path compared without case, Unicode form, or separator style,
+    # and the permalink the path generates. Two paths that share either value name the
+    # same note. They are computed in Python, not in SQL, so SQLite and Postgres agree.
+    # Changing normalize_file_path_for_comparison() or generate_permalink() changes these
+    # values, which needs a migration that recomputes them.
+    file_path_key: Mapped[str] = mapped_column(String, nullable=False)
+    file_path_permalink: Mapped[str] = mapped_column(String, nullable=False)
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # When indexing rewrote the file (frontmatter or permalink), the checksum of the file
@@ -150,6 +171,14 @@ class Entity(Base):
     time_assertions = relationship(
         "MemoryTimeIndex", back_populates="entity", cascade="all, delete-orphan"
     )
+
+    @validates("file_path")
+    def _derive_file_path_conflict_keys(self, attribute_name: str, value: str) -> str:
+        """Set the conflict-check columns every time file_path is set through the ORM."""
+        del attribute_name
+        for column, derived in file_path_conflict_columns(value).items():
+            setattr(self, column, derived)
+        return value
 
     @validates("created_at", "updated_at")
     def _normalize_semantic_timestamp(self, attribute_name: str, value: datetime) -> datetime:

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models import Entity, NoteContent, Relation
+from basic_memory.models.knowledge import file_path_conflict_columns
 from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
@@ -652,6 +653,20 @@ def _build_move_batch_update_values(
     entity_values: dict[str, object] = {
         "file_path": case(target_paths_by_old_path, value=Entity.file_path)
     }
+    # A Core UPDATE skips the Entity file_path validator, so the conflict-check columns
+    # are repointed here from the new paths, keyed by the same old paths.
+    conflict_columns_by_old_path = {
+        old_path: file_path_conflict_columns(new_path)
+        for old_path, new_path in target_paths_by_old_path.items()
+    }
+    for column_name in ("file_path_key", "file_path_permalink"):
+        entity_values[column_name] = case(
+            {
+                old_path: columns[column_name]
+                for old_path, columns in conflict_columns_by_old_path.items()
+            },
+            value=Entity.file_path,
+        )
     note_content_values: dict[str, object] = {
         "file_path": case(target_paths_by_entity_id, value=NoteContent.entity_id)
     }
