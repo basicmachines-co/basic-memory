@@ -64,7 +64,7 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
     """A second write of the same title+directory is blocked as a conflict.
 
     Same title + same directory normalize to the same permalink. Through the
-    guarded MCP create path the server's ``detect_potential_file_conflicts``
+    guarded MCP create path the server's ``find_file_path_conflicts``
     pre-check catches the permalink collision BEFORE the repository layer, so with
     the default ``overwrite=False`` the second write returns a structured
     ``conflict`` (``ALREADY_EXISTS``) rather than clobbering the first note

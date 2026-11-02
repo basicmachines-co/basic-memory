@@ -9,7 +9,6 @@ import re
 import shlex
 import sys
 import unicodedata
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -812,84 +811,25 @@ def normalize_file_path_for_comparison(file_path: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class ExistingFilePermalink:
-    """One indexed file path and the permalink already stored for it, if any."""
+class FilePathConflictKeys:
+    """The two forms under which two different file paths name the same note.
 
-    file_path: str
-    permalink: str | None
-
-
-def detect_potential_file_conflicts(
-    file_path: str,
-    existing_files: Sequence[ExistingFilePermalink],
-    *,
-    canonical_permalink: Callable[[str], str] | None = None,
-) -> List[str]:
-    """Detect potential conflicts between a file path and existing indexed files.
-
-    This function checks for various types of conflicts:
-    - Case sensitivity differences
-    - Unicode normalization differences
-    - Path separator differences
-    - Permalink conflicts between path-derived permalinks
-
-    Args:
-        file_path: The file path to check
-        existing_files: Existing file paths with their stored permalinks
-        canonical_permalink: Builds the project-qualified permalink for a path, when stored
-            permalinks carry a project or workspace prefix
-
-    Returns:
-        List of existing paths that might conflict with the given file path
+    Two paths conflict when their ``path_key`` values are equal (they differ only by case,
+    Unicode normalization, or separators) or when their ``permalink`` values are equal (they
+    generate the same permalink, like ``Foo Bar.md`` and ``foo_bar.md``). The entity table
+    stores both values for every row so the check is an indexed lookup instead of a scan.
     """
 
-    conflicts = []
+    path_key: str
+    permalink: str
 
-    # Normalize the input file path
-    normalized_input = normalize_file_path_for_comparison(file_path)
-    input_permalink = generate_permalink(file_path)
-    claimed_permalinks = {input_permalink}
-    if canonical_permalink is not None:
-        claimed_permalinks.add(canonical_permalink(file_path))
 
-    for existing in existing_files:
-        existing_path = existing.file_path
-        # Skip identical paths
-        if existing_path == file_path:
-            continue
-
-        # Check for case-insensitive path conflicts
-        normalized_existing = normalize_file_path_for_comparison(existing_path)
-        if normalized_input == normalized_existing:
-            conflicts.append(existing_path)
-            continue
-
-        # Trigger: the existing file already owns a stored permalink.
-        # Why: regenerating every project file's permalink on each edit stalled the event
-        # loop on large projects. The stored permalink is an index into the few candidates.
-        # Outcome: a set lookup per file. A candidate counts only while its stored permalink
-        # is still the one its own path produces, so a note that kept its permalink after a
-        # move or carries a frontmatter permalink does not block that name for a new file.
-        # The few candidates that match are then held to the previous rule, equal generated
-        # permalinks, so a path inside the project slug ("test-project/notes/foo.md" next to
-        # "notes/foo.md") is still suffixed on create rather than rejected.
-        if existing.permalink is not None:
-            if existing.permalink in claimed_permalinks:
-                existing_permalink = generate_permalink(existing_path)
-                own_permalinks = {existing_permalink}
-                if canonical_permalink is not None:
-                    own_permalinks.add(canonical_permalink(existing_path))
-                if existing.permalink in own_permalinks and existing_permalink == input_permalink:
-                    conflicts.append(existing_path)
-            continue
-
-        # Check for permalink conflicts
-        existing_permalink = generate_permalink(existing_path)
-        if input_permalink == existing_permalink:
-            conflicts.append(existing_path)
-            continue
-
-    return conflicts
+def file_path_conflict_keys(file_path: str) -> FilePathConflictKeys:
+    """Return the conflict keys for one project-relative file path."""
+    return FilePathConflictKeys(
+        path_key=normalize_file_path_for_comparison(file_path),
+        permalink=generate_permalink(file_path),
+    )
 
 
 def resolve_directory_casing(directory: str, existing_directories: List[str]) -> str:

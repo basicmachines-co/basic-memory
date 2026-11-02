@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from copy import deepcopy
 from itertools import dropwhile
@@ -216,23 +215,10 @@ async def detect_file_path_conflicts(
     if skip_check:
         return []
 
-    from basic_memory.utils import detect_potential_file_conflicts
-
     async with db.scoped_session(dependencies.session_maker, session) as active_session:
-        existing_files = await dependencies.entity_repository.get_file_path_permalinks(
-            active_session
+        return await dependencies.entity_repository.find_file_path_conflicts(
+            active_session, file_path
         )
-        # Stored permalinks carry the project (and workspace) prefix when configured, so
-        # paths must be compared in that same canonical form as well.
-        canonical_permalink = await _canonical_permalink_builder(dependencies, active_session)
-    # The comparison still walks every project path. On large projects that is enough pure
-    # CPU work to stall other requests, so it runs off the event loop.
-    return await asyncio.to_thread(
-        detect_potential_file_conflicts,
-        file_path,
-        existing_files,
-        canonical_permalink=canonical_permalink,
-    )
 
 
 async def _project_permalink(

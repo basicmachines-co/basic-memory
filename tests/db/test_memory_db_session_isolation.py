@@ -57,8 +57,9 @@ async def test_concurrent_session_rollback_does_not_destroy_uncommitted_writes()
             await session.execute(
                 text(
                     "INSERT INTO entity (id, external_id, title, note_type, content_type,"
-                    " project_id, file_path, created_at, updated_at) "
-                    "VALUES (1, 'ex', 'E', 'note', 'text/markdown', 1, 'e.md',"
+                    " project_id, file_path, file_path_key, file_path_permalink,"
+                    " created_at, updated_at) "
+                    "VALUES (1, 'ex', 'E', 'note', 'text/markdown', 1, 'e.md', 'e.md', 'e',"
                     " '2024-01-01', '2024-01-01')"
                 )
             )
