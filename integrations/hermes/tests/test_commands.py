@@ -487,7 +487,8 @@ def test_bm_status_renders_provider_state(bm, monkeypatch):
     assert "demo" in out
     assert "/tmp/demo" in out
     assert "/fake/bin/bm" in out
-    assert "Initialized: no" in out
+    assert "Status:" in out and "MCP process:" in out
+    assert "Initialized" not in out
     assert "transcripts" in out and "inbox" in out
 
 

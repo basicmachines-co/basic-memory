@@ -92,7 +92,7 @@ For direct, in-session use without going through the agent (requires Hermes ≥ 
 | `/bm-read <identifier>` | Read a note by title, permalink, or `memory://` URL. |
 | `/bm-context <identifier>` | Build context for a note (target + related). |
 | `/bm-recent [timeframe]` | Recently updated notes. Default `7d`; accepts `"2 weeks"`, `"yesterday"`, etc. |
-| `/bm-status` | Plugin/provider state: mode, project, capture flags, bm CLI path. |
+| `/bm-status` | Whether Basic Memory is ready, whether `bm mcp` is running, and plugin settings (mode, project, capture flags, bm CLI path). Never starts bm. |
 | `/bm-remember <text>` | Capture a quick note. Title = first line (≤80 chars), folder = `remember_folder` (default `bm-remember`), tagged `manual-capture`. |
 | `/bm-project` | List all known projects; the active one is marked. |
 | `/bm-workspace` | List BM Cloud workspaces. Cloud mode only — prints an explanatory line in local mode. |
@@ -107,6 +107,19 @@ Examples:
 ```
 
 `/bm-project` and `/bm-workspace` are read-only in 0.2.0 — mid-session switching is intentionally not supported because auto-capture would otherwise land in the wrong place. Tracked as a follow-up.
+
+### Reading `/bm-status`
+
+The plugin starts `bm mcp` lazily: on the first `/bm-*` command or agent session in a profile, not when Hermes loads the plugin. `/bm-status` only inspects, so it never starts it. The first two lines tell you which state you are in:
+
+| Output | Meaning |
+|---|---|
+| `Status: ready` / `MCP process: idle (starts on the next /bm-* command or agent session)` | Healthy. Nothing has needed Basic Memory yet. |
+| `Status: ready` / `MCP process: running` | Healthy, and `bm mcp` is up. |
+| `Status: ready` / `MCP process: stopped (restarts on the next call)` | `bm mcp` exited; the next call restarts it. |
+| `Status: unavailable` / `Reason: ...` | Something will stop or did stop the start: a missing `mcp` package, no `bm` or `uv`, an unregistered cloud project, or a failed start (`last start failed: ...`). The reason says what to fix. |
+
+`Note:` lines list setup the first start will do by itself, such as installing `bm` with `uv` or registering a local project.
 
 ### Known issue: `/bm-*` commands may not appear in some Hermes gateway builds
 

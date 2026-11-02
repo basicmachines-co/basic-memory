@@ -315,7 +315,8 @@ def test_slash_commands_use_the_profiles_live_provider(bm, monkeypatch, tmp_path
         handlers = {n: h for n, h, _, _ in bm._build_slash_commands()}
         assert "Hit" in handlers["bm-search"]("anything")
         assert session.calls, "the live provider's bm mcp was not used"
-        assert "Initialized: yes" in handlers["bm-status"]("")
+        status = handlers["bm-status"]("")
+        assert "Status:      ready" in status and "MCP process: running" in status
     finally:
         actor.shutdown()
 
@@ -341,8 +342,12 @@ def test_status_without_a_live_provider_does_not_start_bm(bm, monkeypatch, tmp_p
     monkeypatch.setattr(
         bm.BasicMemoryProvider, "initialize", lambda *a, **k: pytest.fail("started bm")
     )
+    monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
+    monkeypatch.setattr(bm, "_bm_binary_path", lambda: "/fake/bin/bm")
+    monkeypatch.setattr(bm, "_bm_known_projects", lambda: {"hermes-memory": {}})
     out = {n: h for n, h, _, _ in bm._build_slash_commands()}["bm-status"]("")
-    assert "Initialized: no" in out
+    assert "Status:      ready" in out
+    assert "MCP process: idle (starts on the next /bm-* command or agent session)" in out
 
 
 def test_current_hermes_home_falls_back_to_the_environment(bm, monkeypatch, tmp_path):
