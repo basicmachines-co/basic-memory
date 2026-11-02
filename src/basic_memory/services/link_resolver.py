@@ -462,6 +462,20 @@ class LinkResolver:
         # duplicate-title guard below (#1148).
         exact_identifier = normalize_project_reference(clean_text).strip("/")
 
+        # 0. An identifier ending in .md names a file. Its exact path is the most precise
+        # match, and permalink candidates can point elsewhere: in project `cabinet`, the local
+        # permalink of a root `plan.md` is `cabinet/plan`, which is also the slug of the folder
+        # note `cabinet/plan.md` (#2024).
+        if clean_text.casefold().endswith(".md"):
+            exact_file = await entity_repository.get_by_file_path(
+                session,
+                clean_text,
+                load_relations=load_relations,
+            )
+            if exact_file:
+                logger.debug(f"Found exact file path match: {exact_file.file_path}")
+                return exact_file
+
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
             entity = await entity_repository.get_by_permalink(

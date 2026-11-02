@@ -478,6 +478,26 @@ def build_permalink_resolution_candidates(
     if not normalized_project:
         return candidates
 
+    # Trigger: the path starts with the project slug (`cabinet/plan` in project `cabinet`).
+    # Why: that can be a real top-level folder named like the project, whose notes carry
+    #   `cabinet/cabinet/plan` (#2024). The qualified reading below would drop the folder
+    #   and land on a root `plan` note instead, so a read or edit reaches the wrong note.
+    # Outcome: try the literal folder reading first; when no such note exists the qualified
+    #   reading still resolves, so plain project-qualified identifiers keep working.
+    if normalized_path == normalized_project or normalized_path.startswith(
+        f"{normalized_project}/"
+    ):
+        if normalized_workspace:
+            add_candidate(
+                build_file_path_permalink(
+                    normalized_project,
+                    normalized_path,
+                    workspace_permalink=normalized_workspace,
+                )
+            )
+        if include_project:
+            add_candidate(build_file_path_permalink(normalized_project, normalized_path))
+
     workspace_project_prefix = (
         f"{normalized_workspace}/{normalized_project}" if normalized_workspace else None
     )
