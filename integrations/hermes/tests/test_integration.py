@@ -442,7 +442,7 @@ def _start_provider(bm, home, cfg):
 def test_project_registered_outside_the_legacy_config_initializes(
     bm, temp_bm_project, monkeypatch, tmp_path
 ):
-    """The jodys-imac failure behind #2019: bm keeps its registry in
+    """The setup behind #2019: bm keeps its registry in
     BASIC_MEMORY_CONFIG_DIR, while a stale ~/.basic-memory/config.json lacks
     the project. The plugin used to read only the stale file and refuse."""
     project_name, project_dir = temp_bm_project
