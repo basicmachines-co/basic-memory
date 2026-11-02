@@ -1951,6 +1951,35 @@ async def test_put_rename_rejects_a_path_equivalent_to_another_note(
 
 
 @pytest.mark.asyncio
+async def test_folder_named_like_the_project_keeps_its_segment_in_permalinks(
+    client: AsyncClient, v2_project_url
+):
+    """A note in a top-level folder named like the project keeps the folder (#2024).
+
+    Without it, ``test-project/Plan.md`` and a root ``Plan.md`` both claim
+    ``test-project/plan``, so the second note is silently suffixed ``-1`` and a
+    lookup by the folder path matches two notes.
+    """
+    folder_note = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Plan", "directory": "test-project", "content": "In the folder"},
+    )
+    assert folder_note.status_code == 202, folder_note.text
+    folder_entity = EntityResponseV2.model_validate(folder_note.json())
+    assert folder_entity.file_path == "test-project/Plan.md"
+    assert folder_entity.permalink == "test-project/test-project/plan"
+
+    root_note = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Plan", "directory": "/", "content": "At the root"},
+    )
+    assert root_note.status_code == 202, root_note.text
+    root_entity = EntityResponseV2.model_validate(root_note.json())
+    assert root_entity.file_path == "Plan.md"
+    assert root_entity.permalink == "test-project/plan"
+
+
+@pytest.mark.asyncio
 async def test_v2_endpoints_use_project_id_not_name(client: AsyncClient, test_project: Project):
     """Verify v2 endpoints require project external_id UUID, not name."""
     # Try using project name instead of external_id - should fail

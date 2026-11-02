@@ -312,6 +312,32 @@ def build_canonical_permalink(
     return project_path
 
 
+def build_file_path_permalink(
+    project_permalink: Optional[str],
+    file_path: Union[Path, str, PathLike],
+    include_project: bool = True,
+    *,
+    workspace_permalink: Optional[str] = None,
+) -> str:
+    """Build the canonical permalink for a project-relative file path.
+
+    ``build_canonical_permalink`` leaves input that already starts with the project
+    slug alone, which is right for lookup candidates that may be qualified already.
+    A real file path is never qualified: ``cabinet/x.md`` in project ``cabinet`` is a
+    file in the ``cabinet/`` folder, and must not share ``x.md``'s permalink (#2024).
+    """
+    normalized_path = generate_permalink(file_path)
+    if workspace_permalink:
+        if not project_permalink:
+            raise ValueError("workspace_permalink requires project_permalink")
+        project_path = f"{generate_permalink(project_permalink)}/{normalized_path}"
+        return f"{generate_permalink(workspace_permalink)}/{project_path}"
+
+    if not include_project or not project_permalink:
+        return normalized_path
+    return f"{generate_permalink(project_permalink)}/{normalized_path}"
+
+
 def build_qualified_permalink_reference(
     project_permalink: Optional[str],
     identifier: Union[Path, str, PathLike],

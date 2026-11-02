@@ -11,7 +11,7 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.schemas.importer import ImportResult
-from basic_memory.utils import build_canonical_permalink, generate_permalink
+from basic_memory.utils import build_file_path_permalink, generate_permalink
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.services.file_service import FileService
@@ -112,7 +112,7 @@ class Importer[T: ImportResult]:
         if self.file_service.app_config is not None:
             include_project = self.file_service.app_config.permalinks_include_project
 
-        return build_canonical_permalink(
+        return build_file_path_permalink(
             self.project_permalink,
             path,
             include_project=include_project,

@@ -36,7 +36,7 @@ from basic_memory.indexing.wiki_projector import (
 from basic_memory.markdown import EntityParser
 from basic_memory.models import AcceptedProjectNoteChange, Project
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
-from basic_memory.utils import build_canonical_permalink, ensure_timezone_aware
+from basic_memory.utils import build_file_path_permalink, ensure_timezone_aware
 from basic_memory.yaml_policy import SimpleYamlHandler
 
 
@@ -320,7 +320,7 @@ async def _load_local_wiki_snapshot(
             continue
 
         markdown = await parser.parse_file(path)
-        permalink = markdown.frontmatter.permalink or build_canonical_permalink(
+        permalink = markdown.frontmatter.permalink or build_file_path_permalink(
             project.permalink,
             relative_path,
             include_project=include_project_permalinks,
