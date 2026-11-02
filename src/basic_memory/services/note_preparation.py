@@ -61,7 +61,7 @@ from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import NoteType, Permalink
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.file_service import FileService
-from basic_memory.utils import build_canonical_permalink
+from basic_memory.utils import build_file_path_permalink
 from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
 from basic_memory.yaml_policy import SimpleSafeDumper, SimpleYamlHandler
 
@@ -247,7 +247,7 @@ async def _canonical_permalink_builder(
     if include_project or workspace_permalink:
         project_permalink = await _project_permalink(dependencies, session)
     return partial(
-        build_canonical_permalink,
+        build_file_path_permalink,
         project_permalink,
         include_project=include_project,
         workspace_permalink=workspace_permalink,

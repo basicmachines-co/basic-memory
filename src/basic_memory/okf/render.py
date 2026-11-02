@@ -25,7 +25,7 @@ from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.bulk_link_resolver import RelationTargetReference
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.utils import (
-    build_canonical_permalink,
+    build_file_path_permalink,
     build_permalink_resolution_candidates,
     generate_permalink,
 )
@@ -307,7 +307,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         )
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if not isinstance(permalink, str) or not permalink:
-            permalink = build_canonical_permalink(
+            permalink = build_file_path_permalink(
                 snapshot.project, file.path, include_project=snapshot.permalinks_include_project
             )
         if isinstance(permalink, str) and permalink:

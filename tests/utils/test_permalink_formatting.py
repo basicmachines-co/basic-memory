@@ -11,7 +11,11 @@ from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from basic_memory.services import EntityService
-from basic_memory.utils import build_canonical_permalink, generate_permalink
+from basic_memory.utils import (
+    build_canonical_permalink,
+    build_file_path_permalink,
+    generate_permalink,
+)
 from basic_memory.workspace_context import workspace_permalink_context
 
 
@@ -220,3 +224,28 @@ async def test_resolve_permalink_keeps_the_permalink_the_entity_already_owns(
         await entity_service.resolve_permalink("docs/Config.md", current_file_path="docs/config.md")
         == owned
     )
+
+
+@pytest.mark.parametrize(
+    ("workspace", "include_project", "expected"),
+    [
+        (None, True, "cabinet/cabinet/notes"),
+        (None, False, "cabinet/notes"),
+        ("team", True, "team/cabinet/cabinet/notes"),
+    ],
+)
+def test_file_path_permalink_keeps_a_folder_named_like_the_project(
+    workspace: str | None, include_project: bool, expected: str
+) -> None:
+    """A real file path always gets the prefix, unlike an already-qualified lookup (#2024)."""
+    assert (
+        build_file_path_permalink(
+            "cabinet",
+            "cabinet/notes.md",
+            include_project=include_project,
+            workspace_permalink=workspace,
+        )
+        == expected
+    )
+    # Lookup candidates keep the idempotent rule.
+    assert build_canonical_permalink("cabinet", "cabinet/notes") == "cabinet/notes"
