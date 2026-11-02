@@ -33,7 +33,7 @@ import weakref
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 # Hermes ABC + helpers — these resolve because Hermes adds its tree to sys.path
 # when loading plugins (same pattern as plugins/memory/mem0/__init__.py:21).
@@ -1029,6 +1029,12 @@ def _translate_args(
 _registry_lock = threading.Lock()
 _live_providers: dict[str, weakref.ref[BasicMemoryProvider]] = {}
 
+# Why the last initialize() for a profile failed, cleared when one succeeds.
+# Keyed by profile like _live_providers, because a failed provider never
+# registers there: without this, /bm-status could not tell a failed start
+# from a provider that simply has not started yet.
+_init_failures: dict[str, str] = {}
+
 
 def _home_key(home: str | Path) -> str:
     return str(Path(home).expanduser().resolve())
@@ -1115,19 +1121,15 @@ class BasicMemoryProvider(MemoryProvider):
         # Hermes passes "cron", "subagent" or "flush" for non-conversational
         # agents; their prompts must not land in the user's transcripts.
         self._agent_context = kwargs.get("agent_context") or "primary"
-        cfg = _load_config(self._hermes_home)
-        self._mode = cfg.get("mode") or "local"
-        self._project = cfg.get("project") or _default_project()
-        self._project_path = os.path.expanduser(cfg.get("project_path") or _default_project_path())
-        self._capture_per_turn = bool(_coerce_bool(cfg.get("capture_per_turn", True)))
-        self._capture_session_end = bool(_coerce_bool(cfg.get("capture_session_end", True)))
-        self._capture_folder = cfg.get("capture_folder") or "hermes-sessions"
-        self._remember_folder = cfg.get("remember_folder") or "bm-remember"
+        self._apply_config(self._hermes_home)
 
         if not _MCP_AVAILABLE:
             logger.error(
                 "basic-memory: MCP SDK unavailable; provider will not initialize: %s",
                 _MCP_IMPORT_ERROR,
+            )
+            self._record_init_failure(
+                f"the mcp Python package is not importable: {_MCP_IMPORT_ERROR}"
             )
             return
 
@@ -1140,6 +1142,7 @@ class BasicMemoryProvider(MemoryProvider):
                     "Install uv (https://docs.astral.sh/uv/) or run "
                     "`pip install basic-memory` manually. Provider will not initialize."
                 )
+                self._record_init_failure("bm CLI not found, and uv is not installed to add it")
                 return
             logger.info(
                 "basic-memory: bm CLI not found — installing basic-memory via "
@@ -1151,6 +1154,10 @@ class BasicMemoryProvider(MemoryProvider):
                     "`uv tool install basic-memory --prerelease=allow` manually to debug. "
                     "Provider will not initialize."
                 )
+                self._record_init_failure(
+                    "`uv tool install basic-memory --prerelease=allow` failed; "
+                    "run it by hand to see why"
+                )
                 return
 
         if self._mode == "local":
@@ -1158,6 +1165,10 @@ class BasicMemoryProvider(MemoryProvider):
 
         if not self._verify_project_registered():
             self._log_missing_project()
+            self._record_init_failure(
+                f"project {self._project!r} is not registered with bm. "
+                f"Run {self._missing_project_hint()}"
+            )
             return
 
         # Trigger: initialize() called while a previous actor is still running
@@ -1189,6 +1200,7 @@ class BasicMemoryProvider(MemoryProvider):
             argv = self._server_argv()
         except Exception as e:
             logger.error("basic-memory: cannot determine server argv: %s", e)
+            self._record_init_failure(f"cannot build the `bm mcp` command: {e}")
             return
 
         # Expose the actor to cleanup BEFORE start() blocks (up to 25s):
@@ -1209,6 +1221,7 @@ class BasicMemoryProvider(MemoryProvider):
             if self._actor is actor:
                 self._actor = None
             logger.error("basic-memory: MCP server failed to start: %s", e)
+            self._record_init_failure(f"`bm mcp` failed to start: {e}")
             return
         if self._actor is not actor:
             # Signal/atexit cleanup detached the actor while start() was
@@ -1253,7 +1266,25 @@ class BasicMemoryProvider(MemoryProvider):
             self._session_started_at = datetime.now(timezone.utc)
         self._initialized = True
         with _registry_lock:
-            _live_providers[_home_key(self._hermes_home)] = weakref.ref(self)
+            key = _home_key(self._hermes_home)
+            _live_providers[key] = weakref.ref(self)
+            _init_failures.pop(key, None)
+
+    def _record_init_failure(self, reason: str) -> None:
+        """Remember why initialize() gave up, for /bm-status to report."""
+        with _registry_lock:
+            _init_failures[_home_key(self._hermes_home)] = reason
+
+    def _apply_config(self, hermes_home: str) -> None:
+        """Load the profile's basic-memory.json settings. Reads one file; starts nothing."""
+        cfg = _load_config(hermes_home)
+        self._mode = cfg.get("mode") or "local"
+        self._project = cfg.get("project") or _default_project()
+        self._project_path = os.path.expanduser(cfg.get("project_path") or _default_project_path())
+        self._capture_per_turn = bool(_coerce_bool(cfg.get("capture_per_turn", True)))
+        self._capture_session_end = bool(_coerce_bool(cfg.get("capture_session_end", True)))
+        self._capture_folder = cfg.get("capture_folder") or "hermes-sessions"
+        self._remember_folder = cfg.get("remember_folder") or "bm-remember"
 
     def _ensure_local_project(self) -> None:
         # Trigger: the project is already in bm's registry.
@@ -1292,16 +1323,17 @@ class BasicMemoryProvider(MemoryProvider):
             return True
         return self._project in projects
 
-    def _log_missing_project(self) -> None:
+    def _missing_project_hint(self) -> str:
         if self._mode == "cloud":
-            hint = f"`bm project add {self._project} --cloud` (optionally with --local-path) first"
-        else:
-            hint = f"`bm project add {self._project} {self._project_path}` first"
+            return f"`bm project add {self._project} --cloud` (optionally with --local-path) first"
+        return f"`bm project add {self._project} {self._project_path}` first"
+
+    def _log_missing_project(self) -> None:
         logger.error(
             "basic-memory: project %r is not registered with bm. Run %s. "
             "Provider will not initialize.",
             self._project,
-            hint,
+            self._missing_project_hint(),
         )
 
     def _server_argv(self) -> list[str]:
@@ -1828,7 +1860,11 @@ _SLASH_USAGE: dict[str, str] = {
     "bm-read": "Usage: /bm-read <title|permalink|memory:// URL>",
     "bm-context": "Usage: /bm-context <identifier or memory:// URL>",
     "bm-recent": "Usage: /bm-recent [timeframe]   (default: 7d. Accepts '2 weeks', 'yesterday', etc.)",
-    "bm-status": "Usage: /bm-status",
+    "bm-status": (
+        "Usage: /bm-status\n"
+        "Show whether Basic Memory is ready. Status never starts bm: the plugin starts "
+        "`bm mcp` on the first /bm-* command or agent session, so 'idle' is healthy."
+    ),
     "bm-remember": "Usage: /bm-remember <text>\nCapture a note. First line becomes the title.",
     "bm-project": "Usage: /bm-project   (lists Basic Memory projects; active one marked)",
     "bm-workspace": "Usage: /bm-workspace   (lists Basic Memory Cloud workspaces; cloud mode only)",
@@ -1920,10 +1956,92 @@ def _resolve_slash_provider(cmd: str) -> tuple[BasicMemoryProvider | None, str |
 
 
 def _peek_slash_provider() -> BasicMemoryProvider:
-    """A provider describing the caller's profile, without starting bm."""
+    """A provider describing the caller's profile, without starting bm.
+
+    The profile's live provider when one exists. Otherwise a fresh instance
+    carrying the profile's basic-memory.json, so /bm-status reports the
+    configured project rather than the built-in defaults.
+    """
     home = _current_hermes_home()
-    return (
-        _live_provider_for(home) or _slash_providers.get(_home_key(home)) or BasicMemoryProvider()
+    live = _live_provider_for(home)
+    if live is not None:
+        return live
+    view = BasicMemoryProvider()
+    view._hermes_home = home
+    view._apply_config(home)
+    return view
+
+
+class _Readiness(NamedTuple):
+    """What /bm-status says about a provider, worked out without starting bm.
+
+    A NamedTuple, not a dataclass: @dataclass looks the module up in
+    sys.modules, and loaders that skip registering it (the hermetic test
+    conftest does) would fail to import the plugin.
+    """
+
+    status: str  # "ready" or "unavailable"
+    process: str  # the `bm mcp` child: running, idle, stopped or not running
+    reason: str | None = None  # why it is unavailable
+    notes: tuple[str, ...] = ()  # setup that the first start will do
+
+
+def _start_blocker(provider: BasicMemoryProvider) -> str | None:
+    """The reason initialize() is certain to fail, from local checks only.
+
+    Mirrors initialize()'s preconditions without its side effects: no install,
+    no `bm project add`, no subprocess. A local project that is not registered
+    yet is not a blocker, because initialize() registers it.
+    """
+    if not _MCP_AVAILABLE:
+        return "the mcp Python package is not installed"
+    if not _bm_binary_path() and not _uv_binary_path():
+        return "bm CLI not found, and uv is not installed to add it"
+    if provider._mode != "local" and not provider._verify_project_registered():
+        return (
+            f"project {provider._project!r} is not registered with bm. "
+            f"Run {provider._missing_project_hint()}"
+        )
+    return None
+
+
+def _readiness(provider: BasicMemoryProvider, home: str) -> _Readiness:
+    # --- Started: the provider owns a `bm mcp` child ---
+    if provider._initialized and provider._actor is not None:
+        if provider._actor.is_alive():
+            return _Readiness("ready", "running")
+        return _Readiness("ready", "stopped (restarts on the next call)")
+
+    # --- Not started: is anything certain to stop the first start? ---
+    blocker = _start_blocker(provider)
+    if blocker is not None:
+        return _Readiness("unavailable", "not running", reason=blocker)
+
+    # Trigger: an earlier initialize() for this profile gave up.
+    # Why: the cause (a crashed `bm mcp`, a failed install) is not visible
+    #   from local checks, and "idle" would hide it.
+    # Outcome: report the recorded failure; the next use tries again.
+    with _registry_lock:
+        failure = _init_failures.get(_home_key(home))
+    if failure is not None:
+        return _Readiness(
+            "unavailable",
+            "not running (retried on next use)",
+            reason=f"last start failed: {failure}",
+        )
+
+    # --- Healthy and idle: the plugin starts `bm mcp` lazily ---
+    notes: list[str] = []
+    if not _bm_binary_path():
+        notes.append("bm CLI is installed with uv on first use")
+    if provider._mode == "local" and not provider._verify_project_registered():
+        notes.append(
+            f"project {provider._project!r} is registered at {provider._project_path} on first use"
+        )
+    return _Readiness(
+        "ready",
+        "idle (starts on the next /bm-* command or agent session)",
+        notes=tuple(notes),
     )
 
 
@@ -2099,8 +2217,13 @@ def _build_slash_commands(
         if _is_help_arg(raw_args):
             return _SLASH_USAGE["bm-status"]
         p = provider if provider is not None else _peek_slash_provider()
-        lines = [
-            "Basic Memory plugin status",
+        readiness = _readiness(p, p._hermes_home or _current_hermes_home())
+        lines = ["Basic Memory plugin status", f"  Status:      {readiness.status}"]
+        if readiness.reason:
+            lines.append(f"  Reason:      {readiness.reason}")
+        lines.append(f"  MCP process: {readiness.process}")
+        lines.extend(f"  Note:        {note}" for note in readiness.notes)
+        lines += [
             f"  Provider:    {p.name}",
             f"  Mode:        {p._mode}",
             f"  Project:     {p._project}",
@@ -2110,7 +2233,6 @@ def _build_slash_commands(
         bm_bin = _bm_binary_path()
         lines.append(f"  bm CLI:      {bm_bin or '(not found)'}")
         lines.append(f"  MCP module:  {'available' if _MCP_AVAILABLE else 'missing'}")
-        lines.append(f"  Initialized: {'yes' if p._initialized else 'no'}")
         lines.append(
             f"  Capture:     per-turn={p._capture_per_turn}, "
             f"session-end={p._capture_session_end}, "
