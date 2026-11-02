@@ -6,9 +6,12 @@ from typing import Literal, override
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.deps.services import get_schema_validation_observer
 from basic_memory.models import Project
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services.entity_service import EntityService
 from basic_memory.services.schema_validation_hooks import (
@@ -128,6 +131,65 @@ async def test_validation_identity_matches_definition_in_every_scope(
     # Identity is for observers; the public validation response is unchanged.
     assert "schema_external_id" not in report["results"][0]
     assert "schema_kind" not in report["results"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["identifier", "type", "all"])
+async def test_oldest_schema_for_a_type_wins_after_it_is_updated(
+    client: AsyncClient,
+    v2_project_url: str,
+    entity_service: EntityService,
+    entity_repository: EntityRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service: SearchService,
+    identity_observer: IdentityObserver,
+    scope: Literal["identifier", "type", "all"],
+) -> None:
+    # Two schemas cover person. Updating the older one rewrites its row, which on
+    # Postgres moves it behind the newer row in a sequential scan. The older schema
+    # must still win, so the choice cannot follow physical row order.
+    schemas = []
+    for title, field in (("person-oldest", "name"), ("person-newer", "role")):
+        schema, _ = await entity_service.create_or_update_entity(
+            EntitySchema(
+                title=title,
+                directory="schemas",
+                note_type="schema",
+                entity_metadata={"entity": "person", "schema": {field: "string"}},
+                content="A person schema.\n",
+            )
+        )
+        await search_service.index_entity(schema)
+        schemas.append(schema)
+    oldest = schemas[0]
+    async with db.scoped_session(session_maker) as session:
+        assert await entity_repository.update_fields(
+            session, oldest.id, {"title": "person-oldest-renamed"}
+        )
+
+    note, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Oldest wins example",
+            directory="people",
+            note_type="person",
+            content="## Observations\n- [name] Example\n",
+        )
+    )
+    await search_service.index_entity(note)
+    match scope:
+        case "identifier":
+            params = {"identifier": note.permalink}
+        case "type":
+            params = {"note_type": "person"}
+        case "all":
+            params = {}
+
+    response = await client.post(f"{v2_project_url}/schema/validate", params=params)
+    assert response.status_code == 200, response.text
+    [(_, outcomes)] = identity_observer.calls
+    [outcome] = outcomes
+    assert outcome.schema_external_id == oldest.external_id
+    assert outcome.passed is True
 
 
 @pytest.mark.asyncio

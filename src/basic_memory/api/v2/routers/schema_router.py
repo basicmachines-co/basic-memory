@@ -530,7 +530,10 @@ async def _schema_covered_note_types(
     as the write boundary. Standalone targets with no matching notes map to an empty
     list so they still appear in the report.
     """
-    schema_query = entity_repository.select().where(Entity.note_type == "schema")
+    # Ordered so the first-label-wins rule below does not depend on row order.
+    schema_query = (
+        entity_repository.select().where(Entity.note_type == "schema").order_by(Entity.id)
+    )
     schema_result = await entity_repository.execute_query(session, schema_query)
 
     # normalized target -> (display label, stored note types); first label wins
@@ -616,7 +619,10 @@ async def _find_schema_entities(
     2) Only when allow_reference_match=True and no entity match was found, try
        exact reference matching by title/permalink (explicit schema references)
     """
-    query = entity_repository.select().where(Entity.note_type == "schema")
+    # The resolver takes the first candidate, so the oldest schema for a type wins.
+    # Without an ORDER BY the winner would follow physical row order, which changes
+    # when a row is updated (Postgres) or the planner picks a different index.
+    query = entity_repository.select().where(Entity.note_type == "schema").order_by(Entity.id)
     result = await entity_repository.execute_query(session, query)
     entities = list(result.scalars().all())
 
