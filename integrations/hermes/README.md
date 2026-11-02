@@ -92,7 +92,7 @@ For direct, in-session use without going through the agent (requires Hermes ≥ 
 | `/bm-read <identifier>` | Read a note by title, permalink, or `memory://` URL. |
 | `/bm-context <identifier>` | Build context for a note (target + related). |
 | `/bm-recent [timeframe]` | Recently updated notes. Default `7d`; accepts `"2 weeks"`, `"yesterday"`, etc. |
-| `/bm-status` | Plugin/provider state: mode, project, capture flags, bm CLI path. |
+| `/bm-status` | Whether Basic Memory is ready, whether `bm mcp` is running, and plugin settings (mode, project, capture flags, bm CLI path). Never starts bm. |
 | `/bm-remember <text>` | Capture a quick note. Title = first line (≤80 chars), folder = `remember_folder` (default `bm-remember`), tagged `manual-capture`. |
 | `/bm-project` | List all known projects; the active one is marked. |
 | `/bm-workspace` | List BM Cloud workspaces. Cloud mode only — prints an explanatory line in local mode. |
@@ -108,6 +108,21 @@ Examples:
 
 `/bm-project` and `/bm-workspace` are read-only in 0.2.0 — mid-session switching is intentionally not supported because auto-capture would otherwise land in the wrong place. Tracked as a follow-up.
 
+### Reading `/bm-status`
+
+The plugin starts `bm mcp` lazily: on the first `/bm-*` command or agent session in a profile, not when Hermes loads the plugin. `/bm-status` only inspects, so it never starts it. The first two lines tell you which state you are in:
+
+| Output | Meaning |
+|---|---|
+| `Status: ready` / `MCP process: idle (starts on the next /bm-* command or agent session)` | Healthy. Nothing has needed Basic Memory yet. |
+| `Status: ready` / `MCP process: running` | Healthy, and `bm mcp` is up. |
+| `Status: ready` / `MCP process: stopped (restarts on the next call)` | `bm mcp` exited; the next call restarts it. |
+| `Status: unavailable` / `Reason: ...` | Something will stop or did stop the start: a missing `mcp` package, no `bm` or `uv`, or a failed start (`last start failed: ...`), such as a cloud project Basic Memory does not list. The reason says what to fix. |
+
+`Note:` lines list setup the first start will do by itself, such as installing `bm` with `uv`.
+
+The plugin asks the running `bm mcp` whether the configured project exists (`bm_project` list). It never reads Basic Memory's config files, so `BASIC_MEMORY_CONFIG_DIR` and `XDG_CONFIG_HOME` work however `bm` itself resolves them. A missing local project is created at `project_path` on first start. A missing cloud project fails the start with the `bm project add ... --cloud` command to run.
+
 ### Known issue: `/bm-*` commands may not appear in some Hermes gateway builds
 
 Plugin v0.2.0 and later register the commands above, but some Hermes Agent gateway builds do not discover slash commands contributed by an **exclusive memory-provider plugin** during startup. The symptoms are:
@@ -116,7 +131,7 @@ Plugin v0.2.0 and later register the commands above, but some Hermes Agent gatew
 - `hermes memory status` shows `Provider: basic-memory` and `Status: available`; but
 - Discord/native slash command pickers do not show `/bm-search`, `/bm-read`, `/bm-context`, and the other `/bm-*` commands after `hermes gateway restart`.
 
-This is a Hermes Agent plugin-discovery issue, not a Basic Memory runtime issue. Hermes `v0.20.1` and newer correctly own provider command and skill registration, including unload cleanup, but command discovery can still omit an exclusive memory provider before it is loaded. It is tracked upstream in [NousResearch/hermes-agent#23603](https://github.com/NousResearch/hermes-agent/issues/23603). Until the active-provider startup-load fix is available in your installed Hermes version, use one of these workarounds:
+This is a Hermes Agent plugin-discovery issue, not a Basic Memory runtime issue. Hermes `v0.20.1` and newer correctly own provider command and skill registration, including unload cleanup, but command discovery can still omit an exclusive memory provider before it is loaded. [NousResearch/hermes-agent#23603](https://github.com/NousResearch/hermes-agent/issues/23603) (closed 2026-09-22) fixed the registration half only; command discovery still skips the active provider in Hermes `v0.22.5`, so the commands are absent from Discord's native list after every gateway restart until the provider first loads. Until a Hermes release loads the active provider during command discovery, use one of these workarounds:
 
 1. apply the Hermes Agent-side patch described in [MONKEYPATCH.md](MONKEYPATCH.md), which includes compatibility notes for Hermes Agent v0.13.x and v0.14.0; or
 2. use the agent tools directly (`bm_search`, `bm_read`, `bm_recent`, etc.) instead of native slash commands.
@@ -157,7 +172,7 @@ To override, write `~/.hermes/basic-memory.json` or run `hermes memory setup bas
 }
 ```
 
-In local mode the plugin auto-creates the BM project on first init via `bm project add`. In cloud mode it doesn't — you create the cloud-routed project yourself (see below) and the plugin verifies it's registered before initializing.
+In local mode the plugin creates the BM project on first init if Basic Memory does not list it, through `bm mcp`'s `bm_project` create. In cloud mode it doesn't — you create the cloud-routed project yourself (see below) and the plugin checks that Basic Memory lists it before initializing.
 
 ### Cloud mode
 
