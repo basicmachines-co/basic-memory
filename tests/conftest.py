@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 
 from fake_embeddings import use_fake_embeddings
+from postgres_test_server import configured_postgres_sync_url
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
@@ -109,17 +110,7 @@ POSTGRES_EPHEMERAL_TABLES = [
 
 def _configured_postgres_sync_url() -> str | None:
     """Prefer an externally managed Postgres server when CI provides one."""
-    configured_url = os.environ.get("BASIC_MEMORY_TEST_POSTGRES_URL") or os.environ.get(
-        "POSTGRES_TEST_URL"
-    )
-    if not configured_url:
-        return None
-
-    return (
-        configured_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-        .replace("postgresql://", "postgresql+psycopg2://", 1)
-        .replace("postgres://", "postgresql+psycopg2://", 1)
-    )
+    return configured_postgres_sync_url()
 
 
 def _postgres_alembic_config(async_url: str) -> Config:

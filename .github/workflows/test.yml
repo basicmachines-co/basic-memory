@@ -302,6 +302,8 @@ jobs:
         # Shard the largest suite across parallel jobs: each shard is a full job
         # with its own Postgres service running 1/6 of the files, balanced
         # by the recorded .test_durations (refresh with `just test-durations-postgres`).
+        # Within a shard, xdist runs one worker per runner core (2 on ubuntu-latest),
+        # each on its own database on that service.
         # Postgres runs on the latest Python only — the SQLite matrix carries
         # Python-version coverage; Postgres carries backend coverage.
         group: [1, 2, 3, 4, 5, 6]

@@ -6,6 +6,9 @@ TESTMON_REFRESH_FLAGS := env_var_or_default("BASIC_MEMORY_TESTMON_REFRESH_FLAGS"
 # Optional file sharding, shared by local recipes and CI
 # (e.g. "--splits 3 --group 2"). Empty locally.
 PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
+# Full suites run on every core. Postgres workers each get their own database
+# (tests/postgres_test_server.py). Set to "" to run a suite serially.
+PYTEST_XDIST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_XDIST_FLAGS", "-n auto")
 
 # Install dependencies
 install:
@@ -47,12 +50,12 @@ test-postgres: test-unit-postgres test-int-postgres
 # Run unit tests against SQLite
 [positional-arguments]
 test-unit-sqlite *args:
-    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}}
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
 # Run unit tests against Postgres; e.g. just test-unit-postgres --splits 6 --group 1
 [positional-arguments]
 test-unit-postgres *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}}
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
 # Re-record Postgres unit test durations so CI's file shards stay balanced.
 # Without .test_durations the file splitter estimates work from file sizes.
@@ -63,13 +66,13 @@ test-durations-postgres:
 # use just test-semantic / run benchmark files explicitly)
 [positional-arguments]
 test-int-sqlite *args:
-    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
 # Run integration tests against Postgres. Per-test and CI job timeouts fail normally;
 # a killed process does not prove that the selected suite finished successfully.
 [positional-arguments]
 test-int-postgres *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
 # Fast test selection for local iteration; run targeted tests explicitly when possible.
 fast-test *args: testmon-seed
@@ -487,8 +490,7 @@ test-all:
 # never share a process and on-demand semantic/benchmark tests stay out.
 # pytest-cov collects from xdist workers and --cov-append adds each suite to one
 # data file. sysmon keeps tracing overhead near zero (it doubled test time under
-# the old C tracer). SQLite suites run on every core; Postgres suites share one
-# database, so they run serially.
+# the old C tracer). Every suite runs on all cores.
 coverage:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -503,14 +505,14 @@ coverage:
             failed+=("$label")
         fi
     }
-    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= {{PYTEST_FLAGS}})
+    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}})
     int_markers=(-m "not semantic and not benchmark")
     export BASIC_MEMORY_ENV=test COVERAGE_CORE=sysmon
 
     run_suite "unit, SQLite" \
-        uv run pytest "${pytest_args[@]}" -n auto tests
+        uv run pytest "${pytest_args[@]}" tests
     run_suite "integration, SQLite" \
-        uv run pytest "${pytest_args[@]}" -n auto "${int_markers[@]}" test-int
+        uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
     run_suite "unit, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
         uv run pytest "${pytest_args[@]}" tests
     run_suite "integration, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
