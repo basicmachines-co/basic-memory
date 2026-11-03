@@ -42,12 +42,23 @@ def main() -> int:
     parser.add_argument("--timings", type=Path, default=Path(".test_durations"))
     parser.add_argument("--list-files", action="store_true")
     parser.add_argument("--file-list", type=Path, help="Save the assigned files for CI diagnostics")
+    parser.add_argument(
+        "--exclude",
+        type=Path,
+        action="append",
+        default=[],
+        help="Leave out test files under this directory (repeatable)",
+    )
     args, pytest_args = parser.parse_known_args()
     if "--" in pytest_args:
         pytest_args.remove("--")
     if not 1 <= args.group <= args.groups:
         parser.error("group must be between 1 and groups")
-    files = sorted(args.root.rglob("test_*.py"))
+    files = sorted(
+        path
+        for path in args.root.rglob("test_*.py")
+        if not any(path.is_relative_to(excluded) for excluded in args.exclude)
+    )
     if not files:
         parser.error(f"no test files found under {args.root}")
     durations = json.loads(args.timings.read_text()) if args.timings.exists() else {}

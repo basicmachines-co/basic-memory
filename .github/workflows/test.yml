@@ -294,19 +294,19 @@ jobs:
   test-postgres-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/6)
+    name: Test Postgres Unit (Python ${{ matrix.python-version }}, shard ${{ matrix.group }}/4)
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         # Shard the largest suite across parallel jobs: each shard is a full job
-        # with its own Postgres service running 1/6 of the files, balanced
+        # with its own Postgres service running 1/4 of the files, balanced
         # by the recorded .test_durations (refresh with `just test-durations-postgres`).
         # Within a shard, xdist runs one worker per runner core (2 on ubuntu-latest),
         # each on its own database on that service.
         # Postgres runs on the latest Python only — the SQLite matrix carries
         # Python-version coverage; Postgres carries backend coverage.
-        group: [1, 2, 3, 4, 5, 6]
+        group: [1, 2, 3, 4]
         python-version: ["3.14"]
     runs-on: ubuntu-latest
     services:
@@ -356,7 +356,7 @@ jobs:
 
       - name: Run tests
         run: |
-          just test-unit-postgres --splits 6 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
+          just test-unit-postgres --splits 4 --group ${{ matrix.group }} --file-list test-files.txt --durations=30 --junitxml=test-results.xml
 
       - name: Upload test results
         if: always()

@@ -49,6 +49,30 @@ def test_zero_duration_files_do_not_all_land_on_one_shard() -> None:
         splitter.split_files(files, durations, 0)
 
 
+def test_cli_excludes_files_under_excluded_directories(tmp_path: Path) -> None:
+    for relative in ("mcp/test_tool.py", "cli/test_command.py", "repository/test_repo.py"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("def test_value():\n    pass\n")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(tmp_path),
+            "--exclude",
+            str(tmp_path / "mcp"),
+            "--exclude",
+            str(tmp_path / "cli"),
+            "--list-files",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [(tmp_path / "repository/test_repo.py").as_posix()]
+
+
 def test_cli_rejects_missing_suite(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(tmp_path), "--groups", "2", "--group", "1"],
