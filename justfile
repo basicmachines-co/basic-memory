@@ -52,15 +52,21 @@ test-postgres: test-unit-postgres test-int-postgres
 test-unit-sqlite *args:
     BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
-# Run unit tests against Postgres; e.g. just test-unit-postgres --splits 6 --group 1
+# MCP and CLI unit tests are left out on Postgres: no test there depends on the
+# backend, they reach the database through repositories and services that run
+# here, and they cost 26 of Postgres unit's 60 CI minutes. The SQLite suites run
+# them, and the Postgres integration suite covers MCP against Postgres end to end.
+POSTGRES_UNIT_EXCLUDES := "--exclude tests/mcp --exclude tests/cli"
+
+# Run unit tests against Postgres; e.g. just test-unit-postgres --splits 3 --group 1
 [positional-arguments]
 test-unit-postgres *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{POSTGRES_UNIT_EXCLUDES}} {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
 # Re-record Postgres unit test durations so CI's file shards stay balanced.
 # Without .test_durations the file splitter estimates work from file sizes.
 test-durations-postgres:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -q --no-cov --store-durations --durations-path .test_durations tests
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -q --no-cov --store-durations --durations-path .test_durations --ignore=tests/mcp --ignore=tests/cli tests
 
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
@@ -514,7 +520,7 @@ coverage:
     run_suite "integration, SQLite" \
         uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
     run_suite "unit, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
-        uv run pytest "${pytest_args[@]}" tests
+        uv run pytest "${pytest_args[@]}" --ignore=tests/mcp --ignore=tests/cli tests
     run_suite "integration, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
         uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
 
