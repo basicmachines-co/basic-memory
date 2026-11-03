@@ -494,6 +494,16 @@ async def test_an_unknown_project_name_is_refused_before_any_query(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.asyncio
+async def test_empty_projects_is_refused_but_none_is_accepted(client, test_project):
+    """projects=[] is refused as empty, while projects=None runs a single-project search (#2027)."""
+    with pytest.raises(ToolError, match="`projects` is empty"):
+        await bm_search(query="notes", projects=[])
+
+    result = await bm_search(query="notes", project=test_project.name, projects=None)
+    assert result is not None
+
+
 def test_project_refs_need_an_id_an_external_id_and_a_name():
     """List rows a scoped search cannot address or attribute are left out."""
     payload = {

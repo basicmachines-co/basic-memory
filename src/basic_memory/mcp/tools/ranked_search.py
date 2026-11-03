@@ -76,7 +76,14 @@ def _parse_mode(value: Any) -> Any:
     return "semantic" if value == "vector" else value
 
 
-StringList = Annotated[list[str] | None, BeforeValidator(parse_str_list)]
+def _parse_str_list(value: Any) -> list[str] | None:
+    """Parse string list while preserving None so optional parameters are not coerced to empty list."""
+    if value is None:
+        return None
+    return parse_str_list(value)
+
+
+StringList = Annotated[list[str] | None, BeforeValidator(_parse_str_list)]
 
 
 DEFAULT_MAX_MATCHES = 10
