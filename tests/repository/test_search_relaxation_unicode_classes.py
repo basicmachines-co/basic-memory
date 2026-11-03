@@ -255,14 +255,19 @@ def _tokenizing_cpu_seconds(text: str) -> float:
     this thread's CPU work. The collector is paused because a collection that lands
     in one measurement and not the other is the same kind of outside noise.
     """
+    # Windows advances thread_time() in 15.6 ms ticks, and one tokenize of the
+    # smaller query takes about four of them: a single tick of error moved a ×2.0
+    # ratio to ×2.5. Each sample tokenizes several times so it spans many ticks.
+    calls_per_sample = 5
     gc_was_enabled = gc.isenabled()
     gc.disable()
     try:
         samples = []
         for _ in range(5):
             start = time.thread_time()
-            relaxation_word_tokens(text)
-            samples.append(time.thread_time() - start)
+            for _ in range(calls_per_sample):
+                relaxation_word_tokens(text)
+            samples.append((time.thread_time() - start) / calls_per_sample)
     finally:
         if gc_was_enabled:
             gc.enable()
