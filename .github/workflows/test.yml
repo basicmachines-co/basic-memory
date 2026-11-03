@@ -188,6 +188,9 @@ jobs:
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
       UV_PYTHON: ${{ matrix.python-version }}
+      # The ubuntu 3.14 rows record coverage for the coverage job; sysmon keeps it cheap.
+      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report=' || '--no-cov' }}
+      COVERAGE_CORE: sysmon
 
     steps:
       - uses: actions/checkout@v6
@@ -227,6 +230,15 @@ jobs:
             test-results.xml
             test-files.txt
 
+      - name: Upload coverage data
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite-unit-g${{ matrix.group }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+
   test-sqlite-integration:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -252,6 +264,9 @@ jobs:
     # Pin every uv call, including `uv run` inside just recipes. See top of file.
     env:
       UV_PYTHON: ${{ matrix.python-version }}
+      # The ubuntu 3.14 rows record coverage for the coverage job; sysmon keeps it cheap.
+      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report=' || '--no-cov' }}
+      COVERAGE_CORE: sysmon
 
     steps:
       - uses: actions/checkout@v6
@@ -291,6 +306,15 @@ jobs:
             test-results.xml
             test-files.txt
 
+      - name: Upload coverage data
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite-integration-g${{ matrix.group }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+
   test-postgres-unit:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -328,6 +352,9 @@ jobs:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
+      # Postgres jobs always record coverage for the coverage job.
+      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report=
+      COVERAGE_CORE: sysmon
 
     steps:
       - uses: actions/checkout@v6
@@ -367,6 +394,15 @@ jobs:
             test-results.xml
             test-files.txt
 
+      - name: Upload coverage data
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-postgres-unit-g${{ matrix.group }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+
   test-postgres-integration:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -399,6 +435,9 @@ jobs:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
+      # Postgres jobs always record coverage for the coverage job.
+      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report=
+      COVERAGE_CORE: sysmon
 
     steps:
       - uses: actions/checkout@v6
@@ -437,6 +476,63 @@ jobs:
           path: |
             test-results.xml
             test-files.txt
+
+      - name: Upload coverage data
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-postgres-integration-g${{ matrix.group }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+
+  coverage:
+    # One report over every suite: SQLite unit and integration (ubuntu, 3.14) and
+    # Postgres unit and integration. fail_under in pyproject.toml is the floor.
+    needs:
+      [changes, test-sqlite-unit, test-sqlite-integration, test-postgres-unit, test-postgres-integration]
+    if: needs.changes.outputs.code == 'true'
+    name: Coverage
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: "3.14"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev,pdf]"
+
+      - name: Download coverage data
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-data
+
+      - name: Combine and report
+        run: |
+          uv run coverage combine coverage-data/*/.coverage
+          # The summary is informational; the second report enforces fail_under.
+          uv run coverage report --format=markdown --skip-covered --sort=-miss --fail-under=0 >> "$GITHUB_STEP_SUMMARY"
+          uv run coverage report --skip-covered --sort=-miss
 
   test-semantic:
     needs: changes

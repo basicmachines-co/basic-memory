@@ -9,6 +9,10 @@ PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
 # Full suites run on every core. Postgres workers each get their own database
 # (tests/postgres_test_server.py). Set to "" to run a suite serially.
 PYTEST_XDIST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_XDIST_FLAGS", "-n auto")
+# Coverage is off for the test-* recipes. CI turns it on for its Python 3.14 jobs
+# with "--cov --cov-report=" and COVERAGE_CORE=sysmon, then combines every job's
+# data in one coverage job.
+PYTEST_COV_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_COV_FLAGS", "--no-cov")
 
 # Install dependencies
 install:
@@ -50,7 +54,7 @@ test-postgres: test-unit-postgres test-int-postgres
 # Run unit tests against SQLite
 [positional-arguments]
 test-unit-sqlite *args:
-    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py tests {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v {{PYTEST_COV_FLAGS}} {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
 # MCP and CLI unit tests are left out on Postgres: no test there depends on the
 # backend, they reach the database through repositories and services that run
@@ -61,7 +65,7 @@ POSTGRES_UNIT_EXCLUDES := "--exclude tests/mcp --exclude tests/cli"
 # Run unit tests against Postgres; e.g. just test-unit-postgres --splits 3 --group 1
 [positional-arguments]
 test-unit-postgres *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{POSTGRES_UNIT_EXCLUDES}} {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py tests {{POSTGRES_UNIT_EXCLUDES}} {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v {{PYTEST_COV_FLAGS}} {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}}
 
 # Re-record Postgres unit test durations so CI's file shards stay balanced.
 # Without .test_durations the file splitter estimates work from file sizes.
@@ -72,13 +76,13 @@ test-durations-postgres:
 # use just test-semantic / run benchmark files explicitly)
 [positional-arguments]
 test-int-sqlite *args:
-    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
+    BASIC_MEMORY_ENV=test uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v {{PYTEST_COV_FLAGS}} {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
 # Run integration tests against Postgres. Per-test and CI job timeouts fail normally;
 # a killed process does not prove that the selected suite finished successfully.
 [positional-arguments]
 test-int-postgres *args:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v --no-cov {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run python scripts/run_tests.py test-int {{PYTEST_SPLIT_FLAGS}} "$@" -- -p pytest_mock -v {{PYTEST_COV_FLAGS}} {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}} -m "not semantic and not benchmark"
 
 # Fast test selection for local iteration; run targeted tests explicitly when possible.
 fast-test *args: testmon-seed
