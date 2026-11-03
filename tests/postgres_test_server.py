@@ -10,6 +10,7 @@ Without a configured URL, each session (and so each worker) starts its own
 testcontainers server, which is already isolated.
 """
 
+import functools
 import os
 from pathlib import Path
 
@@ -64,11 +65,17 @@ def configured_postgres_sync_url() -> str | None:
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     if not worker:
         return sync_url
-    return _ensure_worker_database(sync_url, worker)
+    return _fresh_worker_database(sync_url, worker)
 
 
-def _ensure_worker_database(sync_url: str, worker: str) -> str:
-    """Create this worker's database once, with the test schema, and return its URL."""
+# Fixtures resolve the URL for every test; the database is rebuilt once per session.
+@functools.cache
+def _fresh_worker_database(sync_url: str, worker: str) -> str:
+    """Recreate this worker's database with the test schema and return its URL.
+
+    The database is dropped first, so a session never inherits state a previous run
+    left on a reused server (a schema a test created, a half-reset table).
+    """
     server_url = make_url(sync_url)
     worker_url = server_url.set(database=f"{server_url.database}_{worker}")
 
@@ -80,22 +87,16 @@ def _ensure_worker_database(sync_url: str, worker: str) -> str:
     )
     try:
         with admin.connect() as conn:
-            exists = conn.execute(
-                text("SELECT 1 FROM pg_database WHERE datname = :name"),
-                {"name": worker_url.database},
-            ).scalar()
-            if not exists:
-                conn.execute(text(f'CREATE DATABASE "{worker_url.database}"'))
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{worker_url.database}" WITH (FORCE)'))
+            conn.execute(text(f'CREATE DATABASE "{worker_url.database}"'))
     finally:
         admin.dispose()
 
-    # Trigger: a fresh worker database.
     # Why: the per-test reset only runs for tests that use the engine fixture. A worker's
     #      first test may instead start the MCP lifespan, whose migrations would build the
     #      Alembic schema (naive timestamps, extra foreign keys) that create_all never fixes.
     # Outcome: every worker starts from the same metadata schema, stamped at head.
-    if not exists:
-        _build_test_schema(worker_url)
+    _build_test_schema(worker_url)
 
     return worker_url.render_as_string(hide_password=False)
 

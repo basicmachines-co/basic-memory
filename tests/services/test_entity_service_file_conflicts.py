@@ -294,6 +294,11 @@ async def test_conflict_check_is_one_indexed_query(
     # The plan reads each key through its (project_id, key) index, never the whole table.
     async with engine.connect() as connection:
         if db_backend == "postgres":
+            # Without statistics on the just-filled table, the planner chose among the
+            # project indexes arbitrarily (ix_entity_project_id, or the key index with
+            # only a project_id condition) and the assertions below flaked. ANALYZE gives
+            # it the row counts that make each per-key index the selective choice.
+            await connection.exec_driver_sql("ANALYZE entity")
             # Tiny test tables make a sequential scan the cheapest plan; turning it off
             # shows whether the indexes can serve the query at all.
             await connection.exec_driver_sql("SET enable_seqscan = off")
