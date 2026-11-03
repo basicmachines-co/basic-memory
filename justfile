@@ -551,6 +551,24 @@ coverage:
         exit "$report_status"
     fi
 
+# List test files that can be deleted without losing line coverage, e.g.
+# just test-redundancy --only test-int/mcp. Records which test ran each line across
+# the four suites (about 30 minutes), then picks files greedily. Uses the ctrace core:
+# sysmon credits a line only to the first test that runs it. Read each listed file
+# before deleting it; line coverage cannot see assertions.
+test-redundancy *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export BASIC_MEMORY_ENV=test COVERAGE_CORE=ctrace COVERAGE_FILE=.coverage.contexts
+    rm -f .coverage.contexts
+    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= --cov-fail-under=0 --cov-context=test {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}})
+    int_markers=(-m "not semantic and not benchmark")
+    uv run pytest "${pytest_args[@]}" tests
+    uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
+    BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest "${pytest_args[@]}" --ignore=tests/mcp --ignore=tests/cli tests
+    BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
+    uv run python scripts/test_redundancy.py .coverage.contexts {{args}}
+
 # Lint and fix code (calls fix)
 lint: fix
 
