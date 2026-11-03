@@ -238,6 +238,9 @@ parallel = true
 source = ["basic_memory"]
 
 [tool.coverage.report]
+# A ratchet, not the goal: combined coverage over all four suites measured 97.16%
+# when CI started enforcing it. Raise it as gaps close; the target is 100%.
+fail_under = 97
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
