@@ -485,7 +485,10 @@ test-all:
 # unit and integration, SQLite and Postgres. Each suite is its own process, with
 # the same flags and markers as its test-* recipe, so tests/ and test-int/ fixtures
 # never share a process and on-demand semantic/benchmark tests stay out.
-# [tool.coverage.run] parallel = true gives each run its own data file to combine.
+# pytest-cov collects from xdist workers and --cov-append adds each suite to one
+# data file. sysmon keeps tracing overhead near zero (it doubled test time under
+# the old C tracer). SQLite suites run on every core; Postgres suites share one
+# database, so they run serially.
 coverage:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -500,20 +503,19 @@ coverage:
             failed+=("$label")
         fi
     }
-    pytest_args=(-p pytest_mock -v --no-cov {{PYTEST_FLAGS}})
+    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= {{PYTEST_FLAGS}})
     int_markers=(-m "not semantic and not benchmark")
+    export BASIC_MEMORY_ENV=test COVERAGE_CORE=sysmon
 
-    run_suite "unit, SQLite" env BASIC_MEMORY_ENV=test \
-        uv run coverage run -m pytest "${pytest_args[@]}" tests
-    run_suite "integration, SQLite" env BASIC_MEMORY_ENV=test \
-        uv run coverage run -m pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
-    run_suite "unit, Postgres" env BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 \
-        uv run coverage run -m pytest "${pytest_args[@]}" tests
-    run_suite "integration, Postgres" env BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 \
-        uv run coverage run -m pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
+    run_suite "unit, SQLite" \
+        uv run pytest "${pytest_args[@]}" -n auto tests
+    run_suite "integration, SQLite" \
+        uv run pytest "${pytest_args[@]}" -n auto "${int_markers[@]}" test-int
+    run_suite "unit, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
+        uv run pytest "${pytest_args[@]}" tests
+    run_suite "integration, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
+        uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
 
-    echo "🧩 Combining coverage data..."
-    uv run coverage combine
     uv run coverage report -m
     uv run coverage html
     echo "Coverage report generated in htmlcov/index.html"
