@@ -10,7 +10,7 @@ PYTEST_SPLIT_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_SPLIT_FLAGS", "")
 # (tests/postgres_test_server.py). Set to "" to run a suite serially.
 PYTEST_XDIST_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_XDIST_FLAGS", "-n auto")
 # Coverage is off for the test-* recipes. CI turns it on for its Python 3.14 jobs
-# with "--cov --cov-report=" and COVERAGE_CORE=sysmon, then combines every job's
+# with "--cov --cov-report= --cov-fail-under=0" and COVERAGE_CORE=sysmon, then combines every job's
 # data in one coverage job.
 PYTEST_COV_FLAGS := env_var_or_default("BASIC_MEMORY_PYTEST_COV_FLAGS", "--no-cov")
 
@@ -515,7 +515,8 @@ coverage:
             failed+=("$label")
         fi
     }
-    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}})
+    # Each suite covers part of the code; only the combined report below checks fail_under.
+    pytest_args=(-p pytest_mock -q --cov --cov-append --cov-report= --cov-fail-under=0 {{PYTEST_XDIST_FLAGS}} {{PYTEST_FLAGS}})
     int_markers=(-m "not semantic and not benchmark")
     export BASIC_MEMORY_ENV=test COVERAGE_CORE=sysmon
 
