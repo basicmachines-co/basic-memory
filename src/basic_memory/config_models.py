@@ -1069,7 +1069,9 @@ class BasicMemoryConfig(BaseSettings):
                 continue
             if not path.exists():
                 try:
-                    path.mkdir(parents=True)
+                    # Another process (a second server, an xdist worker) can create the
+                    # path between the exists() check and here.
+                    path.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
                     logger.error(f"Failed to create project path: {e}")
                     raise e
