@@ -189,7 +189,7 @@ jobs:
     env:
       UV_PYTHON: ${{ matrix.python-version }}
       # The ubuntu 3.14 rows record coverage for the coverage job; sysmon keeps it cheap.
-      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report=' || '--no-cov' }}
+      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report= --cov-fail-under=0' || '--no-cov' }}
       COVERAGE_CORE: sysmon
 
     steps:
@@ -265,7 +265,7 @@ jobs:
     env:
       UV_PYTHON: ${{ matrix.python-version }}
       # The ubuntu 3.14 rows record coverage for the coverage job; sysmon keeps it cheap.
-      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report=' || '--no-cov' }}
+      BASIC_MEMORY_PYTEST_COV_FLAGS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14' && '--cov --cov-report= --cov-fail-under=0' || '--no-cov' }}
       COVERAGE_CORE: sysmon
 
     steps:
@@ -352,8 +352,9 @@ jobs:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
-      # Postgres jobs always record coverage for the coverage job.
-      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report=
+      # Postgres jobs always record coverage for the coverage job. A shard covers part of
+      # the code, so only the Coverage job enforces fail_under (--cov-fail-under=0 here).
+      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report= --cov-fail-under=0
       COVERAGE_CORE: sysmon
 
     steps:
@@ -435,8 +436,9 @@ jobs:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
       # Pin every uv call, including `uv run` inside just recipes. See top of file.
       UV_PYTHON: ${{ matrix.python-version }}
-      # Postgres jobs always record coverage for the coverage job.
-      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report=
+      # Postgres jobs always record coverage for the coverage job. A shard covers part of
+      # the code, so only the Coverage job enforces fail_under (--cov-fail-under=0 here).
+      BASIC_MEMORY_PYTEST_COV_FLAGS: --cov --cov-report= --cov-fail-under=0
       COVERAGE_CORE: sysmon
 
     steps:
