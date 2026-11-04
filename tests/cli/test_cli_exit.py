@@ -37,6 +37,8 @@ def test_bm_schema_validate_exits_cleanly(tmp_path):
         ["uv", "run", "bm", "schema", "validate", "--json", "--local"],
         capture_output=True,
         text=True,
+        # Output is UTF-8; Windows would decode it with the cp1252 locale codec.
+        encoding="utf-8",
         env=env,
         # Guards against a hang, not a performance budget: migrations plus one
         # in-process request take a few seconds on a loaded CI runner.
@@ -54,6 +56,7 @@ def test_bm_version_exits_cleanly():
         ["uv", "run", "bm", "--version"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         # `uv run` startup under full-suite load (especially on Windows runners)
         # can exceed a tight 10s budget even though --version short-circuits
         # before any heavy work. This test guards against hangs, not a startup
@@ -71,6 +74,7 @@ def test_bm_help_exits_cleanly():
         ["uv", "run", "bm", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         # Help builds the full command tree, so use a looser timeout than the
         # version fast path. This test is guarding against hangs, not enforcing
         # a tight performance budget under full-suite load.
@@ -87,6 +91,7 @@ def test_bm_tool_help_exits_cleanly():
         ["uv", "run", "bm", "tool", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
         cwd=Path(__file__).parent.parent.parent,
     )
@@ -115,6 +120,7 @@ def test_bm_version_does_not_import_heavy_modules():
         ["uv", "run", "python", "-c", check_script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
         cwd=Path(__file__).parent.parent.parent,
     )
@@ -156,6 +162,7 @@ def test_bm_cli_import_does_not_load_heavy_stack():
         ["uv", "run", "python", "-c", check_script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=20,
         cwd=Path(__file__).parent.parent.parent,
     )
@@ -179,6 +186,7 @@ def test_bm_help_does_not_import_api_app():
         ["uv", "run", "python", "-c", check_script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=10,
         cwd=Path(__file__).parent.parent.parent,
     )

@@ -29,6 +29,8 @@ def _bm(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str
         ["uv", "run", "bm", *args],
         capture_output=True,
         text=True,
+        # Output is UTF-8; Windows would decode it with the cp1252 locale codec.
+        encoding="utf-8",
         env=env,
         # Guards a wedged install, not a performance budget: first run creates
         # the database and runs migrations.
