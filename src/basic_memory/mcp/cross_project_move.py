@@ -151,7 +151,7 @@ async def _move_one(
         raise refusal("LOCKED", LOCKED_NOTE_MESSAGE, output_format=output_format)
 
     # --- Write the copy ---
-    copy = await _write_copy(target, destination_path, content, output_format)
+    copy = await _write_copy(target, destination_path, entity.title, content, output_format)
 
     # --- Delete the source ---
     try:
@@ -190,13 +190,21 @@ async def _move_one(
 
 
 async def _write_copy(
-    target: ProjectTarget, destination_path: str, content: str, output_format: OutputFormat
+    target: ProjectTarget,
+    destination_path: str,
+    title: str,
+    content: str,
+    output_format: OutputFormat,
 ) -> EntityResponseV2:
-    """Create the note in the target project; never replace a note already there."""
+    """Create the note in the target project; never replace a note already there.
+
+    The note keeps its title; `file_name` alone sets where it lands, as a move
+    within a project does.
+    """
     path = PurePosixPath(destination_path)
     directory = "" if str(path.parent) == "." else str(path.parent)
     note = Entity(
-        title=path.stem,
+        title=title,
         directory=directory,
         file_name=path.name,
         content_type="text/markdown",

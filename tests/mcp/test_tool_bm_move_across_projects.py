@@ -84,6 +84,21 @@ async def test_a_note_moves_into_another_project(client, test_project, second_pr
 
 
 @pytest.mark.asyncio
+async def test_a_renaming_move_keeps_the_title(client, test_project, second_project):
+    await _write(test_project, "notes/plan.md", NOTE.replace("title: Plan", "title: Launch"))
+
+    await bm_move(
+        identifier="notes/plan.md",
+        destination="inbox/roadmap.md",
+        destination_project=second_project.name,
+        project=test_project.name,
+    )
+
+    moved = await _read(second_project, "inbox/roadmap.md")
+    assert "title: Launch" in moved["content"]
+
+
+@pytest.mark.asyncio
 async def test_a_trailing_slash_keeps_the_file_name(client, test_project, second_project):
     await _write(test_project, "notes/plan.md")
 

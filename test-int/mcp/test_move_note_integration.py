@@ -1399,8 +1399,7 @@ async def test_move_note_cross_project_detection(mcp_server, app, test_project):
         error_message = move_result.content[0].text
         assert "UNSUPPORTED" in error_message
         assert "test-project-b" in error_message
-        assert "bm_read" in error_message
-        assert "bm_write" in error_message
+        assert "destination_project='test-project-b'" in error_message
 
 
 @pytest.mark.asyncio
