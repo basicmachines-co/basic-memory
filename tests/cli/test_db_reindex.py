@@ -7,12 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+import typer
 from sqlalchemy import text
 from typer.testing import CliRunner
 
 from basic_memory import db
 from basic_memory.cli.app import app
-from basic_memory.config import DatabaseBackend
+from basic_memory.config import DatabaseBackend, ProjectEntry, ProjectMode
 from basic_memory.indexing.models import (
     IndexFileBatchJobResult,
     IndexFileJobResult,
@@ -1125,3 +1126,36 @@ async def test_reindex_matches_the_project_by_permalink(monkeypatch, session_mak
     project_index.assert_awaited_once()
     [indexed_call] = project_index.await_args_list
     assert indexed_call.args[0] is stored
+
+
+@pytest.mark.asyncio
+async def test_reindex_reports_an_unknown_project_as_not_found(app_config, config_manager, capsys):
+    """A mistyped name is "not found", not a cloud project (#2029).
+
+    get_project_mode() treats every name missing from config as CLOUD, so the
+    not-found branch was unreachable for a typo.
+    """
+    with pytest.raises(typer.Exit) as exc:
+        await db_cmd._reindex(
+            app_config, search=True, embeddings=False, full=False, project="zzzznotreal"
+        )
+
+    assert exc.value.exit_code == 1
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Project 'zzzznotreal' not found." in output
+    assert "Local projects: test-project" in output
+    assert "cloud" not in output
+
+
+@pytest.mark.asyncio
+async def test_reindex_still_refuses_a_configured_cloud_project(app_config, config_manager, capsys):
+    """A config entry marked cloud keeps the server-side indexing hint."""
+    app_config.projects["research"] = ProjectEntry(path="/remote/research", mode=ProjectMode.CLOUD)
+
+    with pytest.raises(typer.Exit) as exc:
+        await db_cmd._reindex(
+            app_config, search=True, embeddings=False, full=False, project="research"
+        )
+
+    assert exc.value.exit_code == 1
+    assert "Project 'research' is a cloud project." in capsys.readouterr().out

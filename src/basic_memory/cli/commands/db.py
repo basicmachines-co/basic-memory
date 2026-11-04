@@ -405,19 +405,29 @@ async def _reindex(
             # Outcome: `bm project add new_default` and `bm project index
             #          new_default` index the project they name.
             project_permalink = generate_permalink(project)
-            projects = [p for p in projects if p.permalink == project_permalink]
-            if not projects:
-                # Check if it's a cloud-only project — those can't be reindexed locally
-                project_mode = app_config.get_project_mode(project)
-                if project_mode == ProjectMode.CLOUD:
+            matching = [p for p in projects if p.permalink == project_permalink]
+            if not matching:
+                # Trigger: no local project has this name.
+                # Why: get_project_mode() treats any unknown name as CLOUD, so asking
+                #      it would call a typo a cloud project (#2029). Only a config
+                #      entry marked cloud is one.
+                # Outcome: a cloud entry gets the server-side hint; anything else is
+                #          "not found" with the names that can be indexed here.
+                entry = app_config.project_entry(project)
+                if entry is not None and entry.mode == ProjectMode.CLOUD:
                     console.print(
                         f"[yellow]Project '{literal(project)}' is a cloud project.[/yellow]\n"
                         "Reindexing is a local operation — cloud projects are "
                         "indexed on the server."
                     )
                 else:
-                    console.print(f"[red]Project '{literal(project)}' not found.[/red]")
+                    known = ", ".join(sorted(p.name for p in projects)) or "none"
+                    console.print(
+                        f"[red]Project '{literal(project)}' not found.[/red] "
+                        f"Local projects: {literal(known)}"
+                    )
                 raise typer.Exit(1)
+            projects = matching
 
         embedding_entities_total = 0
         embedding_errors_total = 0
