@@ -168,6 +168,19 @@ def _has_valid_boolean_shape(expression: str) -> bool:
     )
 
 
+def exact_tsquery_text(tsquery_text: str) -> str:
+    """The same tsquery with every prefix marker removed, for ranking only.
+
+    ts_rank scores a multi-term AND query by the distance between operands, but for a
+    prefix operand it keeps only the last lexeme the operand matched. A note holding
+    a longer word that starts with a query term (project-tracker for ``project:*``)
+    then scores as if the term occurred once, far from the others (#1981). Ranking the
+    exact form too gives such notes the proximity score of the words actually typed;
+    matching still uses the prefix query.
+    """
+    return tsquery_text.replace(":*", "")
+
+
 def prepare_single_term(term: str, is_prefix: bool = True) -> str:
     """Prepare one search term with no Boolean operators.
 
@@ -553,6 +566,7 @@ def compile_fts_filter(
         if script_query.word_text:
             processed_text = prepare_search_term(script_query.word_text)
             params["text"] = processed_text
+            params["text_exact"] = exact_tsquery_text(processed_text)
             probe_texts = [processed_text]
             if allow_relaxed:
                 relaxed_text = relaxed_tsquery_text(script_query.word_text)
@@ -745,14 +759,20 @@ def compile_fts_filter(
                 continue
 
     # ts_rank per channel. With no text search there is no rank, so the score is 0.
+    # Each channel ranks the prefix query and its exact form and keeps the better one;
+    # see exact_tsquery_text.
     score_parts: list[str] = []
     if document_vector is not None:
         score_parts.append(
             "GREATEST("
             f"ts_rank({document_vector}, to_tsquery('english', :text)), "
+            f"ts_rank({document_vector}, to_tsquery('english', :text_exact)), "
             "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text)), "
-            "COALESCE((SELECT MAX(ts_rank("
-            "fts_chunk.textsearchable_index_col, to_tsquery('english', :text))) "
+            "ts_rank(search_index.textsearchable_index_col, "
+            "to_tsquery('english', :text_exact)), "
+            "COALESCE((SELECT MAX(GREATEST("
+            "ts_rank(fts_chunk.textsearchable_index_col, to_tsquery('english', :text)), "
+            "ts_rank(fts_chunk.textsearchable_index_col, to_tsquery('english', :text_exact)))) "
             "FROM search_index_fts_chunks AS fts_chunk "
             "WHERE fts_chunk.project_id = search_index.project_id "
             "AND fts_chunk.search_index_id = search_index.id "
@@ -774,6 +794,16 @@ def compile_fts_filter(
         f"@@ to_tsquery('simple', :script_text_{index})), 0))"
         for index in range(len(script_tsqueries))
     )
+    # Trigger: the search names a title.
+    # Why: a title-only search had no rank and reported 0.000 for every hit, which an
+    #      agent can read as "no real match"; SQLite ranks titles with bm25 (#1983).
+    # Outcome: the title match is ranked like any other channel; the exact title still
+    #          sorts first through leading_order_by.
+    if query.title:
+        score_parts.append(
+            "ts_rank(to_tsvector('english', search_index.title), "
+            "to_tsquery('english', :title_text))"
+        )
     # Each condition above is required, so every query component contributes to
     # relevance. Taking only the strongest rank would make additional script runs
     # invisible.
@@ -933,7 +963,10 @@ class PostgresFts:
                     limit=limit,
                     offset=offset,
                 ):
-                    rows = await execute_rows(active_session, {**params, "text": relaxed})
+                    rows = await execute_rows(
+                        active_session,
+                        {**params, "text": relaxed, "text_exact": exact_tsquery_text(relaxed)},
+                    )
             return rows, relaxed_fallback_used
 
         try:
@@ -1050,7 +1083,10 @@ class PostgresFts:
                         reason="syntax_error" if strict_syntax_error else "empty_result",
                         token_count=len(relaxed_query_words(search_text) or ()),
                     ):
-                        total = await execute_count(session, {**params, "text": relaxed})
+                        total = await execute_count(
+                            session,
+                            {**params, "text": relaxed, "text_exact": exact_tsquery_text(relaxed)},
+                        )
                 return total
         except Exception as e:
             if is_tsquery_syntax_error(e):
