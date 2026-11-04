@@ -65,6 +65,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "identifier",
         "path",
         "expected_checksum",
+        "destination_project",
         "output_format",
         "project",
     ],

@@ -305,6 +305,9 @@ def move(
     identifier: Annotated[Optional[str], typer.Option(help="The note to move")] = None,
     path: Annotated[Optional[str], typer.Option(help="The folder to move")] = None,
     expected_checksum: ExpectedChecksumOption = None,
+    destination_project: Annotated[
+        Optional[str], typer.Option(help="Move into this project; --destination is a path there")
+    ] = None,
     project: ProjectOption = None,
     json_output: JsonOption = False,
     local: LocalOption = False,
@@ -316,6 +319,7 @@ def move(
 
     bm tool move --identifier notes/plan.md --destination plans/q4.md
     bm tool move --path drafts --destination archive/drafts
+    bm tool move --identifier notes/plan.md --destination inbox/ --destination-project research
     """
     from basic_memory.mcp.tools import bm_move
 
@@ -325,6 +329,7 @@ def move(
         identifier=identifier,
         path=path,
         expected_checksum=expected_checksum,
+        destination_project=destination_project,
         project=project,
         json_output=json_output,
         local=local,

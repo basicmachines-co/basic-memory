@@ -28,6 +28,8 @@ type RefusalCode = Literal[
     "OUTSIDE_PROJECT",
     "LOCKED",
     "UNSUPPORTED",
+    # The caller may not make this change in this project.
+    "FORBIDDEN",
     # Some items of a multi-file change succeeded and some did not.
     "PARTIAL_FAILURE",
     # Not a refusal: the write left and no answer said whether it landed.
@@ -93,6 +95,7 @@ def refusal(
 
 _STATUS_REFUSALS: dict[int, RefusalCode] = {
     400: "INVALID_ARGUMENTS",
+    403: "FORBIDDEN",
     404: "NOT_FOUND",
     409: "REVISION_CONFLICT",
     415: "UNSUPPORTED",
