@@ -9,13 +9,17 @@ behind the same protocols.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Coroutine
 
 from loguru import logger
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.index.local_project import (
+    LocalProjectIndexRuntime,
+    LocalProjectIndexRuntimeProvider,
+)
 from basic_memory.index.project_indexing import ProjectIndexRunner
 from basic_memory.index.schedulers import SearchReindexService
 from basic_memory.indexing.embedding_index_planning import EmbeddingBatchVectorSync
@@ -30,7 +34,8 @@ from basic_memory.read_cache import (
     invalidate_recorded_change,
 )
 from basic_memory.services.read_cache_changes import resolved_relations_read_cache_change
-from basic_memory.runtime.vector_sync import EntityVectorSync
+from basic_memory.models import Project
+from basic_memory.runtime.vector_sync import EntityVectorSync, VectorSyncBatchResult
 
 # --- Background Task Machinery ---
 
@@ -299,3 +304,74 @@ class LocalRelationResolutionScheduler:
             # failure cannot drop the required relation rerun.
             if rerun:
                 self.schedule_relation_resolution(project_id=project_id)
+
+
+# --- Background Embedding for Project Catch-up ---
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundBatchVectorSync:
+    """Hand batch vector syncs to background work instead of awaiting them.
+
+    The returned result reports the batch as accepted, not as synced. The real
+    sync records failed and deferred entities itself, and a later index pass
+    resumes deferred ones.
+    """
+
+    vector_sync: EmbeddingBatchVectorSync
+    project_external_id: str
+    read_cache: ReadCacheInvalidator | None
+    test_mode: bool
+
+    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> VectorSyncBatchResult:
+        _schedule_background_coroutine(
+            self._sync(list(entity_ids)),
+            test_mode=self.test_mode,
+        )
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=0,
+            entities_failed=0,
+        )
+
+    async def _sync(self, entity_ids: list[int]) -> None:
+        if self.read_cache is None:
+            await self.vector_sync.sync_entity_vectors_batch(entity_ids)
+            return
+        # Vectors land after the catch-up retired its reads and change only
+        # VECTOR/HYBRID results; a partial failure retires the whole project.
+        async with invalidate_recorded_change(
+            self.read_cache, self.project_external_id
+        ) as vector_change:
+            await self.vector_sync.sync_entity_vectors_batch(entity_ids)
+            vector_change.record(ReadCacheChange.search_index())
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundEmbeddingRuntimeFactory:
+    """Project-index runtimes that embed vectors in the background.
+
+    The watcher catches a project up inside its batch consumer, so no watch
+    batch for any project is handled until the catch-up returns. Embedding a
+    newly added project, or loading the embedding model first, can take
+    minutes, and live edits waited behind it (#1979). File indexing stays in
+    the catch-up, serialized with watch batches; vectors follow in the
+    background like the per-write vector scheduler's.
+    """
+
+    runtime_factory: LocalProjectIndexRuntimeProvider
+    test_mode: bool
+
+    async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
+        runtime = await self.runtime_factory.runtime_for_project(project)
+        if runtime.embedding_vector_sync is None:
+            return runtime
+        return replace(
+            runtime,
+            embedding_vector_sync=BackgroundBatchVectorSync(
+                vector_sync=runtime.embedding_vector_sync,
+                project_external_id=str(project.external_id),
+                read_cache=runtime.read_cache,
+                test_mode=self.test_mode,
+            ),
+        )
