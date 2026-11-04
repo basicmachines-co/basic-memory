@@ -382,7 +382,7 @@ async def resolve_workspace_project_from_index(
             )
             raise WorkspaceProjectLookupMiss(
                 f"Project '{project_identifier}' was not found in workspace "
-                f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
+                f"'{workspace.name}' ({workspace.slug}). Available projects: {available}."
             )
         if len(matches) > 1:
             details = ", ".join(
