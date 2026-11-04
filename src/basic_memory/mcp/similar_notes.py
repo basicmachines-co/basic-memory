@@ -11,17 +11,14 @@ from collections.abc import Callable, Sequence
 
 from httpx import HTTPStatusError
 
-from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
-from basic_memory.repository.embedding_provider_factory import (
-    configured_embedding_provider_identity,
-)
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
     SearchResult,
     SearchRetrievalMode,
+    SimilarityFloor,
 )
 
 # How many neighbors to surface after a create. Ranking is reliable enough to put the note
@@ -30,14 +27,6 @@ SIMILAR_NOTES_LIMIT = 3
 # The vector index embeds a note's title and opening content as its first chunk, so the
 # probe copies that shape and length to land in the same neighborhood as the note itself.
 SIMILAR_NOTES_PROBE_CHARS = 900
-# The advisory asks "might this be the same note?", a stricter question than search's
-# "is this relevant at all?" (semantic_min_similarity, 0.55). Measured on the default
-# bge-small-en-v1.5 model (#1718): rewrites of an existing note scored 0.77-0.93 against
-# it (0.78-0.87 on the Moby Dick vault, #1259), while the nearest neighbor of a note on an
-# unrelated topic topped out at 0.67. Below this floor the list was only noise; near the
-# top, a duplicate and a closely related note still share one band, so ranking decides.
-# The number holds for that model only; see similar_notes_min_similarity.
-SIMILAR_NOTES_MIN_SIMILARITY = 0.70
 # Most wikilinks the advisory resolves to recognize notes the new note already links
 # to; see find_similar_notes.
 SIMILAR_NOTES_LINKED_ALLOWANCE = 10
@@ -65,47 +54,22 @@ def _wikilink_targets(content: str) -> list[str]:
     return list(dict.fromkeys(match.strip() for match in _WIKILINK_TARGET.findall(content)))
 
 
-def similar_notes_min_similarity(config: BasicMemoryConfig) -> float | None:
-    """Return the advisory's similarity floor, or None to use the server's own.
-
-    Cosine scores are model-specific: on OpenAI's text-embedding-3-small correct
-    paraphrases cluster near 0.37, so the floor measured on the default model would hide
-    real duplicates there. Only the exact embedding setup it was measured on gets the
-    floor; anything else keeps semantic_min_similarity, which users tune for their model.
-    The setup is read from this process's config, which describes the server a local
-    write reaches; a write routed elsewhere with a different local setup falls back to
-    that server's floor, the behavior before the advisory floor existed.
-    """
-    # Only FastEmbed can be the measured setup; checking it first also keeps the
-    # identity resolution away from provider configs it would reject.
-    if config.semantic_embedding_provider.strip().lower() != "fastembed":
-        return None
-    # The persisted embedding identity is what decides whether stored vectors are
-    # reusable, so it is the definition of "the same embeddings": it covers the model,
-    # dimensions, and document/query prefixes. model_construct() yields the field
-    # defaults without reading BASIC_MEMORY_* overrides, which would otherwise make an
-    # env-configured model compare equal to itself.
-    measured = configured_embedding_provider_identity(BasicMemoryConfig.model_construct())
-    if configured_embedding_provider_identity(config) != measured:
-        return None
-    # A user who raised the search floor above the advisory's keeps the stricter one.
-    return max(config.semantic_min_similarity, SIMILAR_NOTES_MIN_SIMILARITY)
-
-
-def similar_notes_query(title: str, content: str, *, min_similarity: float | None) -> SearchQuery:
+def similar_notes_query(title: str, content: str) -> SearchQuery:
     """Build the search that asks which existing notes might be the one just written.
 
     Vector-only retrieval keeps the probe out of the FTS query parser, which would read
     parentheses and boolean words in ordinary prose as operators. Notes that declare
     `generated:` in frontmatter (folder indexes, logs, run logs) are rewritten by their
     generator, so nobody means to write to them; they are left out of the candidates.
+    The server applies the advisory's similarity floor, because only it knows which
+    embedding model scored the candidates (#1982).
     """
     return SearchQuery(
         text=compose_similarity_probe(title, content),
         retrieval_mode=SearchRetrievalMode.VECTOR,
         entity_types=[SearchItemType.ENTITY],
         metadata_filters={"generated": None},
-        min_similarity=min_similarity,
+        similarity_floor=SimilarityFloor.SIMILAR_NOTES,
     )
 
 
@@ -150,10 +114,9 @@ async def find_similar_notes(
     content: str,
     exclude_file_path: str,
     exclude_permalink: str | None,
-    min_similarity: float | None,
 ) -> list[SimilarNote]:
     """Ask the vector index which existing notes sit closest to the note just written."""
-    query = similar_notes_query(title, content, min_similarity=min_similarity)
+    query = similar_notes_query(title, content)
     # The cap keeps a hub note with hundreds of links from costing hundreds of requests;
     # a linked note past it can still be listed, which the advisory tolerates.
     linked_targets = _wikilink_targets(content)[:SIMILAR_NOTES_LINKED_ALLOWANCE]

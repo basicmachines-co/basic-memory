@@ -23,6 +23,7 @@ from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
     embedding_provider_identity,
 )
+from basic_memory.repository.similar_notes_floor import similar_notes_min_similarity
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -281,6 +282,16 @@ class SearchRepositoryBase(ABC):
     def configured_min_similarity(self) -> float:
         """Return the configured vector similarity floor."""
         return self._semantic_min_similarity
+
+    @property
+    def configured_similar_notes_min_similarity(self) -> float:
+        """Return the similar-note advisory's floor for this repository's model.
+
+        The measured floor applies only to the embedding setup it was measured on;
+        any other model keeps the search floor, which users tune for that model.
+        """
+        floor = similar_notes_min_similarity(self._app_config)
+        return self._semantic_min_similarity if floor is None else floor
 
     @property
     def configured_reranker_model(self) -> str | None:
