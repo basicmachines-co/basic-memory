@@ -26,6 +26,7 @@ PYPI_TIMEOUT_SECONDS = 5
 BREW_OUTDATED_TIMEOUT_SECONDS = 60
 UV_UPGRADE_TIMEOUT_SECONDS = 180
 BREW_UPGRADE_TIMEOUT_SECONDS = 600
+INSTALLED_VERSION_TIMEOUT_SECONDS = 30
 
 
 class HomebrewCheckError(RuntimeError):
@@ -48,6 +49,8 @@ class AutoUpdateStatus(str, Enum):
     UP_TO_DATE = "up_to_date"
     UPDATE_AVAILABLE = "update_available"
     UPDATED = "updated"
+    # The upgrade command succeeded but the installed version did not change.
+    NOT_UPGRADED = "not_upgraded"
     FAILED = "failed"
 
 
@@ -129,6 +132,27 @@ def _version_from_pypi() -> str:
     if not latest:
         raise RuntimeError("PyPI JSON response did not include info.version")
     return str(latest)
+
+
+def _installed_uv_tool_version(python: str) -> str:
+    """The basic-memory version installed in a uv tool environment right now.
+
+    uv upgrades a tool environment in place, so its interpreter imports the new
+    distribution even while this process still runs the old code.
+    """
+    result = _run_subprocess(
+        [
+            python,
+            "-c",
+            f"from importlib.metadata import version; print(version({PACKAGE_NAME!r}))",
+        ],
+        timeout_seconds=INSTALLED_VERSION_TIMEOUT_SECONDS,
+        silent=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Could not read the installed version: {result.stderr.strip()}")
+    return result.stdout.strip()
 
 
 def _check_homebrew_update_available(silent: bool) -> tuple[bool, str | None]:
@@ -413,6 +437,12 @@ def run_auto_update(
         )
 
         _preload_lazy_console_modules()
+        # Homebrew installs each version in its own Cellar directory, so this
+        # process cannot read the new one; only a uv tool upgrade is verified.
+        tool_python = executable or sys.executable
+        version_before = (
+            _installed_uv_tool_version(tool_python) if source == InstallSource.UV_TOOL else None
+        )
         install_result = _run_subprocess(
             command,
             timeout_seconds=timeout,
@@ -434,6 +464,30 @@ def run_auto_update(
                 error=detail,
             )
 
+        updated_to = ""
+        if version_before is not None:
+            version_after = _installed_uv_tool_version(tool_python)
+            # Trigger: uv exited 0 but the tool environment holds the same version.
+            # Why: a tool receipt that pins basic-memory (basic-memory==0.24.1) keeps
+            #      that version and uv still reports success (#2000).
+            # Outcome: report that nothing changed instead of asking for a restart.
+            if version_after == version_before:
+                return AutoUpdateResult(
+                    status=AutoUpdateStatus.NOT_UPGRADED,
+                    source=source,
+                    checked=True,
+                    update_available=True,
+                    updated=False,
+                    latest_version=latest_version,
+                    message=(
+                        f"uv tool upgrade finished, but basic-memory is still {version_after} "
+                        f"(latest: {latest_version or 'unknown'}). The uv tool install "
+                        "probably pins this version; reinstall to change it: "
+                        "uv tool install basic-memory --force --prerelease=allow"
+                    ),
+                )
+            updated_to = f" to {version_after}"
+
         return AutoUpdateResult(
             status=AutoUpdateStatus.UPDATED,
             source=source,
@@ -442,7 +496,7 @@ def run_auto_update(
             updated=True,
             latest_version=latest_version,
             message=(
-                "Basic Memory was updated successfully. "
+                f"Basic Memory was updated{updated_to}. "
                 "Restart running sessions to use the new version."
             ),
             restart_recommended=True,
@@ -500,11 +554,14 @@ def maybe_run_periodic_auto_update(
     if result.status in {
         AutoUpdateStatus.UPDATE_AVAILABLE,
         AutoUpdateStatus.UPDATED,
+        AutoUpdateStatus.NOT_UPGRADED,
         AutoUpdateStatus.FAILED,
     }:
         out = console or Console()
         if result.status == AutoUpdateStatus.UPDATED:
             print_update_status(out, f"{result.message}", "green")
+        elif result.status == AutoUpdateStatus.NOT_UPGRADED:
+            print_update_status(out, f"{result.message}", "yellow")
         elif result.status == AutoUpdateStatus.FAILED:
             error_detail = f" {result.error}" if result.error else ""
             print_update_status(out, f"{result.message}{error_detail}", "yellow")

@@ -105,6 +105,8 @@ def mcp(
             logger.info(
                 "A newer Basic Memory version was installed and will apply on next restart."
             )
+        elif result.status == AutoUpdateStatus.NOT_UPGRADED:
+            logger.info(result.message)
         elif result.status == AutoUpdateStatus.FAILED and result.error:
             logger.warning(f"MCP background auto-update failed: {result.error}")
 

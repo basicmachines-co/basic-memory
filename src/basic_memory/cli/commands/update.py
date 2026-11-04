@@ -31,6 +31,10 @@ def update(
         )
         return
 
+    if result.status == AutoUpdateStatus.NOT_UPGRADED:
+        print_update_status(console, f"{result.message}", "yellow")
+        return
+
     if result.status == AutoUpdateStatus.UP_TO_DATE:
         print_update_status(console, f"{result.message or 'Basic Memory is up to date.'}", "green")
         return
