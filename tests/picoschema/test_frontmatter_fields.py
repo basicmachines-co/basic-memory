@@ -166,3 +166,20 @@ def test_diff_reports_a_new_frontmatter_key():
     drift = diff_schema(_schema(ATTENDEES), notes)
 
     assert [(freq.name, freq.source) for freq in drift.new_fields] == [("room", "frontmatter")]
+
+
+def test_diff_does_not_let_frontmatter_stand_in_for_a_relation():
+    owner = SchemaField(name="owner", type="Person", required=True, is_entity_ref=True)
+    notes = [_note("monday", {"owner": "Alice"}), _note("tuesday", {"owner": "Bob"})]
+
+    drift = diff_schema(_schema(owner), notes)
+
+    assert [(freq.name, freq.source) for freq in drift.dropped_fields] == [("owner", "relation")]
+
+
+def test_diff_treats_settings_frontmatter_keys_as_declared():
+    schema = _schema(ATTENDEES)
+    schema.frontmatter_fields = [SchemaField(name="status", type="string", required=True)]
+    notes = [_note("monday", {"attendees": 4, "status": "open"})]
+
+    assert diff_schema(schema, notes).new_fields == []

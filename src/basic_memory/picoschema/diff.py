@@ -20,7 +20,7 @@ from basic_memory.picoschema.inference import (
     analyze_fields,
     analyze_relations,
 )
-from basic_memory.picoschema.parser import SchemaDefinition
+from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
 
 
 @dataclass
@@ -59,13 +59,19 @@ def diff_schema(
     field_frequencies = analyze_fields(notes, total, max_sample_values=3)
     rel_frequencies = analyze_relations(notes, total, max_sample_values=3)
 
-    # Build lookup from schema fields
-    schema_field_names = {f.name for f in schema.fields}
+    # Keys declared under settings.frontmatter are declared too; they are not new.
+    schema_field_names = {f.name for f in schema.fields + schema.frontmatter_fields}
 
     # Build lookup from actual frequencies
     field_freq_by_name = {f.name: f for f in field_frequencies}
     rel_freq_by_name = {f.name: f for f in rel_frequencies}
-    all_freq_by_name = {**field_freq_by_name, **rel_freq_by_name}
+
+    def usage(schema_field: SchemaField) -> FieldFrequency | None:
+        # An entity-reference field is satisfied only by relations, as in validation;
+        # a frontmatter key or observation of the same name must not hide its absence.
+        if schema_field.is_entity_ref:
+            return rel_freq_by_name.get(schema_field.name)
+        return field_freq_by_name.get(schema_field.name)
 
     result = SchemaDrift()
 
@@ -78,7 +84,7 @@ def diff_schema(
     # --- Detect dropped fields ---
     # Fields declared in the schema but rarely appearing in actual notes
     for schema_field in schema.fields:
-        freq = all_freq_by_name.get(schema_field.name)
+        freq = usage(schema_field)
         if freq is None:
             # Field doesn't appear at all in any note
             result.dropped_fields.append(
@@ -96,7 +102,7 @@ def diff_schema(
     # --- Detect cardinality changes ---
     # Fields where the schema says single but usage shows array, or vice versa
     for schema_field in schema.fields:
-        freq = all_freq_by_name.get(schema_field.name)
+        freq = usage(schema_field)
         if freq is None:
             continue
 
