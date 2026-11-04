@@ -2058,16 +2058,14 @@ async def get_project_client(
                     # Trigger: a name missing from local config also missed cloud discovery.
                     # Why: the lookup started from local config, so a list of only cloud
                     #   projects hides every local project the caller could use (#1809).
-                    # Outcome: name both lists; a hosted (factory) runtime has no local
-                    #   projects, so its cloud-only message stands.
+                    # Outcome: keep the cloud diagnostic whole (its project list and any
+                    #   discovery failure) and add the local projects; a hosted
+                    #   (factory) runtime has no local projects, so its message stands.
                     if factory_mode or explicit_cloud_routing or project_entry is not None:
                         raise
                     local_projects = ", ".join(sorted(config.projects)) or "none"
-                    cloud_projects = ", ".join(exc.cloud_projects) or "none"
                     raise WorkspaceProjectLookupMiss(
-                        f"Project '{resolved_project}' not found. "
-                        f"Local projects: {local_projects}. Cloud projects: {cloud_projects}.",
-                        cloud_projects=exc.cloud_projects,
+                        f"{exc} Local projects: {local_projects}."
                     ) from exc
             active_ws = resolved_entry.workspace
             workspace_id = active_ws.tenant_id

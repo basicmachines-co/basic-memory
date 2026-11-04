@@ -3714,10 +3714,11 @@ async def test_resolve_project_and_path_reads_this_workspaces_qualified_route(cl
 async def test_unknown_project_with_cloud_credentials_lists_local_and_cloud(
     monkeypatch, app_config, config_manager
 ):
-    """A name in neither local config nor cloud names both project lists (#1809).
+    """A name in neither local config nor cloud lists local projects too (#1809).
 
     The lookup started from local config, but the miss came from cloud discovery
     and listed only cloud projects, hiding the local ones the caller can use.
+    The cloud diagnostic itself is kept whole.
     """
     import basic_memory.mcp.project_context as project_context
     from basic_memory.mcp.project_context import (
@@ -3758,7 +3759,15 @@ async def test_unknown_project_with_cloud_credentials_lists_local_and_cloud(
             pass  # pragma: no cover
 
     message = str(exc.value)
-    assert "Project 'no-such-project' not found." in message
+    assert "Project 'no-such-project' was not found in indexed cloud workspaces." in message
+    assert "Available projects: personal/research." in message
     assert "Local projects: test-project." in message
-    assert "Cloud projects: personal/research." in message
-    assert "indexed cloud workspaces" not in message
+
+    # A qualified typo keeps its workspace's project list rather than losing it.
+    with pytest.raises(WorkspaceProjectLookupMiss) as exc:
+        async with get_project_client("personal/no-such-project"):
+            pass  # pragma: no cover
+
+    message = str(exc.value)
+    assert "research" in message
+    assert "Local projects: test-project." in message

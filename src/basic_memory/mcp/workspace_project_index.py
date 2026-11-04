@@ -20,14 +20,8 @@ class WorkspaceProjectLookupMiss(ValueError):
     """A project was absent from the workspace index rather than ambiguous.
 
     Misses are retried once against a freshly rebuilt index because the session
-    cache may predate an out-of-band project creation. `cloud_projects` holds
-    the qualified names the index offered, so a caller that also knows local
-    projects can list both.
+    cache may predate an out-of-band project creation.
     """
-
-    def __init__(self, message: str, cloud_projects: tuple[str, ...] = ()):
-        super().__init__(message)
-        self.cloud_projects = cloud_projects
 
 
 @dataclass(frozen=True)
@@ -388,7 +382,7 @@ async def resolve_workspace_project_from_index(
             )
             raise WorkspaceProjectLookupMiss(
                 f"Project '{project_identifier}' was not found in workspace "
-                f"'{workspace.name}' ({workspace.slug}). Available projects: {available}"
+                f"'{workspace.name}' ({workspace.slug}). Available projects: {available}."
             )
         if len(matches) > 1:
             details = ", ".join(
@@ -409,11 +403,10 @@ async def resolve_workspace_project_from_index(
                 f" Project discovery failed for {index.failure_summary}. "
                 "Use a qualified project from an indexed workspace."
             )
-        cloud_projects = tuple(entry.qualified_name for entry in index.entries)
+        available = ", ".join(entry.qualified_name for entry in index.entries)
         raise WorkspaceProjectLookupMiss(
             f"Project '{project}' was not found in indexed cloud workspaces. "
-            f"Available projects: {', '.join(cloud_projects)}.{failed_note}",
-            cloud_projects=cloud_projects,
+            f"Available projects: {available}.{failed_note}"
         )
 
     cached_workspace = await get_cached_active_workspace(context)
