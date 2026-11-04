@@ -1,9 +1,27 @@
 """Main CLI entry point for basic-memory."""  # pragma: no cover
 
+import io
 import sys
 import warnings
 
 from basic_memory.cli.app import app  # pragma: no cover
+
+
+def use_utf8_output(*streams: object) -> None:
+    """Write text streams as UTF-8, whatever the platform's locale encoding.
+
+    Windows encodes piped or redirected output with the ANSI code page (cp1252)
+    unless UTF-8 mode is on. A note containing "←" then crashed `bm tool read`,
+    and the Claude Code hooks, which run this CLI in-process, sent mojibake to a
+    consumer that reads UTF-8 (#2003). Streams that are not text wrappers, such as
+    a test runner's capture buffer, are left alone.
+    """
+    for stream in streams:
+        if isinstance(stream, io.TextIOWrapper) and stream.encoding.lower() != "utf-8":
+            stream.reconfigure(encoding="utf-8")
+
+
+use_utf8_output(sys.stdout, sys.stderr)
 
 
 def _version_only_invocation(argv: list[str]) -> bool:
