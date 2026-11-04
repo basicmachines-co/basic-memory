@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.base import Executable
 
 from basic_memory import db
+from basic_memory.index.watch_reload import request_watch_reload
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository import SearchRepository, create_search_repository
@@ -438,6 +439,8 @@ class ProjectService:
                             )
 
         logger.info(f"Project '{name}' added at {resolved_path}")
+        # External edits to the new project are indexed once the watcher attaches it.
+        request_watch_reload()
 
     async def remove_project(
         self, name: str, delete_notes: bool = False
@@ -783,6 +786,8 @@ class ProjectService:
                 config.projects[name].path = old_path
                 self.config_manager.save_config(config)
                 raise ValueError(f"Project '{name}' not found in database")
+        # The watcher re-attaches the project at its new root.
+        request_watch_reload()
 
     async def update_project(  # pragma: no cover
         self, name: str, updated_path: Optional[str] = None, is_active: Optional[bool] = None
