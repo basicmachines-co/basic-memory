@@ -49,8 +49,9 @@ continue.
 bm_move and bm_delete take to guard a change.
 
 A text file that is not a note (`.txt`, `.json`, ...) takes `start_line` and
-`end_line` too, with the same coordinates and continuation; `section` and
-`max_tokens` apply to Markdown notes only. Images come back as images and other
+`end_line` too, with the same coordinates and continuation (its header gives only
+the range, as there is no frontmatter); `section` and `max_tokens` apply to
+Markdown notes only. Images come back as images and other
 binary files as documents, always whole. A missing note is a `NOT_FOUND` error;
 find notes with bm_search.
 

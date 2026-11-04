@@ -235,7 +235,9 @@ async def test_a_text_file_reads_a_line_range(client, test_project, non_note_fil
     assert (payload["next_start_line"], payload["next_end_line"]) == (4, 5)
     assert payload["file_path"] == "source.txt"
     assert payload["content_type"].startswith("text/plain")
-    assert text.startswith("Lines 2-3 of 5")
+    # A text file has no frontmatter, so the header names only the range (#1976).
+    assert text.startswith("Lines 2-3 of 5; next: start_line=4, end_line=5")
+    assert "frontmatter" not in text
     assert "3: Call me Ishmael." in text
 
 
@@ -262,7 +264,7 @@ async def test_an_empty_text_file_reads_as_the_empty_range(client, test_project,
     assert payload["content"] == ""
     assert (payload["start_line"], payload["end_line"], payload["total_lines"]) == (0, 0, 0)
     assert payload["has_more"] is False
-    assert text == "Lines 0-0 of 0 (document, including frontmatter); EOF"
+    assert text == "Lines 0-0 of 0; EOF"
 
 
 @pytest.mark.asyncio

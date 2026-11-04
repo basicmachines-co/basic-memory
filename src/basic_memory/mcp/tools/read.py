@@ -213,7 +213,13 @@ async def bm_read(
             f"token budget\n{payload['content']}\n\n"
             f"(Continue with start_line={payload['continue_line']}.)"
         )
-    return format_line_read(payload["content"], start_line=first, end_line=last, total_lines=total)
+    return format_line_read(
+        payload["content"],
+        start_line=first,
+        end_line=last,
+        total_lines=total,
+        includes_frontmatter=True,
+    )
 
 
 def _continuation(first: int, last: int, total: int) -> dict[str, Any]:
@@ -254,7 +260,13 @@ def _text_file_lines(
                 **_continuation(first, last, total),
             }
         )
-    return format_line_read(sliced.content, start_line=first, end_line=last, total_lines=total)
+    return format_line_read(
+        sliced.content,
+        start_line=first,
+        end_line=last,
+        total_lines=total,
+        includes_frontmatter=False,
+    )
 
 
 def _present_file(
