@@ -762,6 +762,7 @@ class _BmMcpActor:
         self._init_error: BaseException | None = None
         self._stop_future: asyncio.Future | None = None
         self._main_task: asyncio.Task[None] | None = None
+        self._cancel_sent = False
         self._shutdown_requested = threading.Event()
         self._tools_cache: list[dict[str, Any]] = []
         self._running = False
@@ -788,8 +789,10 @@ class _BmMcpActor:
         asyncio.set_event_loop(loop)
         self._loop = loop
         try:
+            self._cancel_sent = False
             self._main_task = loop.create_task(self._main())
             if self._shutdown_requested.is_set():
+                self._cancel_sent = True
                 self._main_task.cancel()
             loop.run_until_complete(self._main_task)
         except asyncio.CancelledError:
@@ -878,15 +881,25 @@ class _BmMcpActor:
         if self._loop is not None:
             try:
 
+                def cancel_main_once() -> None:
+                    # Trigger: shutdown() called again while the first cancel is
+                    # still unwinding (start() timeout, then the provider/host).
+                    # Why: a repeat native cancel breaks stdio_client's shielded
+                    # teardown, which then abandons the `bm mcp` child (#1649).
+                    # Outcome: cancel at most once; later calls only join.
+                    task = self._main_task
+                    if task is not None and not task.done() and not self._cancel_sent:
+                        self._cancel_sent = True
+                        task.cancel()
+
                 def request_stop() -> None:
                     if not self._ready.is_set():
-                        if self._main_task is not None and not self._main_task.done():
-                            self._main_task.cancel()
+                        cancel_main_once()
                         return
                     if self._stop_future is not None and not self._stop_future.done():
                         self._stop_future.set_result(None)
-                    elif self._main_task is not None and not self._main_task.done():
-                        self._main_task.cancel()
+                    else:
+                        cancel_main_once()
 
                 self._loop.call_soon_threadsafe(request_stop)
             except Exception:
