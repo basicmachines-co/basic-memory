@@ -183,3 +183,14 @@ def test_diff_treats_settings_frontmatter_keys_as_declared():
     notes = [_note("monday", {"attendees": 4, "status": "open"})]
 
     assert diff_schema(schema, notes).new_fields == []
+
+
+def test_diff_counts_a_declared_built_in_key():
+    tags = SchemaField(name="tags", type="string", required=True, is_array=True)
+    notes = [_note("monday", {"tags": ["standup", "team"]}), _note("tuesday", {"tags": ["a", "b"]})]
+
+    drift = diff_schema(_schema(tags), notes)
+
+    assert drift.dropped_fields == []
+    assert drift.cardinality_changes == []
+    assert drift.new_fields == []

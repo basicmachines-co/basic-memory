@@ -15,6 +15,7 @@ frequencies against the declared schema fields to surface:
 from dataclasses import dataclass, field
 
 from basic_memory.picoschema.inference import (
+    NOTE_FRONTMATTER_KEYS,
     FieldFrequency,
     NoteData,
     analyze_fields,
@@ -55,12 +56,21 @@ def diff_schema(
     if total == 0:
         return SchemaDrift()
 
-    # --- Analyze actual usage ---
-    field_frequencies = analyze_fields(notes, total, max_sample_values=3)
-    rel_frequencies = analyze_relations(notes, total, max_sample_values=3)
-
     # Keys declared under settings.frontmatter are declared too; they are not new.
     schema_field_names = {f.name for f in schema.fields + schema.frontmatter_fields}
+
+    # --- Analyze actual usage ---
+    # Trigger: the schema declares a key every note carries, such as `tags`.
+    # Why: validation accepts its frontmatter value, so drift must count it too,
+    #      or the field reads as dropped while every note uses it.
+    # Outcome: only undeclared built-in keys stay out of the analysis.
+    field_frequencies = analyze_fields(
+        notes,
+        total,
+        max_sample_values=3,
+        skipped_keys=NOTE_FRONTMATTER_KEYS - schema_field_names,
+    )
+    rel_frequencies = analyze_relations(notes, total, max_sample_values=3)
 
     # Build lookup from actual frequencies
     field_freq_by_name = {f.name: f for f in field_frequencies}

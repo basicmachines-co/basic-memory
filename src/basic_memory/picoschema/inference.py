@@ -183,6 +183,7 @@ def analyze_fields(
     notes: list[NoteData],
     total: int,
     max_sample_values: int,
+    skipped_keys: frozenset[str] = NOTE_FRONTMATTER_KEYS,
 ) -> list[FieldFrequency]:
     """Count field frequencies across notes, from frontmatter keys and observation categories.
 
@@ -192,6 +193,8 @@ def analyze_fields(
     most of its notes keep it, frontmatter on a tie.
     Array detection: if a field has several values in a single note in more than
     half the notes where it appears, it's flagged as an array.
+    Frontmatter keys in `skipped_keys` are not counted; by default these are the
+    keys every note carries (title, type, tags, ...), which are not schema fields.
     """
     # Count how many notes contain each field (presence per note)
     category_note_count: Counter[str] = Counter()
@@ -209,7 +212,7 @@ def analyze_fields(
         for obs in note.observations:
             note_categories.setdefault(obs.category, []).append(obs.content)
         for key, values in frontmatter_values(note.frontmatter).items():
-            if key in NOTE_FRONTMATTER_KEYS:
+            if key in skipped_keys:
                 continue
             note_categories[key] = values
             frontmatter_note_count[key] += 1
