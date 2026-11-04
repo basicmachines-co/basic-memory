@@ -119,6 +119,34 @@ def test_repeat_shutdown_does_not_cancel_startup_teardown(bm):
     assert teardown_done.is_set()
 
 
+def test_repeat_shutdown_does_not_cancel_graceful_teardown(bm):
+    """A graceful stop is the one stop request; a second shutdown() only joins.
+
+    Resolving the stop future starts the same stdio_client teardown as a cancel,
+    so a later shutdown() that cancelled the task would break it (#1649).
+    """
+    import asyncio
+    import threading
+
+    actor = bm._BmMcpActor(["fake-bm", "mcp"])
+    teardown_done = threading.Event()
+
+    async def _ready_then_slow_teardown():
+        actor._stop_future = asyncio.get_running_loop().create_future()
+        actor._ready.set()
+        try:
+            await actor._stop_future
+        finally:
+            await asyncio.sleep(1.0)
+            teardown_done.set()
+
+    actor._main = _ready_then_slow_teardown  # type: ignore[assignment]
+    actor.start(timeout=5.0)
+    actor.shutdown(timeout=0.01)  # resolves the stop future; teardown starts
+    actor.shutdown(timeout=10.0)  # e.g. the host's shutdown hook firing now
+    assert teardown_done.is_set()
+
+
 # ---- Shutdown ----
 
 
