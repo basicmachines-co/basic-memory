@@ -529,7 +529,10 @@ coverage:
     run_suite "integration, Postgres" env BASIC_MEMORY_TEST_POSTGRES=1 \
         uv run pytest "${pytest_args[@]}" "${int_markers[@]}" test-int
 
-    uv run coverage report -m
+    # The recipe runs without -e so every suite reports; keep the report's status
+    # (2 below fail_under) and return it after the HTML is written.
+    report_status=0
+    uv run coverage report -m || report_status=$?
     uv run coverage html
     echo "Coverage report generated in htmlcov/index.html"
 
@@ -539,6 +542,13 @@ coverage:
     if (( ${#failed[@]} )); then
         echo "❌ Failed suites: ${failed[*]}"
         exit 1
+    fi
+
+    # Trigger: combined coverage is below fail_under in pyproject.toml.
+    # Outcome: fail like the CI Coverage job does.
+    if (( report_status )); then
+        echo "❌ Combined coverage is below the fail_under floor"
+        exit "$report_status"
     fi
 
 # Lint and fix code (calls fix)
