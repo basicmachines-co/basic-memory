@@ -28,7 +28,7 @@ from basic_memory.picoschema.inference import (
     RelationData,
     NoteData,
     infer_schema,
-    analyze_observations,
+    analyze_fields,
     analyze_relations,
 )
 from basic_memory.picoschema.diff import (
@@ -58,7 +58,7 @@ __all__ = [
     "RelationData",
     "NoteData",
     "infer_schema",
-    "analyze_observations",
+    "analyze_fields",
     "analyze_relations",
     # Diff
     "SchemaDrift",

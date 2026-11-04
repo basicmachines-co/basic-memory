@@ -1,15 +1,18 @@
 """Schema validator for Basic Memory.
 
-Validates a note's observations and relations against a resolved schema definition.
-The mapping rules ground schema fields in the existing Basic Memory note format:
+Validates a note's frontmatter, observations and relations against a resolved schema
+definition. The mapping rules ground schema fields in the existing Basic Memory note format:
 
   Schema Declaration        -> Grounded In
   -----------------------------------------------
-  field: string             -> observation [field] value
-  field?(array): string     -> multiple [field] observations
+  field: string             -> frontmatter key field, else observation [field] value
+  field?(array): string     -> a frontmatter list, else multiple [field] observations
   field?: EntityType        -> relation 'field [[Target]]'
   field?(array): EntityType -> multiple 'field' relations
-  field?(enum): [values]    -> observation [field] value where value is in set
+  field?(enum): [values]    -> frontmatter or observation value where value is in set
+
+Frontmatter is checked first: when a note has the key, its observations of the same
+name are not consulted.
 
 Validation is soft by default (warn mode). Unmatched observations and relations
 are informational, not errors -- schemas are a subset, not a straitjacket.
@@ -18,7 +21,7 @@ are informational, not errors -- schemas are a subset, not a straitjacket.
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any, assert_never
 
-from basic_memory.picoschema.inference import ObservationData, RelationData
+from basic_memory.picoschema.inference import ObservationData, RelationData, frontmatter_values
 from basic_memory.picoschema.parser import SchemaDefinition, SchemaField, ValidationMode
 
 
@@ -66,7 +69,8 @@ def validate_note(
         schema: The resolved SchemaDefinition to validate against.
         observations: List of ObservationData from the note's observations.
         relations: List of RelationData from the note's relations.
-        frontmatter: The note's frontmatter dict for settings.frontmatter validation.
+        frontmatter: The note's frontmatter dict. Its keys satisfy schema fields before
+            observations do, and settings.frontmatter rules validate it.
 
     Returns:
         A ValidationResult with per-field results, unmatched items, and warnings/errors.
@@ -80,6 +84,7 @@ def validate_note(
     # Build lookup structures from the note's actual content
     obs_by_category = _group_observations(observations)
     rel_by_type = _group_relations(relations)
+    values_by_key = frontmatter_values(frontmatter) if frontmatter is not None else {}
 
     # Track which observation categories and relation types are matched by schema fields
     matched_categories: set[str] = set()
@@ -87,7 +92,7 @@ def validate_note(
 
     # --- Validate each schema field ---
     for schema_field in schema.fields:
-        field_result = _validate_field(schema_field, obs_by_category, rel_by_type)
+        field_result = _validate_field(schema_field, values_by_key, obs_by_category, rel_by_type)
         result.field_results.append(field_result)
 
         # Track which categories/relation types this field consumed
@@ -145,32 +150,37 @@ def validate_note(
 
 def _validate_field(
     schema_field: SchemaField,
+    values_by_key: dict[str, list[str]],
     obs_by_category: dict[str, list[str]],
     rel_by_type: dict[str, list[str]],
 ) -> FieldResult:
     """Validate a single schema field against the note's data.
 
-    Entity ref fields map to relations; all other fields map to observations.
+    Entity ref fields map to relations; all other fields map to a frontmatter key
+    or, when the note has no such key, to observations.
     """
     # --- Entity reference fields map to relations ---
     if schema_field.is_entity_ref:
         return _validate_entity_ref_field(schema_field, rel_by_type)
 
+    # Trigger: the note has the field as a frontmatter key.
+    # Why: scalar facts (counts, dates, owners) live in frontmatter, where
+    #      bm_write(metadata=...) and set_metadata put them (#1973).
+    # Outcome: the key's values are checked; same-named observations are not.
+    values = values_by_key.get(schema_field.name) or obs_by_category.get(schema_field.name, [])
+
     # --- Enum fields require value membership check ---
     if schema_field.is_enum:
-        return _validate_enum_field(schema_field, obs_by_category)
+        return _validate_enum_field(schema_field, values)
 
-    # --- Scalar and array fields map to observations ---
-    return _validate_observation_field(schema_field, obs_by_category)
+    return _validate_value_field(schema_field, values)
 
 
-def _validate_observation_field(
+def _validate_value_field(
     schema_field: SchemaField,
-    obs_by_category: dict[str, list[str]],
+    values: list[str],
 ) -> FieldResult:
-    """Validate a field that maps to observation categories."""
-    values = obs_by_category.get(schema_field.name, [])
-
+    """Validate a scalar or array field from its frontmatter or observation values."""
     if not values:
         return FieldResult(
             field=schema_field,
@@ -209,11 +219,9 @@ def _validate_entity_ref_field(
 
 def _validate_enum_field(
     schema_field: SchemaField,
-    obs_by_category: dict[str, list[str]],
+    values: list[str],
 ) -> FieldResult:
     """Validate an enum field -- value must be in the allowed set."""
-    values = obs_by_category.get(schema_field.name, [])
-
     if not values:
         return FieldResult(
             field=schema_field,
@@ -341,4 +349,7 @@ def _missing_field_message(schema_field: SchemaField) -> str:
             f"(no '{schema_field.name} [[...]]' relation found)"
         )
 
-    return f"Missing {kind} field: {schema_field.name} (expected [{schema_field.name}] observation)"
+    return (
+        f"Missing {kind} field: {schema_field.name} "
+        f"(expected {schema_field.name}: in frontmatter or a [{schema_field.name}] observation)"
+    )

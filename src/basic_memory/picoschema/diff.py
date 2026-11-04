@@ -1,7 +1,8 @@
 """Schema diff for Basic Memory.
 
 Compares a schema definition against actual note usage to detect drift.
-Drift happens naturally as notes evolve -- new observation categories appear,
+Drift happens naturally as notes evolve -- new frontmatter keys and observation
+categories appear,
 old ones fall out of use, single-value fields become multi-value.
 
 The diff engine reuses inference analysis internally, comparing inferred
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 from basic_memory.picoschema.inference import (
     FieldFrequency,
     NoteData,
-    analyze_observations,
+    analyze_fields,
     analyze_relations,
 )
 from basic_memory.picoschema.parser import SchemaDefinition
@@ -55,22 +56,22 @@ def diff_schema(
         return SchemaDrift()
 
     # --- Analyze actual usage ---
-    obs_frequencies = analyze_observations(notes, total, max_sample_values=3)
+    field_frequencies = analyze_fields(notes, total, max_sample_values=3)
     rel_frequencies = analyze_relations(notes, total, max_sample_values=3)
 
     # Build lookup from schema fields
     schema_field_names = {f.name for f in schema.fields}
 
     # Build lookup from actual frequencies
-    obs_freq_by_name = {f.name: f for f in obs_frequencies}
+    field_freq_by_name = {f.name: f for f in field_frequencies}
     rel_freq_by_name = {f.name: f for f in rel_frequencies}
-    all_freq_by_name = {**obs_freq_by_name, **rel_freq_by_name}
+    all_freq_by_name = {**field_freq_by_name, **rel_freq_by_name}
 
     result = SchemaDrift()
 
     # --- Detect new fields ---
     # Fields that appear frequently in notes but aren't declared in the schema
-    for freq in obs_frequencies + rel_frequencies:
+    for freq in field_frequencies + rel_frequencies:
         if freq.name not in schema_field_names and freq.percentage >= new_field_threshold:
             result.new_fields.append(freq)
 

@@ -34,6 +34,14 @@ do:
   the share of notes a field must appear in.
 - `diff` — compare a `note_type`'s notes with its schema to find drift.
 
+A schema field is satisfied by a frontmatter key or an observation category of
+the same name. Frontmatter is checked first: `attendees: 4` in frontmatter
+satisfies `attendees: integer`, and a `- [attendees]` observation is used only
+when the key is absent. Enum checks apply to either. A field whose type is
+another note type is satisfied by relations. `infer` and `diff` count
+frontmatter keys as fields, except `title`, `type`, `permalink`, `tags` and
+`schema`.
+
 A type with no schema, or no notes, is a `NOT_FOUND` error that says how to
 create one.
 
@@ -59,7 +67,7 @@ bm_schema(command="validate", note_type="plan", project="demo")
 # → # Schema Validation: plan
 #   Notes: 1 | Valid: 1 | Warnings: 1 | Errors: 0
 #   - **launch-plan** — valid
-#     - warning: Missing required field: owner (expected [owner] observation)
+#     - warning: Missing required field: owner (expected owner: in frontmatter or a [owner] observation)
 
 bm_schema(command="diff", note_type="plan", project="demo")
 # → # Schema Drift: plan
