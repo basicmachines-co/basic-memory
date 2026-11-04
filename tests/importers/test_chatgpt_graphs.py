@@ -47,7 +47,11 @@ def test_chatgpt_import_visits_each_mapping_key_once(tmp_path: Path, cycle: str)
         env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
         capture_output=True,
         text=True,
-        timeout=15,
+        # Output is UTF-8; Windows would decode it with the cp1252 locale codec.
+        encoding="utf-8",
+        # Bounds an infinite loop, not startup: CLI import plus migrations can pass
+        # 15s on a loaded Windows runner.
+        timeout=60,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     notes = list(tmp_path.rglob("*-Graph.md"))

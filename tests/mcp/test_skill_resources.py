@@ -42,7 +42,10 @@ async def test_skill_get_returns_files_matching_the_shipped_bytes() -> None:
 
 @pytest.mark.asyncio
 async def test_clients_without_the_extension_read_skills_as_resources() -> None:
-    expected = (distributed_skills_root() / "memory-notes" / "SKILL.md").read_text(encoding="utf-8")
+    # Compare decoded bytes: read_text would turn a CRLF checkout (Windows) into LF,
+    # while the served text keeps the file's line endings.
+    skill_path = distributed_skills_root() / "memory-notes" / "SKILL.md"
+    expected = skill_path.read_bytes().decode("utf-8")
     async with Client(mcp) as client:
         listed = {str(resource.uri) for resource in await client.list_resources()}
         contents = await client.read_resource("skill://memory-notes/SKILL.md")
