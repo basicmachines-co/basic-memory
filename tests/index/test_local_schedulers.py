@@ -85,7 +85,7 @@ async def test_entity_vector_scheduler_maps_to_search_service():
         test_mode=False,
     )
     scheduler.schedule_entity_vector_sync(entity_id=7, project_id=13)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert search_service.vector_synced == [7]
     # Vectors change search results only, never a note's own response.
@@ -135,7 +135,7 @@ async def test_project_index_scheduler_maps_to_project_index_runner():
         test_mode=False,
     )
     scheduler.schedule_project_index(project_id=13, force_full=True)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert project_index_runner.indexed == [(13, True)]
 
@@ -264,7 +264,7 @@ async def test_project_index_scheduler_is_noop_in_test_mode():
 
     scheduler = LocalProjectIndexScheduler(project_index_runner=runner, test_mode=True)
     scheduler.schedule_project_index(project_id=13)
-    await asyncio.sleep(0.02)
+    await drain_background_tasks()
 
     assert runner.indexed == []
     assert 13 not in _pending_project_index
@@ -283,7 +283,7 @@ async def test_search_reindex_scheduler_maps_to_search_service():
         test_mode=False,
     )
     scheduler.schedule_search_reindex(project_id=13)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert search_service.reindexed_project is True
     assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
@@ -337,7 +337,7 @@ async def test_relation_resolution_scheduler_runs_project_resolution(session_mak
         debounce_seconds=0.0,
     )
     scheduler.schedule_relation_resolution(project_id=13)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert runtime.resolve_calls == 1
     # A pass that resolved nothing changed nothing, so it retires nothing.
@@ -470,7 +470,7 @@ async def test_relation_resolution_scheduler_retires_the_notes_it_resolved(
         debounce_seconds=0.0,
     )
     scheduler.schedule_relation_resolution(project_id=13)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert read_cache.changes == [ReadCacheChange(content=True)]
 
@@ -493,7 +493,7 @@ async def test_relation_resolution_scheduler_coalesces_a_burst(session_maker):
     )
     for _ in range(10):
         scheduler.schedule_relation_resolution(project_id=7)
-    await asyncio.sleep(0.1)
+    await drain_background_tasks()
 
     # Ten writes, one offline pass — not one whole-project scan per write.
     assert runtime.resolve_calls == 1
@@ -540,7 +540,7 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass(sessio
     runtime.scheduler = scheduler
 
     scheduler.schedule_relation_resolution(project_id=21)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert runtime.resolve_calls == 2
     # Neither pass resolved anything, so neither retires cached reads.
@@ -630,7 +630,7 @@ async def test_relation_resolution_scheduler_is_noop_in_test_mode(session_maker)
         test_mode=True,
     )
     scheduler.schedule_relation_resolution(project_id=13)
-    await asyncio.sleep(0.05)
+    await drain_background_tasks()
 
     assert runtime.resolve_calls == 0
     assert read_cache.invalidated_project_ids == []
