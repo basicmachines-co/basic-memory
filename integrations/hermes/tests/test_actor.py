@@ -85,6 +85,68 @@ def test_start_timeout_raises(bm):
     assert not actor._thread.is_alive()
 
 
+def test_repeat_shutdown_does_not_cancel_startup_teardown(bm):
+    """A second shutdown() during the timed-out start's teardown must not cancel it again.
+
+    stdio_client kills the `bm mcp` child in a shielded teardown that a repeated
+    native task.cancel() breaks, leaving the child orphaned (#1649). The finally
+    block below stands in for that teardown.
+    """
+    import asyncio
+    import threading
+
+    actor = bm._BmMcpActor(["fake-bm", "mcp"])
+    teardown_done = threading.Event()
+
+    async def _hang_then_slow_teardown():
+        try:
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(1.0)
+            teardown_done.set()
+
+    actor._main = _hang_then_slow_teardown  # type: ignore[assignment]
+
+    def _start():
+        with pytest.raises(TimeoutError):
+            actor.start(timeout=0.2)
+
+    starter = threading.Thread(target=_start)
+    starter.start()
+    time.sleep(0.5)  # start() has cancelled the task; teardown is running
+    actor.shutdown(timeout=0.01)  # e.g. the host's shutdown hook firing now
+    starter.join(timeout=10.0)
+    assert teardown_done.is_set()
+
+
+def test_repeat_shutdown_does_not_cancel_graceful_teardown(bm):
+    """A graceful stop is the one stop request; a second shutdown() only joins.
+
+    Resolving the stop future starts the same stdio_client teardown as a cancel,
+    so a later shutdown() that cancelled the task would break it (#1649).
+    """
+    import asyncio
+    import threading
+
+    actor = bm._BmMcpActor(["fake-bm", "mcp"])
+    teardown_done = threading.Event()
+
+    async def _ready_then_slow_teardown():
+        actor._stop_future = asyncio.get_running_loop().create_future()
+        actor._ready.set()
+        try:
+            await actor._stop_future
+        finally:
+            await asyncio.sleep(1.0)
+            teardown_done.set()
+
+    actor._main = _ready_then_slow_teardown  # type: ignore[assignment]
+    actor.start(timeout=5.0)
+    actor.shutdown(timeout=0.01)  # resolves the stop future; teardown starts
+    actor.shutdown(timeout=10.0)  # e.g. the host's shutdown hook firing now
+    assert teardown_done.is_set()
+
+
 # ---- Shutdown ----
 
 

@@ -762,6 +762,7 @@ class _BmMcpActor:
         self._init_error: BaseException | None = None
         self._stop_future: asyncio.Future | None = None
         self._main_task: asyncio.Task[None] | None = None
+        self._stop_sent = False
         self._shutdown_requested = threading.Event()
         self._tools_cache: list[dict[str, Any]] = []
         self._running = False
@@ -788,8 +789,10 @@ class _BmMcpActor:
         asyncio.set_event_loop(loop)
         self._loop = loop
         try:
+            self._stop_sent = False
             self._main_task = loop.create_task(self._main())
             if self._shutdown_requested.is_set():
+                self._stop_sent = True
                 self._main_task.cancel()
             loop.run_until_complete(self._main_task)
         except asyncio.CancelledError:
@@ -879,14 +882,21 @@ class _BmMcpActor:
             try:
 
                 def request_stop() -> None:
-                    if not self._ready.is_set():
-                        if self._main_task is not None and not self._main_task.done():
-                            self._main_task.cancel()
+                    # Trigger: shutdown() called again while the first stop is still
+                    # unwinding (start() timeout, then the provider or host hook).
+                    # Why: a native cancel that lands inside stdio_client's shielded
+                    # teardown breaks it, and the `bm mcp` child is abandoned (#1649).
+                    # A graceful stop starts that same teardown, so it counts too.
+                    # Outcome: one stop request per run; later calls only join.
+                    task = self._main_task
+                    if self._stop_sent or task is None or task.done():
                         return
-                    if self._stop_future is not None and not self._stop_future.done():
-                        self._stop_future.set_result(None)
-                    elif self._main_task is not None and not self._main_task.done():
-                        self._main_task.cancel()
+                    self._stop_sent = True
+                    stop_future = self._stop_future
+                    if self._ready.is_set() and stop_future is not None and not stop_future.done():
+                        stop_future.set_result(None)
+                    else:
+                        task.cancel()
 
                 self._loop.call_soon_threadsafe(request_stop)
             except Exception:
