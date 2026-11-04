@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased
+
+### Breaking Changes
+
+- **Note formatting is removed.** The `format_on_save`, `formatter_command`,
+  `formatters` and `formatter_timeout` settings, their `BASIC_MEMORY_*` environment
+  variables, the `bm format` command and the bundled mdformat dependency are gone.
+  Since 1.0 accepts a note's bytes before writing the file, `format_on_save` had
+  stopped running for `bm_write` and `bm_edit` (#2005). Formatting the file after the
+  write would make it differ from the accepted note, so the next sync would record it
+  as an outside edit and the agent's next `expected_checksum` would conflict. Notes
+  are now stored exactly as written. Old keys in `config.json` are ignored. To format
+  notes, run your formatter from your editor, or over the project folder yourself.
+
 ## v1.0.0 (2026-10-29)
 
 Basic Memory 1.0 is a clean-house release. The MCP server exposes only the `bm_*`

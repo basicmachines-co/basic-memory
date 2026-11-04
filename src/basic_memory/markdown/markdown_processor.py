@@ -132,16 +132,7 @@ class MarkdownProcessor:
         path.parent.mkdir(parents=True, exist_ok=True)
         await file_utils.write_file_atomic(path, final_content)
 
-        # Format file if configured (MarkdownProcessor always handles markdown files)
-        content_for_checksum = final_content
-        if self.app_config:
-            formatted_content = await file_utils.format_file(  # pragma: no cover
-                path, self.app_config, is_markdown=True
-            )
-            if formatted_content is not None:  # pragma: no cover
-                content_for_checksum = formatted_content  # pragma: no cover
-
-        return await file_utils.compute_checksum(content_for_checksum)
+        return await file_utils.compute_checksum(final_content)
 
     def to_markdown_string(self, markdown: EntityMarkdown) -> str:
         """Convert EntityMarkdown to markdown string with frontmatter.

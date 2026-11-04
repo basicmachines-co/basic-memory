@@ -255,15 +255,12 @@ class FileService:
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
 
-        If format_on_save is enabled in config, runs the configured formatter
-        after writing and returns the checksum of the formatted content.
-
         Args:
             path: Where to write (Path or string)
             content: Content to write
 
         Returns:
-            Checksum of written content (or formatted content if formatting enabled)
+            Checksum of the written file
 
         Raises:
             FileOperationError: If write fails
@@ -290,14 +287,7 @@ class FileService:
 
                 await file_utils.write_file_atomic(full_path, content)
 
-                if self.app_config:
-                    formatted_content = await file_utils.format_file(
-                        full_path, self.app_config, is_markdown=self.is_markdown(path)
-                    )
-                    if formatted_content is not None:
-                        pass  # pragma: no cover
-
-                # Trigger: formatters and platform-specific text writers can change the
+                # Trigger: platform-specific text writers can change the
                 # persisted bytes even when the logical content string is the same.
                 # Why: sync and move detection compare against on-disk checksums, not
                 #      the pre-write Python string.
@@ -562,14 +552,8 @@ class FileService:
 
             await file_utils.write_file_atomic(full_path, final_content)
 
-            # Format file if configured
-            if self.app_config:
-                await file_utils.format_file(
-                    full_path, self.app_config, is_markdown=self.is_markdown(path)
-                )
-
             # Trigger: frontmatter normalization may persist bytes that differ from the
-            # in-memory string because of formatter output or platform newline handling.
+            # in-memory string because of platform newline handling.
             # Why: generation publication must parse the same bytes whose checksum and
             #   note_content generation are claimed; an LF payload paired with CRLF disk
             #   bytes is not one coherent snapshot.
