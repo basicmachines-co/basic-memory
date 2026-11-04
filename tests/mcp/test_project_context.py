@@ -3708,3 +3708,57 @@ async def test_resolve_project_and_path_reads_this_workspaces_qualified_route(cl
     assert active_project.external_id == test_project.external_id
     assert resolved_path == f"team-paul/{test_project.permalink}/team/note"
     assert is_memory_url is True
+
+
+@pytest.mark.asyncio
+async def test_unknown_project_with_cloud_credentials_lists_local_and_cloud(
+    monkeypatch, app_config, config_manager
+):
+    """A name in neither local config nor cloud names both project lists (#1809).
+
+    The lookup started from local config, but the miss came from cloud discovery
+    and listed only cloud projects, hiding the local ones the caller can use.
+    """
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        WorkspaceProjectLookupMiss,
+        _build_workspace_project_index,
+        get_project_client,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (
+            WorkspaceProjectEntry(
+                workspace=personal,
+                project=_project("research", id=1, external_id="personal-research-id"),
+            ),
+        ),
+    )
+
+    # Cloud discovery is the network boundary; everything above it runs for real.
+    async def cloud_index(context=None, force_refresh=False):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", cloud_index)
+    app_config.cloud_api_key = "bmc_test123"
+    config_manager.save_config(app_config)
+
+    with pytest.raises(WorkspaceProjectLookupMiss) as exc:
+        async with get_project_client("no-such-project"):
+            pass  # pragma: no cover
+
+    message = str(exc.value)
+    assert "Project 'no-such-project' not found." in message
+    assert "Local projects: test-project." in message
+    assert "Cloud projects: personal/research." in message
+    assert "indexed cloud workspaces" not in message
