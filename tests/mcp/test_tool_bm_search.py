@@ -4,10 +4,14 @@ These run the real ASGI stack through the shared `client` fixture. Most tests pi
 mode="text" so ranking does not depend on the embedding model.
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
 from fastmcp.exceptions import ToolError
+from sqlalchemy import text as sql_text
+
+from basic_memory import db
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.mcp.tools import bm_read, bm_search, bm_write
@@ -468,3 +472,56 @@ async def test_lines_skip_hits_without_markdown(
 
     assert ranked["results"], "the image must be a ranked hit for this test to mean anything"
     assert with_lines["results"] == []
+
+
+# --- Semantic freshness ---
+
+
+async def _hold_deploy_plan_embedding(session_maker) -> datetime:
+    """Edit Deploy Plan's content the way a held vector pass leaves it; return the time."""
+    edited_at = datetime(2026, 3, 4, 5, 6, tzinfo=timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sql_text(
+                "UPDATE entity SET checksum = 'held', updated_at = :at WHERE title = 'Deploy Plan'"
+            ),
+            {"at": edited_at.astimezone()},
+        )
+    return edited_at
+
+
+@pytest.mark.asyncio
+async def test_current_embeddings_add_no_freshness_note(client, test_project):
+    await _seed(test_project.name)
+
+    payload = await search_json(query="deploy", project=test_project.name)
+    text = await search_text(query="deploy", project=test_project.name)
+
+    assert "semantic_index_current_as_of" not in payload
+    assert "Semantic results current as of" not in text
+
+
+@pytest.mark.asyncio
+async def test_held_embeddings_say_how_current_semantic_results_are(
+    client, test_project, session_maker
+):
+    await _seed(test_project.name)
+    edited_at = await _hold_deploy_plan_embedding(session_maker)
+
+    payload = await search_json(query="deploy", project=test_project.name)
+    text = await search_text(query="deploy", project=test_project.name)
+
+    assert datetime.fromisoformat(payload["semantic_index_current_as_of"]) == edited_at
+    assert "Semantic results current as of 2026-03-04 05:06 UTC." in text
+
+
+@pytest.mark.asyncio
+async def test_all_projects_search_carries_the_freshness(client, test_project, session_maker):
+    await _seed(test_project.name)
+    edited_at = await _hold_deploy_plan_embedding(session_maker)
+
+    payload = await search_json(query="deploy", mode="text", all_projects=True)
+    text = await search_text(query="deploy", mode="text", all_projects=True)
+
+    assert datetime.fromisoformat(payload["semantic_index_current_as_of"]) == edited_at
+    assert "Semantic results current as of 2026-03-04 05:06 UTC." in text

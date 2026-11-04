@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.repository.search_scope import ProjectScope
 import asyncio
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -94,6 +94,14 @@ class _ConcreteRepo(SearchRepositoryBase):
     ) -> None:
         return None  # no session_maker in this double; the real write is covered
         # in tests/services/test_project_readiness.py
+
+    @override
+    async def read_entity_checksums(self, entity_ids: Iterable[int]) -> dict[int, str | None]:
+        return {}  # no session_maker in this double; covered in test_semantic_index_freshness.py
+
+    @override
+    async def record_entity_embedded_checksums(self, checksums: Mapping[int, str | None]) -> None:
+        return None  # no session_maker in this double; covered in test_semantic_index_freshness.py
 
     @override
     async def search(

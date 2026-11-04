@@ -813,6 +813,9 @@ class SearchService:
 
         if not entity_embeddings_enabled(entity):
             await self._clear_entity_vectors(entity_id)
+            # An opted-out note owes no embeddings, so its content is as current as
+            # semantic search will ever make it.
+            await self.repository.record_entity_embedded_checksums({entity.id: entity.checksum})
             # Opted-out entities count as skipped, matching the batch path.
             return VectorSyncBatchResult(
                 entities_total=1, entities_synced=0, entities_failed=0, entities_skipped=1
@@ -863,6 +866,9 @@ class SearchService:
         if opted_out_ids:
             await asyncio.gather(
                 *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
+            )
+            await self.repository.record_entity_embedded_checksums(
+                {entity_id: entities_by_id[entity_id].checksum for entity_id in opted_out_ids}
             )
 
         eligible_entity_ids = [

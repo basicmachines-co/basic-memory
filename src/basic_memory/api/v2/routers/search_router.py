@@ -19,6 +19,7 @@ from basic_memory.read_cache import ReadCacheOperation
 from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
 from basic_memory.read_cache.routes import ReadCacheRoute, cached_read, content_group
 from basic_memory.deps import (
+    AppConfigDep,
     EntityServiceV2ExternalDep,
     MemoryTimeIndexRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
@@ -28,6 +29,8 @@ from basic_memory.deps import (
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_scope import ProjectScope
+from basic_memory.repository.semantic_index_freshness import semantic_index_current_as_of
 from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
 from basic_memory.services.search_service import SearchService
 from basic_memory.services.search_guidance import unspaced_script_query_hint
@@ -87,6 +90,7 @@ async def search(
     entity_service: EntityServiceV2ExternalDep,
     temporal_repository: MemoryTimeIndexRepositoryV2ExternalDep,
     session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
     response: Response,
     internal_project_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external UUID"),
@@ -103,7 +107,8 @@ async def search(
         search_service: Search service scoped to project
         entity_service: Entity service scoped to project
         temporal_repository: Valid-time projection, read to explain temporal matches
-        session_maker: Session factory for the temporal hydration read
+        session_maker: Session factory for the temporal hydration and freshness reads
+        app_config: Configuration that says whether semantic search can run here
         page: Page number for pagination
         page_size: Number of results per page
 
@@ -216,6 +221,9 @@ async def search(
             phase="build_response",
             result_count=len(search_results),
         ):
+            current_as_of = await semantic_index_current_as_of(
+                session_maker, app_config, ProjectScope.single(internal_project_id)
+            )
             result = SearchResponse(
                 results=search_results,
                 current_page=page,
@@ -231,6 +239,7 @@ async def search(
                 # None, not False, when nothing was asked: an ordinary search
                 # payload stays exactly what it was before valid time existed.
                 temporal_applied=True if temporal_requested else None,
+                semantic_index_current_as_of=current_as_of,
             )
             return result
 

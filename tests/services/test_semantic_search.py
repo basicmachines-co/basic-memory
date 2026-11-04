@@ -111,7 +111,9 @@ async def test_semantic_vector_sync_skips_embed_opt_out_and_clears_vectors(
     monkeypatch.setattr(
         search_service.entity_repository,
         "find_by_id",
-        AsyncMock(return_value=SimpleNamespace(id=42, entity_metadata={"embed": False})),
+        AsyncMock(
+            return_value=SimpleNamespace(id=42, checksum="c42", entity_metadata={"embed": False})
+        ),
     )
     sync_vectors = AsyncMock()
     delete_entity_vectors = AsyncMock()
@@ -133,7 +135,7 @@ async def test_semantic_vector_sync_resumes_when_embed_opt_out_removed(search_se
     monkeypatch.setattr(
         search_service.entity_repository,
         "find_by_id",
-        AsyncMock(return_value=SimpleNamespace(id=42, entity_metadata={})),
+        AsyncMock(return_value=SimpleNamespace(id=42, checksum="c42", entity_metadata={})),
     )
     sync_vectors = AsyncMock()
     execute_query = AsyncMock()
@@ -159,8 +161,8 @@ async def test_semantic_vector_sync_batch_skips_embed_opt_out_and_reports_skips(
         "find_by_ids",
         AsyncMock(
             return_value=[
-                SimpleNamespace(id=41, entity_metadata={"embed": False}),
-                SimpleNamespace(id=42, entity_metadata={}),
+                SimpleNamespace(id=41, checksum="c41", entity_metadata={"embed": False}),
+                SimpleNamespace(id=42, checksum="c42", entity_metadata={}),
             ]
         ),
     )
@@ -254,8 +256,8 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
         "find_all",
         AsyncMock(
             return_value=[
-                SimpleNamespace(id=41, entity_metadata={"embed": False}),
-                SimpleNamespace(id=42, entity_metadata={}),
+                SimpleNamespace(id=41, checksum="c41", entity_metadata={"embed": False}),
+                SimpleNamespace(id=42, checksum="c42", entity_metadata={}),
             ]
         ),
     )
@@ -304,7 +306,7 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
     monkeypatch.setattr(
         search_service.entity_repository,
         "find_all",
-        AsyncMock(return_value=[SimpleNamespace(id=42, entity_metadata={})]),
+        AsyncMock(return_value=[SimpleNamespace(id=42, checksum="c42", entity_metadata={})]),
     )
 
     async def delete_stale_vector_rows():
@@ -413,8 +415,8 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
         "find_all",
         AsyncMock(
             return_value=[
-                SimpleNamespace(id=41, entity_metadata={}),
-                SimpleNamespace(id=42, entity_metadata={}),
+                SimpleNamespace(id=41, checksum="c41", entity_metadata={}),
+                SimpleNamespace(id=42, checksum="c42", entity_metadata={}),
             ]
         ),
     )
@@ -463,7 +465,7 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
     monkeypatch.setattr(
         search_service.entity_repository,
         "find_by_ids",
-        AsyncMock(return_value=[SimpleNamespace(id=42, entity_metadata={})]),
+        AsyncMock(return_value=[SimpleNamespace(id=42, checksum="c42", entity_metadata={})]),
     )
     sync_batch = AsyncMock(
         side_effect=[

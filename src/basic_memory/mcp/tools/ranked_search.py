@@ -13,6 +13,7 @@ Every failure is a tool error.
 
 import re
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 
 from fastmcp import Context
@@ -678,12 +679,14 @@ def _format_results(
         if next_call is not None
         else ""
     )
+    freshness = _semantic_freshness_note(payload)
     if not results:
         page_hint = " on this page" if next_call is not None else ""
         return (
             (f"No results for '{query}'" if query else "No results")
             + f"{page_hint} in {scope}."
             + (f"\n\n{payload['query_hint']}" if payload.get("query_hint") else "")
+            + freshness
             + continuation
         )
 
@@ -713,4 +716,20 @@ def _format_results(
                 lines.append(f"    (more matches from line {row['next_match_line']})")
         elif row.get("matched_chunk"):
             lines.append(f"    {row['matched_chunk'][:200]}")
-    return "\n".join(lines) + continuation
+    return "\n".join(lines) + freshness + continuation
+
+
+def _semantic_freshness_note(payload: dict[str, Any]) -> str:
+    """Say how current semantic results are, when embeddings lag some notes.
+
+    The field is absent when every note is embedded, so ordinary output is unchanged.
+    """
+    current_as_of = payload.get("semantic_index_current_as_of")
+    if current_as_of is None:
+        return ""
+    as_of_utc = datetime.fromisoformat(current_as_of).astimezone(timezone.utc)
+    return (
+        f"\n\nSemantic results current as of {as_of_utc:%Y-%m-%d %H:%M} UTC. "
+        "Notes changed since then are found by text search but may be missing "
+        "from semantic matches."
+    )

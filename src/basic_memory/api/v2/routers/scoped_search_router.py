@@ -21,6 +21,7 @@ from basic_memory.api.v2.utils import (
 from basic_memory.deps import AppConfigDep, SessionMakerDep
 from basic_memory.repository.search_repository import create_search_reader
 from basic_memory.repository.search_scope import ProjectScope
+from basic_memory.repository.semantic_index_freshness import semantic_index_current_as_of
 from basic_memory.schemas.search import (
     MAX_SCOPED_SEARCH_PAGE_SIZE,
     ScopedSearchQuery,
@@ -119,4 +120,7 @@ async def search_scope(
             # None, not False, when nothing was asked: an ordinary search payload stays
             # exactly what it was before valid time existed.
             temporal_applied=True if temporal_requested else None,
+            semantic_index_current_as_of=await semantic_index_current_as_of(
+                session_maker, app_config, scope
+            ),
         )

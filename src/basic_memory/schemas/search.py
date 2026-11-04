@@ -375,3 +375,16 @@ class SearchResponse(BaseModel):
         description="True when the server executed a requested valid-time filter; "
         "absent when the request carried none",
     )
+    # Semantic (vector) results come from embeddings that a later pass builds, and that
+    # pass can lag the note itself -- Basic Memory Cloud defers a legacy workspace's
+    # embeddings to the next UTC day past its fair-use budget. Full-text search is not
+    # affected: it is indexed with the note.
+    semantic_index_current_as_of: datetime | None = Field(
+        default=None,
+        description="Semantic (vector) search reflects every note in the searched "
+        "projects changed before this time. It is the oldest last-modified time among "
+        "notes whose embeddings are not current (pending, deferred, or missing); notes "
+        "changed at or after it may be missing from semantic and hybrid results but are "
+        "still found by full-text search. Null when every note's embeddings are current, "
+        "or when semantic search is unavailable.",
+    )

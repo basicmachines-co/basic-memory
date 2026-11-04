@@ -32,16 +32,22 @@ from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 def _skip_vector_deferral_writes(monkeypatch):
     """These tests mock session_maker, so the deferral write has nothing to talk to.
 
-    `sync_entity_vectors_batch` records which entities it deferred, which needs a
-    real session; the doubles here patch `scoped_session` only for the paths they
-    exercise. The write itself is covered against a database in
-    tests/services/test_project_readiness.py.
+    `sync_entity_vectors_batch` records which entities it deferred and which checksum
+    each finished entity embedded, which needs a real session; the doubles here patch
+    `scoped_session` only for the paths they exercise. Those writes are covered against
+    a database in tests/services/test_project_readiness.py and
+    tests/repository/test_semantic_index_freshness.py.
     """
 
-    async def _noop(self, **_kwargs) -> None:
+    async def _noop(self, *_args, **_kwargs) -> None:
         return None
 
+    async def _no_checksums(self, _entity_ids) -> dict[int, str | None]:
+        return {}
+
     monkeypatch.setattr(PostgresSearchRepository, "record_entity_vector_deferrals", _noop)
+    monkeypatch.setattr(PostgresSearchRepository, "record_entity_embedded_checksums", _noop)
+    monkeypatch.setattr(PostgresSearchRepository, "read_entity_checksums", _no_checksums)
 
 
 # --- Helpers ---------------------------------------------------------------

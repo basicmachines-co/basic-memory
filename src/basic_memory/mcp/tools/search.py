@@ -7,6 +7,7 @@ runs a search across several projects as one scoped query per database.
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -589,6 +590,8 @@ async def _search_all_projects(
     databases_answered = 0
     failures: list[str] = []
     query_hint: str | None = None
+    # The merged page is only as current as its least current database.
+    semantic_current_as_of: list[datetime] = []
 
     for tenant_id, refs in databases.items():
         label = _database_label(tenant_id, refs)
@@ -619,6 +622,8 @@ async def _search_all_projects(
             response = _compact_search_response(response)
         if response.query_hint:
             query_hint = response.query_hint
+        if response.semantic_index_current_as_of is not None:
+            semantic_current_as_of.append(response.semantic_index_current_as_of)
         total += (
             response.total
             if response.total > 0
@@ -671,6 +676,9 @@ async def _search_all_projects(
             # Confirmed only because a database answered: `databases_answered` is
             # non-zero here for any temporal query, guarded immediately above.
             "temporal_applied": True if temporal_requested else None,
+            "semantic_index_current_as_of": min(semantic_current_as_of)
+            if semantic_current_as_of
+            else None,
         }
     )
 

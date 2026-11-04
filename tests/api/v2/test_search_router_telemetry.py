@@ -38,7 +38,12 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         return []
 
     monkeypatch.setattr(logfire, "span", fake_span)
+
+    async def fake_semantic_index_current_as_of(session_maker, app_config, scope):
+        return None
+
     monkeypatch.setattr(router, "to_search_results", fake_to_search_results)
+    monkeypatch.setattr(router, "semantic_index_current_as_of", fake_semantic_index_current_as_of)
 
     http_response = Response()
     search_response = await router.search(
@@ -48,6 +53,7 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         # This query carries no valid-time filter, so neither is touched.
         temporal_repository=object(),
         session_maker=object(),
+        app_config=object(),
         response=http_response,
         internal_project_id=1,
         project_id="11111111-1111-1111-1111-111111111111",
