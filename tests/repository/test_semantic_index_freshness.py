@@ -308,3 +308,38 @@ async def test_the_lookup_reads_the_partial_index(session_maker, app_config, tes
     plan = " ".join(str(row[-1]) for row in rows)
 
     assert "ix_entity_project_embedding_not_current" in plan
+
+
+@pytest.mark.asyncio
+async def test_opting_out_a_part_way_note_settles_it(
+    entity_repository, search_service, session_maker, app_config, test_project
+):
+    """A note left part-way, then marked `embed: false`, no longer holds search back.
+
+    Opt-out skips the repository sync boundary that clears deferral markers, so the
+    marker the earlier pass left must be cleared by the opt-out itself.
+    """
+    updated_at = _local_time(2)
+    entity = await _embedded_note(
+        entity_repository,
+        search_service,
+        session_maker,
+        test_project,
+        title="Abandoned",
+        updated_at=updated_at,
+    )
+    await search_service.repository.record_entity_vector_deferrals(
+        unfinished_entity_ids={entity.id},
+        completed_entity_ids=set(),
+        pass_started_at=datetime.now().astimezone(),
+    )
+    assert await _current_as_of(session_maker, app_config, test_project) == updated_at
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("UPDATE entity SET entity_metadata = :metadata WHERE id = :id"),
+            {"metadata": '{"embed": false}', "id": entity.id},
+        )
+    await search_service.sync_entity_vectors(entity.id)
+
+    assert await _current_as_of(session_maker, app_config, test_project) is None
