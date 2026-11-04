@@ -1,5 +1,7 @@
 """Tests for file utilities."""
 
+import os
+import time
 import unicodedata
 import random
 import stat
@@ -16,6 +18,7 @@ from basic_memory.file_utils import (
     FileWriteError,
     ParseError,
     compute_checksum,
+    file_created_timestamp,
     format_file,
     format_markdown_builtin,
     has_frontmatter,
@@ -743,3 +746,28 @@ def test_sanitize_for_directory_keeps_combining_marks():
     nfd = unicodedata.normalize("NFD", "café/menús")
 
     assert sanitize_for_directory(nfd) == nfd
+
+
+def test_created_timestamp_is_not_later_than_an_edit_then_move(tmp_path: Path) -> None:
+    """Editing a note and then moving it must not date its creation after the edit (#2004)."""
+    original = tmp_path / "Three.md"
+    original.write_text("# Three\n", encoding="utf-8")
+    time.sleep(0.02)
+    with original.open("a", encoding="utf-8") as note:
+        note.write("Closed.\n")
+    time.sleep(0.02)
+    # The rename resets st_ctime on POSIX, after the append set st_mtime.
+    archived = original.rename(tmp_path / "Three-archived.md")
+
+    stat_result = archived.stat()
+
+    assert file_created_timestamp(stat_result) <= stat_result.st_mtime
+
+
+def test_created_timestamp_without_birthtime_takes_the_earlier_of_ctime_and_mtime() -> None:
+    # A tuple-built stat_result carries no birth time on any platform.
+    renamed_after_edit = os.stat_result((0,) * 7 + (1.0, 5.0, 9.0))
+    assert file_created_timestamp(renamed_after_edit) == 5.0
+
+    edited_after_chmod = os.stat_result((0,) * 7 + (1.0, 9.0, 5.0))
+    assert file_created_timestamp(edited_after_chmod) == 5.0

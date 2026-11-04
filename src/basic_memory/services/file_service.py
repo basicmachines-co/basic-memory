@@ -654,7 +654,9 @@ class FileService:
 
         return FileMetadata(
             size=stat_result.st_size,
-            created_at=datetime.fromtimestamp(stat_result.st_ctime).astimezone(),
+            created_at=datetime.fromtimestamp(
+                file_utils.file_created_timestamp(stat_result)
+            ).astimezone(),
             modified_at=datetime.fromtimestamp(stat_result.st_mtime).astimezone(),
         )
 

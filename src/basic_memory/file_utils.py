@@ -80,6 +80,22 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         raise FileError(f"Failed to compute checksum: {e}")
 
 
+def file_created_timestamp(stat_result: os.stat_result) -> float:
+    """The file's creation time, never later than its last modification.
+
+    On POSIX, st_ctime is the inode change time, not the creation time: a rename
+    or chmod resets it. Editing a note and then moving it made its row's
+    created_at the move and its updated_at the edit, a few milliseconds earlier
+    (#2004). st_birthtime is the real creation time where the platform records it
+    (macOS, BSD, Windows on Python 3.12+). Elsewhere, the earlier of ctime and
+    mtime keeps created_at <= updated_at.
+    """
+    birthtime = getattr(stat_result, "st_birthtime", None)
+    if birthtime is not None:
+        return birthtime
+    return min(stat_result.st_ctime, stat_result.st_mtime)
+
+
 # UTF-8 BOM character that can appear at the start of files
 UTF8_BOM = "\ufeff"
 
