@@ -15,6 +15,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
+from basic_memory.index.local_schedulers import BackgroundEmbeddingRuntimeFactory
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
@@ -300,8 +301,11 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
         await initialize_file_indexing(updated, quiet=True)
 
         watch_kwargs = _FakeWatchService.last_kwargs
+        # The watcher's catch-up embeds in the background around the same runtime (#1979).
+        watch_runtime_factory = watch_kwargs["project_index_runtime_factory"]
+        assert isinstance(watch_runtime_factory, BackgroundEmbeddingRuntimeFactory)
         assert isinstance(
-            watch_kwargs["project_index_runtime_factory"], RecordingProjectIndexRuntimeFactory
+            watch_runtime_factory.runtime_factory, RecordingProjectIndexRuntimeFactory
         )
         initial_projects = watch_kwargs["initial_projects"]
         assert isinstance(initial_projects, list)

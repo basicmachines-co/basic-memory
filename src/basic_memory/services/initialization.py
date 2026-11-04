@@ -243,6 +243,7 @@ async def initialize_file_indexing(
 
     # delay import
     from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
+    from basic_memory.index.local_schedulers import BackgroundEmbeddingRuntimeFactory
     from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
     from basic_memory.index.watch_service import WatchService
 
@@ -290,7 +291,11 @@ async def initialize_file_indexing(
         quiet=quiet,
         event_index_runtime_factory=event_index_runtime_factory,
         constrained_project=constrained_project,
-        project_index_runtime_factory=project_index_runtime_factory,
+        # The watcher's catch-up must not hold live edits behind embedding (#1979).
+        project_index_runtime_factory=BackgroundEmbeddingRuntimeFactory(
+            project_index_runtime_factory,
+            test_mode=app_config.is_test_env,
+        ),
         initial_projects=active_projects,
     )
 
