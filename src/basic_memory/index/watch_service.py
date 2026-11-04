@@ -37,6 +37,7 @@ from basic_memory.index.local_watch import (
     run_local_watch_event_indexing,
 )
 from basic_memory.index.storage_events import StorageEventIndexRuntime
+from basic_memory.index.watch_reload import wait_for_reload, watch_reload_requests
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from basic_memory.utils import generate_permalink, shell_command
@@ -156,10 +157,22 @@ class WatchService:
         self, stop_event: asyncio.Event, watched_projects: Sequence[Project]
     ) -> None:
         """Restart the watch cycle once the selected projects differ from the watched ones."""
+        with watch_reload_requests() as reload_requested:
+            await self._reload_when_selection_changes(
+                stop_event, watched_projects, reload_requested
+            )
+
+    async def _reload_when_selection_changes(
+        self,
+        stop_event: asyncio.Event,
+        watched_projects: Sequence[Project],
+        reload_requested: asyncio.Event,
+    ) -> None:
         watched_key = project_watch_key(watched_projects)
         waited_for_catch_up = False
         while True:
-            await asyncio.sleep(self.app_config.watch_project_reload_interval)
+            # A project added or moved in this process wakes the timer early (#1975).
+            await wait_for_reload(reload_requested, self.app_config.watch_project_reload_interval)
             # .gitignore edits apply to the next batch without a new cycle.
             self._ignore_patterns_cache.clear()
             try:
@@ -392,7 +405,10 @@ class WatchService:
                         "No projects to watch; sleeping before retry "
                         f"(constrained_project={self.constrained_project!r})"
                     )
-                    await asyncio.sleep(self.app_config.watch_project_reload_interval)
+                    with watch_reload_requests() as reload_requested:
+                        await wait_for_reload(
+                            reload_requested, self.app_config.watch_project_reload_interval
+                        )
                     continue
 
                 logger.debug(
