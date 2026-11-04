@@ -101,8 +101,9 @@ def _fastembed_available() -> bool:
         return False
 
 
-def _openai_key_available() -> bool:
-    return bool(os.environ.get("OPENAI_API_KEY"))
+# OpenAI combos spend real tokens. load_dotenv() above puts a developer's key in the
+# environment, so a key alone must not enable them; require an explicit opt-in.
+OPENAI_OPT_IN_ENV = "BASIC_MEMORY_RUN_OPENAI_TESTS"
 
 
 def skip_if_needed(combo: SearchCombo) -> None:
@@ -116,7 +117,9 @@ def skip_if_needed(combo: SearchCombo) -> None:
     if combo.provider_name == "openai":
         if not _fastembed_available():
             pytest.skip("semantic dependencies not installed")
-        if not _openai_key_available():
+        if os.environ.get(OPENAI_OPT_IN_ENV) != "1":
+            pytest.skip(f"paid OpenAI API; set {OPENAI_OPT_IN_ENV}=1 to run")
+        if not os.environ.get("OPENAI_API_KEY"):
             pytest.skip("OPENAI_API_KEY not set")
 
 
