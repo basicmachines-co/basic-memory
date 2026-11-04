@@ -1,7 +1,8 @@
 """Schema diff for Basic Memory.
 
 Compares a schema definition against actual note usage to detect drift.
-Drift happens naturally as notes evolve -- new observation categories appear,
+Drift happens naturally as notes evolve -- new frontmatter keys and observation
+categories appear,
 old ones fall out of use, single-value fields become multi-value.
 
 The diff engine reuses inference analysis internally, comparing inferred
@@ -14,12 +15,13 @@ frequencies against the declared schema fields to surface:
 from dataclasses import dataclass, field
 
 from basic_memory.picoschema.inference import (
+    NOTE_FRONTMATTER_KEYS,
     FieldFrequency,
     NoteData,
-    analyze_observations,
+    analyze_fields,
     analyze_relations,
 )
-from basic_memory.picoschema.parser import SchemaDefinition
+from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
 
 
 @dataclass
@@ -54,30 +56,45 @@ def diff_schema(
     if total == 0:
         return SchemaDrift()
 
+    # Keys declared under settings.frontmatter are declared too; they are not new.
+    schema_field_names = {f.name for f in schema.fields + schema.frontmatter_fields}
+
     # --- Analyze actual usage ---
-    obs_frequencies = analyze_observations(notes, total, max_sample_values=3)
+    # Trigger: the schema declares a key every note carries, such as `tags`.
+    # Why: validation accepts its frontmatter value, so drift must count it too,
+    #      or the field reads as dropped while every note uses it.
+    # Outcome: only undeclared built-in keys stay out of the analysis.
+    field_frequencies = analyze_fields(
+        notes,
+        total,
+        max_sample_values=3,
+        skipped_keys=NOTE_FRONTMATTER_KEYS - schema_field_names,
+    )
     rel_frequencies = analyze_relations(notes, total, max_sample_values=3)
 
-    # Build lookup from schema fields
-    schema_field_names = {f.name for f in schema.fields}
-
     # Build lookup from actual frequencies
-    obs_freq_by_name = {f.name: f for f in obs_frequencies}
+    field_freq_by_name = {f.name: f for f in field_frequencies}
     rel_freq_by_name = {f.name: f for f in rel_frequencies}
-    all_freq_by_name = {**obs_freq_by_name, **rel_freq_by_name}
+
+    def usage(schema_field: SchemaField) -> FieldFrequency | None:
+        # An entity-reference field is satisfied only by relations, as in validation;
+        # a frontmatter key or observation of the same name must not hide its absence.
+        if schema_field.is_entity_ref:
+            return rel_freq_by_name.get(schema_field.name)
+        return field_freq_by_name.get(schema_field.name)
 
     result = SchemaDrift()
 
     # --- Detect new fields ---
     # Fields that appear frequently in notes but aren't declared in the schema
-    for freq in obs_frequencies + rel_frequencies:
+    for freq in field_frequencies + rel_frequencies:
         if freq.name not in schema_field_names and freq.percentage >= new_field_threshold:
             result.new_fields.append(freq)
 
     # --- Detect dropped fields ---
     # Fields declared in the schema but rarely appearing in actual notes
     for schema_field in schema.fields:
-        freq = all_freq_by_name.get(schema_field.name)
+        freq = usage(schema_field)
         if freq is None:
             # Field doesn't appear at all in any note
             result.dropped_fields.append(
@@ -95,7 +112,7 @@ def diff_schema(
     # --- Detect cardinality changes ---
     # Fields where the schema says single but usage shows array, or vice versa
     for schema_field in schema.fields:
-        freq = all_freq_by_name.get(schema_field.name)
+        freq = usage(schema_field)
         if freq is None:
             continue
 

@@ -77,7 +77,7 @@ class FieldFrequencyResponse(BaseModel):
     """Frequency analysis for a single field across notes."""
 
     name: str
-    source: str = Field(description="One of: observation, relation")
+    source: str = Field(description="One of: frontmatter, observation, relation")
     count: int = Field(description="Number of notes containing this field")
     total: int = Field(description="Total notes analyzed")
     percentage: float

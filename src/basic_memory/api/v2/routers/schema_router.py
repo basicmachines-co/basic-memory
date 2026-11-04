@@ -87,6 +87,7 @@ def _entity_to_note_data(entity: Entity) -> NoteData:
         identifier=entity.permalink or entity.file_path,
         observations=_entity_observations(entity),
         relations=_entity_relations(entity),
+        frontmatter=_entity_frontmatter(entity),
     )
 
 

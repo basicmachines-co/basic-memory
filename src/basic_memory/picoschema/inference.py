@@ -1,7 +1,8 @@
 """Schema inference engine for Basic Memory.
 
-Analyzes notes of a given type and suggests a schema based on observation
-and relation frequency. Instead of requiring users to define schemas upfront,
+Analyzes notes of a given type and suggests a schema based on how often each
+field appears. A field is a frontmatter key, an observation category, or a
+relation type. Instead of requiring users to define schemas upfront,
 schemas emerge from actual usage patterns:
 
   Write notes freely -> Patterns emerge -> Crystallize into schema
@@ -25,7 +26,7 @@ class FieldFrequency:
     """Frequency analysis for a single field across notes of a type."""
 
     name: str
-    source: str  # "observation" | "relation"
+    source: str  # "frontmatter" | "observation" | "relation"
     count: int  # notes containing this field
     total: int  # total notes analyzed
     percentage: float
@@ -80,6 +81,26 @@ class NoteData:
     identifier: str
     observations: list[ObservationData]
     relations: list[RelationData]
+    frontmatter: dict[str, Any] = field(default_factory=dict)
+
+
+# Every note carries these keys, or Basic Memory manages them. They describe the
+# note itself, not the fields of its type, so inference and drift skip them.
+NOTE_FRONTMATTER_KEYS = frozenset({"title", "type", "permalink", "tags", "schema"})
+
+
+def frontmatter_values(frontmatter: dict[str, Any]) -> dict[str, list[str]]:
+    """Return each frontmatter key's values as strings; a list gives one value per item.
+
+    Keys with a null value or an empty list have no values and are left out.
+    """
+    values: dict[str, list[str]] = {}
+    for key, value in frontmatter.items():
+        items = value if isinstance(value, list) else [value]
+        strings = [str(item) for item in items if item is not None]
+        if strings:
+            values[key] = strings
+    return values
 
 
 # --- Inference Logic ---
@@ -94,7 +115,8 @@ def infer_schema(
 ) -> InferenceResult:
     """Analyze notes and suggest a Picoschema definition.
 
-    Examines observation categories and relation types across all provided notes.
+    Examines frontmatter keys, observation categories and relation types across all
+    provided notes.
     Fields that appear in a high percentage of notes become required; those that
     appear less frequently become optional.
 
@@ -120,14 +142,12 @@ def infer_schema(
             excluded=[],
         )
 
-    # --- Analyze observation frequencies ---
-    obs_frequencies = analyze_observations(notes, total, max_sample_values)
-
-    # --- Analyze relation frequencies ---
+    # --- Analyze field and relation frequencies ---
+    field_frequencies = analyze_fields(notes, total, max_sample_values)
     rel_frequencies = analyze_relations(notes, total, max_sample_values)
 
     # --- Classify fields by threshold ---
-    all_frequencies = obs_frequencies + rel_frequencies
+    all_frequencies = field_frequencies + rel_frequencies
     suggested_required: list[str] = []
     suggested_optional: list[str] = []
     excluded: list[str] = []
@@ -156,32 +176,46 @@ def infer_schema(
     )
 
 
-# --- Observation Analysis ---
+# --- Field Analysis ---
 
 
-def analyze_observations(
+def analyze_fields(
     notes: list[NoteData],
     total: int,
     max_sample_values: int,
+    skipped_keys: frozenset[str] = NOTE_FRONTMATTER_KEYS,
 ) -> list[FieldFrequency]:
-    """Count observation category frequencies across notes.
+    """Count field frequencies across notes, from frontmatter keys and observation categories.
 
-    A category is counted once per note (presence), not per occurrence.
-    Array detection: if a category appears multiple times in a single note
-    in more than half the notes where it appears, it's flagged as an array.
+    A field is counted once per note (presence), not per occurrence. Frontmatter
+    is checked first, as in validation: when a note has the key in frontmatter, its
+    observations of the same name are not counted again. A field's source is where
+    most of its notes keep it, frontmatter on a tie.
+    Array detection: if a field has several values in a single note in more than
+    half the notes where it appears, it's flagged as an array.
+    Frontmatter keys in `skipped_keys` are not counted; by default these are the
+    keys every note carries (title, type, tags, ...), which are not schema fields.
     """
-    # Count how many notes contain each category (presence per note)
+    # Count how many notes contain each field (presence per note)
     category_note_count: Counter[str] = Counter()
-    # Count how many notes have multiple occurrences (for array detection)
+    # Count how many notes have multiple values (for array detection)
     category_multi_count: Counter[str] = Counter()
+    # Count how many notes keep the field in frontmatter (for its source)
+    frontmatter_note_count: Counter[str] = Counter()
     # Collect sample values
     category_samples: dict[str, list[str]] = {}
 
     for note in notes:
-        # Group observations by category within this note
+        # Group observations by category within this note, then let frontmatter
+        # keys replace a category of the same name.
         note_categories: dict[str, list[str]] = {}
         for obs in note.observations:
             note_categories.setdefault(obs.category, []).append(obs.content)
+        for key, values in frontmatter_values(note.frontmatter).items():
+            if key in skipped_keys:
+                continue
+            note_categories[key] = values
+            frontmatter_note_count[key] += 1
 
         for category, values in note_categories.items():
             category_note_count[category] += 1
@@ -201,11 +235,12 @@ def analyze_observations(
         # multiple occurrences, treat it as an array field
         multi_count = category_multi_count.get(category, 0)
         is_array = multi_count > (count / 2)
+        from_frontmatter = frontmatter_note_count.get(category, 0) * 2 >= count
 
         frequencies.append(
             FieldFrequency(
                 name=category,
-                source="observation",
+                source="frontmatter" if from_frontmatter else "observation",
                 count=count,
                 total=total,
                 percentage=count / total,

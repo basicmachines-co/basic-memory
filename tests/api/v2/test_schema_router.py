@@ -1575,3 +1575,60 @@ async def test_an_inline_schema_has_no_reference_to_report(
     assert len(outcomes) == 1
     assert outcomes[0].schema_entity == "person"
     assert outcomes[0].schema_reference is None
+
+
+@pytest.mark.asyncio
+async def test_frontmatter_satisfies_schema_fields_in_validate_infer_and_diff(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """The #1973 report: `attendees: 4` in frontmatter satisfies `attendees: integer`."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Meeting Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "meeting",
+                "version": 1,
+                "schema": {"attendees": "integer, how many attended"},
+            },
+            content="Schema for meetings.",
+        )
+    )
+    await search_service.index_entity(schema_entity)
+    meeting, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Standup Monday",
+            directory="meetings",
+            note_type="meeting",
+            entity_metadata={"attendees": 4},
+            content=dedent("""\
+                ## Observations
+                - [action] ship the release
+            """),
+        )
+    )
+    await search_service.index_entity(meeting)
+
+    validated = await client.post(
+        f"{v2_project_url}/schema/validate", params={"note_type": "meeting"}
+    )
+    assert validated.status_code == 200
+    [result] = validated.json()["results"]
+    assert result["warnings"] == []
+    assert [(fr["field_name"], fr["status"]) for fr in result["field_results"]] == [
+        ("attendees", "present")
+    ]
+
+    inferred = await client.post(f"{v2_project_url}/schema/infer", params={"note_type": "meeting"})
+    assert inferred.status_code == 200
+    sources = {freq["name"]: freq["source"] for freq in inferred.json()["field_frequencies"]}
+    assert sources == {"attendees": "frontmatter", "action": "observation"}
+
+    drift = await client.get(f"{v2_project_url}/schema/diff/meeting")
+    assert drift.status_code == 200
+    assert drift.json()["dropped_fields"] == []
