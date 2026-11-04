@@ -502,6 +502,23 @@ def test_homebrew_outdated_check_only_reports_latest_version(monkeypatch, tmp_pa
     assert "unknown" not in (result.message or "")
 
 
+UV_TOOL_PYTHON = "/Users/me/.local/share/uv/tools/basic-memory/bin/python"
+
+
+def _fake_uv_tool(monkeypatch, *, installed: list[str]) -> list[list[str]]:
+    """Fake the uv upgrade and the tool interpreter's version reads, in call order."""
+    calls: list[list[str]] = []
+    versions = iter(installed)
+
+    def _fake_run_subprocess(command, **kwargs):
+        calls.append(command)
+        stdout = "" if command[0] == "uv" else f"{next(versions)}\n"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
+    return calls
+
+
 def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
     config = _base_config(tmp_path)
     manager = StubConfigManager(config)
@@ -510,22 +527,56 @@ def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
         "basic_memory.cli.auto_update._check_pypi_update_available",
         lambda: (True, "9.9.9"),
     )
-    calls: list[list[str]] = []
-
-    def _fake_run_subprocess(command, **kwargs):
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-
-    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
+    calls = _fake_uv_tool(monkeypatch, installed=["1.0.0", "9.9.9"])
 
     result = run_auto_update(
         config_manager=_config_manager(manager),
-        executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
+        executable=UV_TOOL_PYTHON,
     )
 
     assert result.status == AutoUpdateStatus.UPDATED
     assert result.latest_version == "9.9.9"
-    assert calls == [["uv", "tool", "upgrade", "basic-memory", "--prerelease=allow"]]
+    assert result.restart_recommended is True
+    assert "updated to 9.9.9" in (result.message or "")
+    upgrade = ["uv", "tool", "upgrade", "basic-memory", "--prerelease=allow"]
+    assert [command for command in calls if command[0] == "uv"] == [upgrade]
+    # The tool's own interpreter reports the version before and after the upgrade.
+    assert [command[0] for command in calls if command[0] != "uv"] == [UV_TOOL_PYTHON] * 2
+
+
+def test_pinned_uv_tool_upgrade_reports_no_change(monkeypatch, tmp_path):
+    """uv exits 0 for a receipt pinned to the current version; say so (#2000)."""
+    manager = StubConfigManager(_base_config(tmp_path))
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "1.0.0"),
+    )
+    _fake_uv_tool(monkeypatch, installed=["0.24.1", "0.24.1"])
+
+    result = run_auto_update(config_manager=_config_manager(manager), executable=UV_TOOL_PYTHON)
+
+    assert result.status == AutoUpdateStatus.NOT_UPGRADED
+    assert result.updated is False
+    assert result.restart_recommended is False
+    assert "still 0.24.1 (latest: 1.0.0)" in (result.message or "")
+
+
+def test_unreadable_uv_tool_version_fails_the_update(monkeypatch, tmp_path):
+    manager = StubConfigManager(_base_config(tmp_path))
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "9.9.9"),
+    )
+
+    def _broken_interpreter(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="no such distribution")
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _broken_interpreter)
+
+    result = run_auto_update(config_manager=_config_manager(manager), executable=UV_TOOL_PYTHON)
+
+    assert result.status == AutoUpdateStatus.FAILED
+    assert "no such distribution" in (result.error or "")
 
 
 def test_unknown_manager_returns_manual_update_guidance(monkeypatch, tmp_path):
@@ -570,24 +621,27 @@ def test_mcp_silent_mode_suppresses_subprocess_output(monkeypatch, tmp_path):
         lambda: (True, "9.9.9"),
     )
 
-    captured_kwargs: list[dict[str, Any]] = []
+    upgrade_kwargs: list[dict[str, Any]] = []
+    versions = iter(["1.0.0", "9.9.9"])
 
     def _fake_run_subprocess(command, **kwargs):
-        captured_kwargs.append(kwargs)
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command[0] == "uv":
+            upgrade_kwargs.append(kwargs)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout=next(versions), stderr="")
 
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run_subprocess)
 
     result = run_auto_update(
         config_manager=_config_manager(manager),
-        executable="/Users/me/.local/share/uv/tools/basic-memory/bin/python",
+        executable=UV_TOOL_PYTHON,
         silent=True,
     )
 
     assert result.status == AutoUpdateStatus.UPDATED
-    assert captured_kwargs
-    assert captured_kwargs[0]["silent"] is True
-    assert captured_kwargs[0]["capture_output"] is False
+    assert len(upgrade_kwargs) == 1
+    assert upgrade_kwargs[0]["silent"] is True
+    assert upgrade_kwargs[0]["capture_output"] is False
 
 
 def test_subprocess_oserror_is_non_fatal(monkeypatch, tmp_path):
