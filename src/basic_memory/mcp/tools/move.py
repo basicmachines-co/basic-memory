@@ -1,8 +1,10 @@
 """bm_move: move or rename a note or a directory within a project.
 
 `identifier` names a note and `path` a directory. A trailing '/' on `destination`
-moves into that folder under the current name. Moves stay inside one project; a
-destination whose first folder names another project is refused.
+moves into that folder under the current name. `destination_project` moves into
+another project: a write there, then a delete here (see cross_project_move). A
+destination whose first folder names another project is refused, since it would
+otherwise silently become a folder of that name.
 """
 
 from pathlib import PurePosixPath, PureWindowsPath
@@ -14,6 +16,7 @@ from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.async_client import local_project_path
 from basic_memory.mcp.clients import KnowledgeClient
+from basic_memory.mcp.cross_project_move import move_directory_across, move_note_across
 from basic_memory.mcp.move_destinations import project_named_by_destination
 from basic_memory.mcp.note_targets import (
     ProjectTarget,
@@ -37,8 +40,10 @@ from basic_memory.utils import generate_permalink, validate_project_path
         "its project. `destination` is the new project-relative path; ending it with '/' "
         "moves into that folder under the current name ('archive/'). A note keeps "
         "its file extension ('.markdown' may become '.md'). Pass `expected_checksum` (from "
-        "bm_read) to move a note only if it is still the revision you read. Moving into "
-        "another project is refused: bm_read, bm_write there, then bm_delete."
+        "bm_read) to move a note only if it is still the revision you read. "
+        "`destination_project` moves into another project: the note is written there as a "
+        "new note (new id, its own history, links not rewritten) and deleted here; a "
+        "directory moves note by note."
     ),
     tags={"notes"},
     annotations={
@@ -86,6 +91,16 @@ async def bm_move(
             description="Move the note only while it is still this revision (from bm_read).",
         ),
     ] = None,
+    destination_project: Annotated[
+        str | None,
+        Field(
+            min_length=1,
+            description=(
+                "Move into this project instead: a project name, 'workspace/project', or "
+                "project external id. `destination` is then a path in that project."
+            ),
+        ),
+    ] = None,
     output_format: OutputFormat = "text",
     *,
     project: ProjectParam,
@@ -113,6 +128,16 @@ async def bm_move(
     async with open_project_target(
         source, project, context, kind=kind, output_format=output_format
     ) as target:
+        if destination_project is not None:
+            return await _move_across(
+                target,
+                identifier,
+                destination,
+                destination_project,
+                expected_checksum,
+                output_format,
+                context,
+            )
         destination_path = _project_relative_destination(target, destination, output_format)
         other_project = await project_named_by_destination(
             target.client, destination_path, target.project
@@ -123,8 +148,8 @@ async def bm_move(
                 f"'{destination}' starts with the project '{other_project}'; moves stay inside "
                 f"project '{target.project.name}'.",
                 try_instead=(
-                    f"bm_read the note, bm_write it with project='{other_project}', then "
-                    "bm_delete the original"
+                    f"bm_move(..., destination_project={other_project!r}) with the path "
+                    "inside that project"
                 ),
                 output_format=output_format,
             )
@@ -133,6 +158,35 @@ async def bm_move(
                 target, identifier, destination_path, expected_checksum, output_format
             )
         return await _move_directory(target, destination_path, output_format)
+
+
+async def _move_across(
+    source: ProjectTarget,
+    identifier: str | None,
+    destination: str,
+    destination_project: str,
+    expected_checksum: str | None,
+    output_format: OutputFormat,
+    context: Context | None,
+) -> str | dict[str, Any]:
+    """Route the destination into its own project and move there (#1842)."""
+    async with open_project_target(
+        destination, destination_project, context, kind="path", output_format=output_format
+    ) as target:
+        destination_path = _project_relative_destination(target, destination, output_format)
+        # Trigger: destination_project names the source's own project.
+        # Outcome: an ordinary move, which keeps the note's id and history.
+        if target.project.external_id == source.project.external_id:
+            if identifier is not None:
+                return await _move_note(
+                    source, identifier, destination_path, expected_checksum, output_format
+                )
+            return await _move_directory(source, destination_path, output_format)
+        if identifier is not None:
+            return await move_note_across(
+                source, target, identifier, destination_path, expected_checksum, output_format
+            )
+        return await move_directory_across(source, target, destination_path, output_format)
 
 
 def _project_relative_destination(
