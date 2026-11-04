@@ -557,6 +557,7 @@ def mcp_server(config_manager, search_service):
 
     # Import resources to register them
     import basic_memory.mcp.resources  # noqa: F401
+    import basic_memory.mcp.resources.skills  # noqa: F401
 
     # Import prompts to register them
     import basic_memory.mcp.prompts  # noqa: F401

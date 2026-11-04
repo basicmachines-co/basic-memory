@@ -83,6 +83,7 @@ def mcp(
     import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
     import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
     import basic_memory.mcp.resources  # noqa: F401  # pragma: no cover
+    import basic_memory.mcp.resources.skills  # noqa: F401  # pragma: no cover
 
     # Initialize logging for MCP (file only, stdout breaks protocol)
     init_mcp_logging()

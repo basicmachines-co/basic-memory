@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastmcp import Client
 from fastmcp.skills import SkillsClientExtension
@@ -47,3 +49,26 @@ async def test_clients_without_the_extension_read_skills_as_resources() -> None:
 
     assert "skill://memory-notes/SKILL.md" in listed
     assert contents[0].text == expected  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_served_skills_match_the_repo_sources() -> None:
+    """The served copies are the checked-in skills, not a stale install snapshot.
+
+    An editable install copies `skills/` into the package at install time, so an
+    edit there is not served until a reinstall. This fails loudly when they differ.
+    """
+    root = distributed_skills_root()
+    repo_skills = Path(__file__).resolve().parents[2] / "skills"
+    if not repo_skills.is_dir():  # pragma: no cover
+        pytest.skip("run from an installed package, without the repository's skills/")
+
+    served = [path for path in root.rglob("*") if path.is_file()]
+    assert served
+    stale = [
+        str(path.relative_to(root))
+        for path in served
+        if path.read_bytes() != (repo_skills / path.relative_to(root)).read_bytes()
+    ]
+    assert stale == [], (
+        "installed skills differ from skills/; run `uv sync --reinstall-package basic-memory`"
+    )
