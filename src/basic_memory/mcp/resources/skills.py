@@ -10,7 +10,7 @@ The skill set is the release set: pyproject's force-include list decides what la
 in ``basic_memory/data/skills``, and tests/test_skills_dist.py pins it.
 """
 
-from importlib.metadata import distribution
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 from fastmcp.server.providers.skills import SkillsDirectoryProvider
@@ -25,9 +25,19 @@ def distributed_skills_root() -> Path:
     """Locate the skills the installed distribution ships.
 
     Both the wheel and the editable install materialize force-included files on
-    disk, so this resolves to a real directory in every supported install.
+    disk, so this resolves to a real directory in every supported install. An
+    editable install copies them at install time: edits under `skills/` show up
+    here only after a reinstall.
     """
-    root = distribution("basic-memory").locate_file(SKILLS_RESOURCE_PATH)
+    # Trigger: no package metadata (a `PYTHONPATH=src` run, a vendored copy).
+    # Why: the skills exist only as force-included files of an install.
+    # Outcome: the server fails at import with the same message as a missing directory.
+    try:
+        root = distribution("basic-memory").locate_file(SKILLS_RESOURCE_PATH)
+    except PackageNotFoundError as error:  # pragma: no cover
+        raise RuntimeError(
+            "Basic Memory skills are missing: basic-memory is not installed"
+        ) from error
     # Trigger: a zipped or partial install. Why: an empty provider would silently
     # advertise no skills. Outcome: the server fails at import instead.
     if not isinstance(root, Path) or not root.is_dir():  # pragma: no cover

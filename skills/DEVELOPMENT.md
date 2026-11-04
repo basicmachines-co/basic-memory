@@ -37,6 +37,17 @@ cp -r memory-tasks <agent-skills-dir>/
 
 Then start a new session and verify the skill is loaded (e.g., ask the agent to create a task).
 
+The MCP server also serves the shipped skills (`skill://<name>/SKILL.md`). An
+editable install copies them into the package at install time, so after editing a
+skill, reinstall before checking it over MCP:
+
+```bash
+uv sync --reinstall-package basic-memory
+```
+
+`tests/mcp/test_skill_resources.py` fails while the installed copies differ from
+`skills/`.
+
 Run the source validation before committing skill changes:
 
 ```bash
