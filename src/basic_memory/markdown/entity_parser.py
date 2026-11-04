@@ -13,6 +13,7 @@ import frontmatter
 from loguru import logger
 from markdown_it import MarkdownIt
 
+from basic_memory.file_utils import file_created_timestamp
 from basic_memory.markdown.plugins import observation_plugin, relation_plugin
 from basic_memory.markdown.path_links import markdown_link_path
 from basic_memory.markdown.schemas import (
@@ -276,7 +277,7 @@ class EntityParser:
             file_path=absolute_path,
             content=file_content,
             mtime=file_stats.st_mtime,
-            ctime=file_stats.st_ctime,
+            ctime=file_created_timestamp(file_stats),
         )
 
     async def parse_markdown_content(
