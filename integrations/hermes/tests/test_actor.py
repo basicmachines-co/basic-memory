@@ -85,6 +85,40 @@ def test_start_timeout_raises(bm):
     assert not actor._thread.is_alive()
 
 
+def test_repeat_shutdown_does_not_cancel_startup_teardown(bm):
+    """A second shutdown() during the timed-out start's teardown must not cancel it again.
+
+    stdio_client kills the `bm mcp` child in a shielded teardown that a repeated
+    native task.cancel() breaks, leaving the child orphaned (#1649). The finally
+    block below stands in for that teardown.
+    """
+    import asyncio
+    import threading
+
+    actor = bm._BmMcpActor(["fake-bm", "mcp"])
+    teardown_done = threading.Event()
+
+    async def _hang_then_slow_teardown():
+        try:
+            await asyncio.sleep(60)
+        finally:
+            await asyncio.sleep(1.0)
+            teardown_done.set()
+
+    actor._main = _hang_then_slow_teardown  # type: ignore[assignment]
+
+    def _start():
+        with pytest.raises(TimeoutError):
+            actor.start(timeout=0.2)
+
+    starter = threading.Thread(target=_start)
+    starter.start()
+    time.sleep(0.5)  # start() has cancelled the task; teardown is running
+    actor.shutdown(timeout=0.01)  # e.g. the host's shutdown hook firing now
+    starter.join(timeout=10.0)
+    assert teardown_done.is_set()
+
+
 # ---- Shutdown ----
 
 

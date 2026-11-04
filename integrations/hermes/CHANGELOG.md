@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Fixed
+- **Stop a repeat `shutdown()` from orphaning `bm mcp` after a timed-out start (#1649).** When `start()` timed out, its cancel started the stdio transport's shielded teardown, which kills the child. A second `shutdown()` landing before that teardown finished (the provider's own cleanup, or the host's shutdown hook) cancelled the actor task again, which broke the teardown and left `bm mcp` running. The actor now cancels its task at most once; later calls only wait for it.
 - **Pass the project a workspace-qualified identifier names (#2015).** Basic Memory 1.0 requires `project` on one-project tools, so the 0.3.2 behavior of omitting it made `bm_read(identifier="memory://personal/main/todo")` fail with a raw "Missing required keyword only argument" error. `bm_read`, `bm_edit`, `bm_delete`, `bm_move`, and `bm_context` now derive `workspace/project` from a workspace-qualified identifier or URL (`personal/main/...`, or an organization slug with a 32-character hash suffix) and pass it as `project`. Explicit `project_id` and `project` still win; unqualified identifiers still use the configured Hermes project.
 
 ## [0.3.2] — 2026-05-23
