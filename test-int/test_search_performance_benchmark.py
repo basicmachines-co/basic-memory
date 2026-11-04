@@ -21,6 +21,11 @@ from basic_memory.repository.sqlite_search_repository import SQLiteSearchReposit
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 
 
+# These benchmarks time and score the real embedding model. The suite's default
+# hash embedder (tests/fake_embeddings.py) has no semantic signal, so vector and
+# hybrid queries would return nothing.
+pytestmark = pytest.mark.real_embedder
+
 TOPIC_TERMS = {
     "auth": ["authentication", "session", "token", "oauth", "refresh", "login"],
     "database": ["database", "migration", "schema", "sqlite", "postgres", "index"],
