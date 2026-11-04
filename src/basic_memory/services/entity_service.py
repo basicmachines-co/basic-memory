@@ -164,8 +164,8 @@ class EntityService(BaseService[EntityModel]):
         self,
         file_path: Path,
     ) -> tuple[EntityMarkdown, str, str]:
-        """Read and parse the stored markdown after write-time formatting has finished."""
-        # Trigger: format-on-save or platform-specific text writes can change the stored markdown
+        """Read and parse the stored markdown exactly as it landed on disk."""
+        # Trigger: platform-specific text writes can change the stored markdown
         # after prepare accepted the request.
         # Why: responses, search, and relation generations must all describe the same bytes that
         #      landed on disk, not the pre-write parse paired with a later file snapshot.

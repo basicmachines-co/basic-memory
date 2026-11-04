@@ -12,7 +12,6 @@ from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import file_utils
-from basic_memory.config import BasicMemoryConfig
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE
 from basic_memory.document_ingestion.local_runtime import (
     ApiDocumentSourceEntityResolver,
@@ -311,25 +310,6 @@ async def test_writer_rejects_ignored_generated_paths_before_writing(
     assert not await file_service.exists(built.document_file_path)
     assert not await file_service.exists(built.run_file_path)
     assert knowledge.indexed == []
-
-
-@pytest.mark.asyncio
-async def test_writer_reuses_and_refreshes_a_formatted_sidecar(
-    file_service: FileService,
-    app_config: BasicMemoryConfig,
-) -> None:
-    file_service.app_config = app_config.model_copy(update={"format_on_save": True})
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
-    built = artifacts()
-    await writer.write(built)
-    persisted = await file_service.read_file_content(built.document_file_path)
-    assert persisted != built.document_markdown
-
-    reused = await writer.write(built)
-    assert reused.document_created is False
-    assert reused.run_created is False
-    refreshed = await writer.write(artifacts(checksum_char="b"))
-    assert refreshed.document_created is True
 
 
 @pytest.mark.asyncio

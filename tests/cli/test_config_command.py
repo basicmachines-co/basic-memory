@@ -59,7 +59,6 @@ def _base_config(**overrides) -> dict[str, Any]:
 def test_configurable_fields_excludes_structured_types():
     """Structured fields need dedicated commands or richer parsing, so they're excluded."""
     assert "projects" not in config_cmd.CONFIGURABLE_FIELDS
-    assert "formatters" not in config_cmd.CONFIGURABLE_FIELDS
     assert "auto_update_last_checked_at" not in config_cmd.CONFIGURABLE_FIELDS
 
 
@@ -186,10 +185,10 @@ def test_config_set_invalid_value_fails_with_pydantic_error(runner, write_config
 def test_config_set_coerces_bool_from_string(runner, write_config):
     write_config(_base_config())
 
-    result = runner.invoke(app, ["config", "set", "format_on_save", "true"])
+    result = runner.invoke(app, ["config", "set", "skip_initialization_sync", "true"])
 
     assert result.exit_code == 0, result.output
-    assert "format_on_save = True" in result.output
+    assert "skip_initialization_sync = True" in result.output
 
 
 def test_config_set_default_project_rejects_unknown_project(runner, write_config):

@@ -63,7 +63,6 @@ def test_existing_config_load_keeps_environment_precedence(
 
     monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(config_dir))
     monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
-    monkeypatch.setenv("BASIC_MEMORY_FORMATTERS", '{"md":"formatter --write {file}"}')
     monkeypatch.setattr(config_module, "_CONFIG_CACHE", None)
     monkeypatch.setattr(config_module, "_CONFIG_MTIME", None)
     monkeypatch.setattr(config_module, "_CONFIG_SIZE", None)
@@ -74,7 +73,6 @@ def test_existing_config_load_keeps_environment_precedence(
                 "projects": {"custom": {"path": str(project_dir)}},
                 "default_project": "custom",
                 "log_level": "INFO",
-                "formatters": {"md": "old-formatter {file}"},
             }
         ),
         encoding="utf-8",
@@ -83,4 +81,3 @@ def test_existing_config_load_keeps_environment_precedence(
     loaded = ConfigManager().load_config()
 
     assert loaded.log_level == "DEBUG"
-    assert loaded.formatters == {"md": "formatter --write {file}"}

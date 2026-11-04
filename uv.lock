@@ -352,9 +352,6 @@ dependencies = [
     { name = "loguru" },
     { name = "markdown-it-py" },
     { name = "mcp" },
-    { name = "mdformat" },
-    { name = "mdformat-frontmatter" },
-    { name = "mdformat-gfm" },
     { name = "openai" },
     { name = "pathspec" },
     { name = "pillow" },
@@ -383,6 +380,7 @@ dependencies = [
 [package.optional-dependencies]
 documents = [
     { name = "markitdown", extra = ["docx", "pptx"] },
+    { name = "mdit-py-plugins" },
 ]
 litellm = [
     { name = "litellm" },
@@ -406,6 +404,7 @@ dev = [
     { name = "libcst" },
     { name = "logfire", extra = ["fastapi"] },
     { name = "markitdown", extra = ["docx", "pptx"] },
+    { name = "mdit-py-plugins" },
     { name = "pdf-inspector" },
     { name = "psycopg" },
     { name = "pyright" },
@@ -444,9 +443,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = ">=3.0.0" },
     { name = "markitdown", extras = ["docx", "pptx"], marker = "extra == 'documents'", specifier = ">=0.1.7,<0.2" },
     { name = "mcp", specifier = ">=2,<3" },
-    { name = "mdformat", specifier = ">=0.7.22" },
-    { name = "mdformat-frontmatter", specifier = ">=2.0.8" },
-    { name = "mdformat-gfm", specifier = ">=0.3.7" },
+    { name = "mdit-py-plugins", marker = "extra == 'documents'", specifier = ">=0.6.1" },
     { name = "openai", specifier = ">=1.100.2" },
     { name = "pathspec", specifier = ">=1.1.1,<2" },
     { name = "pdf-inspector", marker = "extra == 'pdf'", specifier = ">=0.2.6,<2" },
@@ -485,6 +482,7 @@ dev = [
     { name = "libcst", specifier = ">=1.8.6" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=4.19.0" },
     { name = "markitdown", extras = ["docx", "pptx"], specifier = ">=0.1.7,<0.2" },
+    { name = "mdit-py-plugins", specifier = ">=0.6.1" },
     { name = "pdf-inspector", specifier = ">=0.2.6,<2" },
     { name = "psycopg", specifier = ">=3.2.0" },
     { name = "pyright", specifier = ">=1.1.408" },
@@ -2474,47 +2472,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mdformat"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/05/32b5e14b192b0a8a309f32232c580aefedd9d06017cb8fe8fce34bec654c/mdformat-1.0.0.tar.gz", hash = "sha256:4954045fcae797c29f86d4ad879e43bb151fa55dbaf74ac6eaeacf1d45bb3928", size = 56953, upload-time = "2025-10-16T12:05:03.695Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/9a/8fe71b95985ca7a4001effbcc58e5a07a1f2a2884203f74dcf48a3b08315/mdformat-1.0.0-py3-none-any.whl", hash = "sha256:bca015d65a1d063a02e885a91daee303057bc7829c2cd37b2075a50dbb65944b", size = 53288, upload-time = "2025-10-16T12:05:02.607Z" },
-]
-
-[[package]]
-name = "mdformat-frontmatter"
-version = "2.1.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "mdformat" },
-    { name = "mdit-py-plugins" },
-    { name = "ruamel-yaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/90/ae8a3d20066295367d9048ad480bcde3afe694eb592fec9c35bbdb7d68eb/mdformat_frontmatter-2.1.2.tar.gz", hash = "sha256:9c9c3159c38407f47e567202749c74ce7680017516cd158c82400f015c6a01d1", size = 9425, upload-time = "2026-05-23T05:14:26.324Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/53/a0/20b6f53593139d8b64fa8e7f750033fbb580c096c241cd551b59907e6abe/mdformat_frontmatter-2.1.2-py3-none-any.whl", hash = "sha256:bcbb1dd7e35ce4387603acd32f2c092dd4518bbfaa2a4b801a0f29a4e69bf2ca", size = 4927, upload-time = "2026-05-23T05:14:24.747Z" },
-]
-
-[[package]]
-name = "mdformat-gfm"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markdown-it-py" },
-    { name = "mdformat" },
-    { name = "mdit-py-plugins" },
-    { name = "wcwidth" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/56/6f/a626ebb142a290474401b67e2d61e73ce096bf7798ee22dfe6270f924b3f/mdformat_gfm-1.0.0.tar.gz", hash = "sha256:d1d49a409a6acb774ce7635c72d69178df7dce1dc8cdd10e19f78e8e57b72623", size = 10112, upload-time = "2025-10-16T09:12:22.402Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/18/6bc2189b744dd383cad03764f41f30352b1278d2205096f77a29c0b327ad/mdformat_gfm-1.0.0-py3-none-any.whl", hash = "sha256:7305a50efd2a140d7c83505b58e3ac5df2b09e293f9bbe72f6c7bee8c678b005", size = 10970, upload-time = "2025-10-16T09:12:21.276Z" },
-]
-
-[[package]]
 name = "mdit-py-plugins"
 version = "0.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -4387,15 +4344,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ruamel-yaml"
-version = "0.19.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c7/3b/ebda527b56beb90cb7652cb1c7e4f91f48649fbcd8d2eb2fb6e77cd3329b/ruamel_yaml-0.19.1.tar.gz", hash = "sha256:53eb66cd27849eff968ebf8f0bf61f46cdac2da1d1f3576dd4ccee9b25c31993", size = 142709, upload-time = "2026-01-02T16:50:31.84Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/0c/51f6841f1d84f404f92463fc2b1ba0da357ca1e3db6b7fbda26956c3b82a/ruamel_yaml-0.19.1-py3-none-any.whl", hash = "sha256:27592957fedf6e0b62f281e96effd28043345e0e66001f97683aa9a40c667c93", size = 118102, upload-time = "2026-01-02T16:50:29.201Z" },
-]
-
-[[package]]
 name = "ruff"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4929,15 +4877,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/56/fe/cb8ef3d6f929d14158fdaaad9925985b7310abc9384dcd4d82dd0016fb59/watchfiles-1.2.0-cp315-cp315-manylinux_2_31_riscv64.whl", hash = "sha256:cee9d5efd929efdac5f7e58f72b3376f676b64050a91c5b99a7094c5b2317488", size = 465096, upload-time = "2026-05-18T04:31:30.384Z" },
     { url = "https://files.pythonhosted.org/packages/25/91/80908e835e100527a9267147b08c0eee1fa6ab0ffec15edc04d1d44885f7/watchfiles-1.2.0-cp315-cp315-musllinux_1_1_aarch64.whl", hash = "sha256:b718bf356bbc15e559bd8ef41782b573b8ae0e3f177ab244b440568d7ea02cfb", size = 630638, upload-time = "2026-05-18T04:30:49.89Z" },
     { url = "https://files.pythonhosted.org/packages/46/4b/95ab2f256bb4af3cb2eb23b9317bda984ee6e0f11733a5c004a6c95b06e3/watchfiles-1.2.0-cp315-cp315-musllinux_1_1_x86_64.whl", hash = "sha256:922c0e019fe68b3ae392965a766b02a71ba1168c932cebc3733cd52c5fe5b377", size = 657684, upload-time = "2026-05-18T04:31:32.027Z" },
-]
-
-[[package]]
-name = "wcwidth"
-version = "0.8.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/34/74/c6428f875774288bec1396f5bfcbc2d925700a4dad61727fd5f2b12f249d/wcwidth-0.8.2.tar.gz", hash = "sha256:91fbef97204b96a3d4d421609b80340b760cf33e26da123ff243d76b1fda8dda", size = 1466253, upload-time = "2026-06-29T18:11:11.601Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/42/3e5985a0a7e57de470b320c6d6a1a67c844f6737a587f3d44dd13d1819e7/wcwidth-0.8.2-py3-none-any.whl", hash = "sha256:d63947694a0539a1d51e01eda7caf800c291020e6cdd7e28ad7b14dd33ad4f85", size = 323166, upload-time = "2026-06-29T18:11:09.888Z" },
 ]
 
 [[package]]

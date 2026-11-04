@@ -643,28 +643,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
     )
 
-    # File formatting configuration
-    format_on_save: bool = Field(
-        default=False,
-        description="Automatically format files after saving using configured formatter. Disabled by default.",
-    )
-
-    formatter_command: Optional[str] = Field(
-        default=None,
-        description="External formatter command. Use {file} as placeholder for file path. If not set, uses built-in mdformat (Python, no Node.js required). Set to 'npx prettier --write {file}' for Prettier.",
-    )
-
-    formatters: Dict[str, str] = Field(
-        default_factory=dict,
-        description="Per-extension formatters. Keys are extensions (without dot), values are commands. Example: {'md': 'prettier --write {file}', 'json': 'prettier --write {file}'}",
-    )
-
-    formatter_timeout: float = Field(
-        default=5.0,
-        description="Maximum seconds to wait for formatter to complete",
-        gt=0,
-    )
-
     # Project path constraints
     project_root: Optional[str] = Field(
         default=None,
