@@ -6,7 +6,8 @@ Runs identical query suites (lexical + paraphrase) against five configurations:
   sqlite-fastembed    SQLite + FastEmbed (384-d ONNX)
   postgres-fts        Postgres tsvector, no embeddings
   postgres-fastembed  Postgres + FastEmbed (384-d)
-  postgres-openai     Postgres + OpenAI (1536-d, needs OPENAI_API_KEY)
+  postgres-openai     Postgres + OpenAI (1536-d, paid; needs OPENAI_API_KEY and
+                      BASIC_MEMORY_RUN_OPENAI_TESTS=1)
 
 Quality is measured via hit@1, recall@5, and MRR@10.  A comparison table
 is printed at the end, and JSON-lines artifacts are written when
