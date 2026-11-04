@@ -36,6 +36,16 @@ class SearchRetrievalMode(str, Enum):
     HYBRID = "hybrid"
 
 
+class SimilarityFloor(str, Enum):
+    """Which configured similarity floor a vector query uses without min_similarity."""
+
+    # "Is this relevant at all?": semantic_min_similarity.
+    SEARCH = "search"
+    # "Might this be the same note?": the similar-note advisory's stricter floor,
+    # decided by the server for the model it embeds with.
+    SIMILAR_NOTES = "similar_notes"
+
+
 def normalize_file_path_prefix(value: Optional[str]) -> Optional[str]:
     """Reduce a directory scope to the bare project-relative spelling the index stores.
 
@@ -120,6 +130,7 @@ class SearchQuery(BaseModel):
     status: Optional[str] = None  # Convenience status filter
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
     min_similarity: Optional[float] = None  # Per-query override for semantic_min_similarity
+    similarity_floor: SimilarityFloor = SimilarityFloor.SEARCH  # Used when min_similarity is None
 
     # Authored valid-time filters. Kept as strings at the boundary so HTTP clients and
     # MCP callers can pass one flat value; the service parses them into the portable

@@ -33,7 +33,6 @@ from basic_memory.mcp.similar_notes import (
     find_similar_notes,
     format_similar_notes_section,
     probe_declined_by_server,
-    similar_notes_min_similarity,
 )
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
@@ -423,13 +422,6 @@ async def _similar_notes(
             content=content,
             exclude_file_path=written.file_path,
             exclude_permalink=written.permalink,
-            # The measured floor describes this process's embedding model, so it applies
-            # only to a local project; a routed (Cloud) project uses its server's floor.
-            min_similarity=(
-                similar_notes_min_similarity(ConfigManager().config)
-                if local_project_path(target.client, target.project) is not None
-                else None
-            ),
         )
     except ToolError as probe_error:
         # The note is already written, so a failed probe must not fail the call.

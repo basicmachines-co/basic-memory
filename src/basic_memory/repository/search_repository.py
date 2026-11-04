@@ -61,6 +61,9 @@ class SearchRepository(Protocol):
     def configured_min_similarity(self) -> float: ...
 
     @property
+    def configured_similar_notes_min_similarity(self) -> float: ...
+
+    @property
     def configured_reranker_model(self) -> str | None: ...
 
     @property

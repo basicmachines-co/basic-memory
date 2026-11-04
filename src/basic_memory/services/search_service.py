@@ -33,7 +33,12 @@ from basic_memory.repository.search_repository_base import find_entity_ids_missi
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
-from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
+from basic_memory.schemas.search import (
+    SearchItemType,
+    SearchQuery,
+    SearchRetrievalMode,
+    SimilarityFloor,
+)
 from basic_memory.runtime.vector_sync import (
     VECTOR_SYNC_SAMPLE_ERROR_LIMIT,
     VectorSyncBatchResult,
@@ -347,7 +352,21 @@ class SearchService:
 
     def prepare_query(self, query: SearchQuery) -> PreparedSearchQuery | None:
         """Normalize a SearchQuery into repository arguments."""
-        return prepare_search_query(query)
+        prepared = prepare_search_query(query)
+        # Trigger: the similar-note advisory asked for its floor and set no explicit one.
+        # Why: the floor is model-specific, and only this server knows the model that
+        #      embedded the candidates; a client deciding it sent Cloud writes the looser
+        #      search floor (#1982).
+        # Outcome: the query runs with this repository's advisory floor.
+        if (
+            prepared is not None
+            and prepared.min_similarity is None
+            and query.similarity_floor == SimilarityFloor.SIMILAR_NOTES
+        ):
+            prepared = replace(
+                prepared, min_similarity=self.repository.configured_similar_notes_min_similarity
+            )
+        return prepared
 
     @staticmethod
     def _prepared_has_filters(prepared: PreparedSearchQuery) -> bool:

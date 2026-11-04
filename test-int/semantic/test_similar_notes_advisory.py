@@ -11,9 +11,8 @@ from __future__ import annotations
 import pytest
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.config import DatabaseBackend
 from basic_memory.mcp.similar_notes import (
-    similar_notes_min_similarity,
     similar_notes_query,
 )
 
@@ -25,8 +24,6 @@ from semantic.conftest import (
 )
 
 COMBO = SearchCombo("sqlite-fastembed", DatabaseBackend.SQLITE, "fastembed", 384)
-# The default config names the model these numbers were measured on.
-MIN_SIMILARITY = similar_notes_min_similarity(BasicMemoryConfig())
 
 EXISTING_NOTES = {
     "notes/coffee-brewing": (
@@ -130,9 +127,7 @@ async def advisory_search(sqlite_engine_factory, tmp_path):
 async def test_rewrite_of_an_existing_note_is_still_suggested(
     advisory_search, title, body, original
 ):
-    results = await advisory_search.search(
-        similar_notes_query(title, _note(title, body), min_similarity=MIN_SIMILARITY), limit=4
-    )
+    results = await advisory_search.search(similar_notes_query(title, _note(title, body)), limit=4)
 
     assert results, "a rewrite of an existing note must clear the advisory floor"
     assert results[0].permalink == original
@@ -162,8 +157,6 @@ async def test_rewrite_of_an_existing_note_is_still_suggested(
     ],
 )
 async def test_note_on_an_unrelated_topic_gets_no_suggestions(advisory_search, title, body):
-    results = await advisory_search.search(
-        similar_notes_query(title, _note(title, body), min_similarity=MIN_SIMILARITY), limit=4
-    )
+    results = await advisory_search.search(similar_notes_query(title, _note(title, body)), limit=4)
 
     assert [row.permalink for row in results] == []
