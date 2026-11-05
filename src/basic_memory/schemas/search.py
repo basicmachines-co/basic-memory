@@ -109,8 +109,10 @@ class SearchQuery(BaseModel):
     """
 
     # Primary search modes (use ONE of these)
-    permalink: Optional[str] = None  # Exact permalink match
-    permalink_match: Optional[str] = None  # Glob permalink match
+    # A nonempty list matches any alternative within the same project scope.
+    # Reusing these fields makes older string-only servers reject the request.
+    permalink: str | Annotated[list[str], Field(min_length=1)] | None = None
+    permalink_match: str | Annotated[list[str], Field(min_length=1)] | None = None
     text: Optional[str] = Field(  # Full-text search (supports boolean operators)
         default=None, max_length=MAX_SEARCH_TEXT_CHARS
     )

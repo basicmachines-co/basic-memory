@@ -662,7 +662,19 @@ def compile_fts_filter(
         params["title_exact"] = query.title.strip()
         leading_order_by = "(lower(search_index.title) = lower(:title_exact)) DESC, "
 
-    if query.permalink_match:
+    if isinstance(query.permalink_match, list):
+        alternatives = []
+        for index, pattern in enumerate(query.permalink_match):
+            name = f"permalink_pattern_{index}"
+            permalink_text = pattern.lower().strip()
+            if "*" in pattern:
+                params[name] = permalink_text.replace("*", "%")
+                alternatives.append(f"search_index.permalink LIKE :{name}")
+            else:
+                params[name] = permalink_text
+                alternatives.append(f"search_index.permalink = :{name}")
+        conditions.append(f"({' OR '.join(alternatives)})")
+    elif query.permalink_match:
         permalink_text = query.permalink_match.lower().strip()
         if "*" in query.permalink_match:
             # ``*`` becomes the LIKE wildcard.
