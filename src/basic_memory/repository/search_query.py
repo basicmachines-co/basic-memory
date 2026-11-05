@@ -19,8 +19,8 @@ class PreparedSearchQuery:
     """
 
     search_text: str | None = None
-    permalink: str | None = None
-    permalink_match: str | None = None
+    permalink: str | list[str] | None = None
+    permalink_match: str | list[str] | None = None
     title: str | None = None
     note_types: list[str] | None = None
     search_item_types: list[SearchItemType] | None = None

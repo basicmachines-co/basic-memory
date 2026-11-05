@@ -283,7 +283,14 @@ def shared_filter_conditions(
     """
     conditions = [scope.predicate("search_index.project_id", params)]
 
-    if query.permalink:
+    if isinstance(query.permalink, list):
+        alternatives = []
+        for index, permalink in enumerate(query.permalink):
+            name = f"permalink_exact_{index}"
+            params[name] = permalink
+            alternatives.append(f"search_index.permalink = :{name}")
+        conditions.append(f"({' OR '.join(alternatives)})")
+    elif query.permalink:
         params["permalink"] = query.permalink
         conditions.append("search_index.permalink = :permalink")
 
