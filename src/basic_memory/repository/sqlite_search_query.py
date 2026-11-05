@@ -346,7 +346,26 @@ def compile_fts_filter(
         params["title_exact"] = query.title.strip()
         leading_order_by = "(lower(search_index.title) = lower(:title_exact)) DESC, "
 
-    if query.permalink_match:
+    if isinstance(query.permalink_match, list):
+        alternatives = []
+        for index, pattern in enumerate(query.permalink_match):
+            name = f"permalink_pattern_{index}"
+            permalink_text = pattern.lower().strip()
+            params[name] = permalink_text
+            if "*" in pattern:
+                alternatives.append(f"search_index.permalink GLOB :{name}")
+            elif "/" in permalink_text:
+                alternatives.append(f"search_index.permalink = :{name}")
+            else:
+                # MATCH cannot share an outer OR with equality/GLOB. Filter by
+                # rowid so alternatives leave the outer text/title ranking intact.
+                params[name] = prepare_search_term(permalink_text, is_prefix=False)
+                alternatives.append(
+                    "search_index.rowid IN (SELECT rowid FROM search_index "
+                    f"WHERE search_index.permalink MATCH :{name})"
+                )
+        conditions.append(f"({' OR '.join(alternatives)})")
+    elif query.permalink_match:
         # GLOB patterns keep their syntax; prepare_search_term would quote the slashes.
         permalink_text = query.permalink_match.lower().strip()
         params["permalink"] = permalink_text

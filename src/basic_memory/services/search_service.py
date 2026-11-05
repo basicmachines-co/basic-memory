@@ -2,6 +2,7 @@
 
 import asyncio
 import ast
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -138,7 +139,9 @@ def describe_search_criteria(prepared: PreparedSearchQuery) -> str:
     request would misreport what ran.
     """
 
-    def quoted(value: str | None) -> str | None:
+    def quoted(value: str | list[str] | None) -> str | None:
+        if isinstance(value, list):
+            return json.dumps(value, ensure_ascii=False)
         return f'"{value}"' if value else None
 
     criteria: dict[str, object | None] = {

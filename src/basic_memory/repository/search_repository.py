@@ -99,8 +99,8 @@ class SearchRepository(Protocol):
     async def search(
         self,
         search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
+        permalink: str | list[str] | None = None,
+        permalink_match: str | list[str] | None = None,
         title: Optional[str] = None,
         note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,

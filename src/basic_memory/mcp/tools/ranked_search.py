@@ -462,22 +462,25 @@ async def bm_search(
                     prefix, remainder = claimed
                     query = f"{prefix}/{remainder}" if remainder else prefix
             search_mode = "permalink"
-        # Trigger: a permalink search ('core/*' or an exact permalink).
-        # Why: permalinks are stored in index form, with the project prefix when
-        #      permalinks_include_project is on (and the workspace form in Cloud), and
-        #      a project-relative pattern matches none of them.
-        # Outcome: the permalink is put into index form before it is matched.
+        # Trigger: an exact or glob permalink search without a recognized URL qualifier.
+        # Why: generated permalinks include the project prefix, but explicit frontmatter
+        #      can retain a bare or foreign-prefixed value.
+        # Outcome: match literal and canonical forms in one scoped, paginated query.
+        permalink_alternatives: list[str] | None = None
         if (
             search_mode == "permalink"
             and query is not None
             and not (memory_query and target.route.stripped)
         ):
+            literal_query = query.strip()
             query = canonical_memory_path_for_active_route(
                 target.project,
-                query,
+                literal_query,
                 include_project=include_project,
                 cached_workspace=await get_cached_active_workspace(context),
             )
+            if literal_query and literal_query != query:
+                permalink_alternatives = [literal_query, query]
 
         search_query = _build_search_query(
             query=query,
@@ -497,6 +500,12 @@ async def bm_search(
         )
         if search_query is None:
             raise _nothing_to_search(output_format)
+
+        if permalink_alternatives is not None:
+            if search_query.permalink_match is not None:
+                search_query.permalink_match = permalink_alternatives
+            else:
+                search_query.permalink = permalink_alternatives
 
         response = await SearchClient(target.client, target.project.external_id).search(
             search_query.model_dump(), page=page, page_size=page_size
