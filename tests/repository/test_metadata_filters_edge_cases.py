@@ -468,6 +468,31 @@ async def test_filter_between_inclusive_boundaries(search_repository, session_ma
 
 
 @pytest.mark.asyncio
+async def test_numeric_filter_skips_values_that_are_not_numbers(search_repository, session_maker):
+    """A numeric bound drops notes whose value is not a number, on both backends.
+
+    Postgres used to cast every value and fail the whole query on `version: v13`;
+    SQLite cast it to 0.0, so it matched `$lt 5`.
+    """
+    for title, version in [
+        ("Version One", 1),
+        ("Version Two As Text", "2"),
+        ("Version Letter", "v13"),
+        ("Version Dotted", "1.2.3"),
+        ("Version Empty", ""),
+    ]:
+        await _index_entity_with_metadata(
+            search_repository, session_maker, title, {"version": version}
+        )
+
+    between = await search_repository.search(metadata_filters={"version": {"$between": [1, 1]}})
+    assert [r.title for r in between] == ["Version One"]
+
+    below = await search_repository.search(metadata_filters={"version": {"$lt": 5}})
+    assert sorted(r.title for r in below) == ["Version One", "Version Two As Text"]
+
+
+@pytest.mark.asyncio
 async def test_range_with_two_operators_on_one_key(search_repository, session_maker):
     """{"$gte": a, "$lt": b} ANDs both bounds on both backends."""
     for title, started in [

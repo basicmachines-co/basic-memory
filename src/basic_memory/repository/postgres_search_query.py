@@ -49,6 +49,10 @@ _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
+# A frontmatter value written as a number: the literals SQLite's numeric affinity
+# accepts, so a numeric metadata filter admits the same notes on both backends.
+# Interpolated into SQL, so it must stay free of quotes and colons.
+NUMERIC_TEXT_PATTERN = r"^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$"
 
 
 def _result_columns(text_columns: str) -> str:
@@ -742,8 +746,17 @@ def compile_fts_filter(
                 continue
 
             if filt.op in {"gt", "gte", "lt", "lte", "between"}:
+                # Trigger: a numeric bound against a value that is not a number
+                #          (frontmatter `version: v13` under `$between [1, 2]`).
+                # Why: a bare ::double precision cast raises on the first such note
+                #      and fails the whole query.
+                # Outcome: only values written as a number are cast; anything else
+                #          compares as NULL and drops out, as on SQLite.
                 compare_expr = (
-                    f"{text_expr}::double precision" if filt.comparison == "numeric" else text_expr
+                    f"CASE WHEN {text_expr} ~ '{NUMERIC_TEXT_PATTERN}' "
+                    f"THEN ({text_expr})::double precision END"
+                    if filt.comparison == "numeric"
+                    else text_expr
                 )
                 if filt.op == "between":
                     min_param = f"meta_val_{idx}_min"
