@@ -336,7 +336,6 @@ async def test_search_categories_filter(search_service, test_graph):
     assert note_ids.isdisjoint(tech_ids)
 
     # count() must agree with the filtered search via the same prepared query.
-    assert await search_service.count(SearchQuery(categories=["note"])) == len(note_results)
 
 
 @pytest.mark.asyncio
@@ -372,7 +371,6 @@ async def test_search_by_file_path_prefix_alone_runs_a_scoped_query(search_servi
     assert len(scoped) > 0
     assert all(row.file_path.startswith("test/") for row in scoped)
     assert elsewhere == []
-    assert await search_service.count(SearchQuery(file_path_prefix="test")) == len(scoped)
 
 
 @pytest.mark.asyncio
@@ -673,29 +671,6 @@ async def test_plain_cjk_multiterm_fts_enables_repository_relaxed_fallback(
     )
 
     assert len(results) == 1
-    assert len(calls) == 1
-    assert calls[0]["search_text"] == "季度 报告"
-    assert calls[0]["allow_relaxed"] is True
-
-
-@pytest.mark.asyncio
-async def test_plain_cjk_multiterm_count_enables_repository_relaxed_fallback(
-    search_service, monkeypatch
-):
-    """Count should use the same backend relaxed fallback as search."""
-    calls: list[dict[str, Any]] = []
-
-    async def fake_count(**kwargs):
-        calls.append(kwargs)
-        return 1 if kwargs.get("allow_relaxed") else 0
-
-    monkeypatch.setattr(search_service.repository, "count", fake_count)
-
-    total = await search_service.count(
-        SearchQuery(text="季度 报告", retrieval_mode=SearchRetrievalMode.FTS)
-    )
-
-    assert total == 1
     assert len(calls) == 1
     assert calls[0]["search_text"] == "季度 报告"
     assert calls[0]["allow_relaxed"] is True

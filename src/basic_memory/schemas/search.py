@@ -58,8 +58,8 @@ def normalize_file_path_prefix(value: Optional[str]) -> Optional[str]:
 
     Everything else survives byte for byte, whitespace included. A directory
     really can be named " specs ", and stripping would answer for "specs/"
-    instead: a different subtree, reported under the same exact total as the
-    right one. The preserved spelling gives the honest empty result.
+    instead: a different subtree, returned as if it were the right one. The
+    preserved spelling gives the honest empty result.
 
     A spelling carrying no path at all — "", "/", "./", "   ", "  /  " — names
     the project root, i.e. no subtree scope, and must collapse to None. "/" in

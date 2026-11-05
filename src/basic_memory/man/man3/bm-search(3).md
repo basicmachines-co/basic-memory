@@ -98,7 +98,8 @@ bm_search(query="launch", mode="text", all_projects=True)
 
 bm_search(query="release", mode="text", page_size=1, output_format="json", project="demo")
 # → {"results": [{"title": "release-checklist", "file_path": "plans/release-checklist.md",
-#    ...}], "current_page": 1, "page_size": 1, "total": 2, "has_more": true}
+#    ...}], "current_page": 1, "page_size": 1, "total": 1, "total_is_exact": false,
+#    "has_more": true}
 ```
 
 ## GOTCHAS
@@ -106,6 +107,8 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
 - `max_matches` bounds matching lines; without `lines` or `identifier` it is
   refused.
 - A search across projects reaches at most result 1000 (`page * page_size`).
+- `total` is a lower bound, not a count of every match (`total_is_exact` is
+  false): it counts the results through the current page. Page with `has_more`.
 - `hybrid` mode also returns notes that are only near in meaning. With `lines`,
   candidates without a matching line are omitted in every mode. Searching one
   note with `identifier` explicitly says when no lines match.

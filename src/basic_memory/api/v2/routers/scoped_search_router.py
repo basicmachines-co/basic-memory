@@ -7,8 +7,6 @@ that project's own route does, and several projects are one ranking over the uni
 rather than per-project pages merged afterwards.
 """
 
-import asyncio
-
 import logfire
 from fastapi import APIRouter, Query, Response
 
@@ -26,7 +24,6 @@ from basic_memory.schemas.search import (
     MAX_SCOPED_SEARCH_PAGE_SIZE,
     ScopedSearchQuery,
     SearchResponse,
-    SearchRetrievalMode,
 )
 from basic_memory.services.scoped_search_service import ScopedSearchService
 
@@ -65,7 +62,6 @@ async def search_scope(
         session_maker, scope, create_search_reader(session_maker, scope, app_config)
     )
     temporal_requested = query.has_temporal_filter()
-    exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
     offset = (page - 1) * page_size
 
     with logfire.span(
@@ -80,22 +76,15 @@ async def search_scope(
         has_temporal_filter=temporal_requested,
     ):
         with search_error_boundary():
-            if exact_count_available:
-                results, total = await asyncio.gather(
-                    service.search(query, limit=page_size, offset=offset),
-                    service.count(query),
-                )
-                has_more = offset + len(results) < total
-            else:
-                # Trigger: semantic modes would need another vector or hybrid pass to count.
-                # Why: a search should not pay for a second semantic retrieval.
-                # Outcome: probe one row past the page and report a lower bound, marked
-                #   inexact: rows at this offset prove offset + len(results) exist; an
-                #   empty page proves nothing about the offset it skipped, so it reports 0.
-                results = await service.search(query, limit=page_size + 1, offset=offset)
-                has_more = len(results) > page_size
-                results = results[:page_size]
-                total = offset + len(results) if results else 0
+            # Why no exact count: a COUNT(*) over every match cost as much as the search
+            #   on large scopes, and semantic modes would need a second retrieval to count.
+            # Outcome: probe one row past the page and report a lower bound, marked
+            #   inexact: rows at this offset prove offset + len(results) exist; an
+            #   empty page proves nothing about the offset it skipped, so it reports 0.
+            results = await service.search(query, limit=page_size + 1, offset=offset)
+            has_more = len(results) > page_size
+            results = results[:page_size]
+            total = offset + len(results) if results else 0
 
         temporal_by_source = {}
         project_external_ids: dict[int, str] = {}
@@ -115,7 +104,7 @@ async def search_scope(
             current_page=page,
             page_size=page_size,
             total=total,
-            total_is_exact=exact_count_available,
+            total_is_exact=False,
             has_more=has_more,
             # None, not False, when nothing was asked: an ordinary search payload stays
             # exactly what it was before valid time existed.

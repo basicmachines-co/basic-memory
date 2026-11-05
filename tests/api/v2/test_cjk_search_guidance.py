@@ -40,7 +40,7 @@ async def test_unspaced_compound_miss_has_actionable_hint(
     payload = response.json()
     assert payload["results"] == []
     assert payload["total"] == 0
-    assert payload["total_is_exact"] is True
+    assert payload["total_is_exact"] is False
     assert payload["has_more"] is False
     assert "shorter word" in payload["query_hint"]
     assert "spaces" in payload["query_hint"]

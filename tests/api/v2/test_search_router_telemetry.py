@@ -24,9 +24,6 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         async def search(self, query, *, limit, offset):
             return []
 
-        async def count(self, query):
-            return 0
-
     @contextmanager
     def fake_span(name: str, **attrs):
         operations.append((name, attrs))

@@ -446,30 +446,6 @@ class SearchService:
             trace=trace,
         )
 
-    async def _count_repository(
-        self,
-        prepared: PreparedSearchQuery,
-        *,
-        search_text: str | None,
-        allow_relaxed: bool = False,
-    ) -> int:
-        return await self.repository.count(
-            search_text=search_text,
-            permalink=prepared.permalink,
-            permalink_match=prepared.permalink_match,
-            title=prepared.title,
-            note_types=prepared.note_types,
-            search_item_types=prepared.search_item_types,
-            categories=prepared.categories,
-            after_date=prepared.after_date,
-            metadata_filters=prepared.metadata_filters,
-            file_path_prefix=prepared.file_path_prefix,
-            temporal=prepared.temporal,
-            retrieval_mode=prepared.retrieval_mode,
-            min_similarity=prepared.min_similarity,
-            allow_relaxed=allow_relaxed,
-        )
-
     async def search(
         self,
         query: SearchQuery,
@@ -531,34 +507,6 @@ class SearchService:
             )
 
         return results
-
-    async def count(self, query: SearchQuery) -> int:
-        """Count all indexed rows matching a query."""
-        prepared = self.prepare_query(query)
-        if prepared is None:
-            return 0
-        prepared = await self._include_legacy_note_type_spellings(prepared)
-
-        strict_search_text = prepared.search_text
-        has_query = bool(
-            strict_search_text or prepared.title or prepared.permalink or prepared.permalink_match
-        )
-        has_filters = self._prepared_has_filters(prepared)
-
-        with logfire.span(
-            "search.count",
-            retrieval_mode=prepared.retrieval_mode.value,
-            has_query=has_query,
-            has_filters=has_filters,
-        ):
-            allow_relaxed = self._is_relaxed_fts_fallback_eligible(
-                query, strict_search_text, prepared.retrieval_mode
-            )
-            return await self._count_repository(
-                prepared,
-                search_text=strict_search_text,
-                allow_relaxed=allow_relaxed,
-            )
 
     @classmethod
     def _is_relaxed_fts_fallback_eligible(

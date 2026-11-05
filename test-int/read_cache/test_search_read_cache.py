@@ -32,17 +32,11 @@ class CountingSearchService:
 
     def __init__(self) -> None:
         self.search_calls = 0
-        self.count_calls = 0
 
     async def search(self, query: Any, *, limit: int, offset: int) -> list[Any]:
         del query, limit, offset
         self.search_calls += 1
         return []
-
-    async def count(self, query: Any) -> int:
-        del query
-        self.count_calls += 1
-        return 0
 
 
 class PartiallyFailingVectorSync:
@@ -96,7 +90,6 @@ async def test_equivalent_query_bodies_share_one_real_redis_entry(
     assert reordered.headers["Accept-Query"] == "application/json"
     assert reordered.json() == first.json()
     assert search_service.search_calls == 1
-    assert search_service.count_calls == 1
 
     search_keys = [
         key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:search:*")
@@ -118,7 +111,6 @@ async def test_equivalent_query_bodies_share_one_real_redis_entry(
 
     assert refreshed.headers["x-redis-cache"] == "MISS"
     assert search_service.search_calls == 2
-    assert search_service.count_calls == 2
 
 
 @pytest.mark.asyncio
@@ -149,7 +141,6 @@ async def test_search_pagination_uses_distinct_real_redis_entries(
     assert first_page.status_code == 200
     assert second_page.status_code == 200
     assert search_service.search_calls == 2
-    assert search_service.count_calls == 2
     search_keys = [
         key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:search:*")
     ]
