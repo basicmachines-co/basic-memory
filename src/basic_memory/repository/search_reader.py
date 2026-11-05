@@ -1650,9 +1650,3 @@ class SearchReader:
                 return await self._semantic().hybrid(query, limit=limit, offset=offset, trace=trace)
             case _:  # pragma: no cover
                 assert_never(query.retrieval_mode)
-
-    async def count(self, query: PreparedSearchQuery, *, allow_relaxed: bool = False) -> int:
-        """Count full-text matches with the same filters as ``search``."""
-        if query.retrieval_mode != SearchRetrievalMode.FTS:
-            raise ValueError("Exact counts are only supported for full-text search retrieval.")
-        return await self.fts.count(self.scope, query, allow_relaxed=allow_relaxed)

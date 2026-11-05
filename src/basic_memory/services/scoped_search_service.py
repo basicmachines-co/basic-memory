@@ -68,19 +68,6 @@ class ScopedSearchService:
             prepared, limit=limit, offset=offset, allow_relaxed=allow_relaxed
         )
 
-    async def count(self, query: SearchQuery) -> int:
-        """Exact full-text match count over every project in scope."""
-        prepared = prepare_search_query(query)
-        if prepared is None:
-            return 0
-        prepared = await include_legacy_note_type_spellings(
-            self.session_maker, self.scope, prepared
-        )
-        allow_relaxed = relaxed_fts_fallback_eligible(
-            query, prepared.search_text, prepared.retrieval_mode
-        )
-        return await self.reader.count(prepared, allow_relaxed=allow_relaxed)
-
     # --- Hydration, bounded by the scope ---
 
     async def get_entities_by_id(self, ids: Sequence[int]) -> Sequence[Entity]:

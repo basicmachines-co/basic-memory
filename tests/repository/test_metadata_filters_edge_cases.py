@@ -107,7 +107,6 @@ async def test_null_filter_matches_a_missing_key_and_an_explicit_null(
     results = await search_repository.search(metadata_filters={"owner": None})
 
     assert {r.id for r in results} == {missing.id, explicit.id}
-    assert await search_repository.count(metadata_filters={"owner": None}) == 2
 
 
 @pytest.mark.asyncio
@@ -139,10 +138,8 @@ async def test_metadata_filters_never_match_a_non_markdown_file(search_repositor
 
     assert {r.id for r in results} == {unowned_note.id}
     # The total is what paginates, so it has to exclude the PDF too.
-    assert await search_repository.count(metadata_filters={"owner": None}) == 1
     # Stored file-format metadata is not frontmatter and never matches a filter.
     assert await search_repository.search(metadata_filters={"format": "pdf"}) == []
-    assert await search_repository.count(metadata_filters={"format": "pdf"}) == 0
 
 
 @pytest.mark.asyncio
@@ -357,7 +354,6 @@ async def test_contains_filter_treats_like_metacharacters_literally(
 
     assert {r.id for r in results} == {literal.id}
     # The total is what paginates, so the lookalike must be out of it too.
-    assert await search_repository.count(metadata_filters={"tags": [literal_tag]}) == 1
 
 
 @pytest.mark.asyncio

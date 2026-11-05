@@ -269,12 +269,8 @@ async def test_one_reader_answers_the_whole_scope(
         if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "DROP"))
     ]
     assert mutations == []
-    if mode == SearchRetrievalMode.FTS:
-        assert await service.count(query) == scope_size * 3
-    else:
+    if mode != SearchRetrievalMode.FTS:
         assert all(row.matched_chunk_text for row in rows)
-        with pytest.raises(ValueError, match="Exact counts"):
-            await service.count(query)
 
 
 @pytest.mark.asyncio
@@ -426,7 +422,7 @@ async def test_filters_narrow_the_scope_and_results_carry_project_identity(
     assert row["external_id"] == corpus.entities[0].external_id
     assert row["observation_id"] == OBSERVATION_IDS[0]
     assert row["entity"] == "notes/shared"
-    assert data["total_is_exact"] == (mode == SearchRetrievalMode.FTS)
+    assert data["total_is_exact"] is False
     # One result either way: counted exactly for FTS, a lower bound for semantic modes.
     assert data["total"] == 1
     assert not data["has_more"]
@@ -588,8 +584,6 @@ async def test_relaxation_keeps_strict_matches_on_deep_pages(
     assert len(first.json()["results"]) == 2
     assert later.status_code == 200, later.text
     assert later.json()["results"] == []
-    if mode == "fts":
-        assert later.json()["total"] == 2
 
 
 @pytest.mark.asyncio

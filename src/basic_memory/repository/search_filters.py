@@ -106,14 +106,6 @@ class FtsBackend(Protocol):
         """
         ...
 
-    async def count(
-        self,
-        scope: ProjectScope,
-        query: PreparedSearchQuery,
-        *,
-        allow_relaxed: bool = False,
-    ) -> int: ...
-
     async def row_filter(
         self, scope: ProjectScope, query: PreparedSearchQuery
     ) -> tuple[str, dict[str, Any]]:
@@ -149,8 +141,8 @@ def file_path_prefix_condition(
     """Build the SQL scoping search rows to one directory subtree of the project.
 
     One implementation, shared verbatim by both backends: a subtree scope that
-    means different things on SQLite and Postgres would report an exact total
-    for a match set the other dialect never produces.
+    means different things on SQLite and Postgres would return a match set the
+    other dialect never produces.
 
     Boundary: the compared prefix carries its trailing separator, so "specs"
     admits "specs/api.md" and never "specs-archive/api.md".

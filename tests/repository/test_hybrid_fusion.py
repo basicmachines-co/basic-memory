@@ -101,15 +101,6 @@ class FakeFts:
         )
         return cast(list[SearchIndexRow], list(self.answer(limit)))
 
-    async def count(
-        self,
-        scope: ProjectScope,
-        query: PreparedSearchQuery,
-        *,
-        allow_relaxed: bool = False,
-    ) -> int:
-        return len(self.answer(0))
-
     async def row_filter(
         self, scope: ProjectScope, query: PreparedSearchQuery
     ) -> tuple[str, dict[str, Any]]:
