@@ -540,6 +540,55 @@ class SearchRepositoryBase(ABC):
                     )
             await session.commit()
 
+    async def read_entity_checksums(self, entity_ids: Iterable[int]) -> dict[int, str | None]:
+        """Read each listed entity's current checksum; deleted entities are absent."""
+        ordered_ids = sorted(set(entity_ids))
+        checksums: dict[int, str | None] = {}
+        if not ordered_ids:
+            return checksums
+        async with db.scoped_session(self.session_maker) as session:
+            # Chunked for the same bind-parameter cap as the deferral markers above.
+            for start in range(0, len(ordered_ids), VECTOR_HYDRATION_BATCH_SIZE):
+                chunk = ordered_ids[start : start + VECTOR_HYDRATION_BATCH_SIZE]
+                placeholders = ", ".join(f":entity_id_{index}" for index in range(len(chunk)))
+                params: dict[str, object] = {"project_id": self.project_id}
+                params.update(
+                    {f"entity_id_{index}": entity_id for index, entity_id in enumerate(chunk)}
+                )
+                result = await session.execute(
+                    text(
+                        "SELECT id, checksum FROM entity "
+                        f"WHERE project_id = :project_id AND id IN ({placeholders})"
+                    ),
+                    params,
+                )
+                checksums.update({int(row[0]): row[1] for row in result.all()})
+        return checksums
+
+    async def record_entity_embedded_checksums(self, checksums: Mapping[int, str | None]) -> None:
+        """Stamp the checksum each listed entity's embeddings now reflect.
+
+        The caller passes the checksum it read *before* the pass read the note's
+        search rows. A write that lands during the pass then leaves the stamp behind
+        the new checksum, so the note reads as not current until the next pass embeds
+        it -- the safe direction. Stamping `checksum` as it is at the end of the pass
+        would mark content the pass never saw as embedded.
+        """
+        if not checksums:
+            return
+        async with db.scoped_session(self.session_maker) as session:
+            # One executemany: a single bind set per row, so no parameter cap applies.
+            await session.execute(
+                text(
+                    "UPDATE entity SET embedded_checksum = :checksum "
+                    "WHERE project_id = :project_id AND id = :entity_id"
+                ),
+                [
+                    {"project_id": self.project_id, "entity_id": entity_id, "checksum": checksum}
+                    for entity_id, checksum in sorted(checksums.items())
+                ],
+            )
+
     async def _write_embeddings(
         self,
         session: AsyncSession,
@@ -1690,6 +1739,9 @@ class SearchRepositoryBase(ABC):
         doubles that have none.
         """
         pass_started_at = datetime.now(timezone.utc)
+        # Read before the pass reads any search rows, so a completed entity is stamped
+        # with a checksum no newer than the content it embedded.
+        checksums_at_start = await self.read_entity_checksums(entity_ids)
         try:
             result = await semantic_vector_sync.sync_entity_vectors_internal(
                 self,
@@ -1725,6 +1777,13 @@ class SearchRepositoryBase(ABC):
             unfinished_entity_ids=set(result.deferred_entity_ids) | set(result.failed_entity_ids),
             completed_entity_ids=set(result.synced_entity_ids),
             pass_started_at=pass_started_at,
+        )
+        await self.record_entity_embedded_checksums(
+            {
+                entity_id: checksums_at_start[entity_id]
+                for entity_id in result.synced_entity_ids
+                if entity_id in checksums_at_start
+            }
         )
         return result
 

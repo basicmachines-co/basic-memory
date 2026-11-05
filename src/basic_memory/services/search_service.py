@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import batched
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, List, Optional, Set, Dict
 
 from dateparser import parse
@@ -813,6 +813,7 @@ class SearchService:
 
         if not entity_embeddings_enabled(entity):
             await self._clear_entity_vectors(entity_id)
+            await self._settle_opted_out_entities({entity.id: entity.checksum})
             # Opted-out entities count as skipped, matching the batch path.
             return VectorSyncBatchResult(
                 entities_total=1, entities_synced=0, entities_failed=0, entities_skipped=1
@@ -863,6 +864,9 @@ class SearchService:
         if opted_out_ids:
             await asyncio.gather(
                 *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
+            )
+            await self._settle_opted_out_entities(
+                {entity_id: entities_by_id[entity_id].checksum for entity_id in opted_out_ids}
             )
 
         eligible_entity_ids = [
@@ -1072,6 +1076,21 @@ class SearchService:
         logger.info(
             "Purged stale search rows", project_id=self.repository.project_id, purged=purged
         )
+
+    async def _settle_opted_out_entities(self, checksums: dict[int, str | None]) -> None:
+        """Record that opted-out notes owe no embeddings.
+
+        An opted-out note's content is as current as semantic search will ever make it,
+        so it is stamped embedded at its checksum. Opt-out bypasses the repository sync
+        boundary that clears deferral markers, so the marker a failed or sharded pass left
+        is cleared here too; otherwise it would pin the search freshness forever.
+        """
+        await self.repository.record_entity_vector_deferrals(
+            unfinished_entity_ids=set(),
+            completed_entity_ids=set(checksums),
+            pass_started_at=datetime.now(timezone.utc),
+        )
+        await self.repository.record_entity_embedded_checksums(checksums)
 
     async def _clear_entity_vectors(self, entity_id: int) -> None:
         """Delete derived vector rows for one entity."""

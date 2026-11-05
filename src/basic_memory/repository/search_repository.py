@@ -6,7 +6,7 @@ The actual repository implementations are backend-specific:
 - PostgresSearchRepository: Uses tsvector/tsquery with GIN indexes
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Callable, List, Optional, Protocol
 
@@ -86,6 +86,10 @@ class SearchRepository(Protocol):
         pass_started_at: datetime,
     ) -> None:
         """Record which entities a vector sync pass left unfinished."""
+        ...
+
+    async def record_entity_embedded_checksums(self, checksums: Mapping[int, str | None]) -> None:
+        """Stamp the checksum each listed entity's embeddings now reflect."""
         ...
 
     async def semantic_effectively_enabled(self) -> bool:

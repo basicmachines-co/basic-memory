@@ -16,6 +16,7 @@ from rich.console import Console
 
 from basic_memory.config import ConfigManager
 from basic_memory.cli.markup import literal
+from basic_memory.user_agent import BASIC_MEMORY_USER_AGENT
 
 console = Console()
 
@@ -50,7 +51,7 @@ class CLIAuth:
             async with self._http_client_factory() as client:
                 yield client
         else:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(headers={"User-Agent": BASIC_MEMORY_USER_AGENT}) as client:
                 yield client
 
     def generate_pkce_pair(self) -> tuple[str, str]:

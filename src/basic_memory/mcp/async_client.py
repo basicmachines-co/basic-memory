@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 import logfire
+from basic_memory.user_agent import BASIC_MEMORY_USER_AGENT
 from basic_memory.config import (
     BasicMemoryConfig,
     ConfigManager,
@@ -349,7 +350,7 @@ async def _cloud_client(
 
     token = await _resolve_cloud_token(config)
     proxy_base_url = f"{config.cloud_host}/proxy"
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": BASIC_MEMORY_USER_AGENT}
     headers.update(workspace_permalink_headers())
     if workspace:
         headers["X-Workspace-ID"] = workspace
@@ -370,7 +371,7 @@ async def get_cloud_control_plane_client(
     config = ConfigManager().config
     timeout = _build_timeout()
     token = await _resolve_cloud_token(config)
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": BASIC_MEMORY_USER_AGENT}
     if workspace:
         headers["X-Workspace-ID"] = workspace
     logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")

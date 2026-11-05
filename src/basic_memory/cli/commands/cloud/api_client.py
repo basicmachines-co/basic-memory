@@ -11,6 +11,7 @@ from rich.console import Console
 
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ConfigManager
+from basic_memory.user_agent import BASIC_MEMORY_USER_AGENT
 
 console = Console()
 
@@ -75,7 +76,9 @@ async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, st
 
 @asynccontextmanager
 async def _default_http_client(timeout: float) -> AsyncIterator[httpx.AsyncClient]:
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout, headers={"User-Agent": BASIC_MEMORY_USER_AGENT}
+    ) as client:
         yield client
 
 

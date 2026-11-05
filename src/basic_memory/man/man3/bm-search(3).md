@@ -113,6 +113,10 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
   a next-page call; follow it to check the remaining candidates.
 - Line results report `total_is_exact: false`; `total` counts ranked candidates,
   so page with `has_more` instead of using it as a result count.
+- Embeddings can lag a note's text. When some notes are not embedded yet, the
+  response carries `semantic_index_current_as_of` and the text output says
+  "Semantic results current as of ...". Notes changed after that time are found
+  by `mode="text"` but may be missing from semantic and hybrid matches.
 
 ## AUTHORED VALID TIME
 

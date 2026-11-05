@@ -29,6 +29,18 @@ from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.utils import file_path_conflict_keys, generate_permalink
 
 
+# A markdown entity whose semantic embeddings do not reflect its current content: never
+# embedded at this checksum, or a pass left part of it unembedded. Shared verbatim by the
+# partial index below and by the search-freshness query, because both engines use a
+# partial index only when the query repeats the index's predicate.
+ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE = (
+    "content_type = 'text/markdown' AND ("
+    "embedded_checksum IS NULL "
+    "OR embedded_checksum <> checksum "
+    "OR vector_sync_deferred_at IS NOT NULL)"
+)
+
+
 def file_path_conflict_columns(file_path: str) -> dict[str, str]:
     """Return the derived entity columns that index ``file_path`` for conflict checks.
 
@@ -76,6 +88,15 @@ class Entity(Base):
         # File path conflict checks look up one project's rows by either conflict key.
         Index("ix_entity_project_file_path_key", "project_id", "file_path_key"),
         Index("ix_entity_project_file_path_permalink", "project_id", "file_path_permalink"),
+        # Search reports the oldest note whose embeddings are behind. Only those notes are
+        # in this index, so the lookup reads a handful of rows however large the project.
+        Index(
+            "ix_entity_project_embedding_not_current",
+            "project_id",
+            "updated_at",
+            sqlite_where=text(ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE),
+            postgresql_where=text(ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE),
+        ),
     )
 
     # Core identity
@@ -123,6 +144,12 @@ class Entity(Base):
     vector_sync_deferred_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # The entity checksum whose embeddings a vector-sync pass finished, or which owes no
+    # embeddings (opted out). It differs from `checksum` once the note changes and stays
+    # behind until a pass embeds the new content, which is how search can say how current
+    # semantic results are. Written only by vector sync, with the checksum read before
+    # that pass read the note's search rows.
+    embedded_checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
 
     # Metadata and tracking
     created_at: Mapped[datetime] = mapped_column(
