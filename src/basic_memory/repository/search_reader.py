@@ -9,6 +9,7 @@ reader the matching capability set; a route reading several projects at once bui
 one directly over a wider scope.
 """
 
+import asyncio
 import time
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
@@ -1395,43 +1396,53 @@ class SemanticSearch:
         rerank = self._active_rerank(query_text)
         query_start = time.perf_counter()
         candidate_limit = self._candidate_limit(limit, offset, query_text)
-        fts_start = time.perf_counter()
-        # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
-        # branch silently degrades hybrid to vector-only ranking. Fusion plus
-        # bm25 keep relaxed lexical candidates from dominating precision.
-        with logfire.span("search.fts", candidate_limit=candidate_limit) as fts_span:
-            fts_results = await self.fts.search(
-                self.scope,
-                replace(query, retrieval_mode=SearchRetrievalMode.FTS),
-                limit=candidate_limit,
-                offset=0,
-                allow_relaxed=True,
-                trace=trace,
-                # Fusion reads scores; the returned rows' text is fetched afterwards.
-                with_text=False,
-            )
-            fts_span.set_attribute("result_count", len(fts_results))
-        fts_ms = (time.perf_counter() - fts_start) * 1000
-        vector_start = time.perf_counter()
-        # Trigger: reranking owns a bounded candidate window shared by both legs.
-        # Why: the disabled path historically expands the vector leg again to
-        # preserve recall when many vector chunks collapse into a few search rows.
-        # Outcome: avoid double expansion only when reranking is actually active.
-        vector_candidate_limit = (
-            candidate_limit
-            if rerank is not None
-            else self._candidate_limit(candidate_limit, 0, query_text)
-        )
-        window = await self._vector_window(
-            query,
-            vector_candidate_limit,
-            self._row_target(limit, offset, query_text),
-            trace=trace,
-        )
+        row_target = self._row_target(limit, offset, query_text)
+
+        async def fts_leg() -> tuple[list[SearchIndexRow], float]:
+            started = time.perf_counter()
+            # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
+            # branch silently degrades hybrid to vector-only ranking. Fusion plus
+            # bm25 keep relaxed lexical candidates from dominating precision.
+            with logfire.span("search.fts", candidate_limit=candidate_limit) as fts_span:
+                rows = await self.fts.search(
+                    self.scope,
+                    replace(query, retrieval_mode=SearchRetrievalMode.FTS),
+                    limit=candidate_limit,
+                    offset=0,
+                    allow_relaxed=True,
+                    trace=trace,
+                    # Fusion reads scores; the returned rows' text is fetched afterwards.
+                    with_text=False,
+                )
+                fts_span.set_attribute("result_count", len(rows))
+            return rows, (time.perf_counter() - started) * 1000
+
+        async def vector_leg() -> tuple[CandidateWindow, float]:
+            started = time.perf_counter()
+            # Both legs read candidate_limit: the chunk window already carries the
+            # fan-out for chunks that collapse into one row (see _candidate_limit).
+            # Expanding it a second time read 10x the chunks, 1,000 for a default
+            # 10-row page, and the vector query dominated hybrid latency.
+            leg_window = await self._vector_window(query, candidate_limit, row_target, trace=trace)
+            return leg_window, (time.perf_counter() - started) * 1000
+
+        # Trigger: every hybrid query.
+        # Why: the legs are independent, and run one after the other the request
+        #      waited for the sum of a full-text query and an embed plus vector query.
+        # Outcome: they run together on separate sessions. A TaskGroup cancels the
+        #          other leg when one fails, and the first failure is re-raised bare so
+        #          callers see the same exception types as before.
+        try:
+            async with asyncio.TaskGroup() as legs:
+                fts_task = legs.create_task(fts_leg())
+                vector_task = legs.create_task(vector_leg())
+        except ExceptionGroup as group:
+            raise group.exceptions[0]
+        fts_results, fts_ms = fts_task.result()
+        window, vector_ms = vector_task.result()
         vector_results = window.ranked_rows()[:candidate_limit]
-        vector_ms = (time.perf_counter() - vector_start) * 1000
-        # Trigger: with reranking disabled the vector leg expands internally and can
-        # hydrate more rows than the fusion window it returns.
+        # Trigger: a filtered window widened past candidate_limit chunks and hydrated
+        # more rows than the fusion window it returns.
         # Why: rows cut here never fuse — left in the trace they would surface as
         # candidates with no rejection and no fused rank, which the response labels
         # "returned". Rows with a recorded rejection keep their chunk evidence.

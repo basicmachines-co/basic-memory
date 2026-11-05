@@ -187,7 +187,8 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     )
 
     assert baseline_results
-    assert candidate_limits == [1000]
+    # One candidate window: (limit + offset) * 10 chunks, not that again times ten.
+    assert candidate_limits == [100]
 
     candidate_limits.clear()
     repo._semantic_vector_k = 5
