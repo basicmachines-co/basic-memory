@@ -439,8 +439,16 @@ def compile_fts_filter(
                 continue
 
             if filt.op in {"gt", "gte", "lt", "lte", "between"}:
+                # Trigger: a numeric bound against a value that is not a number
+                #          (frontmatter `version: v13` under `$between [1, 2]`).
+                # Why: CAST('v13' AS REAL) is 0.0, so the note would match `$lt 5`.
+                # Outcome: comparing the NUMERIC cast with the raw value applies numeric
+                #          affinity to the raw value, which converts only a well-formed
+                #          number. Anything else stays text, the test is false, and the
+                #          value compares as NULL and drops out, as on Postgres.
                 compare_expr = (
-                    f"CAST({extract_expr} AS REAL)"
+                    f"CASE WHEN CAST({extract_expr} AS NUMERIC) = {extract_expr} "
+                    f"THEN CAST({extract_expr} AS REAL) END"
                     if filt.comparison == "numeric"
                     else extract_expr
                 )
