@@ -358,6 +358,45 @@ async def test_a_timed_out_probe_does_not_fail_the_write(client, test_project, m
     assert "Body" in str(read_back)
 
 
+@pytest.mark.asyncio
+async def test_a_database_error_in_the_probe_does_not_fail_the_write(
+    client, test_project, monkeypatch
+):
+    """A server-side exception from the in-process search keeps the accepted write (#2065).
+
+    Through the local ASGI transport an exception raised while serving the search
+    reaches the probe as itself, not as an HTTP 500, so it is not a ToolError.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from basic_memory.services.search_service import SearchService
+
+    calls = 0
+
+    async def search_fails_in_sqlite(self, *args: Any, **kwargs: Any):
+        nonlocal calls
+        calls += 1
+        raise OperationalError(
+            "WITH vector_matches AS MATERIALIZED (...)",
+            {},
+            Exception(
+                "An illegal WHERE constraint was provided on a vec0 auxiliary "
+                "column in a KNN query."
+            ),
+        )
+
+    # Raised by the server's search service, so it travels through the search route
+    # and the local ASGI transport exactly as the vec0 error in #2065 did.
+    monkeypatch.setattr(SearchService, "search", search_fails_in_sqlite)
+    result = await write_json(identifier="notes/a.md", content="Body", project=test_project.name)
+
+    assert calls == 1
+    assert result["action"] == "created"
+    assert result["similar_notes"] == []
+    read_back = await bm_read(identifier="notes/a.md", project=test_project.name)
+    assert "Body" in str(read_back)
+
+
 # --- Refusals ---
 
 
