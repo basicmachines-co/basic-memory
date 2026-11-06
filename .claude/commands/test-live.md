@@ -285,7 +285,6 @@ Test essential MCP tools that form the foundation of Basic Memory:
 ### Phase 6: Specialized Tools Testing (Tier 4)
 
 **15. MCP Prompts Tests (Specialized):**
-- ✅ ai_assistant_guide output
 - ✅ continue_conversation functionality
 - ✅ Formatted search results
 - ✅ Enhanced activity reports
