@@ -730,6 +730,6 @@ def _semantic_freshness_note(payload: dict[str, Any]) -> str:
     as_of_utc = datetime.fromisoformat(current_as_of).astimezone(timezone.utc)
     return (
         f"\n\nSemantic results current as of {as_of_utc:%Y-%m-%d %H:%M} UTC. "
-        "Notes changed since then are found by text search but may be missing "
-        "from semantic matches."
+        "Notes still waiting for embeddings are found by text search but may be "
+        "missing from semantic matches."
     )

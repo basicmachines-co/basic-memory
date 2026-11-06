@@ -381,10 +381,11 @@ class SearchResponse(BaseModel):
     # affected: it is indexed with the note.
     semantic_index_current_as_of: datetime | None = Field(
         default=None,
-        description="Semantic (vector) search reflects every note in the searched "
-        "projects changed before this time. It is the oldest last-modified time among "
-        "notes whose embeddings are not current (pending, deferred, or missing); notes "
-        "changed at or after it may be missing from semantic and hybrid results but are "
-        "still found by full-text search. Null when every note's embeddings are current, "
-        "or when semantic search is unavailable.",
+        description="The latest note change semantic (vector) search reflects: the "
+        "newest last-modified time among notes whose embeddings are current. Present "
+        "only while some note's embeddings are not current (pending, deferred, or "
+        "missing); those notes may be missing from semantic and hybrid results but are "
+        "still found by full-text search. When no note is embedded yet, it is the oldest "
+        "last-modified time among the notes behind. Null when every note's embeddings "
+        "are current, or when semantic search is unavailable.",
     )
