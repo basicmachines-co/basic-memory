@@ -228,8 +228,9 @@ def _format_project_list_text(merged: list[dict[str, Any]]) -> str:
 
     result += "\n" + "─" * 40 + "\n"
     result += (
-        "Pass a project name (or its [external_id] as project_id) on tool calls to "
-        "target a project. Calls without one use the default project."
+        "Pass `project` on every note, folder, context and schema call: a project "
+        "name, 'workspace/project', or its [external_id]. Search may use `projects` "
+        "or `all_projects=true` instead."
     )
     return result
 
