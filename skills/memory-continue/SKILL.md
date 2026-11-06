@@ -9,7 +9,7 @@ Resume previous work by reconstructing context from the Basic Memory knowledge g
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.
@@ -48,10 +48,10 @@ bm_context(
 )
 ```
 
-**No clear starting point — use `bm_project(command="recent", project="<project>")`.** See what's changed and let it surface the thread:
+**No clear starting point — use `bm_recent(project="<project>")`.** See what's changed and let it surface the thread:
 
 ```python
-bm_project(command="recent", since="3d", project="<project>")
+bm_recent(since="3d", project="<project>")
 ```
 
 **Looking for something specific — use `bm_search`.** Find candidate notes by keyword:
@@ -101,7 +101,7 @@ Use a specific note URL to anchor on one starting point; use a wildcard to pull 
 
 ## Timeframe Reference
 
-`bm_context` and `bm_project(command="recent", project="<project>")` accept natural-language timeframes:
+`bm_context` and `bm_recent(project="<project>")` accept natural-language timeframes:
 
 | Timeframe | Meaning |
 |-----------|---------|
@@ -130,7 +130,7 @@ Then summarize: the goals, what's completed, what's pending, and any blockers or
 
 ```python
 # 1. Check recent activity
-bm_project(command="recent", since="3d", project="<project>")
+bm_recent(since="3d", project="<project>")
 
 # 2. Read notes from the recent sessions it surfaces
 bm_read(identifier="relevant-note", project="<project>")
@@ -155,7 +155,7 @@ Then present the full picture — the note plus its connected context.
 Project names are user-specific. To discover what's available before scoping a search or `memory://` URL:
 
 ```python
-bm_project(command="list")
+bm_project_list()
 ```
 
 A qualified `memory://` URL (e.g. `memory://research/papers/crdt`) must agree
@@ -170,9 +170,9 @@ bm_search(query="topic keywords", all_projects=True)
 
 ## Guidelines
 
-1. **Start broad, then narrow.** Get an overview with `bm_project(command="recent", project="<project>")` or a wildcard `bm_context`, then drill into specific notes.
+1. **Start broad, then narrow.** Get an overview with `bm_recent(project="<project>")` or a wildcard `bm_context`, then drill into specific notes.
 2. **Present incrementally.** Share what you find as you go rather than holding everything until the end.
 3. **Follow relations.** The graph's connections are the point — `bm_context` with `depth` surfaces context you wouldn't find by reading one note.
-4. **Check multiple projects.** Specs may live separately from implementation notes; discover projects with `bm_project(command="list")`.
+4. **Check multiple projects.** Specs may live separately from implementation notes; discover projects with `bm_project_list()`.
 5. **Confirm understanding.** Verify the reconstructed context is what the user actually needs before acting on it.
 6. **Capture new progress.** As the resumed work advances, write it back to the graph (see the **memory-notes** skill) so the next session can continue too.

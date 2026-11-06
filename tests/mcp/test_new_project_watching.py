@@ -6,7 +6,7 @@ import pytest
 
 from basic_memory.index import watch_service as watch_module
 from basic_memory.index.watch_service import WatchService
-from basic_memory.mcp.tools import bm_project, bm_search
+from basic_memory.mcp.tools import bm_project_create, bm_search
 
 
 @pytest.mark.asyncio
@@ -26,7 +26,7 @@ async def test_files_copied_after_project_creation_are_searchable_after_watch_at
         initial_projects=[test_project],
     )
     root = tmp_path_factory.mktemp("mcp-created-project")
-    await bm_project(command="create", name="copied-project", path=str(root))
+    await bm_project_create(name="copied-project", path=str(root))
     (root / "inbox").mkdir()
     (root / "inbox" / "copied.md").write_text(
         "# Copied Note\n\n- [fact] unicorn\n", encoding="utf-8"

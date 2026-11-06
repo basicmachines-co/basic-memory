@@ -9,7 +9,7 @@ Find notes by their structured frontmatter fields instead of (or in addition to)
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.

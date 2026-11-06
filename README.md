@@ -559,7 +559,7 @@ agents can pick the right one without trial-and-error:
 - **Content:** `bm_write`, `bm_read`, `bm_edit`, `bm_move`, `bm_delete`
 - **Search & discovery:** `bm_search`, `bm_list`, `bm_find`
 - **Knowledge graph:** `bm_context`
-- **Projects:** `bm_project(command="list" | "create" | "recent")`;
+- **Projects:** `bm_project_list(| "create" | "recent")`;
   `bm_project_delete` is separate and requires server opt-in.
 - **Schema:** `bm_schema(command="validate" | "infer" | "diff")`
 - **Manual:** `bm_man`

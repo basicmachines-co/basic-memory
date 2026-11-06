@@ -6,9 +6,9 @@ plans, preferences, and connected reference material.
 
 ## Start usefully
 
-1. Call `bm_project(command="list")` to discover projects; ask which to use if the user's
+1. Call `bm_project_list()` to discover projects; ask which to use if the user's
    request does not identify one.
-2. Call `bm_project(command="recent", project="<project name or external id>")` to orient.
+2. Call `bm_recent(project="<project name or external id>")` to orient.
 3. Preserve the selected route in later calls. Pass a returned `external_id` UUID as `project`, or use a
    workspace-qualified name (`workspace/project`), because names can collide across cloud workspaces.
    Note, folder, context and schema tools always require `project`. Search requires `project`,

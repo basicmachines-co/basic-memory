@@ -557,7 +557,7 @@ describe("BmClient MCP behavior", () => {
     expect(ctx.results).toHaveLength(1)
   })
 
-  it("recentActivity calls bm_project with JSON output", async () => {
+  it("recentActivity calls bm_recent with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         results: [
@@ -575,9 +575,8 @@ describe("BmClient MCP behavior", () => {
     const recent = await client.recentActivity("7d")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_project",
+      name: "bm_recent",
       arguments: {
-        command: "recent",
         since: "7d",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -586,7 +585,7 @@ describe("BmClient MCP behavior", () => {
     expect(recent).toHaveLength(1)
   })
 
-  it("listProjects calls bm_project with JSON output", async () => {
+  it("listProjects calls bm_project_list with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         projects: [
@@ -603,9 +602,8 @@ describe("BmClient MCP behavior", () => {
     const projects = await client.listProjects()
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_project",
+      name: "bm_project_list",
       arguments: {
-        command: "list",
         output_format: "json",
       },
     })
@@ -638,9 +636,8 @@ describe("BmClient MCP behavior", () => {
     const projects = await client.listProjects("team-alpha")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_project",
+      name: "bm_project_list",
       arguments: {
-        command: "list",
         output_format: "json",
       },
     })
@@ -672,12 +669,12 @@ describe("BmClient MCP behavior", () => {
       { tenant_id: "team-id", name: "Team", workspace_type: "team" },
     ])
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_project",
-      arguments: { command: "list", output_format: "json" },
+      name: "bm_project_list",
+      arguments: { output_format: "json" },
     })
   })
 
-  it("ensureProject calls bm_project in idempotent JSON mode", async () => {
+  it("ensureProject calls bm_project_create in idempotent JSON mode", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         name: "test-project",
@@ -691,9 +688,8 @@ describe("BmClient MCP behavior", () => {
     await client.ensureProject("/tmp/memory")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_project",
+      name: "bm_project_create",
       arguments: {
-        command: "create",
         name: "test-project",
         path: "/tmp/memory",
         set_default: true,
@@ -982,11 +978,10 @@ describe("BmClient MCP behavior", () => {
             finishConnect = resolve
           }),
       )
-      const callToolRaw = jest.fn(
-        async (_name: string, args: Record<string, unknown>) =>
-          args.command === "create"
-            ? structured({ ok: true })
-            : structured({ projects: [] }),
+      const callToolRaw = jest.fn(async (name: string) =>
+        name === "bm_project_create"
+          ? structured({ ok: true })
+          : structured({ projects: [] }),
       )
       ;(client as any).callToolRaw = callToolRaw
 
@@ -1001,11 +996,9 @@ describe("BmClient MCP behavior", () => {
 
       // Project creation runs first, then the waiting call.
       expect(callToolRaw.mock.calls.map(([name]) => name)).toEqual([
-        "bm_project",
-        "bm_project",
+        "bm_project_create",
+        "bm_project_list",
       ])
-      expect(callToolRaw.mock.calls[0][1]).toMatchObject({ command: "create" })
-      expect(callToolRaw.mock.calls[1][1]).toMatchObject({ command: "list" })
     })
 
     it("retries a failed startup once for the next tool calls", async () => {
@@ -1032,7 +1025,7 @@ describe("BmClient MCP behavior", () => {
       const projectUnavailable =
         'Basic Memory project "test-project" is unavailable: ALREADY_EXISTS'
       const pathMismatch = new BmToolError(
-        "bm_project",
+        "bm_project_create",
         JSON.stringify({
           error: "ALREADY_EXISTS",
           message:
@@ -1058,7 +1051,7 @@ describe("BmClient MCP behavior", () => {
                 },
               })
             }
-            if (args.command === "list") return structured({ projects })
+            if (name === "bm_project_list") return structured({ projects })
             if (args.path !== storedPath) throw pathMismatch
             return structured({ name: "Test-Project", already_exists: true })
           },
@@ -1071,7 +1064,7 @@ describe("BmClient MCP behavior", () => {
       }
 
       const createCalls = (callToolRaw: jest.Mock) =>
-        callToolRaw.mock.calls.filter(([, args]) => args.command === "create")
+        callToolRaw.mock.calls.filter(([name]) => name === "bm_project_create")
 
       it("adopts the stored folder when projectPath is the default", async () => {
         const callToolRaw = serveStoredProject("/ws/test-project")
@@ -1090,13 +1083,12 @@ describe("BmClient MCP behavior", () => {
       })
 
       it("creates at the default path when no project has the name", async () => {
-        const callToolRaw = jest.fn(
-          async (_name: string, args: Record<string, unknown>) =>
-            args.command === "list"
-              ? structured({
-                  projects: [{ name: "other", path: "/elsewhere" }],
-                })
-              : structured({ name: DEFAULT_PROJECT, created: true }),
+        const callToolRaw = jest.fn(async (name: string) =>
+          name === "bm_project_list"
+            ? structured({
+                projects: [{ name: "other", path: "/elsewhere" }],
+              })
+            : structured({ name: DEFAULT_PROJECT, created: true }),
         )
         ;(client as any).connectWithRetries = jest
           .fn()
@@ -1112,26 +1104,25 @@ describe("BmClient MCP behavior", () => {
       // ahead of the row attached to the local project. Its path is
       // tenant-relative, and a local create there would be refused.
       it("adopts the local row, not a cloud-only row of the same name", async () => {
-        const callToolRaw = jest.fn(
-          async (_name: string, args: Record<string, unknown>) =>
-            args.command === "list"
-              ? structured({
-                  projects: [
-                    {
-                      name: "test-project",
-                      path: "/test-project",
-                      local_path: null,
-                      source: "cloud",
-                    },
-                    {
-                      name: "test-project",
-                      path: "/ws",
-                      local_path: "/ws",
-                      source: "local+cloud",
-                    },
-                  ],
-                })
-              : structured({ name: DEFAULT_PROJECT, already_exists: true }),
+        const callToolRaw = jest.fn(async (name: string) =>
+          name === "bm_project_list"
+            ? structured({
+                projects: [
+                  {
+                    name: "test-project",
+                    path: "/test-project",
+                    local_path: null,
+                    source: "cloud",
+                  },
+                  {
+                    name: "test-project",
+                    path: "/ws",
+                    local_path: "/ws",
+                    source: "local+cloud",
+                  },
+                ],
+              })
+            : structured({ name: DEFAULT_PROJECT, already_exists: true }),
         )
         ;(client as any).connectWithRetries = jest
           .fn()
@@ -1145,20 +1136,19 @@ describe("BmClient MCP behavior", () => {
       })
 
       it("creates at the default path when only a cloud row has the name", async () => {
-        const callToolRaw = jest.fn(
-          async (_name: string, args: Record<string, unknown>) =>
-            args.command === "list"
-              ? structured({
-                  projects: [
-                    {
-                      name: "test-project",
-                      path: "/test-project",
-                      local_path: null,
-                      source: "cloud",
-                    },
-                  ],
-                })
-              : structured({ name: DEFAULT_PROJECT, created: true }),
+        const callToolRaw = jest.fn(async (name: string) =>
+          name === "bm_project_list"
+            ? structured({
+                projects: [
+                  {
+                    name: "test-project",
+                    path: "/test-project",
+                    local_path: null,
+                    source: "cloud",
+                  },
+                ],
+              })
+            : structured({ name: DEFAULT_PROJECT, created: true }),
         )
         ;(client as any).connectWithRetries = jest
           .fn()
@@ -1199,8 +1189,8 @@ describe("BmClient MCP behavior", () => {
       it("lets calls that name another project through after a refusal", async () => {
         const callToolRaw = serveStoredProject("/ws/test-project")
         callToolRaw.mockImplementation(
-          async (name: string, args: Record<string, unknown>) => {
-            if (args.command === "create") throw pathMismatch
+          async (name: string, _args: Record<string, unknown>) => {
+            if (name === "bm_project_create") throw pathMismatch
             if (name === "bm_read") {
               return structured({
                 result: {
@@ -1229,7 +1219,7 @@ describe("BmClient MCP behavior", () => {
         ).resolves.toMatchObject({ file_path: "n.md" })
         expect(
           callToolRaw.mock.calls
-            .filter(([name]) => name !== "bm_project")
+            .filter(([name]) => !name.startsWith("bm_project_"))
             .map(([name, args]) => [name, args.project]),
         ).toEqual([
           ["bm_read", "other-project-uuid"],
@@ -1243,7 +1233,9 @@ describe("BmClient MCP behavior", () => {
           client.writeNote("n", "body", "notes", "TEST-PROJECT"),
         ).rejects.toThrow(projectUnavailable)
         expect(
-          callToolRaw.mock.calls.filter(([name]) => name !== "bm_project"),
+          callToolRaw.mock.calls.filter(
+            ([name]) => !name.startsWith("bm_project_"),
+          ),
         ).toHaveLength(2)
       })
 
@@ -1251,15 +1243,16 @@ describe("BmClient MCP behavior", () => {
         const create = jest
           .fn()
           .mockRejectedValueOnce(
-            new BmToolError("bm_project", "database is locked"),
+            new BmToolError("bm_project_create", "database is locked"),
           )
           .mockResolvedValue(structured({ name: DEFAULT_PROJECT }))
         ;(client as any).connectWithRetries = jest
           .fn()
           .mockResolvedValue(undefined)
-        ;(client as any).callToolRaw = jest.fn(
-          async (_name: string, args: Record<string, unknown>) =>
-            args.command === "create" ? create() : structured({ projects: [] }),
+        ;(client as any).callToolRaw = jest.fn(async (name: string) =>
+          name === "bm_project_create"
+            ? create()
+            : structured({ projects: [] }),
         )
 
         // A transient failure is not kept as the project's state: startup

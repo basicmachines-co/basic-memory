@@ -12,7 +12,7 @@ facts contradict new ones, and finished work lingers. Defrag fixes the content;
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.
@@ -41,7 +41,7 @@ notes nobody touched lately.
 bm_find(path="/", depth=10, page_size=100, project="<project>")
 
 # Recently busy notes, to look at first
-bm_project(command="recent", since="30d", output_format="json", page_size=50, project="<project>")
+bm_recent(since="30d", output_format="json", page_size=50, project="<project>")
 
 # Notes on one topic, to spot overlap
 bm_search(query="launch plan", project="<project>")

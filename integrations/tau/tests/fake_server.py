@@ -29,7 +29,7 @@ for line in sys.stdin:
             }
         case "tools/list":
             names = (
-                ["bm_write", "bm_project"]
+                ["bm_write", "bm_project_list"]
                 if not params.get("cursor")
                 else ["extra_tool", "bm_read", "bm_search", "bm_context"]
             )

@@ -11,7 +11,7 @@ This skill curates the **knowledge graph** — the notes, relations, and tags th
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.
@@ -208,7 +208,7 @@ context, suggest adding background. Apply with `bm_edit`.
 ## Curation Workflows
 
 Scale the pass to the request. A health check reports orphans, likely duplicates,
-recent activity (`bm_project(command="recent", project="<project>")`), and folder distribution. A deep session works
+recent activity (`bm_recent(project="<project>")`), and folder distribution. A deep session works
 through the capabilities above in whatever order the findings suggest. A topic pass
 maps one subject with `bm_search` and `bm_context`, fills the gaps it finds, and
 ends with a hub note.

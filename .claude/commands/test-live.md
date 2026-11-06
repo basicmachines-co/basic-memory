@@ -11,7 +11,7 @@ All test results are recorded as notes in a dedicated test project.
 **Parameters:**
 - `phase` (optional): Specific test phase to run (`recent`, `core`, `features`, `edge`, `workflows`, `stress`, or `all`)
 - `recent` - Focus on recent changes and new features (recommended for regular testing)
-- `core` - Essential tools only (Tier 1: bm_write, bm_read, bm_search, bm_edit, bm_project(command="list"), bm_project(command="recent"))
+- `core` - Essential tools only (Tier 1: bm_write, bm_read, bm_search, bm_edit, bm_project_list(), bm_recent())
 - `features` - Core + important workflows (Tier 1 + Tier 2)
 - `all` - Comprehensive testing of all tools and scenarios
 
@@ -27,12 +27,12 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 2. **bm_read** - Primary knowledge retrieval mechanism
 3. **bm_search** - Essential for finding information
 4. **bm_edit** - Core content modification capability
-5. **bm_project(command="list")** - Project discovery and session guidance
-6. **bm_project(command="recent")** - Project discovery mode and activity analysis
+5. **bm_project_list()** - Project discovery and session guidance
+6. **bm_recent()** - Project discovery mode and activity analysis
 
 ### **Tier 2: Important Workflows (Usually Test)**
 7. **bm_context** - Conversation continuity via memory:// URLs
-8. **bm_project(command="create")** - Essential for project setup
+8. **bm_project_create()** - Essential for project setup
 9. **bm_move** - Knowledge organization
 10. **bm_project_delete** - Project lifecycle management
 
@@ -49,9 +49,9 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 
 ## Project Routing Tests
 
-1. Call `bm_project(command="list")`; inspect project names, external IDs, and
+1. Call `bm_project_list()`; inspect project names, external IDs, and
    workspace grouping. Reuse a returned UUID through `project`.
-2. Call `bm_project(command="recent", project=<test-project>, since="7d")`.
+2. Call `bm_recent(project=<test-project>, since="7d")`.
    Check paging and indexing guidance. Without `project`, it uses the default
    project; with no default, it aggregates projects. Empty activity is not proof
    of an empty knowledge base.
@@ -159,12 +159,12 @@ Test essential MCP tools that form the foundation of Basic Memory:
 - ✅ Stale `expected_checksum` refuses changes
 - ⚠️ Error scenarios (invalid commands)
 
-**5. bm_project(command="list") Tests (Critical):**
+**5. bm_project_list() Tests (Critical):**
 - Project identities and workspace grouping
 - Empty project list and constrained server behavior
 - UUIDs reusable through `project`
 
-**6. bm_project(command="recent") Tests (Critical):**
+**6. bm_recent() Tests (Critical):**
 - Explicit project, default project, and no-default aggregation
 - `since`, `items`, and pagination
 - Empty activity and never-indexed guidance
@@ -177,7 +177,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 - ✅ memory:// URL navigation
 - ⚠️ Performance with complex relation graphs
 
-**8. bm_project(command="create") Tests (Important):**
+**8. bm_project_create() Tests (Important):**
 - ✅ Create projects dynamically
 - ✅ Set default during creation
 - ✅ Path validation and creation

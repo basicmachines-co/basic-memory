@@ -9,7 +9,7 @@ Use this before substantial work in a repo, before resuming an old thread, or wh
 the user asks where things stand. Accept an optional Basic Memory identifier,
 permalink, or topic after `$bm-orient`.
 
-When no project is pinned, discover projects with `bm_project(command="list")`
+When no project is pinned, discover projects with `bm_project_list()`
 and pass the selected project's external ID as `project` on note/search calls.
 With several addressable projects, these calls require an explicit scope even
 when a default is configured.

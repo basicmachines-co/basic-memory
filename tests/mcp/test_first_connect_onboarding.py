@@ -15,7 +15,7 @@ from sqlalchemy import text
 
 from basic_memory.mcp.prompts.getting_started import getting_started
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.projects import bm_project
+from basic_memory.mcp.tools.projects import bm_recent
 from basic_memory.mcp.tools.ranked_search import bm_search
 from basic_memory.mcp.tools.write import bm_write
 
@@ -29,7 +29,7 @@ def test_server_sets_first_connect_instructions():
     assert instructions is not None
     # Orients the model to what Basic Memory is and points at the first-note action.
     assert "Basic Memory" in instructions
-    assert 'bm_project(command="recent", project=' in instructions
+    assert "bm_recent(project=" in instructions
     assert "bm_write" in instructions
     assert "https://docs.basicmemory.com/llms.txt" in instructions
     assert "/raw/...md" in instructions
@@ -47,7 +47,7 @@ async def test_recent_activity_empty_project_offers_first_note(
     client, test_project, indexed_project
 ):
     """An empty project (no test_graph) should surface the offer-not-act first-note guidance."""
-    result = await bm_project(command="recent", project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
+    result = await bm_recent(project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert isinstance(result, str)
     assert "No recent activity" in result
@@ -56,7 +56,7 @@ async def test_recent_activity_empty_project_offers_first_note(
     # Examples route by the collision-safe external id, and the widened call stays scoped.
     assert "bm_write(project=" in result
     assert 'directory="notes"' in result
-    assert 'bm_project(command="recent", project=' in result
+    assert "bm_recent(project=" in result
     assert 'since="30d"' in result
 
 
@@ -82,14 +82,14 @@ async def test_recent_activity_quiet_populated_project_has_no_first_note_offer(
         )
         await session.commit()
 
-    result = await bm_project(command="recent", project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
+    result = await bm_recent(project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert isinstance(result, str)
     assert "No recent activity" in result
     assert "If the user is just getting started" not in result
     assert "first note" not in result
     assert "bm_write(" not in result
-    assert f'bm_project(command="recent", project="{test_project.external_id}"' in result
+    assert f'bm_recent(project="{test_project.external_id}"' in result
     assert 'since="30d"' in result
     assert f'bm_search(project="{test_project.external_id}"' in result
 
@@ -111,7 +111,7 @@ async def test_recent_activity_empty_path_makes_one_status_request(
 
     monkeypatch.setattr(ProjectClient, "get_status", counting)
 
-    await bm_project(command="recent", project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
+    await bm_recent(project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert calls == 1
 
@@ -121,7 +121,7 @@ async def test_recent_activity_populated_project_has_no_first_note_offer(
     client, test_project, test_graph
 ):
     """A populated project must not nag with the first-note offer."""
-    result = await bm_project(command="recent", project=test_project.name, since="1w")  # pyright: ignore[reportGeneralTypeIssues]
+    result = await bm_recent(project=test_project.name, since="1w")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert "wait for them to agree" not in result
 
@@ -138,8 +138,7 @@ async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(
         directory="notes",
     )
 
-    result = await bm_project(
-        command="recent",
+    result = await bm_recent(
         project=test_project.name,
         items=["relation"],
         since="7d",
@@ -156,8 +155,7 @@ async def test_recent_activity_out_of_range_page_has_no_first_note_offer(
     client, test_project, test_graph, indexed_project
 ):
     """An empty later page should direct the agent back through pagination."""
-    result = await bm_project(
-        command="recent",
+    result = await bm_recent(
         project=test_project.name,
         since="7d",
         page=100,
@@ -234,12 +232,10 @@ async def test_getting_started_preserves_markdown_around_multiline_activity(monk
     async def fake_recent_activity(**_kwargs: object) -> str:
         return "# Recent activity\n\n- Updated [[Project Plan]]"
 
-    async def fake_project(**kwargs: object):
-        if kwargs["command"] == "list":
-            return await fake_list_memory_projects(**kwargs)
-        return await fake_recent_activity(**kwargs)
-
-    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_project", fake_project)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fake_recent_activity)
 
     result = await getting_started(project="research")  # pyright: ignore[reportGeneralTypeIssues]
 
@@ -300,18 +296,16 @@ async def test_getting_started_prefers_constrained_project(monkeypatch):
         activity_calls.append(kwargs)
         return "# Recent activity\n\nNo recent activity"
 
-    async def fake_project(**kwargs: object):
-        if kwargs["command"] == "list":
-            return await fake_list_memory_projects(**kwargs)
-        return await fake_recent_activity(**kwargs)
-
-    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_project", fake_project)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fake_recent_activity)
 
     result = await getting_started(  # pyright: ignore[reportGeneralTypeIssues]
         project="requested"
     )
 
-    assert activity_calls == [{"command": "recent", "since": "30d", "project": "project-locked"}]
+    assert activity_calls == [{"since": "30d", "project": "project-locked"}]
     assert 'bm_write(project="project-locked"' in result
     assert "project-requested" not in result
 
@@ -350,16 +344,14 @@ async def test_getting_started_preserves_merged_local_project_route(monkeypatch)
         activity_calls.append(kwargs)
         return "# Recent activity\n\nNo recent activity"
 
-    async def fake_project(**kwargs: object):
-        if kwargs["command"] == "list":
-            return await fake_list_memory_projects(**kwargs)
-        return await fake_recent_activity(**kwargs)
-
-    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_project", fake_project)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fake_recent_activity)
 
     result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
 
-    assert activity_calls == [{"command": "recent", "since": "30d", "project": "main"}]
+    assert activity_calls == [{"since": "30d", "project": "main"}]
     assert 'bm_write(project="main"' in result
     assert 'bm_read(project="main"' in result
     assert 'bm_search(project="main"' in result
@@ -381,18 +373,16 @@ async def test_getting_started_without_projects_stops_before_note_actions(monkey
     async def fail_recent_activity(**_kwargs: object) -> str:
         raise AssertionError("recent_activity requires a selected project")
 
-    async def fake_project(**kwargs: object):
-        if kwargs["command"] == "list":
-            return await fake_list_memory_projects(**kwargs)
-        return await fail_recent_activity(**kwargs)
-
-    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_project", fake_project)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fail_recent_activity)
 
     result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
 
     assert "No Basic Memory projects are available yet" in result
-    assert 'bm_project(command="list")' in result
-    assert 'bm_project(command="recent", project="...", since="30d")' in result
+    assert "bm_project_list()" in result
+    assert 'bm_recent(project="...", since="30d")' in result
     assert "invoke this getting-started prompt" not in result
     assert "bm_write(" not in result
     assert "bm_read(" not in result
@@ -433,12 +423,10 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
         activity_calls.append(kwargs)
         return "# Recent activity\n\nNo recent activity"
 
-    async def fake_project(**kwargs: object):
-        if kwargs["command"] == "list":
-            return await fake_list_memory_projects(**kwargs)
-        return await fake_recent_activity(**kwargs)
-
-    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_project", fake_project)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fake_recent_activity)
 
     result = await getting_started(project="notes")  # pyright: ignore[reportGeneralTypeIssues]
 
@@ -447,7 +435,7 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
     assert "`team/notes`" in result
     assert 'project="notes"' in result
     assert 'project="project-team"' in result
-    assert '`bm_project(command="recent", ...)`' in result
+    assert "`bm_recent(...)`" in result
     assert "invoke this getting-started prompt" not in result
     assert "bm_write(" not in result
     assert "bm_read(" not in result
@@ -458,5 +446,5 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
         project="team/notes"
     )
 
-    assert activity_calls == [{"command": "recent", "since": "30d", "project": "project-team"}]
+    assert activity_calls == [{"since": "30d", "project": "project-team"}]
     assert 'bm_write(project="project-team"' in selected_result

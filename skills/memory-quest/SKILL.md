@@ -36,7 +36,7 @@ Work through these in order. Stop at the first step that fails, explain what's m
 
 ### 1. Confirm a cloud connection
 
-Call `bm_project(command="list", output_format="json")` and inspect the projects grouped by workspace.
+Call `bm_project_list(output_format="json")` and inspect the projects grouped by workspace.
 
 - If it fails, Basic Memory isn't connected to this assistant. Tell the user to connect it and run Memory Quest again.
 - If no project has `source: cloud` or `source: local+cloud`, this assistant has not demonstrated a cloud connection. Memory Quest lives in Basic Memory Cloud: tell the user to connect their cloud account (`bm cloud login` for the CLI, or the Basic Memory connector in a chat app) and try again.
@@ -65,7 +65,7 @@ If they decline, stop. Say that the mission stays incomplete and they can run Me
 
 ### 5. Save the Memory Master note
 
-First choose a project that exists only in Basic Memory Cloud. Call `bm_project(command="list")` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
+First choose a project that exists only in Basic Memory Cloud. Call `bm_project_list()` with `output_format: "json"` and pick a project whose `source` is exactly `cloud`: the default project if it qualifies, otherwise ask the user which to use. New cloud accounts usually have one, Getting Started. Write to it by its `external_id`.
 
 Don't use a project listed as `local` or `local+cloud`. When this machine has a local project with the same name as a cloud one, which is common because every local install creates `main`, a local Basic Memory server writes the note to the local copy however you address it, by name, workspace-qualified name, or ID. The write reports success, but the cloud never sees it, so the mission stays incomplete. If no project is listed as `cloud`, stop and tell the user to create one in Basic Memory Cloud (or connect their cloud account), then run Memory Quest again.
 

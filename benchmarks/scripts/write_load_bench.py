@@ -309,8 +309,8 @@ async def run(args: argparse.Namespace) -> int:
             await session.initialize()
 
             create = await session.call_tool(
-                "bm_project",
-                {"command": "create", "name": project, "path": str(project_dir)},
+                "bm_project_create",
+                {"name": project, "path": str(project_dir)},
             )
             if create.model_dump(by_alias=True)["isError"]:
                 print("ERROR: could not create project", file=sys.stderr)

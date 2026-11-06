@@ -11,7 +11,7 @@ to checkpoint, wrap up, hand off, remember the state of the work, or before a
 long context transition. This is the deliberate, high-signal counterpart to the
 automatic PreCompact checkpoint.
 
-When no project is pinned, discover projects with `bm_project(command="list")`
+When no project is pinned, discover projects with `bm_project_list()`
 and pass the selected project's external ID as `project` on note/search calls.
 With several addressable projects, these calls require an explicit scope even
 when a default is configured.

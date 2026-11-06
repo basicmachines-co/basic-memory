@@ -323,9 +323,8 @@ class MemoryLifecycle:
             ):
                 recent = tool_result(
                     await self.connection.call(
-                        "bm_project",
+                        "bm_recent",
                         {
-                            "command": "recent",
                             "project": profile.project,
                             "since": "7d",
                             "page_size": 10,

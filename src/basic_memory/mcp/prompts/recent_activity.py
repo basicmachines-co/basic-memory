@@ -12,7 +12,7 @@ from pydantic import Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import resolve_project_parameter
-from basic_memory.mcp.tools.projects import bm_project
+from basic_memory.mcp.tools.projects import bm_recent
 
 
 @mcp.prompt(
@@ -53,14 +53,12 @@ async def recent_activity_prompt(
     project = await resolve_project_parameter(project=project, context=context)
     if project is None:
         return (
-            "Choose a project with bm_project(command='list'), then request recent "
+            "Choose a project with bm_project_list(), then request recent "
             "activity with an explicit project name or external id."
         )
 
     # Call the tool function - it returns a well-formatted string
-    activity_summary = await bm_project(
-        command="recent", project=project, since=timeframe, context=context
-    )
+    activity_summary = await bm_recent(project=project, since=timeframe, context=context)
 
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly

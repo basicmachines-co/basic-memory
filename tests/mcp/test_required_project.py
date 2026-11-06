@@ -76,7 +76,7 @@ async def test_explicit_project_id_alias_reads_the_same_note(client, test_projec
 
 @pytest.mark.asyncio
 async def test_discovery_and_bundled_manual_need_no_project(client, test_project):
-    projects = await tools.bm_project(command="list", output_format="json")
+    projects = await tools.bm_project_list(output_format="json")
     assert isinstance(projects, dict)
     assert test_project.name in {project["name"] for project in projects["projects"]}
     manual = await tools.bm_man(page="bm-read(3)")
@@ -155,7 +155,7 @@ async def test_prompts_discover_before_calling_tools_when_no_project_resolves(
     module = importlib.import_module(f"basic_memory.mcp.prompts.{module_name}")
     monkeypatch.setattr(module, "resolve_project_parameter", AsyncMock(return_value=None))
     result = await getattr(module, prompt_name)(**arguments)
-    assert "bm_project(command='list')" in result
+    assert "bm_project_list()" in result
     assert "explicit project" in result
 
 
@@ -178,7 +178,7 @@ async def test_every_saved_prompt_followup_call_carries_its_scope(
     )
     module = importlib.import_module(f"basic_memory.mcp.prompts.{module_name}")
     result = await getattr(module, prompt_name)(project=test_project.name, **arguments)
-    calls = re.findall(r"`(bm_(?:read|context|search|project)\([^`\n]*\))`", result)
+    calls = re.findall(r"`(bm_(?:read|context|search|recent)\([^`\n]*\))`", result)
     assert calls
     for example in calls:
         call = ast.parse(example, mode="eval").body

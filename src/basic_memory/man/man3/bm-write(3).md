@@ -46,7 +46,7 @@ observations and relations with bm_context.
 ## PARAMETERS
 
 - **content** (string, required) — The note's Markdown. Saved as given; it may start with frontmatter.
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — File path for the note, e.g. 'notes/plan.md'; '.md' is added when missing. '<project>/path' writes into another project. Use instead of title + directory.
 - **title** (string | null, optional, default: None) — Note title. With `directory`, it also names the file. With `identifier`, it is used when the content has no frontmatter title.
 - **directory** (string | null, optional, default: None) — Folder for a note addressed by title, e.g. 'meetings'; '/' is the root.

@@ -738,8 +738,8 @@ async def run(args: argparse.Namespace) -> int:
         ):
             await session.initialize()
             created = await session.call_tool(
-                "bm_project",
-                {"command": "create", "name": project, "path": str(project_dir)},
+                "bm_project_create",
+                {"name": project, "path": str(project_dir)},
             )
             if created.is_error:
                 raise RuntimeError("could not create benchmark project")

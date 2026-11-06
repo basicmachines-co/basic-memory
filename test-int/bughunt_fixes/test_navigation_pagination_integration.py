@@ -56,12 +56,11 @@ async def test_search_notes_rejects_nonpositive_page_size(mcp_server, app, test_
         # Baseline: recent_activity correctly rejects page_size < 1.
         with pytest.raises(ToolError, match="page_size"):
             await client.call_tool(
-                "bm_project",
+                "bm_recent",
                 {
                     "project": test_project.name,
                     "page_size": -3,
                     "output_format": "json",
-                    "command": "recent",
                 },
             )
 
@@ -277,8 +276,8 @@ async def test_recent_activity_project_id_header_shows_name_not_uuid(
         )
 
         result = await client.call_tool(
-            "bm_project",
-            {"project": test_project.external_id, "output_format": "text", "command": "recent"},
+            "bm_recent",
+            {"project": test_project.external_id, "output_format": "text"},
         )
         text = result.content[0].text
 

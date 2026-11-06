@@ -26,7 +26,7 @@ def test_read_only_surface_excludes_mutation():
     assert view.name == BM_SURFACE.name
     assert view.config_overrides == BM_SURFACE.config_overrides
     assert not set(SHARED_WRITE_TOOLS) & set(view.tool_allowlist)
-    assert "bm_project" not in view.tool_allowlist  # its create command writes
+    assert "bm_project_create" not in view.tool_allowlist
     assert "bm_schema" not in view.tool_allowlist
     assert "bm_read" in view.tool_allowlist
 

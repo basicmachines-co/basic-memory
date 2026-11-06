@@ -133,7 +133,7 @@ async def test_continue_conversation_delegates_to_recent_activity(monkeypatch):
         return "## Recent Activity: test-project (7d)\n\n**Items:** 3 found"
 
     monkeypatch.setattr(
-        "basic_memory.mcp.prompts.continue_conversation.bm_project", fake_recent_activity
+        "basic_memory.mcp.prompts.continue_conversation.bm_recent", fake_recent_activity
     )
 
     out = await continue_conversation(timeframe="7d")  # pyright: ignore[reportGeneralTypeIssues]
@@ -153,7 +153,7 @@ async def test_continue_conversation_no_topic_default_timeframe(monkeypatch):
         return "## Recent Activity Summary"
 
     monkeypatch.setattr(
-        "basic_memory.mcp.prompts.continue_conversation.bm_project", fake_recent_activity
+        "basic_memory.mcp.prompts.continue_conversation.bm_recent", fake_recent_activity
     )
 
     await continue_conversation()  # pyright: ignore[reportGeneralTypeIssues]

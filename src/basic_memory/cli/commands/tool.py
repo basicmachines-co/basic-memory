@@ -584,52 +584,94 @@ def context(
 # --- Projects and schemas ---
 
 
-@tool_app.command("project")
-def project_(
-    command: Annotated[str, typer.Argument(help="list, create, or recent")],
-    name: Annotated[Optional[str], typer.Option(help="For create: the project name")] = None,
-    path: Annotated[Optional[str], typer.Option(help="For create: the project folder")] = None,
-    set_default: Annotated[
-        bool, typer.Option("--set-default", help="For create: make it the default")
-    ] = False,
-    workspace: Annotated[Optional[str], typer.Option(help="Cloud workspace slug")] = None,
-    since: Annotated[Optional[str], typer.Option(help="For recent: how far back")] = None,
-    items: Annotated[
-        Optional[list[str]], typer.Option(help="For recent: note, observation, or relation")
-    ] = None,
-    page: PageOption = 1,
-    page_size: PageSizeOption = 10,
-    project: Annotated[
-        Optional[str], typer.Option(help="For recent: one project instead of all")
-    ] = None,
+@tool_app.command("project-list")
+def project_list(
     json_output: JsonOption = False,
     local: LocalOption = False,
     cloud: CloudOption = False,
 ) -> None:
-    """List projects, create one, or show recent activity (bm_project).
+    """List projects, grouped by workspace (bm_project_list).
 
     Examples:
 
-    bm tool project list
-    bm tool project recent --since 3d
-    bm tool project create --name research --path ~/research
+    bm tool project-list
+    bm tool project-list --json
     """
-    from basic_memory.mcp.tools import bm_project
+    from basic_memory.mcp.tools import bm_project_list
 
     run_tool(
-        bm_project,
-        command=command,
+        bm_project_list,
+        project=None,
+        default_to_config_project=False,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("project-create")
+def project_create(
+    name: Annotated[str, typer.Option(help="The project name")],
+    path: Annotated[str, typer.Option(help="The project folder")],
+    set_default: Annotated[
+        bool, typer.Option("--set-default", help="Make it the default project")
+    ] = False,
+    workspace: Annotated[Optional[str], typer.Option(help="Cloud workspace slug")] = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Create a project (bm_project_create).
+
+    Examples:
+
+    bm tool project-create --name research --path ~/research
+    """
+    from basic_memory.mcp.tools import bm_project_create
+
+    run_tool(
+        bm_project_create,
         name=name,
         path=path,
         set_default=set_default,
         workspace=workspace,
+        project=None,
+        default_to_config_project=False,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("recent")
+def recent(
+    since: Annotated[Optional[str], typer.Option(help="How far back: 3d, 24h, a date")] = None,
+    items: Annotated[
+        Optional[list[str]], typer.Option(help="note, observation, or relation")
+    ] = None,
+    page: PageOption = 1,
+    page_size: PageSizeOption = 10,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Show what changed lately in a project (bm_recent).
+
+    Examples:
+
+    bm tool recent --since 3d
+    bm tool recent --project research --items note
+    """
+    from basic_memory.mcp.tools import bm_recent
+
+    run_tool(
+        bm_recent,
         since=since,
         items=items,
         page=page,
         page_size=page_size,
         project=project,
-        # list and create take no project; recent reads one, the default unless named.
-        default_to_config_project=command == "recent",
         json_output=json_output,
         local=local,
         cloud=cloud,

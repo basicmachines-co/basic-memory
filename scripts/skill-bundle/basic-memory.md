@@ -22,7 +22,7 @@ conversation. What one session learns, the next one can find.
   user agrees, unless they have told you otherwise.
 - **Don't overwrite by accident.** Pass `overwrite: false` to `bm_write` unless you
   are deliberately replacing a note you have read in full.
-- **Name the project.** Discover projects with `bm_project(command="list")` when
+- **Name the project.** Discover projects with `bm_project_list()` when
   needed, then pass `project` on every note, folder, context and schema call and
   on recent activity. A project name, `workspace/project`, or external ID works;
   a qualified path does not replace it. Search requires `project`, `projects`, or
