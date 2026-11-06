@@ -97,6 +97,8 @@ class StorageEventIndexRuntime:
 
     project_resolver: StorageEventProjectResolver
     operation_processor_factory: StorageEventOperationProcessorFactory
+    # Paths of one project processed at once; see run_runtime_storage_event_operations.
+    max_concurrent_paths: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +161,7 @@ async def run_storage_event_indexing(
         project_result = await run_runtime_storage_event_operations(
             project_batch.events,
             processor,
+            max_concurrent_paths=runtime.max_concurrent_paths,
         )
         result = result.add(project_result)
 
