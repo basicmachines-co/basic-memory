@@ -477,14 +477,16 @@ async def test_lines_skip_hits_without_markdown(
 # --- Semantic freshness ---
 
 
-async def _hold_deploy_plan_embedding(session_maker) -> datetime:
-    """Edit Deploy Plan's content the way a held vector pass leaves it; return the time."""
+async def _hold_every_embedding(session_maker) -> datetime:
+    """Edit every note the way a held vector pass leaves it; return the edit time.
+
+    With no note current, the answer is the oldest note behind, so a fixed edit time
+    gives a fixed timestamp to assert in the text output.
+    """
     edited_at = datetime(2026, 3, 4, 5, 6, tzinfo=timezone.utc)
     async with db.scoped_session(session_maker) as session:
         await session.execute(
-            sql_text(
-                "UPDATE entity SET checksum = 'held', updated_at = :at WHERE title = 'Deploy Plan'"
-            ),
+            sql_text("UPDATE entity SET checksum = 'held', updated_at = :at"),
             {"at": edited_at.astimezone()},
         )
     return edited_at
@@ -506,7 +508,7 @@ async def test_held_embeddings_say_how_current_semantic_results_are(
     client, test_project, session_maker
 ):
     await _seed(test_project.name)
-    edited_at = await _hold_deploy_plan_embedding(session_maker)
+    edited_at = await _hold_every_embedding(session_maker)
 
     payload = await search_json(query="deploy", project=test_project.name)
     text = await search_text(query="deploy", project=test_project.name)
@@ -518,7 +520,7 @@ async def test_held_embeddings_say_how_current_semantic_results_are(
 @pytest.mark.asyncio
 async def test_all_projects_search_carries_the_freshness(client, test_project, session_maker):
     await _seed(test_project.name)
-    edited_at = await _hold_deploy_plan_embedding(session_maker)
+    edited_at = await _hold_every_embedding(session_maker)
 
     payload = await search_json(query="deploy", mode="text", all_projects=True)
     text = await search_text(query="deploy", mode="text", all_projects=True)
