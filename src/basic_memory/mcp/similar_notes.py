@@ -182,9 +182,10 @@ def format_similar_notes_section(
     a merely related note score in the same band, so a number would imply a precision the
     signal does not have. Ranking is the useful part.
 
-    `same_topic` renders the "merge into the closest note" calls for the closest note's
-    reference, in the calling tool's own vocabulary; `reference` picks how a note is
-    named, its permalink by default.
+    `same_topic` renders the advice for a likely duplicate of the closest note. It is
+    informational: it names the note and leaves the decision to the user, and never
+    spells out edit or delete calls an agent could run unasked (#2011). `reference`
+    picks how a note is named, its permalink by default.
     """
     closest = similar_notes[0]
     closest_ref = reference(closest)
