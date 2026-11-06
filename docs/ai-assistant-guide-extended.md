@@ -354,8 +354,7 @@ await bm_man(query="frontmatter filters")
 
 The manual also lives at `memory://man` and `memory://man/bm-write(3)`. In a shell,
 use `bm man bm-write`. See [Manual Pages](manual-pages.md) for its layout and
-verification rules, and the [short assistant guide](../src/basic_memory/mcp/resources/ai_assistant_guide.md)
-for session-start guidance.
+verification rules. Session-start guidance is the MCP server's own instructions.
 
 ## Best Practices
 

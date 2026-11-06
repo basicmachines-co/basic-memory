@@ -10,10 +10,8 @@ from basic_memory.mcp.prompts import continue_conversation
 from basic_memory.mcp.prompts import getting_started
 from basic_memory.mcp.prompts import recent_activity
 from basic_memory.mcp.prompts import search
-from basic_memory.mcp.prompts import ai_assistant_guide
 
 __all__ = [
-    "ai_assistant_guide",
     "continue_conversation",
     "getting_started",
     "recent_activity",
