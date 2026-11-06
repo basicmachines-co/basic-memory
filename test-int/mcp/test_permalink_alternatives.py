@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from fastmcp import Client
+from httpx import ASGITransport, AsyncClient
 
 from basic_memory.mcp.clients.project import ProjectClient
 from basic_memory.workspace_context import workspace_permalink_context
@@ -299,3 +300,87 @@ async def test_exact_alternatives_intersect_other_filters(
     assert response.json()["results"] == []
     assert response.json()["total"] == 0
     assert response.json()["has_more"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("field", ["permalink", "permalink_match"])
+@pytest.mark.parametrize(
+    "alternatives",
+    [
+        ["notes/shared", ""],
+        ["notes/shared", " \t\n"],
+        [],
+        [f"notes/{index}" for index in range(101)],
+        [f"notes/{index}" for index in range(1001)],
+    ],
+    ids=["empty-element", "whitespace-element", "empty-list", "above-limit", "depth-overflow"],
+)
+async def test_api_rejects_unsafe_permalink_alternatives(
+    app, test_project, permalink_projects, scoped, field, alternatives
+):
+    """Both public routes reject unsafe lists instead of losing matches or returning 500."""
+    url = "/v2/search/" if scoped else f"/v2/projects/{test_project.external_id}/search/"
+    scope = {"project_ids": [test_project.id]} if scoped else {}
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
+    ) as client:
+        control = await client.request("QUERY", url, json={field: ["notes/shared"], **scope})
+        assert control.status_code == 200, control.text
+        assert [row["permalink"] for row in control.json()["results"]] == ["notes/shared"]
+        response = await client.request("QUERY", url, json={field: alternatives, **scope})
+    assert response.status_code == 422, response.text
+    assert any(field in error["loc"] for error in response.json()["detail"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize(
+    "fields", [("permalink",), ("permalink_match",), ("permalink", "permalink_match")]
+)
+@pytest.mark.parametrize("size", [1, 100])
+async def test_api_permalink_alternatives_at_accepted_boundaries(
+    client, test_project, permalink_projects, scoped, fields, size
+):
+    """Accepted list limits execute together with ranking and independent predicates."""
+    query: dict[str, object] = {
+        field: [f"missing{index}" for index in range(size - 1)] + ["notes/shared"]
+        for field in fields
+    }
+    query.update(
+        {
+            "text": "searchable",
+            "title": "Shared",
+            "entity_types": ["entity"],
+            "note_types": ["note"],
+            "file_path_prefix": "notes",
+            "after_date": "2000-01-01",
+            "tags": ["retained"],
+            "status": "active",
+            "metadata_filters": {"title": {"$in": ["Shared 0", "Absent"]}},
+        }
+    )
+    url = "/v2/search/" if scoped else f"/v2/projects/{test_project.external_id}/search/"
+    if scoped:
+        query["project_ids"] = [test_project.id]
+    response = await client.request("QUERY", url, json=query)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert [row["permalink"] for row in payload["results"]] == ["notes/shared"]
+    assert payload["results"][0]["project_id"] == test_project.id
+    assert payload["has_more"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field, expected", [("permalink", []), ("permalink_match", ["notes/shared"])]
+)
+async def test_api_permalink_alternatives_keep_text_normalization(
+    client, test_project, permalink_projects, field, expected
+):
+    """Exact values stay literal while pattern values retain lowercase/strip behavior."""
+    url = f"/v2/projects/{test_project.external_id}/search/"
+    for value in [" Notes/Shared ", [" Notes/Shared "]]:
+        response = await client.request("QUERY", url, json={field: value})
+        assert response.status_code == 200, response.text
+        assert [row["permalink"] for row in response.json()["results"]] == expected
