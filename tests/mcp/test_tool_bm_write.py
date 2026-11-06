@@ -292,7 +292,7 @@ async def test_typed_refusals(client, test_project, monkeypatch, outcome, patter
 
 
 @pytest.mark.asyncio
-async def test_similar_notes_are_listed_with_bm_verbs(client, test_project, monkeypatch):
+async def test_similar_notes_are_listed_as_advice(client, test_project, monkeypatch):
     async def neighbors(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
         return [SimilarNote(title="Old Plan", permalink="notes/old-plan", file_path="notes/o.md")]
 
@@ -303,13 +303,28 @@ async def test_similar_notes_are_listed_with_bm_verbs(client, test_project, monk
     )
 
     assert "## Similar existing notes" in text
-    assert "bm_edit(identifier='notes/o.md'" in text
-    assert f"bm_delete(identifier='notes/new.md', project='{test_project.name}')" in text
+    assert "- Old Plan (`notes/o.md`)" in text
+    assert "Ask the user whether to merge it into `notes/o.md`" in text
     assert payload["similar_notes"][0]["title"] == "Old Plan"
 
 
 @pytest.mark.asyncio
-async def test_similar_note_calls_reach_the_routed_project(client, test_project, monkeypatch):
+async def test_similar_notes_advice_spells_out_no_tool_calls(client, test_project, monkeypatch):
+    """The advisory informs; it must not hand the agent edit or delete calls to run (#2011)."""
+
+    async def neighbors(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
+        return [SimilarNote(title="Old Plan", permalink="notes/old-plan", file_path="notes/o.md")]
+
+    monkeypatch.setattr(write_module, "find_similar_notes", neighbors)
+    text = await write_text(identifier="notes/new.md", content="Body", project=test_project.name)
+
+    section = text[text.index("## Similar existing notes") :]
+    for call in ("bm_edit(", "bm_delete(", "bm_write(", "bm_move("):
+        assert call not in section
+
+
+@pytest.mark.asyncio
+async def test_similar_notes_name_the_routed_path(client, test_project, monkeypatch):
     async def neighbors(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
         return [SimilarNote(title="Old Plan", permalink="notes/old-plan", file_path="notes/o.md")]
 
@@ -322,8 +337,7 @@ async def test_similar_note_calls_reach_the_routed_project(client, test_project,
         identifier=f"{prefix}/notes/newer.md", content="Body", project=test_project.name
     )
 
-    assert f"bm_edit(identifier='{prefix}/notes/o.md'" in text
-    assert f"bm_delete(identifier='{prefix}/notes/new.md', project='{test_project.name}')" in text
+    assert f"Ask the user whether to merge it into `{prefix}/notes/o.md`" in text
     assert payload["similar_notes"][0]["file_path"] == f"{prefix}/notes/o.md"
 
 

@@ -311,7 +311,7 @@ async def bm_write(
             **change.as_json(),
             "similar_notes": [dataclasses.asdict(similar) for similar in similar_notes],
         }
-    return _format_text(change, similar_notes, project=project)
+    return _format_text(change, similar_notes)
 
 
 def _place_note(
@@ -430,7 +430,7 @@ async def _similar_notes(
         return []
 
 
-def _format_text(change: NoteChange, similar_notes: list[SimilarNote], *, project: str) -> str:
+def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
     """The text result: what was written, where, and the checksum to pass back."""
     lines = change.text_lines()
     if similar_notes:
@@ -438,9 +438,8 @@ def _format_text(change: NoteChange, similar_notes: list[SimilarNote], *, projec
             format_similar_notes_section(
                 similar_notes,
                 same_topic=lambda closest: (
-                    f"`bm_edit(identifier={closest!r}, command='append', content='...', "
-                    f"project={project!r})`, then "
-                    f"`bm_delete(identifier={change.file_path!r}, project={project!r})`"
+                    f"Ask the user whether to merge it into `{closest}`; "
+                    "keep both notes until they decide"
                 ),
                 reference=lambda note: note.file_path,
             )
