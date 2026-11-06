@@ -210,7 +210,7 @@ class TestToolCommandsAcceptFlags:
         "command,args",
         [
             ("search", ["test query"]),
-            ("project", ["recent"]),
+            ("recent", []),
             ("read", ["test"]),
             ("edit", ["test", "--command", "append", "--content", "test"]),
             ("context", ["memory://test"]),
@@ -227,7 +227,7 @@ class TestToolCommandsAcceptFlags:
         "command,args",
         [
             ("search", ["test query"]),
-            ("project", ["recent"]),
+            ("recent", []),
             ("read", ["test"]),
             ("edit", ["test", "--command", "append", "--content", "test"]),
             ("context", ["memory://test"]),
