@@ -384,3 +384,59 @@ async def test_api_permalink_alternatives_keep_text_normalization(
         response = await client.request("QUERY", url, json={field: value})
         assert response.status_code == 200, response.text
         assert [row["permalink"] for row in response.json()["results"]] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize(
+    "ranking",
+    [{"title": "Shared"}, {"text": "searchable"}, {"text": "searchable", "title": "Shared"}],
+)
+@pytest.mark.parametrize(
+    "patterns",
+    [
+        ["shared", "missing"],
+        ["shared", "shared"],
+        [f"missing{index}" for index in range(99)] + ["shared"],
+    ],
+    ids=["union", "overlap", "accepted-limit"],
+)
+async def test_api_bare_pattern_alternatives_preserve_ranked_match(
+    app, test_project, permalink_projects, db_backend, scoped, ranking, patterns
+):
+    """Bare alternatives retain MATCH context, scores and pagination without metadata."""
+    url = "/v2/search/" if scoped else f"/v2/projects/{test_project.external_id}/search/"
+    query: dict[str, object] = {"entity_types": ["entity"], **ranking}
+    if scoped:
+        query["project_ids"] = [test_project.id]
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test"
+    ) as client:
+        # All fixture notes are active. This control uses the existing metadata
+        # isolation so it can rank combined text/title predicates on SQLite.
+        control = await client.request(
+            "QUERY", url, json={**query, "metadata_filters": {"status": "active"}}
+        )
+        assert control.status_code == 200, control.text
+        control_rows = control.json()["results"]
+        assert len(control_rows) == 3
+        expected_rows = (
+            [row for row in control_rows if row["permalink"] in permalink_projects[:2]]
+            if db_backend == "sqlite"
+            else []
+        )
+        query["permalink_match"] = patterns
+        rows = []
+        for page in range(1, len(expected_rows) + 2):
+            response = await client.request(
+                "QUERY", url, json=query, params={"page": page, "page_size": 1}
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["has_more"] is (page < len(expected_rows))
+            assert payload["total_is_exact"] is False
+            rows.extend(payload["results"])
+    assert [row["permalink"] for row in rows] == [row["permalink"] for row in expected_rows]
+    assert [row["score"] for row in rows] == [row["score"] for row in expected_rows]
+    assert all(row["score"] != 0 for row in rows)
+    assert all(row["project_id"] == test_project.id for row in rows)
