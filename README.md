@@ -397,8 +397,8 @@ Try a prompt:
 - **Optional search reranking.** Rescore the strongest vector and hybrid
   candidates with a local FastEmbed cross-encoder or a LiteLLM-backed provider.
 - **Schema system.** Infer, validate, and diff the structure of your
-  knowledge base with `bm_schema(command="infer")`, `bm_schema(command="validate")`, and
-  `bm_schema(command="diff")`.
+  knowledge base with `bm_schema_infer()`, `bm_schema_validate()`, and
+  `bm_schema_diff()`.
 - **Per-project cloud routing.** Route individual projects through the cloud
   while others stay local, via API key (`bm project set-cloud`).
 - **Explicit note changes.** `bm_edit` updates existing notes; `bm_write`
@@ -559,9 +559,9 @@ agents can pick the right one without trial-and-error:
 - **Content:** `bm_write`, `bm_read`, `bm_edit`, `bm_move`, `bm_delete`
 - **Search & discovery:** `bm_search`, `bm_list`, `bm_find`
 - **Knowledge graph:** `bm_context`
-- **Projects:** `bm_project_list(| "create" | "recent")`;
+- **Projects:** `bm_project_list`, `bm_project_create`, `bm_recent`;
   `bm_project_delete` is separate and requires server opt-in.
-- **Schema:** `bm_schema(command="validate" | "infer" | "diff")`
+- **Schema:** `bm_schema_validate`, `bm_schema_infer`, `bm_schema_diff`
 - **Manual:** `bm_man`
 - **Cloud connector adapters:** `search` and `fetch` are registered by Cloud only.
   Local diagnostics use `bm doctor`.

@@ -1,11 +1,13 @@
 """Remaining bm_* manual regressions from #1843, through the local ASGI API."""
 
+import re
 from typing import Any
 
 import pytest
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import bm_context, bm_edit, bm_move, bm_read, bm_schema, bm_write
+from basic_memory.mcp import tools
+from basic_memory.mcp.tools import bm_context, bm_edit, bm_move, bm_read, bm_write
 
 
 @pytest.mark.asyncio
@@ -142,12 +144,13 @@ async def test_schema_guidance_names_the_public_bm_tools(client, test_project, c
     )
 
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command=command, note_type=note_type, project=test_project.name)
+        schema_tool = getattr(tools, f"bm_schema_{command}")
+        await schema_tool(note_type=note_type, project=test_project.name)
 
     guidance = str(refused.value)
-    assert "bm_schema(command=" in guidance
-    assert "schema_infer(" not in guidance
-    assert "schema_validate" not in guidance
-    assert "schema_diff" not in guidance
+    assert "bm_schema_" in guidance
+    assert "bm_schema(command=" not in guidance
+    # The pre-1.0 names, without the bm_ prefix, must not come back.
+    assert re.search(r"(?<!bm_)schema_(?:infer|validate|diff)", guidance) is None
     assert "`write_note`" not in guidance
     assert "`search_notes`" not in guidance

@@ -375,8 +375,8 @@ if (!RUN_INTEGRATION) {
     // Regression (#1997): the schema tools read field names BM never sent
     // (entity_type, identifier, valid, declared_in), so every note rendered as
     // "**undefined** — invalid". Unit fixtures are hand-written; this checks
-    // the plugin against a real bm_schema response.
-    it("renders schema tool results from real bm_schema responses", async () => {
+    // the plugin against real schema tool responses.
+    it("renders schema tool results from real schema tool responses", async () => {
       const { client } = getHarness()
       const tools = new Map<
         string,

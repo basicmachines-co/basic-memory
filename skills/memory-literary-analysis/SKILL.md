@@ -557,18 +557,18 @@ During chapter processing, new minor characters, locations, and symbols will eme
 
 ```python
 # Validate each entity type
-bm_schema(command="validate", note_type="Character", project="<work-name>")
-bm_schema(command="validate", note_type="Theme", project="<work-name>")
-bm_schema(command="validate", note_type="Chapter", project="<work-name>")
-bm_schema(command="validate", note_type="Location", project="<work-name>")
-bm_schema(command="validate", note_type="Symbol", project="<work-name>")
-bm_schema(command="validate", note_type="LiteraryDevice", project="<work-name>")
+bm_schema_validate(note_type="Character", project="<work-name>")
+bm_schema_validate(note_type="Theme", project="<work-name>")
+bm_schema_validate(note_type="Chapter", project="<work-name>")
+bm_schema_validate(note_type="Location", project="<work-name>")
+bm_schema_validate(note_type="Symbol", project="<work-name>")
+bm_schema_validate(note_type="LiteraryDevice", project="<work-name>")
 ```
 
 ### Drift Detection
 
 ```python
-bm_schema(command="diff", note_type="Character", project="<work-name>")
+bm_schema_diff(note_type="Character", project="<work-name>")
 # ... for each type
 ```
 
@@ -775,7 +775,7 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.
 - **Add prose for depth.** After structured data is in place, add interpretive essays to major notes. The prose captures what observations cannot: argument, nuance, opinion, and voice.
-- **Validate periodically.** Run `bm_schema(command="validate", project="<work-name>")` after each batch, not just at the end. Catch drift early.
+- **Validate periodically.** Run `bm_schema_validate(project="<work-name>")` after each batch, not just at the end. Catch drift early.
 - **Quote generously.** Literary analysis lives on textual evidence. Include significant quotes as `[quote]` observations with chapter attribution.
 - **Review and revise.** After completing all chapters, review the full graph from an external perspective. Look for thin notes, missing connections, and gaps in coverage. The first pass is never the last.
 - **Analysis comes last.** Synthesis notes in `analysis/` should be written after all chapters are processed, when you have the full picture.

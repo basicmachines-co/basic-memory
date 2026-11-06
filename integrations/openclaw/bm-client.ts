@@ -79,7 +79,9 @@ const REQUIRED_TOOLS = [
   "bm_recent",
   "bm_delete",
   "bm_move",
-  "bm_schema",
+  "bm_schema_validate",
+  "bm_schema_infer",
+  "bm_schema_diff",
 ]
 
 export interface SearchResult {
@@ -204,7 +206,7 @@ export interface WorkspaceResult {
   workspace_type: string | null
 }
 
-// The bm_schema response shapes. They mirror the backend models in
+// The schema tool response shapes. They mirror the backend models in
 // src/basic_memory/schemas/schema.py (ValidationReport, InferenceReport,
 // DriftReport); the client casts the payload without translating fields, so
 // a name that drifts from the backend renders as undefined (#1997).
@@ -1162,17 +1164,16 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaValidationResult> {
     const args: Record<string, unknown> = {
-      command: "validate",
       output_format: "json",
       project: this.routedProject(project),
     }
     if (noteType) args.note_type = noteType
     if (identifier) args.identifier = identifier
 
-    const payload = await this.callTool("bm_schema", args)
+    const payload = await this.callTool("bm_schema_validate", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid bm_schema response")
+      throw new Error("invalid bm_schema_validate response")
     }
 
     return payload as unknown as SchemaValidationResult
@@ -1184,17 +1185,16 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaInferResult> {
     const args: Record<string, unknown> = {
-      command: "infer",
       note_type: noteType,
       threshold,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("bm_schema", args)
+    const payload = await this.callTool("bm_schema_infer", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid bm_schema response")
+      throw new Error("invalid bm_schema_infer response")
     }
 
     return payload as unknown as SchemaInferResult
@@ -1205,16 +1205,15 @@ export class BmClient {
     project?: string,
   ): Promise<SchemaDiffResult> {
     const args: Record<string, unknown> = {
-      command: "diff",
       note_type: noteType,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("bm_schema", args)
+    const payload = await this.callTool("bm_schema_diff", args)
 
     if (!isRecord(payload)) {
-      throw new Error("invalid bm_schema response")
+      throw new Error("invalid bm_schema_diff response")
     }
 
     return payload as unknown as SchemaDiffResult

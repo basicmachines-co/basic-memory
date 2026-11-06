@@ -82,14 +82,9 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "bm_recent": ["project", "since", "items", "page", "page_size", "output_format"],
     "bm_project_delete": ["name", "delete_notes", "workspace", "output_format"],
     "bm_man": ["page", "query", "output_format"],
-    "bm_schema": [
-        "command",
-        "note_type",
-        "identifier",
-        "threshold",
-        "output_format",
-        "project",
-    ],
+    "bm_schema_validate": ["note_type", "identifier", "output_format", "project"],
+    "bm_schema_infer": ["note_type", "threshold", "output_format", "project"],
+    "bm_schema_diff": ["note_type", "output_format", "project"],
     "bm_write": [
         "content",
         "identifier",
@@ -146,7 +141,9 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_project_list": {"readOnlyHint": True, "destructiveHint": False},
     "bm_project_create": {"readOnlyHint": False, "destructiveHint": False},
     "bm_recent": {"readOnlyHint": True, "destructiveHint": False},
-    "bm_schema": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_schema_validate": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_schema_infer": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_schema_diff": {"readOnlyHint": True, "destructiveHint": False},
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
 }
 
@@ -180,7 +177,9 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_project_create": tools.bm_project_create,
     "bm_recent": tools.bm_recent,
     "bm_project_delete": tools.bm_project_delete,
-    "bm_schema": tools.bm_schema,
+    "bm_schema_validate": tools.bm_schema_validate,
+    "bm_schema_infer": tools.bm_schema_infer,
+    "bm_schema_diff": tools.bm_schema_diff,
     "bm_man": tools.bm_man,
 }
 

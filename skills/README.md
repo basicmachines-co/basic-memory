@@ -23,9 +23,11 @@ These skills target the Basic Memory 1.0 MCP surface. Use `bm_man(page="bm_searc
   `bm_find` recurses and supports `filters` plus `fields` for metadata discovery.
 - `bm_search` takes `mode`, `filters`, `items`, and `since`; `lines` requests matching lines.
 - `bm_context` takes `identifier`, graph `depth`, and `since`.
-- `bm_project_list()` discovers projects without scope; `create` creates one.
+- `bm_project_list` discovers projects without scope; `bm_project_create` creates one.
   `bm_recent(project="<project>")` shows scoped activity.
-- `bm_schema(command="validate"|"infer"|"diff", project="<project>")` handles schemas.
+- `bm_schema_validate`, `bm_schema_infer` and `bm_schema_diff` check notes against a
+  schema, suggest one from existing notes, and report drift. `infer` and `diff` need
+  `note_type`.
 - Cloud adds `bm_agent` and Cloud-only read options. Check that the connected server
   exposes them before using those workflows.
 

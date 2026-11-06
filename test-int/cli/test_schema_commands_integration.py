@@ -1,4 +1,4 @@
-"""`bm schema` against a real project: each command calls bm_schema end to end."""
+"""`bm schema` against a real project: each command calls its schema tool end to end."""
 
 import json
 from typing import Any
@@ -217,7 +217,7 @@ def test_diff_without_schema_prints_message(app, test_project, config_manager) -
 
 
 def test_project_passes_through_like_bm_tool(app, test_project, config_manager) -> None:
-    """--project goes to bm_schema unchanged, so a project id routes as it does in bm tool."""
+    """--project goes to the schema tool unchanged, so a project id routes as it does in bm tool."""
     write_people(test_project)
 
     data = bm_schema_json("validate", "person", "--project", test_project.external_id)

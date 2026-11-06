@@ -78,9 +78,8 @@ async def test_shared_schema_and_cross_checkout_recall(
             assert path is not None
             report = structured(
                 await connection.call(
-                    "bm_schema",
+                    "bm_schema_validate",
                     {
-                        "command": "validate",
                         "identifier": path,
                         "project": "main",
                         "output_format": "json",
@@ -143,9 +142,8 @@ async def test_shared_schema_and_cross_checkout_recall(
         )
         foreign_report = structured(
             await connection.call(
-                "bm_schema",
+                "bm_schema_validate",
                 {
-                    "command": "validate",
                     "identifier": foreign.file_path,
                     "project": "main",
                     "output_format": "json",

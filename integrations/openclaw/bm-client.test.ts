@@ -722,7 +722,7 @@ describe("BmClient MCP behavior", () => {
     expect(result.file_path).toBe("notes/old-note.md")
   })
 
-  it("schemaValidate calls bm_schema with JSON output", async () => {
+  it("schemaValidate calls bm_schema_validate with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "person",
@@ -739,9 +739,8 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaValidate("person")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_schema",
+      name: "bm_schema_validate",
       arguments: {
-        command: "validate",
         note_type: "person",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -768,9 +767,8 @@ describe("BmClient MCP behavior", () => {
     await client.schemaValidate(undefined, "notes/my-note")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_schema",
+      name: "bm_schema_validate",
       arguments: {
-        command: "validate",
         identifier: "notes/my-note",
         output_format: "json",
         project: DEFAULT_PROJECT,
@@ -778,7 +776,7 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
-  it("schemaInfer calls bm_schema with threshold", async () => {
+  it("schemaInfer calls bm_schema_infer with threshold", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "task",
@@ -795,9 +793,8 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaInfer("task", 0.5)
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_schema",
+      name: "bm_schema_infer",
       arguments: {
-        command: "infer",
         note_type: "task",
         threshold: 0.5,
         output_format: "json",
@@ -807,7 +804,7 @@ describe("BmClient MCP behavior", () => {
     expect(result.notes_analyzed).toBe(10)
   })
 
-  it("schemaDiff calls bm_schema with JSON output", async () => {
+  it("schemaDiff calls bm_schema_diff with JSON output", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
         entity_type: "person",
@@ -822,9 +819,8 @@ describe("BmClient MCP behavior", () => {
     const result = await client.schemaDiff("person")
 
     expect(callTool).toHaveBeenCalledWith({
-      name: "bm_schema",
+      name: "bm_schema_diff",
       arguments: {
-        command: "diff",
         note_type: "person",
         output_format: "json",
         project: DEFAULT_PROJECT,

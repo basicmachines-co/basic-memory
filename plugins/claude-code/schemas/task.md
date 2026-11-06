@@ -34,6 +34,6 @@ Tasks are found by the SessionStart hook via structured recall:
 
 Put queryable fields (`status`, `priority`, `current_step`) in frontmatter so
 `filters` can find them, and mirror them as `- [status] active`
-observations so `bm_schema(command="validate")` sees them. `note_type="Task"` is stored as
+observations so `bm_schema_validate()` sees them. `note_type="Task"` is stored as
 lowercase `task` in frontmatter, so search with `note_types=["task"]`.
 Validation is `warn` — advisory, never blocking.
