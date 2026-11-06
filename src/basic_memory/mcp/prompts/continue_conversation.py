@@ -13,7 +13,7 @@ from pydantic import Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import resolve_project_parameter
-from basic_memory.mcp.tools.projects import bm_project
+from basic_memory.mcp.tools.projects import bm_recent
 from basic_memory.mcp.tools.ranked_search import bm_search
 
 
@@ -52,7 +52,7 @@ async def continue_conversation(
     project = await resolve_project_parameter(project=project, context=context)
     if project is None:
         return (
-            "Choose a project with bm_project(command='list'), then continue this "
+            "Choose a project with bm_project_list(), then continue this "
             "conversation with an explicit project name or external id."
         )
 
@@ -73,9 +73,7 @@ async def continue_conversation(
     else:
         # No topic — show recent activity
         effective_timeframe = timeframe or "7d"
-        activity_text = await bm_project(
-            command="recent", since=effective_timeframe, project=project, context=context
-        )
+        activity_text = await bm_recent(since=effective_timeframe, project=project, context=context)
         context_text = str(activity_text)
         result_count = -1  # Signals we used recent_activity
 
@@ -113,7 +111,7 @@ async def continue_conversation(
         prompt += dedent(f"""
             No previous context found for '{topic}'.
 
-            Try `bm_search` with related terms or check `bm_project(command="recent", project={project!r})`. If the user wants this
+            Try `bm_search` with related terms or check `bm_recent(project={project!r})`. If the user wants this
             topic tracked, offer to start a note with `bm_write`.
         """)
     else:

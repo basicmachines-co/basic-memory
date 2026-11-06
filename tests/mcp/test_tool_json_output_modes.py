@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from basic_memory.mcp.tools import (
-    bm_project,
+    bm_project_create,
+    bm_project_list,
     bm_write,
 )
 
@@ -42,11 +43,11 @@ async def test_write_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_list_and_create_project_text_and_json_modes(app, test_project, tmp_path):
-    list_text = await bm_project(command="list", output_format="text")
+    list_text = await bm_project_list(output_format="text")
     assert isinstance(list_text, str)
     assert test_project.name in list_text
 
-    list_json = await bm_project(command="list", output_format="json")
+    list_json = await bm_project_list(output_format="json")
     assert isinstance(list_json, dict)
     assert "projects" in list_json
     assert any(project["name"] == test_project.name for project in list_json["projects"])
@@ -54,8 +55,7 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     project_name = "mode-create-project"
     project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "mode-create-project")
 
-    create_text = await bm_project(
-        command="create",
+    create_text = await bm_project_create(
         name=project_name,
         path=project_path,
         output_format="text",
@@ -66,8 +66,7 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     # the UUID without re-listing projects.
     assert "External ID:" in create_text
 
-    create_json_again = await bm_project(
-        command="create",
+    create_json_again = await bm_project_create(
         name=project_name,
         path=project_path,
         output_format="json",
@@ -86,8 +85,7 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     # Verify create-new JSON path also returns external_id (not just already-exists).
     new_project_name = "mode-create-fresh"
     new_project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "mode-create-fresh")
-    create_json_new = await bm_project(
-        command="create",
+    create_json_new = await bm_project_create(
         name=new_project_name,
         path=new_project_path,
         output_format="json",
@@ -102,16 +100,14 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     default_project_path = str(
         tmp_path.parent / (tmp_path.name + "-projects") / "mode-default-project"
     )
-    await bm_project(
-        command="create",
+    await bm_project_create(
         name=default_project_name,
         path=default_project_path,
         set_default=True,
         output_format="text",
     )
 
-    default_text_again = await bm_project(
-        command="create",
+    default_text_again = await bm_project_create(
         name=default_project_name,
         path=default_project_path,
         output_format="text",

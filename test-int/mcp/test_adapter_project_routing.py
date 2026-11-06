@@ -9,7 +9,7 @@ from mcp import types as mt
 async def seed_projects(
     client: Client[FastMCPTransport], default_project: str, other_path: str
 ) -> None:
-    await client.call_tool("bm_project", {"command": "create", "name": "other", "path": other_path})
+    await client.call_tool("bm_project_create", {"name": "other", "path": other_path})
     for project, marker in ((default_project, "DefaultOnlyMarker"), ("other", "OtherOnlyMarker")):
         await client.call_tool(
             "bm_write",

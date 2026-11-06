@@ -3,7 +3,7 @@ title: tools-migration(7)
 type: manpage
 section: 7
 name: tools-migration
-summary: map pre-1.0 MCP tools and bm tool commands to their 1.0 replacements
+summary: map pre-1.0 and 1.0 MCP tools and bm tool commands to their replacements
 generated: hand
 ---
 
@@ -11,7 +11,7 @@ generated: hand
 
 ## NAME
 
-**tools-migration** — map pre-1.0 MCP tools and `bm tool` commands to their 1.0 replacements
+**tools-migration** — map pre-1.0 and 1.0 MCP tools and `bm tool` commands to their replacements
 
 ## DESCRIPTION
 
@@ -20,8 +20,8 @@ are removed with no aliases. The ChatGPT connector's `search` and `fetch` tools 
 Basic Memory Cloud still registers them. Section 3 documents each tool.
 
 `bm tool` mirrors the local note, search, project and schema tools: `read`, `write`, `edit`,
-`move`, `delete`, `list`, `find`, `search`, `context`, `project` and `schema`, with flags named
-after the tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
+`move`, `delete`, `list`, `find`, `search`, `context`, `project-list`, `project-create`,
+`recent` and `schema`, with flags named after the tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
 `bm man`, [[bm-project-delete(3)]] is `bm project remove`, and the Cloud-only tools
 ([[bm-agent(3)]], the ChatGPT `search` and `fetch` adapters) have no `bm tool` command.
 
@@ -39,11 +39,11 @@ The guide's "Tool-by-tool change list" gives each tool's renamed arguments and r
 | `build_context` | `bm_context` |
 | `list_directory`, `ls` | `bm_list` for one level; `bm_find` for recursive inventory |
 | `find` | `bm_find` |
-| `recent_activity` | `bm_project(command="recent")` |
-| `tail` | `bm_project(command="recent")`; map `timeframe` to `since` and `lines` to `page_size`. Recent JSON includes `created_at`, not `updated_at`. The `bm tail` shell command is removed; use `bm tool project recent`. |
-| `list_memory_projects` | `bm_project(command="list")` |
-| `list_workspaces` | `bm_project(command="list")` groups projects by workspace, so it omits a workspace with no projects; `bm cloud workspace list` in a shell lists every workspace |
-| `create_memory_project` | `bm_project(command="create", name=..., path=...)` |
+| `recent_activity` | `bm_recent` |
+| `tail` | `bm_recent`; map `timeframe` to `since` and `lines` to `page_size`. Recent JSON includes `created_at`, not `updated_at`. The `bm tail` shell command is removed; use `bm tool recent`. |
+| `list_memory_projects` | `bm_project_list` |
+| `list_workspaces` | `bm_project_list` groups projects by workspace, so it omits a workspace with no projects; `bm cloud workspace list` in a shell lists every workspace |
+| `create_memory_project` | `bm_project_create(name=..., path=...)` |
 | `delete_project` | `bm_project_delete` (opt-in) |
 | `schema_validate`, `schema_infer`, `schema_diff` | `bm_schema(command="validate"/"infer"/"diff")` |
 | `move_note` | `bm_move` |
@@ -52,6 +52,21 @@ The guide's "Tool-by-tool change list" gives each tool's renamed arguments and r
 
 Two more retired tools: `cloud_info` is `bm_project(command="info")` on Basic Memory Cloud, with no
 local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config list` in a shell.
+
+## 1.1 CHANGES
+
+Basic Memory 1.1 splits the 1.0 tools that chose an operation with a `command` argument into one
+tool per operation, so each tool declares its own required parameters and read-only or
+destructive hints. The 1.0 names are removed with no aliases.
+
+| 1.0 call | 1.1 replacement |
+| --- | --- |
+| `bm_project(command="list")` | `bm_project_list()` |
+| `bm_project(command="create", name=..., path=...)` | `bm_project_create(name=..., path=...)` |
+| `bm_project(command="recent", project=...)` | `bm_recent(project=...)` |
+| `bm tool project list` | `bm tool project-list` |
+| `bm tool project create --name N --path P` | `bm tool project-create --name N --path P` |
+| `bm tool project recent` | `bm tool recent` |
 
 ## BM TOOL COMMANDS
 
@@ -67,10 +82,10 @@ local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config 
 | `search --type T`, `--entity-type K`, `--after_date D` | `search --note-types T`, `--items K`, `--since D` |
 | `search --category C` | `search --categories C` |
 | `build-context`, `context URL --timeframe D` | `context IDENTIFIER --since D` |
-| `recent-activity`, `recent` | `project recent` |
-| `recent --timeframe D --type K --depth N` | `project recent --since D --items K`; depth is fixed at 1 |
-| `list-projects`, `projects` | `project list` |
-| `list-workspaces`, `workspaces` | `project list` (omits workspaces with no projects), or `bm cloud workspace list` for every workspace |
+| `recent-activity`, `recent` | `recent` |
+| `recent --timeframe D --type K --depth N` | `recent --since D --items K`; depth is fixed at 1 |
+| `list-projects`, `projects` | `project-list` |
+| `list-workspaces`, `workspaces` | `project-list` (omits workspaces with no projects), or `bm cloud workspace list` for every workspace |
 | `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate/infer/diff`; a positional `TYPE` becomes `--note-type TYPE` |
 | `validate path/note.md` | `schema validate --identifier path/note.md` |
 | `--project-id UUID` | `--project UUID` |
@@ -89,7 +104,7 @@ JSON result with `--json`.
 
 | Previous shell verb | 1.0 shell verb |
 | --- | --- |
-| `bm tail` | removed; use `bm tool project recent` |
+| `bm tail` | removed; use `bm tool recent` |
 | `--plain`, Rich tables, JSON when piped | removed; text result by default, `--json` for JSON |
 | `--project-id UUID` | `--project UUID` |
 | no `--project` with several projects: refused | the configured default project |

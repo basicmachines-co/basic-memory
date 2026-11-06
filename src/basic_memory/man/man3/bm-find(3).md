@@ -36,7 +36,7 @@ The shell counterpart is find(1).
 
 ## PARAMETERS
 
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **path** (string, optional, default: "/") — A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the project root; '<project>/path' addresses another project.
 - **name** (string | null, optional, default: None) — File-name glob, e.g. '*.md'. Not with `filters`.
 - **filters** (object | null, optional, default: None) — Frontmatter filters as {field: condition}. Nested fields use dot notation ("schema.confidence"). A condition is a value for equality ({"status": "draft"}), null for absent-or-null ({"owner": null}), a list for contains-all ({"tags": ["a", "b"]}), or an operator object with $gt, $gte, $lt, $lte, $in, $between, $contains or $exists, e.g. {"priority": {"$in": ["high"]}}. Several operators on one field AND together.

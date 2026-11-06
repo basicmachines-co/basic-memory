@@ -9,7 +9,7 @@ Create a durable, immutable handoff note for current Codex work. Use this when
 the user asks to checkpoint, wrap up, hand off, remember the work state, or when
 the post-compaction SessionStart context requests the deliberate handoff.
 
-When no project is pinned, discover projects with `bm_project(command="list")`
+When no project is pinned, discover projects with `bm_project_list()`
 and pass the selected project's external ID as `project` on note/search calls.
 With several addressable projects, these calls require an explicit scope even
 when a default is configured.

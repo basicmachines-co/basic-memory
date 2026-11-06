@@ -57,7 +57,7 @@ ProjectParam = Annotated[
         validation_alias=AliasChoices("project", "project_id"),
         description=(
             "Required project name, 'workspace/project', or project external id. "
-            "Discover projects with bm_project(command='list'). Paths are relative "
+            "Discover projects with bm_project_list(). Paths are relative "
             "to this project; a qualified path must agree with it."
         ),
     ),

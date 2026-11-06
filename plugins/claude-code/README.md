@@ -216,7 +216,7 @@ ever auto-writing to the shared graph.**
 
 Because project names repeat across workspaces, team refs must be **workspace-qualified**
 (`my-team/notes`) or `external_id` UUIDs — `/basic-memory:bm-setup` fills these in for you
-from `bm_project(command="list")`.
+from `bm_project_list()`.
 
 ## Documentation
 

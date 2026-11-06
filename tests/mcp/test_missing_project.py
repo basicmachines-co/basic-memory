@@ -23,7 +23,7 @@ SCOPED_TOOLS = {
     "bm_schema": {"command": "validate"},
 }
 
-HINT = "Try instead: bm_project(command='list') to discover projects"
+HINT = "Try instead: bm_project_list() to discover projects"
 
 
 def _server(*registered: Any) -> FastMCP:
@@ -66,7 +66,7 @@ async def test_json_output_format_gets_a_json_refusal(name: str):
     assert result.is_error
     payload = json.loads(_text(result))
     assert payload["error"] == "INVALID_ARGUMENTS"
-    assert payload["try_instead"] == "bm_project(command='list') to discover projects"
+    assert payload["try_instead"] == "bm_project_list() to discover projects"
 
 
 @pytest.mark.asyncio

@@ -48,7 +48,7 @@ create one.
 ## PARAMETERS
 
 - **command** (required) — What to do.
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **note_type** (string | null, optional, default: None) — The frontmatter `type:` to check. Required for infer and diff.
 - **identifier** (string | null, optional, default: None) — For validate: one note, instead of a whole note type.
 - **threshold** (number, optional, default: 0.25) — For infer: the share of notes a field must appear in to be suggested.

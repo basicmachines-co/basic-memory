@@ -1,6 +1,6 @@
 """bm_list: list one directory level.
 
-Every listing names its project explicitly. Project discovery is bm_project's job;
+Every listing names its project explicitly. Project discovery is bm_project_list's job;
 recursive listing is bm_find's job.
 """
 
@@ -30,7 +30,7 @@ from basic_memory.schemas.directory import DirectoryListResponse, DirectorySortO
     description=(
         "List one folder of a Basic Memory project: its subfolders, then its files with "
         "title, date and id. `project` is required; '/' lists its root. Discover projects "
-        "with bm_project(command='list'). Filter files with `glob` "
+        "with bm_project_list(). Filter files with `glob` "
         "and order them with `sort`. For a recursive search by name or frontmatter, use "
         "bm_find."
     ),

@@ -121,7 +121,7 @@ The plugin starts `bm mcp` lazily: on the first `/bm-*` command or agent session
 
 `Note:` lines list setup the first start will do by itself, such as installing `bm` with `uv`.
 
-The plugin asks the running `bm mcp` whether the configured project exists (`bm_project` list). It never reads Basic Memory's config files, so `BASIC_MEMORY_CONFIG_DIR` and `XDG_CONFIG_HOME` work however `bm` itself resolves them. A missing local project is created at `project_path` on first start. A missing cloud project fails the start with the `bm project add ... --cloud` command to run.
+The plugin asks the running `bm mcp` whether the configured project exists (`bm_project_list`). It never reads Basic Memory's config files, so `BASIC_MEMORY_CONFIG_DIR` and `XDG_CONFIG_HOME` work however `bm` itself resolves them. A missing local project is created at `project_path` on first start. A missing cloud project fails the start with the `bm project add ... --cloud` command to run.
 
 ### Known issue: `/bm-*` commands may not appear in some Hermes gateway builds
 
@@ -172,7 +172,7 @@ To override, write `~/.hermes/basic-memory.json` or run `hermes memory setup bas
 }
 ```
 
-In local mode the plugin creates the BM project on first init if Basic Memory does not list it, through `bm mcp`'s `bm_project` create. In cloud mode it doesn't — you create the cloud-routed project yourself (see below) and the plugin checks that Basic Memory lists it before initializing.
+In local mode the plugin creates the BM project on first init if Basic Memory does not list it, through `bm mcp`'s `bm_project_create`. In cloud mode it doesn't — you create the cloud-routed project yourself (see below) and the plugin checks that Basic Memory lists it before initializing.
 
 ### Cloud mode
 

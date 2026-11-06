@@ -1586,7 +1586,7 @@ def _agreed_route_project(
 
 OTHER_WORKSPACES_HINT = (
     "projects in other workspaces are addressed as '<workspace-slug>/<project>/<path>' "
-    "or by project UUID; bm_project(command='list') lists them"
+    "or by project UUID; bm_project_list() lists them"
 )
 
 

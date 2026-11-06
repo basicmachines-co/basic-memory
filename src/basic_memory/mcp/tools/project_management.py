@@ -1,4 +1,4 @@
-"""Project listing, creation and deletion behind bm_project and bm_project_delete.
+"""Project listing, creation and deletion behind bm_project_list, bm_project_create and bm_project_delete.
 
 The project listing also serves bm_search across projects and the Cloud server.
 """
@@ -449,7 +449,7 @@ async def create_memory_project(
         workspace: Optional cloud workspace selector to create the project in. Slug is
             preferred for AI callers, but tenant_id and unique name are also accepted.
             When omitted, the connection's default workspace is used. Discover values
-            via `bm_project(command='list')`. A workspace selector implies cloud routing:
+            via `bm_project_list()`. A workspace selector implies cloud routing:
             without cloud credentials the call fails fast instead of silently
             creating a local project.
         output_format: "text" returns human-readable result text.
@@ -460,9 +460,9 @@ async def create_memory_project(
         Confirmation message with project details
 
     Example:
-        bm_project(command="create", name="my-research", path="~/Documents/research")
-        bm_project(command="create", name="work-notes", path="/home/user/work", set_default=True)
-        bm_project(command="create", name="team-notes", path="/team/notes", workspace="team-paul")
+        bm_project_create(name="my-research", path="~/Documents/research")
+        bm_project_create(name="work-notes", path="/home/user/work", set_default=True)
+        bm_project_create(name="team-notes", path="/team/notes", workspace="team-paul")
     """
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors
@@ -481,7 +481,7 @@ async def create_memory_project(
     workspace_id = await _resolve_workspace_routing(workspace, context, output_format)
 
     # workspace targets a non-default cloud workspace at create time.
-    # Trigger: caller passed workspace (e.g. a slug from bm_project(command="list")).
+    # Trigger: caller passed workspace (e.g. a slug from bm_project_list()).
     # Why: there is no project_id yet for per-project routing — the project doesn't exist.
     # Outcome: cloud factory routes the create request to the resolved workspace tenant id.
     async with get_client(workspace=workspace_id) as client:
@@ -521,7 +521,7 @@ async def create_memory_project(
                     f"Project '{existing_match.name}' already exists at "
                     f"{existing_match.path}, not {project_path}.",
                     try_instead=(
-                        f"another name, or bm_project(command='create', "
+                        f"another name, or bm_project_create("
                         f"name='{existing_match.name}', path='{existing_match.path}')"
                     ),
                     output_format=output_format,
@@ -693,7 +693,7 @@ async def delete_project(
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
             used. A workspace selector implies cloud routing: without cloud
-            credentials the call fails fast, as bm_project(command="create")
+            credentials the call fails fast, as bm_project_create()
             does.
 
     Returns:

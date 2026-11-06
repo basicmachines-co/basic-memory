@@ -1,4 +1,4 @@
-"""bm_project and bm_project_delete against Cloud workspaces.
+"""The project tools against Cloud workspaces.
 
 The Cloud server runs these tools with an injected client factory and workspace
 provider (set_client_factory, set_workspace_provider). These tests inject the same
@@ -22,7 +22,7 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp import async_client, project_context
 from basic_memory.mcp.async_client import set_client_factory
 from basic_memory.mcp.project_context import set_workspace_provider
-from basic_memory.mcp.tools import bm_project, bm_project_delete
+from basic_memory.mcp.tools import bm_project_create, bm_project_delete, bm_project_list
 from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectItem, ProjectList, ProjectStatusResponse
 from basic_memory.utils import generate_permalink
@@ -200,7 +200,7 @@ async def test_list_groups_projects_by_workspace(hosted):
         )
     )
 
-    result = await bm_project(command="list")
+    result = await bm_project_list()
 
     assert isinstance(result, str)
     assert "Workspace: Personal (personal default)\n" in result
@@ -225,7 +225,7 @@ async def test_list_json_carries_workspace_metadata(hosted):
         )
     )
 
-    result = await bm_project(command="list", output_format="json")
+    result = await bm_project_list(output_format="json")
 
     assert isinstance(result, dict)
     assert result["default_project"] == "personal-main"
@@ -274,7 +274,7 @@ async def test_list_surfaces_workspace_discovery_failure(hosted):
     set_workspace_provider(no_user_context)
 
     with pytest.raises(RuntimeError, match="no user context"):
-        await bm_project(command="list")
+        await bm_project_list()
 
 
 @pytest.mark.asyncio
@@ -294,8 +294,8 @@ async def test_constrained_json_matches_every_project_spelling(hosted, monkeypat
     )
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", constraint)
 
-    result = await bm_project(command="list", output_format="json")
-    text = await bm_project(command="list")
+    result = await bm_project_list(output_format="json")
+    text = await bm_project_list()
 
     assert isinstance(result, dict)
     assert [row["external_id"] for row in result["projects"]] == ["team-main-uuid"]
@@ -314,16 +314,13 @@ async def test_create_in_a_workspace_named_by_slug(hosted):
     """The slug resolves to the tenant id, and Cloud indexes in the background."""
     cloud = hosted(FakeCloud(projects={}))
 
-    created = await bm_project(
-        command="create",
+    created = await bm_project_create(
         name="WS Project",
         path="ws-project",
         workspace="team-paul",
         output_format="json",
     )
-    created_text = await bm_project(
-        command="create", name="WS Text", path="ws-text", workspace="team-paul"
-    )
+    created_text = await bm_project_create(name="WS Text", path="ws-text", workspace="team-paul")
 
     assert isinstance(created, dict)
     assert created["created"] is True
@@ -348,8 +345,8 @@ async def test_create_retry_does_not_compare_hosted_paths(hosted):
     """Hosted paths are tenant-relative, so a retry spelling the path differently succeeds."""
     hosted(FakeCloud(projects={PERSONAL.tenant_id: [_project("manual", "manual-uuid")]}))
 
-    retry = await bm_project(command="create", name="manual", path="manual", output_format="json")
-    retry_text = await bm_project(command="create", name="manual", path="elsewhere")
+    retry = await bm_project_create(name="manual", path="manual", output_format="json")
+    retry_text = await bm_project_create(name="manual", path="elsewhere")
 
     assert isinstance(retry, dict)
     assert (retry["already_exists"], retry["path"]) == (True, "/manual")
@@ -364,7 +361,7 @@ async def test_create_needs_the_created_project_back(hosted):
     cloud = hosted(FakeCloud(projects={}, returns_created_project=False))
 
     with pytest.raises(RuntimeError, match="succeeded without returning the new project"):
-        await bm_project(command="create", name="Missing", path="missing")
+        await bm_project_create(name="Missing", path="missing")
 
     assert not any(path.endswith("/index") for _, path, _ in cloud.tenant_requests("POST"))
 
@@ -463,8 +460,7 @@ async def test_unknown_workspace_is_a_refusal_in_the_requested_format(hosted):
 async def test_list_merges_local_and_cloud_projects(
     stdio_with_cloud, test_project, tmp_path_factory
 ):
-    local_main = await bm_project(
-        command="create",
+    local_main = await bm_project_create(
         name="main",
         path=str(tmp_path_factory.mktemp("main")),
         output_format="json",
@@ -480,8 +476,8 @@ async def test_list_merges_local_and_cloud_projects(
         )
     )
 
-    text = await bm_project(command="list")
-    payload = await bm_project(command="list", output_format="json")
+    text = await bm_project_list()
+    payload = await bm_project_list(output_format="json")
 
     assert isinstance(text, str)
     assert "- main (local+cloud) [cloud-main-uuid]\n" in text
@@ -508,7 +504,7 @@ async def test_list_falls_back_to_local_projects_when_cloud_fails(stdio_with_clo
 
     set_workspace_provider(unavailable)
 
-    text = await bm_project(command="list")
+    text = await bm_project_list()
 
     assert isinstance(text, str)
     assert f"- {test_project.name} (local)" in text
@@ -538,8 +534,7 @@ async def test_local_state_attaches_to_one_workspace_row(
     personal_is_default,
     attached,
 ):
-    local_main = await bm_project(
-        command="create",
+    local_main = await bm_project_create(
         name="main",
         path=str(tmp_path_factory.mktemp("main")),
         output_format="json",
@@ -559,7 +554,7 @@ async def test_local_state_attaches_to_one_workspace_row(
         )
     )
 
-    payload = await bm_project(command="list", output_format="json")
+    payload = await bm_project_list(output_format="json")
 
     assert isinstance(local_main, dict) and isinstance(payload, dict)
     rows: dict[str, dict[str, Any]] = {

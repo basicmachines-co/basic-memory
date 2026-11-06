@@ -9,7 +9,7 @@ Transform a complete literary work into a structured knowledge graph. Characters
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<work-name>` below is a placeholder for it.
@@ -86,7 +86,7 @@ CLI page sizes and flags below are separate from the MCP shapes.
 ### Create the Project
 
 ```python
-bm_project(command="create", name="<work-name>", path="~/basic-memory/<work-name>")
+bm_project_create(name="<work-name>", path="~/basic-memory/<work-name>")
 ```
 
 Use a kebab-case slug of the work's title (e.g., `great-gatsby`, `hamlet`, `beloved`).

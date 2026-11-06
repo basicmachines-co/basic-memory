@@ -26,7 +26,7 @@ bm_list(project, path="/", glob=None, sort=None, page=1, page_size=10,
 
 Lists one level of a folder: subfolders first, then files with their title,
 date and id. `project` is required, including when `path="/"` lists its root.
-Discover available projects with `bm_project(command="list")`. A qualified path
+Discover available projects with `bm_project_list`. A qualified path
 must agree with `project`; returned paths keep that prefix.
 
 Filter files with `glob` and order them with `sort`. Results are paged; the text
@@ -37,7 +37,7 @@ The shell counterpart is ls(1).
 
 ## PARAMETERS
 
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **path** (string, optional, default: "/") — A directory in the project, e.g. 'specs' or 'specs/active'. '/' is the project root; '<project>/path' addresses another project.
 - **glob** (string | null, optional, default: None) — File-name glob, e.g. '*.md' or '*meeting*'.
 - **sort** (string | null, optional, default: None) — File order. Folders always come first.

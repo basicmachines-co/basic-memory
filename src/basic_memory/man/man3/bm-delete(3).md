@@ -34,7 +34,7 @@ be undone.
 
 ## PARAMETERS
 
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — The note to delete: a path, permalink, memory:// URL or exact title.
 - **path** (string | null, optional, default: None) — The directory to delete, with everything in it.
 - **recursive** (boolean, optional, default: False) — Required true to delete a directory and everything under it.

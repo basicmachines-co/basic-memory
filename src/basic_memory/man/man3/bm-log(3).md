@@ -52,8 +52,8 @@ every field, as the web app's activity API does.
 `operation.agent_run`.
 
 `bm_log` does not return note content. To read a note, use bm_read(3). To
-read recently changed notes' content, use `bm_project(command="recent",
-project="<project>")`, see bm-project(3).
+read recently changed notes' content, use
+`bm_recent(project="<project>")`, see bm-recent(3).
 
 ## EXAMPLES
 
@@ -77,5 +77,5 @@ bm_log(since="2026-07-22", full=True)
 ## SEE ALSO
 
 - see_also [[bm-read(3)]]
-- see_also [[bm-project(3)]]
+- see_also [[bm-project-list(3)]]
 - see_also [[bm-man(3)]]

@@ -49,7 +49,7 @@ Every search needs explicit project scope: `project` for one project, `projects`
 for a list, or `all_projects=True` for all accessible projects. A path or
 `memory://` query does not replace that requirement. For a one-project search,
 `identifier`, `path` or a `memory://` query narrows within the selected project.
-Discover projects with `bm_project(command="list")`.
+Discover projects with `bm_project_list`.
 
 ## PARAMETERS
 
@@ -131,7 +131,7 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
 - An unquoted authored point is one whitespace-delimited token: `@occurred:2026-06-10` and `@occurred:03/04/2026` work, but a multi-word date like `@occurred:June 10, 2026` is left as content because nothing can tell where it ends
 - Double quotes lift the one-token rule and end the point at the closing quote, so `@occurred:"June 10, 2026"` and `@"June 2026"` both file — inside quotes even a month-only or year-only date is taken, since the author delimited it
 - A relative date is never filed as a qualifier, quoted or not: `@occurred:yesterday`, `@occurred:"2 days ago"` and a bare month name like `@occurred:March` each name a different span depending on when the note is indexed, so they stay ordinary content — quoting settles where a token ends, not what a date means
-- Relative wording still works for `since` in bm_project(command="recent") and bm_context, which ask about edit time rather than authored time — only the valid-time qualifier requires a date that means the same thing on every pass
+- Relative wording still works for `since` in bm_recent and bm_context, which ask about edit time rather than authored time — only the valid-time qualifier requires a date that means the same thing on every pass
 - Only `"` opens a quoted point, never `'`, and an unterminated quote is reported rather than swallowing the rest of the line
 - `@occurred:03/04/2026` resolves by the `date_order` setting (YMD/DMY read it as 3 April, MDY as 4 March); ISO dates are never re-guessed
 

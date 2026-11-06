@@ -60,7 +60,7 @@ The shell counterpart is cat(1).
 ## PARAMETERS
 
 - **identifier** (string, required) — The note or file: a file path ('notes/plan.md'), permalink, memory:// URL, exact title, external id, or '<project>/path'.
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **section** (string | null, optional, default: None) — A heading to read: "Decisions", "Auth/Decisions" for a heading under "Auth", or "Decisions[1]" for the second "Decisions" heading.
 - **start_line** (integer | null, optional, default: None)
 - **end_line** (integer | null, optional, default: None)

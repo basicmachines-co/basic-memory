@@ -250,8 +250,8 @@ async def test_recent_activity_accepts_timeframe_aliases(mcp_server, app, test_p
     """`since`/`time_range`/`lookback` should map to `timeframe`."""
     async with Client(mcp_server) as client:
         result = await client.call_tool(
-            "bm_project",
-            {"project": test_project.name, "since": "7d", "limit": 5, "command": "recent"},
+            "bm_recent",
+            {"project": test_project.name, "since": "7d", "limit": 5},
         )
         assert result.content  # accepted, no validation error
 
@@ -502,7 +502,7 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
                 ["query", "mode", "filters", "items", "since", "page_size"],
                 ["q", "pattern", "search_type", "metadata_filters", "entity_types", "limit"],
             ),
-            "bm_project": (["command", "since", "items"], ["timeframe", "entity_types"]),
+            "bm_recent": (["since", "items"], ["timeframe", "entity_types"]),
             "bm_find": (["path", "name", "filters"], ["folder", "dir_name"]),
             "bm_move": (
                 ["destination", "identifier", "path"],

@@ -1,4 +1,4 @@
-"""Integration tests for bm_project and bm_project_delete.
+"""Integration tests for the project tools and bm_project_delete.
 
 MCP client -> MCP server -> FastAPI -> project service.
 """
@@ -25,8 +25,8 @@ async def test_list_projects_basic_operation(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # List all available projects
         list_result = await client.call_tool(
-            "bm_project",
-            {"command": "list"},
+            "bm_project_list",
+            {},
         )
 
         # Should return formatted project list
@@ -47,13 +47,12 @@ async def test_create_project_basic_operation(mcp_server, app, test_project, tmp
     async with Client(mcp_server) as client:
         # Create a new project
         create_result = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "test-new-project",
                 "path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / "project-test-new-project"
                 ),
-                "command": "create",
             },
         )
 
@@ -70,7 +69,7 @@ async def test_create_project_basic_operation(mcp_server, app, test_project, tmp
         assert "Project is now available for use" in create_text
 
         # Verify project appears in project list
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         list_text = list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "test-new-project" in list_text
 
@@ -82,14 +81,13 @@ async def test_create_project_with_default_flag(mcp_server, app, test_project, t
     async with Client(mcp_server) as client:
         # Create a new project and set as default
         create_result = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "test-default-project",
                 "path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / "project-test-default-project"
                 ),
                 "set_default": True,
-                "command": "create",
             },
         )
 
@@ -102,7 +100,7 @@ async def test_create_project_with_default_flag(mcp_server, app, test_project, t
         assert "Set as default project" in create_text
 
         # Verify the new project is listed
-        list_after_create = await client.call_tool("bm_project", {"command": "list"})
+        list_after_create = await client.call_tool("bm_project_list", {})
         assert "test-default-project" in list_after_create.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
@@ -116,33 +114,30 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "duplicate-test",
                 "path": original_path,
-                "command": "create",
             },
         )
 
         # A different directory is a refusal, which MCP clients receive as a tool error.
         with pytest.raises(ToolError, match="^ALREADY_EXISTS: Project 'duplicate-test'") as refused:
             await client.call_tool(
-                "bm_project",
+                "bm_project_create",
                 {
                     "name": "duplicate-test",
                     "path": other_path,
-                    "command": "create",
                 },
             )
         expected_paths = f"already exists at {original_path}, not {other_path}.".replace("\\", "/")
         assert expected_paths in str(refused.value).replace("\\", "/")
 
         same = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "duplicate-test",
                 "path": original_path,
-                "command": "create",
             },
         )
         same_text = same.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -150,12 +145,11 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
         assert "already exists" in same_text.lower()
 
         same_json = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "duplicate-test",
                 "path": original_path,
                 "output_format": "json",
-                "command": "create",
             },
         )
         same_json_text = same_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -171,18 +165,17 @@ async def test_delete_project_basic_operation(mcp_server, app, test_project, tmp
     async with Client(mcp_server) as client:
         # First create a project to delete
         await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "to-be-deleted",
                 "path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / "project-to-be-deleted"
                 ),
-                "command": "create",
             },
         )
 
         # Verify it exists
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         assert "to-be-deleted" in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Delete the project
@@ -206,7 +199,7 @@ async def test_delete_project_basic_operation(mcp_server, app, test_project, tmp
         )
 
         # Verify project no longer appears in list
-        list_result_after = await client.call_tool("bm_project", {"command": "list"})
+        list_result_after = await client.call_tool("bm_project_list", {})
         assert "to-be-deleted" not in list_result_after.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
@@ -257,8 +250,8 @@ async def test_project_lifecycle_workflow(mcp_server, app, test_project, tmp_pat
 
         # 1. Create new project
         create_result = await client.call_tool(
-            "bm_project",
-            {"name": project_name, "path": project_path, "command": "create"},
+            "bm_project_create",
+            {"name": project_name, "path": project_path},
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert project_name in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -276,11 +269,11 @@ async def test_project_lifecycle_workflow(mcp_server, app, test_project, tmp_pat
         )
 
         # 3. Verify the project exists in the list
-        list_with_content = await client.call_tool("bm_project", {"command": "list"})
+        list_with_content = await client.call_tool("bm_project_list", {})
         assert project_name in list_with_content.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # 4. Verify we can still access the original test project
-        test_list = await client.call_tool("bm_project", {"command": "list"})
+        test_list = await client.call_tool("bm_project_list", {})
         assert "test-project" in test_list.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # 5. Delete the lifecycle test project
@@ -293,7 +286,7 @@ async def test_project_lifecycle_workflow(mcp_server, app, test_project, tmp_pat
         assert "removed successfully" in delete_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # 6. Verify project is gone from list
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         assert project_name not in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
@@ -307,7 +300,7 @@ async def test_create_delete_project_edge_cases(mcp_server, app, test_project, t
 
         # Create project with special characters
         create_result = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": special_name,
                 "path": str(
@@ -315,14 +308,13 @@ async def test_create_delete_project_edge_cases(mcp_server, app, test_project, t
                     / (tmp_path.name + "-projects")
                     / "project-test-project-with-special-chars"
                 ),
-                "command": "create",
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert special_name in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Verify it appears in list
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         assert special_name in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Delete it
@@ -334,7 +326,7 @@ async def test_create_delete_project_edge_cases(mcp_server, app, test_project, t
         assert special_name in delete_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Verify it's gone
-        list_result_after = await client.call_tool("bm_project", {"command": "list"})
+        list_result_after = await client.call_tool("bm_project_list", {})
         assert special_name not in list_result_after.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
@@ -346,20 +338,19 @@ async def test_case_insensitive_project_switching(mcp_server, app, test_project,
         # Create a project with mixed case name
         project_name = "Personal-Project"
         create_result = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": project_name,
                 "path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
                 ),
-                "command": "create",
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert project_name in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Verify project was created with canonical name
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         assert project_name in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Test with different case variations
@@ -403,13 +394,12 @@ async def test_case_insensitive_project_operations(mcp_server, app, test_project
         # Create a project with capital letters
         project_name = "CamelCase-Project"
         create_result = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": project_name,
                 "path": str(
                     tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
                 ),
-                "command": "create",
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -495,18 +485,17 @@ async def test_case_preservation_in_project_list(mcp_server, app, test_project, 
         # Create all test projects
         for project_name in test_projects:
             await client.call_tool(
-                "bm_project",
+                "bm_project_create",
                 {
                     "name": project_name,
                     "path": str(
                         tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
                     ),
-                    "command": "create",
                 },
             )
 
         # List projects and verify each appears with its original case
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         list_text = list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         for project_name in test_projects:
@@ -545,8 +534,8 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
         )
 
         await client.call_tool(
-            "bm_project",
-            {"name": parent_name, "path": parent_path, "command": "create"},
+            "bm_project_create",
+            {"name": parent_name, "path": parent_path},
         )
 
         # Try to create a child project nested under the parent
@@ -557,8 +546,8 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
 
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(
-                "bm_project",
-                {"name": child_name, "path": child_path, "command": "create"},
+                "bm_project_create",
+                {"name": child_name, "path": child_path},
             )
 
         # Verify error message mentions nested paths
@@ -585,19 +574,18 @@ async def test_create_project_workspace_without_credentials_fails_fast(
     async with Client(mcp_server) as client:
         with pytest.raises(ToolError, match="cloud workspace was requested"):
             await client.call_tool(
-                "bm_project",
+                "bm_project_create",
                 {
                     "name": "ws-local-test",
                     "path": str(
                         tmp_path.parent / (tmp_path.name + "-projects") / "project-ws-local-test"
                     ),
                     "workspace": "team-paul",
-                    "command": "create",
                 },
             )
 
         # The failed create must not leave a local project behind
-        list_result = await client.call_tool("bm_project", {"command": "list"})
+        list_result = await client.call_tool("bm_project_list", {})
         assert "ws-local-test" not in list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
 
@@ -640,7 +628,7 @@ async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
     try:
         async with Client(mcp_server) as mcp_client:
             create_result = await mcp_client.call_tool(
-                "bm_project",
+                "bm_project_create",
                 {
                     "name": "ws-routed-project",
                     "path": str(
@@ -649,7 +637,6 @@ async def test_create_project_workspace_slug_forwarded_to_factory_as_tenant_id(
                         / "project-ws-routed-project"
                     ),
                     "workspace": "team-paul",
-                    "command": "create",
                 },
             )
 

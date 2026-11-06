@@ -115,7 +115,7 @@ def test_tree_refuses_bad_depth():
 
 
 def test_tail_is_gone():
-    """`bm tail` was removed in 1.0; `bm tool project recent` lists recent notes."""
+    """`bm tail` was removed in 1.0; `bm tool recent` lists recent notes."""
     result = runner.invoke(cli_app, ["tail"])
 
     assert result.exit_code == 2

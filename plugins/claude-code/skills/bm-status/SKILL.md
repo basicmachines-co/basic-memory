@@ -9,7 +9,7 @@ disable-model-invocation: true
 Report the plugin's current state for this project, then present a concise summary.
 This is a quick diagnostic — gather the facts and lay them out; don't over-investigate.
 
-When no project is pinned, discover projects with `bm_project(command="list")`
+When no project is pinned, discover projects with `bm_project_list()`
 and pass the selected project's external ID as `project` on note/search calls.
 With several addressable projects, these calls require an explicit scope even
 when a default is configured.

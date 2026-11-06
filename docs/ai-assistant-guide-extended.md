@@ -22,7 +22,7 @@ capture authorization; ask before saving when no authorization exists.
 Discover projects when the route is unknown or the user asks for their projects:
 
 ```python
-await bm_project(command="list", output_format="json")
+await bm_project_list(output_format="json")
 ```
 
 Pass a project name, `workspace/project`, or a returned `external_id` UUID through
@@ -33,7 +33,7 @@ a project for later calls. Note-addressing tools can refuse unqualified identifi
 when several projects are available, even if a default is configured.
 
 ```python
-await bm_project(command="recent", since="7d", project="main")
+await bm_recent(since="7d", project="main")
 await bm_search(query="authentication", project="main")
 await bm_read(identifier="specs/authentication.md", project="main")
 ```
@@ -47,9 +47,7 @@ conclusion. The CLI `bm status` reports local indexing status; there is no MCP
 Create a project when requested:
 
 ```python
-await bm_project(
-    command="create",
-    name="research",
+await bm_project_create(name="research",
     path="/Users/name/Documents/research",
     set_default=False,
 )

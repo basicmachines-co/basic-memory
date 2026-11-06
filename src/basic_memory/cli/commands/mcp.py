@@ -141,7 +141,7 @@ def mcp(
     elif transport == "streamable-http" or transport == "sse":
         # Trigger: HTTP/SSE bind host is not a loopback address.
         # Why: these transports have no inbound authentication, so every MCP tool
-        #      (bm_write, bm_delete, bm_project create, ...) is reachable by
+        #      (bm_write, bm_delete, bm_project_create, ...) is reachable by
         #      anyone who can reach the port.
         # Outcome: warn on stderr and in the MCP log; startup proceeds because
         #          containers legitimately bind 0.0.0.0 behind their own network.

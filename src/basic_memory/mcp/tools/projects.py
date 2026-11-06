@@ -1,27 +1,22 @@
-"""bm_project and bm_project_delete: projects and workspaces.
+"""Project tools: list, create, recent changes, delete.
 
-bm_project lists projects (grouped by workspace), creates them, and shows what
-changed recently. bm_project_delete removes one; it is its own tool so bm_project
-is never destructive, and it is hidden unless the enable_project_delete setting
-turns it on (see mcp.server.set_project_delete_visibility).
-
-Each command runs the project tool implementation of the same purpose; these
-tools give them one `command` parameter and the shared parameter types.
+One tool per operation, so each carries its own annotations and required
+parameters (#2030). bm_project_delete is hidden unless the enable_project_delete
+setting turns it on (see mcp.server.set_project_delete_visibility).
 """
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
-from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp, set_project_delete_visibility
 from basic_memory.mcp.tool_params import (
     Items,
     OutputFormat,
     Page,
     PageSize,
-    OptionalProjectParam,
+    ProjectParam,
     Since,
     parse_project,
     routing_arguments,
@@ -33,8 +28,6 @@ from basic_memory.mcp.tools.project_management import (
 )
 from basic_memory.mcp.tools.recent_activity import RecentRows, recent_activity_page
 
-type ProjectCommand = Literal["list", "create", "recent"]
-
 Workspace = Annotated[
     str | None,
     Field(description="In Cloud: the workspace slug, name or id that holds the project."),
@@ -42,106 +35,127 @@ Workspace = Annotated[
 
 
 @mcp.tool(
-    name="bm_project",
-    title="Projects",
+    name="bm_project_list",
+    title="List projects",
+    description="List the Basic Memory projects you can reach, grouped by workspace.",
+    tags={"projects"},
+    annotations={
+        "title": "List projects",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def bm_project_list(
+    output_format: OutputFormat = "text",
+    context: Context | None = None,
+) -> str | dict[str, Any]:
+    """List projects."""
+    return await list_memory_projects(output_format=output_format, context=context)
+
+
+@mcp.tool(
+    name="bm_project_create",
+    title="Create project",
     description=(
-        "Basic Memory projects. `command`: list (projects, grouped by workspace); create "
-        "(`name`, `path`, optional `set_default`, `workspace`); recent (what changed "
-        "lately in the required `project`: `since`, `items`, paging)."
+        "Create a Basic Memory project named `name` whose notes live in the folder `path`. "
+        "In Cloud, `workspace` picks the workspace that holds it."
     ),
     tags={"projects"},
     annotations={
-        "title": "Projects",
+        "title": "Create project",
         "readOnlyHint": False,
         "destructiveHint": False,
         "idempotentHint": False,
         "openWorldHint": False,
     },
 )
-async def bm_project(
-    command: Annotated[ProjectCommand, Field(description="What to do.")],
+async def bm_project_create(
     name: Annotated[
-        str | None,
+        str,
         Field(
             min_length=1,
             validation_alias=AliasChoices("name", "project_name"),
-            description="For create: the new project's name.",
+            description="The new project's name.",
         ),
-    ] = None,
+    ],
     path: Annotated[
-        str | None,
+        str,
         Field(
             min_length=1,
             validation_alias=AliasChoices("path", "project_path"),
-            description="For create: the folder that holds the project's notes.",
+            description="The folder that holds the project's notes.",
         ),
-    ] = None,
-    set_default: Annotated[
-        bool, Field(description="For create: make the new project the default.")
-    ] = False,
+    ],
+    set_default: Annotated[bool, Field(description="Make the new project the default.")] = False,
     workspace: Workspace = None,
+    output_format: OutputFormat = "text",
+    context: Context | None = None,
+) -> str | dict[str, Any]:
+    """Create one project."""
+    return await create_memory_project(
+        project_name=name,
+        project_path=path,
+        set_default=set_default,
+        workspace=workspace,
+        output_format=output_format,
+        context=context,
+    )
+
+
+@mcp.tool(
+    name="bm_recent",
+    title="Recent changes",
+    description=(
+        "What changed lately in a Basic Memory project: notes, observations or relations "
+        "modified within `since`, newest first, paged."
+    ),
+    tags={"projects"},
+    annotations={
+        "title": "Recent changes",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def bm_recent(
+    project: ProjectParam,
     since: Since = "7d",
     items: Items = None,
     page: Page = 1,
     page_size: PageSize = 10,
     output_format: OutputFormat = "text",
-    project: OptionalProjectParam = None,
     context: Context | None = None,
-) -> str | dict[str, Any] | list[dict[str, Any]]:
-    """List or create projects, or show what changed in them."""
-    match command:
-        case "list":
-            return await list_memory_projects(output_format=output_format, context=context)
-        case "create":
-            if name is None or path is None:
-                raise refusal(
-                    "INVALID_ARGUMENTS",
-                    "create needs `name` and `path`.",
-                    try_instead="bm_project(command='create', name='research', path='~/research')",
-                    output_format=output_format,
-                )
-            return await create_memory_project(
-                project_name=name,
-                project_path=path,
-                set_default=set_default,
-                workspace=workspace,
-                output_format=output_format,
-                context=context,
-            )
-        case "recent":
-            if project is None:
-                raise refusal(
-                    "INVALID_ARGUMENTS",
-                    "recent needs `project`, a project name, workspace/project or external id.",
-                    try_instead="bm_project(command='list') to discover projects",
-                    output_format=output_format,
-                )
-            project_name, project_id = routing_arguments(parse_project(project))
-            activity = await recent_activity_page(
-                items=items,
-                timeframe=since,
-                page=page,
-                page_size=page_size,
-                project=project_name,
-                project_id=project_id,
-                output_format=output_format,
-                context=context,
-            )
-            # Text is returned as rendered. JSON has one shape, as bm_search has: rows
-            # with paging, or no rows plus the reason the miss is not final (a project
-            # that was never indexed).
-            match activity:
-                case str() as text if output_format == "text":
-                    return text
-                case RecentRows() as recent:
-                    return {
-                        "results": recent.rows,
-                        "page": recent.page,
-                        "page_size": recent.page_size,
-                        "has_more": recent.has_more,
-                    }
-                case str() as guidance:
-                    return {"results": [], "guidance": guidance}
+) -> str | dict[str, Any]:
+    """Show what changed in one project."""
+    project_name, project_id = routing_arguments(parse_project(project))
+    activity = await recent_activity_page(
+        items=items,
+        timeframe=since,
+        page=page,
+        page_size=page_size,
+        project=project_name,
+        project_id=project_id,
+        output_format=output_format,
+        context=context,
+    )
+    # Text is returned as rendered. JSON has one shape, as bm_search has: rows with
+    # paging, or no rows plus the reason the miss is not final (a project that was never
+    # indexed).
+    match activity:
+        case str() as text if output_format == "text":
+            return text
+        case RecentRows() as recent:
+            return {
+                "results": recent.rows,
+                "page": recent.page,
+                "page_size": recent.page_size,
+                "has_more": recent.has_more,
+            }
+        case str() as guidance:
+            return {"results": [], "guidance": guidance}
 
 
 @mcp.tool(
@@ -166,7 +180,7 @@ async def bm_project_delete(
         Field(
             min_length=1,
             validation_alias=AliasChoices("name", "project_name"),
-            description="The project to delete, as bm_project(command='list') names it.",
+            description="The project to delete, as bm_project_list names it.",
         ),
     ],
     delete_notes: Annotated[

@@ -28,7 +28,7 @@ async def test_real_basic_memory_roundtrip_and_fresh_recall(
     cfg = Settings(command=COMMAND, project="main", timeout_seconds=90)
     tools = discover_sync(cfg)
     by_name = {tool.name: tool for tool in tools}
-    assert {"bm_write", "bm_read", "bm_search", "bm_project"} <= by_name.keys()
+    assert {"bm_write", "bm_read", "bm_search", "bm_recent"} <= by_name.keys()
     connection = McpConnection(cfg)
     await connection.start()
     try:

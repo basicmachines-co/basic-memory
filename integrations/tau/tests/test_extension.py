@@ -49,7 +49,7 @@ async def test_sync_discovery_inside_running_loop_and_persistent_calls() -> None
     tools = discover_sync(cfg)
     assert [t.name for t in tools] == [
         "bm_write",
-        "bm_project",
+        "bm_project_list",
         "extra_tool",
         "bm_read",
         "bm_search",

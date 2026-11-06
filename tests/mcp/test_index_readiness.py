@@ -10,11 +10,11 @@ from sqlalchemy import update
 
 from basic_memory import db
 from basic_memory.mcp.clients.project import ProjectClient
-from basic_memory.mcp.tools import bm_project, bm_search, bm_write
+from basic_memory.mcp.tools import bm_recent, bm_search, bm_write
 from basic_memory.models import Project
 
 
-@pytest.mark.parametrize("tool", ["bm_search", "bm_project"])
+@pytest.mark.parametrize("tool", ["bm_search", "bm_recent"])
 @pytest.mark.parametrize("output_format", ["text", "json"])
 @pytest.mark.parametrize("page", [1, 2])
 async def test_index_required_through_mcp(mcp, client, test_project, tool, output_format, page):
@@ -23,7 +23,7 @@ async def test_index_required_through_mcp(mcp, client, test_project, tool, outpu
     if tool == "bm_search":
         params.update(query="missing", mode="text")
     else:
-        params.update(command="recent", items=["observation"])
+        params.update(items=["observation"])
     async with Client(mcp) as mcp_client:
         result = await mcp_client.call_tool(tool, params)
     assert "# Project Index Required" in result.content[0].text
@@ -53,7 +53,7 @@ async def test_readiness_failure_is_not_an_empty_success(client, test_project, m
     with pytest.raises(ToolError, match="readiness unavailable"):
         await bm_search(project=test_project.name, query="missing", output_format="json")
     with pytest.raises(ToolError, match="readiness unavailable"):
-        await bm_project(command="recent", project=test_project.name, output_format="json")
+        await bm_recent(project=test_project.name, output_format="json")
 
 
 async def test_nonempty_reads_skip_status(client, test_project, monkeypatch):
@@ -67,7 +67,7 @@ async def test_nonempty_reads_skip_status(client, test_project, monkeypatch):
     found = await bm_search(
         project=test_project.name, query="Visible", mode="text", output_format="json"
     )
-    recent = await bm_project(command="recent", project=test_project.name, output_format="json")
+    recent = await bm_recent(project=test_project.name, output_format="json")
 
     assert isinstance(found, dict) and found["results"]
     assert isinstance(recent, dict) and recent["results"]
@@ -87,7 +87,7 @@ async def test_indexed_pending_misses_stay_empty(client, test_project, session_m
     found = await bm_search(
         project=test_project.name, query="missing", mode="text", output_format="json"
     )
-    recent = await bm_project(command="recent", project=test_project.name, output_format="json")
+    recent = await bm_recent(project=test_project.name, output_format="json")
 
     assert isinstance(found, dict) and found["results"] == []
     assert "guidance" not in found
