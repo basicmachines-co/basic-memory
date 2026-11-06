@@ -15,7 +15,7 @@ per the consistency model in CLAUDE.md.
 
 from datetime import datetime
 
-from sqlalchemy import Select, exists, func, select, text
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -24,20 +24,6 @@ from basic_memory.models.knowledge import ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_runtime import semantic_runtime_available
 from basic_memory.utils import ensure_timezone_aware
-
-
-def any_behind_statement(scope: ProjectScope) -> Select[tuple[bool]]:
-    """Whether any of ``scope``'s notes has embeddings that lag its content.
-
-    The predicate is the partial index's own text, so both engines can answer from
-    `ix_entity_project_embedding_not_current`, which holds only the notes behind.
-    """
-    return select(
-        exists().where(
-            Entity.project_id.in_(scope.project_ids),
-            text(ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE),
-        )
-    )
 
 
 def latest_embedded_statement(scope: ProjectScope) -> Select[tuple[datetime]]:
@@ -55,7 +41,11 @@ def latest_embedded_statement(scope: ProjectScope) -> Select[tuple[datetime]]:
 
 
 def oldest_behind_statement(scope: ProjectScope) -> Select[tuple[datetime]]:
-    """The oldest last-modified time among ``scope``'s notes whose embeddings lag."""
+    """The oldest last-modified time among ``scope``'s notes whose embeddings lag.
+
+    The predicate is the partial index's own text, so both engines can answer from
+    `ix_entity_project_embedding_not_current`, which holds only the notes behind.
+    """
     return select(func.min(Entity.updated_at)).where(
         Entity.project_id.in_(scope.project_ids),
         text(ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE),
@@ -77,16 +67,16 @@ async def semantic_index_current_as_of(
         return None
 
     async with db.scoped_session(session_maker) as session:
+        oldest_behind = (await session.execute(oldest_behind_statement(scope))).scalar_one()
         # Trigger: no note is behind. Why: the common case, answered from the partial
         # index without touching current notes. Outcome: no freshness to report.
-        if not (await session.execute(any_behind_statement(scope))).scalar_one():
+        if oldest_behind is None:
             return None
-        current_as_of = (await session.execute(latest_embedded_statement(scope))).scalar_one()
-        # Trigger: notes are behind and none is embedded yet (a first pass still owed).
-        # Why: there is no embedded change to point at, and null would claim every note
-        # is current. Outcome: the oldest note behind, before which nothing is missing.
-        if current_as_of is None:
-            current_as_of = (await session.execute(oldest_behind_statement(scope))).scalar_one()
+        latest_embedded = (await session.execute(latest_embedded_statement(scope))).scalar_one()
+    # Trigger: notes are behind and none is embedded yet (a first pass still owed).
+    # Why: there is no embedded change to point at, and null would claim every note is
+    # current. Outcome: the oldest note behind, before which nothing is missing.
+    current_as_of = latest_embedded if latest_embedded is not None else oldest_behind
     # SQLite hands back naive local times. An aware value is what lets a client compare
     # answers from a local and a cloud database, as the all-projects search does.
     return ensure_timezone_aware(

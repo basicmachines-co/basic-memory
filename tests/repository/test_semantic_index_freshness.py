@@ -19,7 +19,7 @@ from basic_memory.models import Entity, Project
 from basic_memory.repository import semantic_index_freshness as freshness_module
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_index_freshness import (
-    any_behind_statement,
+    oldest_behind_statement,
     semantic_index_current_as_of,
 )
 
@@ -331,7 +331,7 @@ async def test_the_lookup_reads_the_partial_index(session_maker, app_config, tes
     """Each search pays for this check, so it must not scan the project's entities."""
     if app_config.database_backend != DatabaseBackend.SQLITE:
         pytest.skip("Postgres picks partial indexes by cost; the planner is not asserted.")
-    compiled = any_behind_statement(ProjectScope.single(test_project.id)).compile(
+    compiled = oldest_behind_statement(ProjectScope.single(test_project.id)).compile(
         dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
     )
     async with db.scoped_session(session_maker) as session:
