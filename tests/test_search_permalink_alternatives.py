@@ -3,6 +3,7 @@
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from basic_memory.read_cache.routes import _request_identity
 from basic_memory.schemas.search import SearchQuery
@@ -41,3 +42,38 @@ async def test_permalink_alternatives_partition_query_cache(field):
     keys = [response.json() for response in responses]
     assert len(set(keys[:3])) == 3
     assert keys[1] == keys[3]
+
+
+@pytest.mark.parametrize("field", ["permalink", "permalink_match"])
+@pytest.mark.parametrize("blank", ["", " ", "\t\n", "\u2003"])
+def test_permalink_alternatives_reject_blank_elements(field: str, blank: str) -> None:
+    """Reject the whole list before an empty MATCH can discard valid alternatives."""
+    with pytest.raises(ValidationError):
+        SearchQuery.model_validate({field: ["notes/shared", blank]})
+
+
+@pytest.mark.parametrize("field", ["permalink", "permalink_match"])
+@pytest.mark.parametrize("size", [0, 101, 1001])
+def test_permalink_alternatives_reject_invalid_lengths(field: str, size: int) -> None:
+    """Reject empty lists and lists that exceed the SQL expression budget."""
+    with pytest.raises(ValidationError):
+        SearchQuery.model_validate({field: [f"notes/{index}" for index in range(size)]})
+
+
+@pytest.mark.parametrize("field", ["permalink", "permalink_match"])
+@pytest.mark.parametrize("size", [1, 100])
+def test_permalink_alternatives_preserve_accepted_values(field: str, size: int) -> None:
+    """Validation preserves case and whitespace for the existing backend normalization."""
+    values = [" Notes/Shared "] * size
+    query = SearchQuery.model_validate({field: values})
+    prepared = prepare_search_query(query)
+    assert prepared is not None
+    assert getattr(prepared, field) == values
+
+
+@pytest.mark.parametrize("field", ["permalink", "permalink_match"])
+@pytest.mark.parametrize("value", [None, "", " ", " Notes/Shared "])
+def test_permalink_scalar_validation_is_unchanged(field: str, value: str | None) -> None:
+    """List validation must not constrain or normalize legacy scalar inputs."""
+    query = SearchQuery.model_validate({field: value})
+    assert getattr(query, field) == value
