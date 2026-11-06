@@ -1,5 +1,6 @@
 """Portable storage event normalization helpers."""
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
@@ -84,33 +85,121 @@ class RuntimeStorageEventSource:
         return group_storage_events_by_bucket(self.events)
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeStorageEventStep:
+    """One operation to run, standing for every event it covers.
+
+    Consecutive deletes of one path collapse into a single step: a delete only
+    asks whether the object is still there, so one check answers them all.
+    """
+
+    operation: RuntimeStorageEventOperation
+    event_count: int = 1
+
+
+def plan_runtime_storage_event_steps(
+    operations: Iterable[RuntimeStorageEventOperation],
+) -> tuple[tuple[RuntimeStorageEventStep, ...], ...]:
+    """Group operations by path, in arrival order, collapsing repeated deletes.
+
+    Deleting old object versions (a version prune) sends one delete event per
+    version, so one notification batch can hold the same path many times.
+    Operations without a path (skips) each form their own group.
+    """
+    groups: dict[str, list[RuntimeStorageEventStep]] = {}
+    for position, operation in enumerate(operations):
+        group_key = operation.relative_path or f"\0{position}"
+        steps = groups.setdefault(group_key, [])
+        previous = steps[-1] if steps else None
+        if (
+            previous is not None
+            and previous.operation.kind == RuntimeStorageEventOperationKind.delete_file
+            and operation.kind == RuntimeStorageEventOperationKind.delete_file
+        ):
+            # Keep the latest event; its check runs after every earlier delete.
+            steps[-1] = RuntimeStorageEventStep(operation, previous.event_count + 1)
+            continue
+        steps.append(RuntimeStorageEventStep(operation))
+    return tuple(tuple(steps) for steps in groups.values())
+
+
+async def _run_storage_event_step(
+    step: RuntimeStorageEventStep,
+    processor: RuntimeStorageEventOperationProcessor,
+) -> RuntimeJobCounts:
+    operation = step.operation
+    try:
+        if operation.kind == RuntimeStorageEventOperationKind.skip:
+            await processor.skip_event(operation)
+            return RuntimeJobCounts().with_skipped(step.event_count)
+
+        if operation.kind == RuntimeStorageEventOperationKind.index_file:
+            await processor.index_file(operation)
+            return RuntimeJobCounts().with_processed(step.event_count)
+
+        if operation.kind == RuntimeStorageEventOperationKind.delete_file:
+            await processor.delete_file(operation)
+            return RuntimeJobCounts().with_processed(step.event_count)
+
+        raise RuntimeError(f"Unhandled storage event operation kind: {operation.kind}")
+    except Exception as exc:
+        await processor.event_failed(operation, exc)
+        return RuntimeJobCounts().with_failed(step.event_count)
+
+
+async def _run_storage_event_path(
+    steps: tuple[RuntimeStorageEventStep, ...],
+    processor: RuntimeStorageEventOperationProcessor,
+) -> RuntimeJobCounts:
+    # One path's events stay in arrival order, so a create after a delete
+    # still wins.
+    result = RuntimeJobCounts()
+    for step in steps:
+        result = result.add(await _run_storage_event_step(step, processor))
+    return result
+
+
 async def run_runtime_storage_event_operations(
     events: Iterable[StorageEventPayload],
     processor: RuntimeStorageEventOperationProcessor,
+    *,
+    max_concurrent_paths: int = 1,
 ) -> RuntimeJobCounts:
-    """Execute normalized storage event operations and count per-event outcomes."""
+    """Execute normalized storage event operations and count per-event outcomes.
+
+    Different paths run up to ``max_concurrent_paths`` at a time; each path's
+    own events stay in order. The default of one runs every path in turn. A
+    caller raising it must bound it by what each operation holds (a database
+    connection per check, for example).
+    """
+    if max_concurrent_paths < 1:
+        raise ValueError("max_concurrent_paths must be at least 1")
+
+    path_groups = plan_runtime_storage_event_steps(plan_runtime_storage_event_operations(events))
+
+    if max_concurrent_paths == 1:
+        result = RuntimeJobCounts()
+        for steps in path_groups:
+            result = result.add(await _run_storage_event_path(steps, processor))
+        return result
+
+    slots = asyncio.Semaphore(max_concurrent_paths)
+
+    async def run_path(steps: tuple[RuntimeStorageEventStep, ...]) -> RuntimeJobCounts:
+        async with slots:
+            return await _run_storage_event_path(steps, processor)
+
+    # Per-event failures are counted inside each path. Only an error the
+    # processor chose to raise (a failure no later event would repair) gets
+    # here; it cancels the other paths and fails the batch, as it would have
+    # stopped the sequential loop.
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            tasks = [task_group.create_task(run_path(steps)) for steps in path_groups]
+    except ExceptionGroup as failures:
+        raise failures.exceptions[0] from None
+
     result = RuntimeJobCounts()
-
-    for operation in plan_runtime_storage_event_operations(events):
-        try:
-            if operation.kind == RuntimeStorageEventOperationKind.skip:
-                await processor.skip_event(operation)
-                result = result.with_skipped()
-                continue
-
-            if operation.kind == RuntimeStorageEventOperationKind.index_file:
-                await processor.index_file(operation)
-                result = result.with_processed()
-                continue
-
-            if operation.kind == RuntimeStorageEventOperationKind.delete_file:
-                await processor.delete_file(operation)
-                result = result.with_processed()
-                continue
-
-            raise RuntimeError(f"Unhandled storage event operation kind: {operation.kind}")
-        except Exception as exc:
-            await processor.event_failed(operation, exc)
-            result = result.with_failed()
-
+    for task in tasks:
+        result = result.add(task.result())
     return result

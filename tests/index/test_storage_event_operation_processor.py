@@ -1,5 +1,6 @@
 """Tests for generic project-scoped storage event operation processing."""
 
+import asyncio
 from dataclasses import dataclass, field
 
 from basic_memory.index.event_operations import (
@@ -201,3 +202,26 @@ async def test_storage_event_operation_processor_notifies_skips_and_failures() -
 
     assert observer.skipped == [("main", RuntimeStorageEventSkipReason.unknown_event)]
     assert observer.failed == [("image.png", "boom")]
+
+
+@dataclass(slots=True)
+class SlowDeleteResourcesFactory(RecordingDeleteResourcesFactory):
+    """Yields while creating resources, as a real factory opening clients does."""
+
+    @override
+    async def create_delete_resources(self, context: ProjectOperationContext) -> str:
+        await asyncio.sleep(0.01)
+        return await RecordingDeleteResourcesFactory.create_delete_resources(self, context)
+
+
+async def test_concurrent_deletes_share_one_set_of_delete_resources() -> None:
+    delete_resources_factory = SlowDeleteResourcesFactory()
+    processor = operation_processor(delete_resources_factory=delete_resources_factory)
+
+    await asyncio.gather(
+        processor.delete_file(delete_operation("notes/a.md")),
+        processor.delete_file(delete_operation("notes/b.md")),
+        processor.delete_file(delete_operation("notes/c.md")),
+    )
+
+    assert delete_resources_factory.calls == ["main"]

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from typing import Generic, Protocol, TypeVar
 
 from basic_memory.runtime.storage import RuntimeStorageEventOperation
@@ -100,6 +101,9 @@ class StorageEventOperationProcessor(
         DeleteResultT,
     ]
     delete_resources: DeleteResourcesT | None = None
+    # Paths of one batch can run concurrently; they share one set of delete
+    # resources, created by whichever delete gets here first.
+    _delete_resources_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
         await self.runtime.observer.skip_event(self.runtime.context, operation)
@@ -108,16 +112,18 @@ class StorageEventOperationProcessor(
         await self.runtime.index_runner.index_file(self.runtime.context, operation)
 
     async def delete_file(self, operation: RuntimeStorageEventOperation) -> None:
-        if self.delete_resources is None:
-            self.delete_resources = (
-                await self.runtime.delete_resources_factory.create_delete_resources(
-                    self.runtime.context,
+        async with self._delete_resources_lock:
+            if self.delete_resources is None:
+                self.delete_resources = (
+                    await self.runtime.delete_resources_factory.create_delete_resources(
+                        self.runtime.context,
+                    )
                 )
-            )
+            delete_resources = self.delete_resources
 
         result = await self.runtime.delete_runner.delete_file(
             self.runtime.context,
-            self.delete_resources,
+            delete_resources,
             operation,
         )
         await self.runtime.observer.delete_file_completed(
