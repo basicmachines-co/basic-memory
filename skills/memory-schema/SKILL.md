@@ -125,7 +125,7 @@ Look for clusters of notes that share structure but have no schema:
 
 1. **Search by type**: `bm_search(note_types=["meeting"], project="<project>")` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
 
-2. **Infer a schema**: Use `bm_schema_infer(project="<project>")` to analyze existing notes and generate a suggested schema:
+2. **Infer a schema**: Use `bm_schema_infer` to analyze existing notes and generate a suggested schema:
    ```python
    bm_schema_infer(note_type="Meeting", project="<project>")
    bm_schema_infer(note_type="Meeting", threshold=0.5, project="<project>")  # fields in 50%+ of notes
@@ -186,7 +186,7 @@ bm_schema_validate(note_type="Meeting", project="<project>")
 bm_schema_validate(identifier="meetings/2026-02-10-standup", project="<project>")
 ```
 
-**Important:** `bm_schema_validate(project="<project>")` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
+**Important:** `bm_schema_validate` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
 
 Validation reports **missing required fields** (as observation categories, or relations
 for entity-reference fields) and **invalid enum values**. Undeclared observation categories
@@ -200,7 +200,7 @@ type-checked.
 
 ## Detecting Drift
 
-Over time, notes evolve and schemas lag behind. Use `bm_schema_diff(project="<project>")` to find divergence:
+Over time, notes evolve and schemas lag behind. Use `bm_schema_diff` to find divergence:
 
 ```python
 bm_schema_diff(note_type="Meeting", project="<project>")
@@ -250,10 +250,10 @@ When note structure changes:
 ## Workflow Summary
 
 ```
-1. Notice repeated note structure → infer schema (bm_schema_infer(project="<project>"))
+1. Notice repeated note structure → infer schema (bm_schema_infer)
 2. Review + create schema note   → write to schema/ (bm_write)
-3. Validate existing notes       → check conformance (bm_schema_validate(project="<project>"))
+3. Validate existing notes       → check conformance (bm_schema_validate)
 4. Fix outliers                  → edit non-conforming notes (bm_edit)
-5. Periodically check drift      → detect divergence (bm_schema_diff(project="<project>"))
+5. Periodically check drift      → detect divergence (bm_schema_diff)
 6. Evolve schema as needed       → update schema note (bm_edit)
 ```

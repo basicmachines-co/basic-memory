@@ -91,7 +91,7 @@ What future-you needs to pick up this work. Include:
 )
 ```
 
-**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema_validate(project="<project>")`. Include queryable fields in both places for full coverage.
+**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema_validate`. Include queryable fields in both places for full coverage.
 
 ### Key Principles
 
