@@ -428,6 +428,19 @@ async def _similar_notes(
         probe_log = logger.debug if probe_declined_by_server(probe_error) else logger.warning
         probe_log(f"bm_write similar-note probe failed for {written.file_path}: {probe_error}")
         return []
+    except Exception as probe_error:
+        # Trigger: the routed search raised something other than a ToolError. Through the
+        #   local ASGI transport a server-side exception (a sqlite-vec OperationalError,
+        #   #2065) reaches the client as itself rather than as an HTTP 500.
+        # Why: the note is already on disk; failing the call reports a write that happened
+        #   as failed, and a caller that retries can duplicate it.
+        # Outcome: the write succeeds without the advisory, and the cause is logged.
+        #   CancelledError is a BaseException, so cancellation still propagates.
+        logger.opt(exception=probe_error).warning(
+            f"bm_write similar-note probe failed for {written.file_path}: "
+            f"{type(probe_error).__name__}: {probe_error}"
+        )
+        return []
 
 
 def _format_text(change: NoteChange, similar_notes: list[SimilarNote]) -> str:
