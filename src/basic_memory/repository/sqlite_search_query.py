@@ -346,6 +346,7 @@ def compile_fts_filter(
         params["title_exact"] = query.title.strip()
         leading_order_by = "(lower(search_index.title) = lower(:title_exact)) DESC, "
 
+    has_permalink_fts_alternative = False
     if isinstance(query.permalink_match, list):
         alternatives = []
         for index, pattern in enumerate(query.permalink_match):
@@ -359,6 +360,7 @@ def compile_fts_filter(
             else:
                 # MATCH cannot share an outer OR with equality/GLOB. Filter by
                 # rowid so alternatives leave the outer text/title ranking intact.
+                has_permalink_fts_alternative = True
                 params[name] = prepare_search_term(permalink_text, is_prefix=False)
                 alternatives.append(
                     "search_index.rowid IN (SELECT rowid FROM search_index "
@@ -496,12 +498,13 @@ def compile_fts_filter(
         )
         match_conditions = [ranked_match]
 
-    # MATCH and BM25 must run together before metadata joins. Moving only
+    # MATCH and BM25 must run together before metadata joins or bare permalink
+    # alternatives. SQLite can plan a rowid union outside the MATCH context. Moving only
     # MATCH into a rowid subquery leaves the outer BM25 without match context,
     # yielding zero scores and ordering matching notes by id instead of relevance.
-    # OFFSET 0 prevents SQLite from flattening this query back into the join,
+    # OFFSET 0 prevents SQLite from flattening this query back into the outer filters,
     # where per-column OR MATCH predicates cannot retain a valid FTS context.
-    if query.metadata_filters and match_conditions:
+    if (query.metadata_filters or has_permalink_fts_alternative) and match_conditions:
         # Scope before materialization so unrelated projects do not pay the cost
         # of ranking and projecting every matching note into the derived table.
         scope_where = scope.predicate("search_index.project_id", params)
@@ -510,8 +513,9 @@ def compile_fts_filter(
             "(SELECT search_index.rowid AS rowid, search_index.*, "
             f"{BM25_SCORE_EXPRESSION} AS fts_score "
             f"FROM search_index WHERE {match_where} LIMIT -1 OFFSET 0) AS search_index "
-            "JOIN entity ON search_index.entity_id = entity.id"
         )
+        if query.metadata_filters:
+            from_clause += "JOIN entity ON search_index.entity_id = entity.id"
         score_expression = "search_index.fts_score"
     else:
         conditions.extend(match_conditions)
