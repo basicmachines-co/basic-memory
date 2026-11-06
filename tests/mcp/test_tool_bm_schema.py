@@ -1,4 +1,4 @@
-"""Tests for bm_schema (validate, infer, diff) through the full ASGI stack."""
+"""Tests for the schema tools (validate, infer, diff) through the full ASGI stack."""
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -10,7 +10,7 @@ from fastmcp.exceptions import ToolError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.index.local_project import LocalProjectIndexRunner
-from basic_memory.mcp.tools import bm_schema, bm_write
+from basic_memory.mcp.tools import bm_schema_diff, bm_schema_infer, bm_schema_validate, bm_write
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 
@@ -113,8 +113,7 @@ async def test_schema_validate_by_type(app, test_project, index_project):
     # Index so the database picks up the files written directly to disk.
     await index_project()
 
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         note_type="person",
         project=test_project.name,
     )
@@ -140,8 +139,7 @@ async def test_schema_validate_json_output(app, test_project, index_project):
 
     await index_project()
 
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         note_type="person",
         project=test_project.name,
         output_format="json",
@@ -201,8 +199,7 @@ permalink: pico/pico-test-1
 
     await index_project()
 
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         note_type="pico_test",
         project=test_project.name,
         output_format="json",
@@ -235,8 +232,7 @@ async def test_schema_validate_by_identifier(app, test_project, index_project):
 
     await index_project()
 
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         identifier="people/alice",
         project=test_project.name,
     )
@@ -265,8 +261,7 @@ async def test_schema_validate_by_title(app, test_project, index_project):
     await index_project()
 
     # Use the title "Alice" instead of the permalink "people/alice"
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         identifier="Alice",
         project=test_project.name,
     )
@@ -299,8 +294,7 @@ async def test_schema_validate_identifier_no_schema_refuses_with_guidance(
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(
-            command="validate",
+        await bm_schema_validate(
             identifier="Alice",
             project=test_project.name,
         )
@@ -326,8 +320,7 @@ async def test_schema_infer(app, test_project, index_project):
 
     await index_project()
 
-    result = await bm_schema(
-        command="infer",
+    result = await bm_schema_infer(
         note_type="person",
         project=test_project.name,
     )
@@ -369,8 +362,7 @@ permalink: people/dave
 
     await index_project()
 
-    result = await bm_schema(
-        command="diff",
+    result = await bm_schema_diff(
         note_type="person",
         project=test_project.name,
     )
@@ -400,7 +392,7 @@ async def test_schema_validate_all_types(app, test_project, index_project):
 
     await index_project()
 
-    result = await bm_schema(command="validate", project=test_project.name)
+    result = await bm_schema_validate(project=test_project.name)
 
     assert isinstance(result, str)
     assert "Schema Validation: all" in result
@@ -425,7 +417,7 @@ async def test_schema_validate_all_types_json(app, test_project, index_project):
 
     await index_project()
 
-    result = await bm_schema(command="validate", project=test_project.name, output_format="json")
+    result = await bm_schema_validate(project=test_project.name, output_format="json")
 
     assert isinstance(result, dict)
     assert result["total_notes"] == 1
@@ -460,13 +452,13 @@ async def test_schema_validate_all_types_no_schemas_refuses_with_guidance(
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command="validate", project=test_project.name)
+        await bm_schema_validate(project=test_project.name)
     result = str(refused.value)
 
     assert isinstance(result, str)
     assert "No Schemas Defined" in result
     assert "unknown" not in result
-    assert "bm_schema(command='infer'" in result
+    assert "bm_schema_infer(" in result
 
 
 @pytest.mark.asyncio
@@ -474,7 +466,7 @@ async def test_schema_validate_all_types_no_schemas_json(app, test_project, inde
     """JSON output with no schemas defined returns a clear error dict."""
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command="validate", project=test_project.name, output_format="json")
+        await bm_schema_validate(project=test_project.name, output_format="json")
     result = json.loads(str(refused.value))
 
     assert result == {"error": "NOT_FOUND", "message": "No schemas defined in this project"}
@@ -487,7 +479,7 @@ async def test_schema_validate_all_types_no_schemas_json(app, test_project, inde
 async def test_bm_write_metadata_creates_schema_note(app, test_project, index_project):
     """Create a schema note via bm_write(metadata=...), then validate against it.
 
-    Proves the end-to-end workflow: bm_write → index → bm_schema validate.
+    Proves the end-to-end workflow: bm_write → index → bm_schema_validate.
     """
     project_path = Path(test_project.path)
 
@@ -517,9 +509,8 @@ async def test_bm_write_metadata_creates_schema_note(app, test_project, index_pr
     # 3. Sync picks up person notes written directly to disk
     await index_project()
 
-    # 4. Validate — bm_schema should find the schema and validate person notes
-    result = await bm_schema(
-        command="validate",
+    # 4. Validate — bm_schema_validate should find the schema and validate person notes
+    result = await bm_schema_validate(
         note_type="person",
         project=test_project.name,
     )
@@ -585,8 +576,7 @@ permalink: employees/{name.lower()}
     await index_project()
 
     # Validate — must find "Employee Schema" via entity_metadata['entity'] == "employee"
-    result = await bm_schema(
-        command="validate",
+    result = await bm_schema_validate(
         note_type="employee",
         project=test_project.name,
     )
@@ -640,8 +630,7 @@ permalink: things/{name}
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(
-            command="infer",
+        await bm_schema_infer(
             note_type="widget",
             project=test_project.name,
         )
@@ -662,8 +651,7 @@ async def test_schema_validate_no_notes_refuses_with_guidance(app, test_project,
     """When no notes of the requested type exist, refuse with guidance on creating notes."""
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(
-            command="validate",
+        await bm_schema_validate(
             note_type="employee",
             project=test_project.name,
         )
@@ -694,8 +682,7 @@ async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(
-            command="validate",
+        await bm_schema_validate(
             note_type="person",
             project=test_project.name,
         )
@@ -705,7 +692,7 @@ async def test_schema_validate_no_schema_refuses_with_guidance(app, test_project
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
-    assert "bm_schema(command='infer'" in result
+    assert "bm_schema_infer(" in result
     assert "How to Create a Schema" in result
     assert "bm_write" in result
     assert "bm reindex" not in result
@@ -728,8 +715,7 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
 
     # Nothing to report is a refusal now, not a success (C11, #1813).
     with pytest.raises(ToolError) as refused:
-        await bm_schema(
-            command="diff",
+        await bm_schema_diff(
             note_type="person",
             project=test_project.name,
         )
@@ -739,7 +725,7 @@ async def test_schema_diff_no_schema_refuses_with_guidance(app, test_project, in
     assert isinstance(result, str)
     assert "No Schema Found" in result
     assert "person" in result
-    assert "bm_schema(command='infer'" in result
+    assert "bm_schema_infer(" in result
     assert "How to Create a Schema" in result
     assert "bm_write" in result
     assert "bm reindex" not in result
@@ -759,7 +745,7 @@ async def test_schema_note_from_bm_write_found_without_reindex(app, test_project
     await index_project()
 
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command="validate", note_type="person", project=test_project.name)
+        await bm_schema_validate(note_type="person", project=test_project.name)
     assert "No Schema Found" in str(refused.value)
 
     # Follow the guidance: create the schema note with bm_write. No index_project() after this.
@@ -781,7 +767,7 @@ async def test_schema_note_from_bm_write_found_without_reindex(app, test_project
         project=test_project.name,
     )
 
-    result = await bm_schema(command="validate", note_type="person", project=test_project.name)
+    result = await bm_schema_validate(note_type="person", project=test_project.name)
     assert isinstance(result, str)
     assert "Schema Validation: person" in result
 
@@ -849,7 +835,7 @@ permalink: contracts/lease
 
     await index_project()
 
-    result = await bm_schema(command="validate", project=test_project.name)
+    result = await bm_schema_validate(project=test_project.name)
 
     assert isinstance(result, str)
     assert "- **Nameless** — valid" in result
@@ -890,14 +876,14 @@ permalink: people/frank
 
     await index_project()
 
-    text = await bm_schema(command="infer", note_type="person", project=test_project.name)
+    text = await bm_schema_infer(note_type="person", project=test_project.name)
     assert isinstance(text, str)
     assert "## Suggested Schema" in text
     assert "## Excluded (below threshold)" in text
     assert "- hobby" in text
 
-    data = await bm_schema(
-        command="infer", note_type="person", project=test_project.name, output_format="json"
+    data = await bm_schema_infer(
+        note_type="person", project=test_project.name, output_format="json"
     )
     assert isinstance(data, dict)
     assert data["notes_analyzed"] == 6
@@ -908,7 +894,7 @@ permalink: people/frank
 async def test_schema_infer_no_notes_refuses(app, test_project, index_project):
     """Inferring a type with no notes refuses instead of returning an empty report."""
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command="infer", note_type="nobody", project=test_project.name)
+        await bm_schema_infer(note_type="nobody", project=test_project.name)
 
     assert "No Notes Found of Type 'nobody'" in str(refused.value)
 
@@ -963,7 +949,7 @@ permalink: people/{name.lower()}
 
     await index_project()
 
-    result = await bm_schema(command="diff", note_type="person", project=test_project.name)
+    result = await bm_schema_diff(note_type="person", project=test_project.name)
 
     assert isinstance(result, str)
     assert "## New Fields (in notes but not in schema)" in result
@@ -988,13 +974,11 @@ async def test_schema_diff_no_drift(app, test_project, index_project):
 
     await index_project()
 
-    text = await bm_schema(command="diff", note_type="person", project=test_project.name)
+    text = await bm_schema_diff(note_type="person", project=test_project.name)
     assert isinstance(text, str)
     assert "No drift detected" in text
 
-    data = await bm_schema(
-        command="diff", note_type="person", project=test_project.name, output_format="json"
-    )
+    data = await bm_schema_diff(note_type="person", project=test_project.name, output_format="json")
     assert isinstance(data, dict)
     assert data["schema_found"] is True
     assert data["new_fields"] == []
@@ -1009,6 +993,6 @@ async def test_schema_diff_no_notes_refuses(app, test_project, index_project):
     await index_project()
 
     with pytest.raises(ToolError) as refused:
-        await bm_schema(command="diff", note_type="meeting", project=test_project.name)
+        await bm_schema_diff(note_type="meeting", project=test_project.name)
 
     assert "No Notes Found of Type 'meeting'" in str(refused.value)

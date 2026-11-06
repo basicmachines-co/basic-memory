@@ -38,8 +38,7 @@ await bm_search(query="authentication", project="main")
 await bm_read(identifier="specs/authentication.md", project="main")
 ```
 
-For `command="recent"`, omitting `project` uses the default project; only when no
-default exists does it aggregate projects. No recent activity does not establish
+`bm_recent` requires `project`. No recent activity does not establish
 that a project is empty. Check indexing guidance and search before drawing that
 conclusion. The CLI `bm status` reports local indexing status; there is no MCP
 `sync_status` tool.
@@ -335,9 +334,9 @@ search-result observation/relation fields.
 Use schemas to validate conventions and identify drift:
 
 ```python
-await bm_schema(command="validate", identifier="specs/authentication.md", project="main")
-await bm_schema(command="infer", note_type="decision", project="main")
-await bm_schema(command="diff", note_type="decision", project="main")
+await bm_schema_validate(identifier="specs/authentication.md", project="main")
+await bm_schema_infer(note_type="decision", project="main")
+await bm_schema_diff(note_type="decision", project="main")
 ```
 
 Schema inference proposes structure; it does not authorize rewriting existing notes.

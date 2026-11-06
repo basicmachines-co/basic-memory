@@ -41,7 +41,7 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 12. **bm_delete** — content removal
 13. **bm_list / bm_find** — one-level listing, recursive names, frontmatter inventories
 14. **bm_edit** — advanced section commands and metadata updates
-15. **bm_schema** — `command="validate"`, `"infer"`, and `"diff"`
+15. **bm_schema_validate**, **bm_schema_infer**, **bm_schema_diff**
 16. **bm_man** — manual index, page lookup, and text search
 
 ### **Tier 4: Specialized (Rarely Test)**
@@ -224,7 +224,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 - ⚠️ Non-existent project handling
 
 **Schema and manual discovery:**
-- Validate one fixture by identifier and a note type with `bm_schema(command="validate")`.
+- Validate one fixture by identifier and a note type with `bm_schema_validate()`.
 - Infer and diff a fixture type using the corresponding `command` values.
 - Read `bm_man(page="bm-edit(3)")`; confirm documented signatures match the server.
 

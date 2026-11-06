@@ -13,7 +13,11 @@ from basic_memory.mcp.tools.find_files import bm_find
 from basic_memory.mcp.tools.listing import bm_list
 from basic_memory.mcp.tools.manual import bm_man
 from basic_memory.mcp.tools.move import bm_move
-from basic_memory.mcp.tools.note_schemas import bm_schema
+from basic_memory.mcp.tools.note_schemas import (
+    bm_schema_diff,
+    bm_schema_infer,
+    bm_schema_validate,
+)
 
 from basic_memory.mcp.tools.projects import (
     bm_project_create,
@@ -38,7 +42,9 @@ __all__ = [
     "bm_project_list",
     "bm_read",
     "bm_recent",
-    "bm_schema",
+    "bm_schema_diff",
+    "bm_schema_infer",
+    "bm_schema_validate",
     "bm_search",
     "bm_write",
 ]

@@ -94,7 +94,7 @@ Ask only what you can't infer. Cover:
    How you get it depends on whether the project already has notes:
    - **Existing project with notes** → *learn*. Inspect it: `bm_list(path="/", project="<primaryProject>")` for the
      top-level folder layout (`bm_find` for recursive discovery), sample a few notes per folder (and, where a folder holds
-     recurring typed notes, you may run `bm_schema(command="infer")` to see their shape).
+     recurring typed notes, you may run `bm_schema_infer()` to see their shape).
      Summarize the *real* conventions — folder-by-topic layout, naming style, the
      observation categories they favor. Infer from their actual notes; don't impose.
    - **New or empty project** → *suggest* (there's nothing to learn yet). Propose a

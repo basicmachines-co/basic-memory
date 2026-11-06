@@ -3,7 +3,7 @@
 Provides CLI access to schema validation, inference, and drift detection.
 Registered as a subcommand group: `bm schema validate`, `bm schema infer`, `bm schema diff`.
 
-Each command calls the bm_schema MCP tool with output_format="json" and
+Each command calls its schema MCP tool (bm_schema_validate, bm_schema_infer, bm_schema_diff) with output_format="json" and
 renders the result as Rich tables.
 """
 
@@ -180,7 +180,7 @@ def validate(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import bm_schema
+    from basic_memory.mcp.tools import bm_schema_validate
 
     try:
         validate_routing_flags(local, cloud)
@@ -196,8 +196,7 @@ def validate(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                bm_schema(
-                    command="validate",
+                bm_schema_validate(
                     note_type=note_type,
                     identifier=identifier,
                     project=project_name,
@@ -267,7 +266,7 @@ def infer(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import bm_schema
+    from basic_memory.mcp.tools import bm_schema_infer
 
     try:
         validate_routing_flags(local, cloud)
@@ -275,8 +274,7 @@ def infer(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                bm_schema(
-                    command="infer",
+                bm_schema_infer(
                     note_type=note_type,
                     threshold=threshold,
                     project=project_name,
@@ -343,7 +341,7 @@ def diff(
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from basic_memory.mcp.tools import bm_schema
+    from basic_memory.mcp.tools import bm_schema_diff
 
     try:
         validate_routing_flags(local, cloud)
@@ -351,8 +349,7 @@ def diff(
 
         with force_routing(local=local, cloud=cloud):
             result = run_schema_tool(
-                bm_schema(
-                    command="diff",
+                bm_schema_diff(
                     note_type=note_type,
                     project=project_name,
                     output_format="json",

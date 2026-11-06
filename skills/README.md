@@ -25,7 +25,7 @@ These skills target the Basic Memory 1.0 MCP surface. Use `bm_man(page="bm_searc
 - `bm_context` takes `identifier`, graph `depth`, and `since`.
 - `bm_project_list()` discovers projects without scope; `create` creates one.
   `bm_recent(project="<project>")` shows scoped activity.
-- `bm_schema(command="validate"|"infer"|"diff", project="<project>")` handles schemas.
+- `bm_schema_validate(|"infer"|"diff", project="<project>")` handles schemas.
 - Cloud adds `bm_agent` and Cloud-only read options. Check that the connected server
   exposes them before using those workflows.
 

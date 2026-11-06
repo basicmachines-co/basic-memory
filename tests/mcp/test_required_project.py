@@ -22,7 +22,7 @@ SCOPED_TOOLS = {
     "bm_list": {"path": "/"},
     "bm_find": {"path": "/"},
     "bm_context": {"identifier": "notes/plan.md"},
-    "bm_schema": {"command": "validate"},
+    "bm_schema_validate": {},
 }
 
 

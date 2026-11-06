@@ -1,4 +1,4 @@
-"""Project tools (one per operation, #2030) and bm_schema."""
+"""Project and schema tools, one per operation (#2030)."""
 
 import json
 from typing import Any
@@ -15,7 +15,9 @@ from basic_memory.mcp.tools import (
     bm_project_list,
     bm_read,
     bm_recent,
-    bm_schema,
+    bm_schema_diff,
+    bm_schema_infer,
+    bm_schema_validate,
     bm_write,
 )
 from basic_memory.mcp.tools import projects as projects_module
@@ -337,7 +339,7 @@ async def test_explicit_local_routing_keeps_a_workspace_create_local(
     assert created["indexing"]["state"] == "completed"
 
 
-# --- bm_schema ---
+# --- Schema tools ---
 
 
 @pytest.mark.asyncio
@@ -349,23 +351,21 @@ async def test_schema_commands_delegate(client, test_project):
             project=test_project.name,
         )
 
-    inferred = await bm_schema(
-        command="infer", note_type="person", output_format="json", project=test_project.name
+    inferred = await bm_schema_infer(
+        note_type="person", output_format="json", project=test_project.name
     )
     assert isinstance(inferred, dict) and inferred["note_type"] == "person"
     assert inferred["suggested_schema"]
 
     # The replaced tools now refuse "nothing to report" instead of returning it (C11).
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Found for 'person'"):
-        await bm_schema(command="diff", note_type="person", project=test_project.name)
+        await bm_schema_diff(note_type="person", project=test_project.name)
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Found for 'person'"):
-        await bm_schema(command="validate", note_type="person", project=test_project.name)
+        await bm_schema_validate(note_type="person", project=test_project.name)
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Schemas Defined"):
-        await bm_schema(command="validate", project=test_project.name)
+        await bm_schema_validate(project=test_project.name)
     with pytest.raises(ToolError, match='"error": "NOT_FOUND"'):
-        await bm_schema(
-            command="validate", note_type="robot", output_format="json", project=test_project.name
-        )
+        await bm_schema_validate(note_type="robot", output_format="json", project=test_project.name)
 
 
 PERSON_SCHEMA = (
@@ -387,8 +387,7 @@ async def test_schema_api_refusals_honor_the_output_format(client, test_project)
     )
 
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
-        await bm_schema(
-            command="validate",
+        await bm_schema_validate(
             identifier="people/odd.md",
             output_format="json",
             project=test_project.name,
@@ -404,18 +403,16 @@ async def test_schema_reports_once_a_schema_exists(client, test_project):
         project=test_project.name,
     )
 
-    report = await bm_schema(
-        command="validate", note_type="person", output_format="json", project=test_project.name
+    report = await bm_schema_validate(
+        note_type="person", output_format="json", project=test_project.name
     )
-    text = await bm_schema(command="validate", project=test_project.name)
-    note = await bm_schema(
-        command="validate", identifier="people/ada.md", project=test_project.name
+    text = await bm_schema_validate(project=test_project.name)
+    note = await bm_schema_validate(identifier="people/ada.md", project=test_project.name)
+    drift = await bm_schema_diff(
+        note_type="person", output_format="json", project=test_project.name
     )
-    drift = await bm_schema(
-        command="diff", note_type="person", output_format="json", project=test_project.name
-    )
-    drift_text = await bm_schema(command="diff", note_type="person", project=test_project.name)
-    inferred_text = await bm_schema(command="infer", note_type="person", project=test_project.name)
+    drift_text = await bm_schema_diff(note_type="person", project=test_project.name)
+    inferred_text = await bm_schema_infer(note_type="person", project=test_project.name)
 
     assert isinstance(report, dict) and report["total_notes"] == 1
     assert isinstance(text, str) and isinstance(note, str)
@@ -426,7 +423,7 @@ async def test_schema_reports_once_a_schema_exists(client, test_project):
 @pytest.mark.asyncio
 async def test_infer_with_no_notes_of_the_type(client, test_project):
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Notes Found of Type 'robot'"):
-        await bm_schema(command="infer", note_type="robot", project=test_project.name)
+        await bm_schema_infer(note_type="robot", project=test_project.name)
 
 
 @pytest.mark.asyncio
@@ -439,24 +436,28 @@ async def test_infer_below_the_threshold(client, test_project):
         )
 
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Schema Pattern Found"):
-        await bm_schema(
-            command="infer", note_type="person", threshold=0.9, project=test_project.name
-        )
+        await bm_schema_infer(note_type="person", threshold=0.9, project=test_project.name)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        ({"command": "infer"}, "infer needs `note_type`"),
-        ({"command": "validate", "note_type": "person", "identifier": "a.md"}, "Give `note_type`"),
-        ({"command": "diff"}, "diff needs `note_type`"),
-        ({"command": "diff", "identifier": "a.md"}, "diff works on a note type, not one note"),
-    ],
-)
-async def test_schema_argument_refusals(client, test_project, arguments, message):
-    with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: {message}"):
-        await bm_schema(project=test_project.name, **arguments)
+async def test_validate_refuses_a_type_and_a_note_together(client, test_project):
+    with pytest.raises(ToolError, match="^INVALID_ARGUMENTS: Give `note_type`"):
+        await bm_schema_validate(note_type="person", identifier="a.md", project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_each_schema_tool_requires_only_its_own_arguments():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    required = {
+        name: sorted(tools[name].parameters.get("required", []))
+        for name in ("bm_schema_validate", "bm_schema_infer", "bm_schema_diff")
+    }
+
+    assert required == {
+        "bm_schema_validate": ["project"],
+        "bm_schema_infer": ["note_type", "project"],
+        "bm_schema_diff": ["note_type", "project"],
+    }
 
 
 @pytest.mark.asyncio
@@ -465,7 +466,7 @@ async def test_diff_without_notes_is_not_a_clean_diff(client, test_project):
     await bm_write(identifier="schemas/person.md", content=PERSON_SCHEMA, project=test_project.name)
 
     with pytest.raises(ToolError, match="^NOT_FOUND: # No Notes Found of Type 'person'"):
-        await bm_schema(command="diff", note_type="person", project=test_project.name)
+        await bm_schema_diff(note_type="person", project=test_project.name)
 
 
 @pytest.mark.asyncio

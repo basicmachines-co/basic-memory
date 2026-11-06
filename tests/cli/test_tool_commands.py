@@ -26,7 +26,9 @@ COMMAND_TOOLS = {
     "project-list": tools.bm_project_list,
     "project-create": tools.bm_project_create,
     "recent": tools.bm_recent,
-    "schema": tools.bm_schema,
+    "schema-validate": tools.bm_schema_validate,
+    "schema-infer": tools.bm_schema_infer,
+    "schema-diff": tools.bm_schema_diff,
 }
 
 
