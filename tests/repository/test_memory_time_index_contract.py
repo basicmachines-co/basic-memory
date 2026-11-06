@@ -789,29 +789,6 @@ async def test_projection_rows_carry_only_authored_bounds(
 
 
 @pytest.mark.asyncio
-async def test_temporal_filter_count_matches_search(search_repository, temporal_population):
-    """`count()` runs the same predicate as `search()`, or pagination lies.
-
-    The router gathers the two concurrently and derives `has_more` from the count, so a
-    count that ignored the filter would report pages that do not exist.
-    """
-    temporal = TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-01"))
-    results = await search_repository.search(
-        search_text=SHARED_TERM,
-        search_item_types=[SearchItemType.OBSERVATION],
-        temporal=temporal,
-        limit=50,
-    )
-    total = await search_repository.count(
-        search_text=SHARED_TERM,
-        search_item_types=[SearchItemType.OBSERVATION],
-        temporal=temporal,
-    )
-
-    assert total == len(results) == 5
-
-
-@pytest.mark.asyncio
 async def test_temporal_filter_applies_without_search_text(search_repository, temporal_population):
     """A valid-time filter is criteria on its own; no MATCH is required to use it."""
     matched = await _matching_labels(

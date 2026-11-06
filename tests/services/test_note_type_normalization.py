@@ -112,7 +112,6 @@ async def test_search_matches_legacy_note_type_projection_without_reindex(
     results = await search_service.search(query)
 
     assert [result.entity_id for result in results] == [entity.id]
-    assert await search_service.count(query) == 1
 
     # The execution trace must describe the expanded filter that admitted the legacy
     # row, not the raw request — a trace showing only ['task_item'] could not explain

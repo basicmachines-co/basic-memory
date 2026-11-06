@@ -761,7 +761,11 @@ async def test_hybrid_search_preserves_candidate_windows(
     rerank_search_repository,
     monkeypatch,
 ):
-    """Hybrid preserves legacy recall unless reranking owns the shared candidate pool."""
+    """The vector leg reads the hybrid candidate window once, with or without reranking.
+
+    It used to expand the window a second time when reranking was off: 1,000 chunks
+    for a 10-row page.
+    """
     await _index_two_auth_notes(rerank_search_repository)
     rerank_search_repository._semantic_vector_k = 100
     rerank_search_repository._reranker_candidates = 100
@@ -793,7 +797,7 @@ async def test_hybrid_search_preserves_candidate_windows(
     )
 
     assert baseline_results
-    assert candidate_limits == [1000]
+    assert candidate_limits == [100]
 
     candidate_limits.clear()
     rerank_search_repository._semantic_vector_k = 5

@@ -204,22 +204,11 @@ async def test_root_spellings_apply_no_scope(search_repository, seeded_paths, sc
 
 
 @pytest.mark.asyncio
-async def test_scope_composes_with_metadata_filters_and_counts_agree(
-    search_repository, seeded_paths
-):
-    """The scope ANDs into the same WHERE, so count() describes the page's query.
-
-    A total drawn from a different WHERE than the page is the exact failure the
-    file-path filter exists to prevent: it would advertise pages that hold
-    nothing and hide pages that hold matches.
-    """
+async def test_scope_composes_with_metadata_filters(search_repository, seeded_paths):
+    """The scope ANDs into the same WHERE as the metadata filter."""
     kwargs = {"file_path_prefix": "specs", "metadata_filters": {"status": "active"}}
 
     assert await _titles(search_repository, **kwargs) == {"Alpha"}
-    assert await search_repository.count(**kwargs) == 1
-    # Unscoped, the same predicate also reaches every decoy directory.
-    active_notes = sum(1 for _title, status in SEEDED_NOTES.values() if status == "active")
-    assert await search_repository.count(metadata_filters={"status": "active"}) == active_notes
 
 
 @pytest.mark.asyncio
@@ -266,21 +255,20 @@ async def test_scope_composes_with_an_unsegmented_script_query(search_repository
 
 
 @pytest.mark.asyncio
-async def test_count_matches_the_paged_rows(search_repository, seeded_paths):
+async def test_scoped_pages_reach_every_row(search_repository, seeded_paths):
     """Pagination over a scoped query stays reachable end to end."""
-    total = await search_repository.count(file_path_prefix="specs")
     first = await search_repository.search(file_path_prefix="specs", limit=1, offset=0)
     second = await search_repository.search(file_path_prefix="specs", limit=1, offset=1)
+    past_end = await search_repository.search(file_path_prefix="specs", limit=1, offset=2)
 
-    assert total == 2
     assert {first[0].title, second[0].title} == {"Alpha", "Beta"}
+    assert past_end == []
 
 
 @pytest.mark.asyncio
 async def test_nonexistent_scope_is_empty_not_unfiltered(search_repository, seeded_paths):
     """A directory with no notes answers zero rows, never the whole project."""
     assert await _titles(search_repository, file_path_prefix="nowhere") == set()
-    assert await search_repository.count(file_path_prefix="nowhere") == 0
 
 
 @pytest.mark.asyncio

@@ -96,14 +96,9 @@ async def test_permalink_mode_matches_an_exact_permalink(client, test_project, q
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("mode", "total_is_exact"),
-    [("text", True), ("semantic", False), ("hybrid", False)],
-)
-async def test_json_keeps_the_total_exactness_of_the_mode(
-    client, test_project, mode, total_is_exact
-):
-    """Vector and hybrid searches skip the count query, so their total is not exact."""
+@pytest.mark.parametrize("mode", ["text", "semantic", "hybrid"])
+async def test_json_total_is_a_lower_bound_in_every_mode(client, test_project, mode):
+    """No mode counts every match, so the total is never exact."""
     await _write_search_note(test_project.name)
 
     payload = await search_json(
@@ -111,7 +106,7 @@ async def test_json_keeps_the_total_exactness_of_the_mode(
     )
 
     assert payload["results"]
-    assert payload["total_is_exact"] is total_is_exact
+    assert payload["total_is_exact"] is False
 
 
 # --- Filters, end to end ---
@@ -381,31 +376,21 @@ def search_config(app_config, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_mode_is_hybrid_and_boolean_queries_run_as_text(
+async def test_boolean_query_with_default_mode_returns_full_text_matches(
     client, test_project, search_config
 ):
-    """Hybrid's vector half ignores NOT/AND, so a Boolean query defaults to full-text.
-
-    The total's exactness tells the two apart: only full-text search counts.
-    """
+    """Hybrid's vector half ignores NOT/AND, so a Boolean query defaults to full-text."""
     await _write_search_note(test_project.name)
 
-    plain = await search_json(query="searchable", project=test_project.name)
     boolean = await search_json(query="searchable NOT missing", project=test_project.name)
 
-    assert plain["total_is_exact"] is False
-    assert boolean["total_is_exact"] is True
     assert [row["title"] for row in boolean["results"]] == ["Test Search Note"]
 
 
-@pytest.mark.asyncio
-async def test_configured_default_search_type_wins(client, test_project, search_config):
+def test_configured_default_search_type_wins(search_config):
     search_config.default_search_type = "text"
-    await _write_search_note(test_project.name)
 
-    payload = await search_json(query="searchable", project=test_project.name)
-
-    assert payload["total_is_exact"] is True
+    assert _search_type_for(None, "coffee", ["test-project"]) == "text"
 
 
 def test_boolean_operators_are_recognized_only_as_standalone_uppercase_words(search_config):

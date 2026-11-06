@@ -77,7 +77,6 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
     query = '"incident response" OR "database recovery"'
     async with asyncio.timeout(2):
         results = await repository.search(search_text=query)
-        total = await repository.count(search_text=query)
         adjacent_results = await repository.search(search_text='incident"response runbook"')
         grouped_adjacent_results = await repository.search(search_text='"incident"(response)')
         apostrophe_results = await repository.search(search_text='"incident" AND O\'Reilly')
@@ -89,7 +88,6 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
         "operations/incident-response",
         "operations/database-recovery",
     }
-    assert total == 2
     assert [result.permalink for result in adjacent_results] == ["operations/incident-response"]
     assert [result.permalink for result in grouped_adjacent_results] == [
         "operations/incident-response"

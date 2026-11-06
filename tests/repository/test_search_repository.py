@@ -287,7 +287,6 @@ async def test_sqlite_text_search_matches_full_content_snippet(search_repository
     results = await search_repository.search(search_text=marker)
 
     assert [result.id for result in results] == [search_entity.id]
-    assert await search_repository.count(search_text=marker) == 1
 
 
 @pytest.mark.asyncio
@@ -313,7 +312,6 @@ async def test_sqlite_word_query_keeps_terms_in_one_search_column(search_reposit
     await search_repository.index_item(search_row)
 
     assert await search_repository.search(search_text="alpha beta") == []
-    assert await search_repository.count(search_text="alpha beta") == 0
 
 
 @pytest.mark.asyncio
@@ -336,7 +334,6 @@ async def test_not_excludes_a_term_found_in_any_column(search_repository, search
     await search_repository.index_item(search_row)
 
     assert await search_repository.search(search_text="coffee NOT pour") == []
-    assert await search_repository.count(search_text="coffee NOT pour") == 0
     kept = await search_repository.search(search_text="coffee NOT decaf")
     assert [row.permalink for row in kept] == [search_entity.permalink]
 
@@ -1306,7 +1303,6 @@ async def test_search_categories_exact_match(search_repository, search_entity):
     assert {r.id for r in filtered_only} == {70001}
 
     # count mirrors the filtered search.
-    assert await search_repository.count(categories=["requirement"]) == 1
 
     # Multiple categories union: both observations come back.
     multi = await search_repository.search(categories=["requirement", "decision"])
@@ -1445,9 +1441,6 @@ async def test_cjk_compound_query_matches_with_or_without_relaxation(
 
     results = await search_repository.search(search_text="季度 报告", allow_relaxed=True)
     assert any(r.entity_id == search_entity.id for r in results)
-
-    total = await search_repository.count(search_text="季度 报告", allow_relaxed=True)
-    assert total == 1
 
 
 # --- Row-kind uniqueness (#1437) ---

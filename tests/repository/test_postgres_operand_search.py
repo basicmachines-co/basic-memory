@@ -91,7 +91,6 @@ async def test_indexed_operands_preserve_document_matches(
     rows = await fts.search(operand_scope, prepared, limit=100, offset=0, allow_relaxed=relaxed)
     assert {row.id for row in rows} == expected
     assert all(row.project_id == operand_scope.project_ids[0] for row in rows)
-    assert await fts.count(operand_scope, prepared, allow_relaxed=relaxed) == len(expected)
     assert await fts.search(
         operand_scope, prepared, limit=100, offset=0, candidate_keys=[("entity", 4)]
     ) == ([] if 4 not in expected or relaxed else [row for row in rows if row.id == 4])
@@ -147,4 +146,3 @@ async def test_long_query_keeps_existing_vector_path(
     fts = PostgresFts(session_maker)
     rows = await fts.search(operand_scope, query, limit=100, offset=0)
     assert {row.id for row in rows} == {1, 2, 4, 5}
-    assert await fts.count(operand_scope, query) == 4

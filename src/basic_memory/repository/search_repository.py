@@ -122,26 +122,6 @@ class SearchRepository(Protocol):
         """Search across indexed content."""
         ...
 
-    async def count(
-        self,
-        search_text: Optional[str] = None,
-        permalink: str | list[str] | None = None,
-        permalink_match: str | list[str] | None = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        allow_relaxed: bool = False,
-    ) -> int:
-        """Count indexed content matching the same filters as search."""
-        ...
-
     async def index_item(
         self, search_index_row: SearchIndexRow, session: AsyncSession | None = None
     ) -> None:

@@ -372,41 +372,6 @@ class SearchRepositoryBase(ABC):
             trace=trace,
         )
 
-    async def count(
-        self,
-        search_text: Optional[str] = None,
-        permalink: str | list[str] | None = None,
-        permalink_match: str | list[str] | None = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[Dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        allow_relaxed: bool = False,
-    ) -> int:
-        """Count full-text matches with the same filters as ``search``."""
-        query = PreparedSearchQuery(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            search_item_types=search_item_types,
-            categories=categories,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-        )
-        return await SearchReader(self.scope, self._fts).count(query, allow_relaxed=allow_relaxed)
-
     # --- Reader construction ---
 
     def _reranking(self) -> Reranking | None:

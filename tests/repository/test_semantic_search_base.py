@@ -577,25 +577,6 @@ async def test_sqlite_hybrid_search_raises_disabled_error(search_repository):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("retrieval_mode", [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID])
-async def test_count_rejects_semantic_modes_without_running_search(monkeypatch, retrieval_mode):
-    """Semantic counts must not materialize vector or hybrid retrieval."""
-    repo = _ConcreteRepo()
-    search_calls = []
-
-    async def fail_if_search_runs(**kwargs):
-        search_calls.append(kwargs)
-        return []
-
-    monkeypatch.setattr(repo, "search", fail_if_search_runs)
-
-    with pytest.raises(ValueError, match="Exact counts are only supported for full-text search"):
-        await repo.count(search_text="semantic query", retrieval_mode=retrieval_mode)
-
-    assert search_calls == []
-
-
-@pytest.mark.asyncio
 async def test_project_vector_cleanup_skips_missing_manifest(monkeypatch):
     """A full reindex should remain safe before semantic tables ever existed."""
     repo = _ConcreteRepo()

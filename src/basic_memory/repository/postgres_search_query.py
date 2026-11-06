@@ -49,6 +49,10 @@ _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
+# A frontmatter value written as a number: the literals SQLite's numeric affinity
+# accepts, so a numeric metadata filter admits the same notes on both backends.
+# Interpolated into SQL, so it must stay free of quotes and colons.
+NUMERIC_TEXT_PATTERN = r"^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$"
 
 
 def _result_columns(text_columns: str) -> str:
@@ -754,8 +758,17 @@ def compile_fts_filter(
                 continue
 
             if filt.op in {"gt", "gte", "lt", "lte", "between"}:
+                # Trigger: a numeric bound against a value that is not a number
+                #          (frontmatter `version: v13` under `$between [1, 2]`).
+                # Why: a bare ::double precision cast raises on the first such note
+                #      and fails the whole query.
+                # Outcome: only values written as a number are cast; anything else
+                #          compares as NULL and drops out, as on SQLite.
                 compare_expr = (
-                    f"{text_expr}::double precision" if filt.comparison == "numeric" else text_expr
+                    f"CASE WHEN {text_expr} ~ '{NUMERIC_TEXT_PATTERN}' "
+                    f"THEN ({text_expr})::double precision END"
+                    if filt.comparison == "numeric"
+                    else text_expr
                 )
                 if filt.op == "between":
                     min_param = f"meta_val_{idx}_min"
@@ -1051,58 +1064,3 @@ class PostgresFts:
         async with db.scoped_session(self._session_maker) as session:
             result = await session.execute(text(sql), compiled.params)
             return {(row.type, row.id) for row in result.fetchall()}
-
-    async def count(
-        self,
-        scope: ProjectScope,
-        query: PreparedSearchQuery,
-        *,
-        allow_relaxed: bool = False,
-    ) -> int:
-        """Count rows matching the tsquery, with the same relaxed retry as search."""
-        search_text = query.search_text
-        compiled = compile_fts_filter(scope, query, allow_relaxed=allow_relaxed)
-        params = compiled.params
-        sql = f"SELECT COUNT(*) FROM {compiled.from_clause} WHERE {compiled.where_clause}"
-        logger.trace(f"Count {sql} params: {params}")
-
-        async def execute_count(active_session: AsyncSession, query_params: dict[str, Any]) -> int:
-            rows = await execute_fts_statement(
-                active_session,
-                sql,
-                query_params,
-                prefer_index_scans=compiled.prefer_index_scans,
-                use_savepoint=allow_relaxed,
-            )
-            return int(rows[0][0])
-
-        try:
-            async with db.scoped_session(self._session_maker) as session:
-                relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
-                strict_syntax_error = False
-                try:
-                    total = await execute_count(session, params)
-                except Exception as exc:
-                    if not (is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
-                        raise
-                    strict_syntax_error = True
-                    total = 0
-
-                if relaxed and total == 0 and params.get("text"):
-                    with logfire.span(
-                        "search.count.relaxed_fts_retry",
-                        backend="postgres",
-                        reason="syntax_error" if strict_syntax_error else "empty_result",
-                        token_count=len(relaxed_query_words(search_text) or ()),
-                    ):
-                        total = await execute_count(
-                            session,
-                            {**params, "text": relaxed, "text_exact": exact_tsquery_text(relaxed)},
-                        )
-                return total
-        except Exception as e:
-            if is_tsquery_syntax_error(e):
-                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
-                return 0
-            logger.error(f"Database error during search count: {e}")
-            raise

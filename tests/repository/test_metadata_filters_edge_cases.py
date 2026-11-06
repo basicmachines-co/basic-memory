@@ -107,7 +107,6 @@ async def test_null_filter_matches_a_missing_key_and_an_explicit_null(
     results = await search_repository.search(metadata_filters={"owner": None})
 
     assert {r.id for r in results} == {missing.id, explicit.id}
-    assert await search_repository.count(metadata_filters={"owner": None}) == 2
 
 
 @pytest.mark.asyncio
@@ -139,10 +138,8 @@ async def test_metadata_filters_never_match_a_non_markdown_file(search_repositor
 
     assert {r.id for r in results} == {unowned_note.id}
     # The total is what paginates, so it has to exclude the PDF too.
-    assert await search_repository.count(metadata_filters={"owner": None}) == 1
     # Stored file-format metadata is not frontmatter and never matches a filter.
     assert await search_repository.search(metadata_filters={"format": "pdf"}) == []
-    assert await search_repository.count(metadata_filters={"format": "pdf"}) == 0
 
 
 @pytest.mark.asyncio
@@ -357,7 +354,6 @@ async def test_contains_filter_treats_like_metacharacters_literally(
 
     assert {r.id for r in results} == {literal.id}
     # The total is what paginates, so the lookalike must be out of it too.
-    assert await search_repository.count(metadata_filters={"tags": [literal_tag]}) == 1
 
 
 @pytest.mark.asyncio
@@ -465,6 +461,31 @@ async def test_filter_between_inclusive_boundaries(search_repository, session_ma
     result_ids = {r.id for r in results}
     assert entity_low.id in result_ids
     assert entity_high.id in result_ids
+
+
+@pytest.mark.asyncio
+async def test_numeric_filter_skips_values_that_are_not_numbers(search_repository, session_maker):
+    """A numeric bound drops notes whose value is not a number, on both backends.
+
+    Postgres used to cast every value and fail the whole query on `version: v13`;
+    SQLite cast it to 0.0, so it matched `$lt 5`.
+    """
+    for title, version in [
+        ("Version One", 1),
+        ("Version Two As Text", "2"),
+        ("Version Letter", "v13"),
+        ("Version Dotted", "1.2.3"),
+        ("Version Empty", ""),
+    ]:
+        await _index_entity_with_metadata(
+            search_repository, session_maker, title, {"version": version}
+        )
+
+    between = await search_repository.search(metadata_filters={"version": {"$between": [1, 1]}})
+    assert [r.title for r in between] == ["Version One"]
+
+    below = await search_repository.search(metadata_filters={"version": {"$lt": 5}})
+    assert sorted(r.title for r in below) == ["Version One", "Version Two As Text"]
 
 
 @pytest.mark.asyncio

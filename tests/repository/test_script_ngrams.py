@@ -629,10 +629,8 @@ async def test_sqlite_relaxed_search_keeps_word_and_script_channels_distinct(
     await search_repository.index_item(row)
 
     results = await search_repository.search("missing 適者", allow_relaxed=True)
-    total = await search_repository.count("missing 適者", allow_relaxed=True)
 
     assert results == []
-    assert total == 0
 
 
 @pytest.mark.asyncio

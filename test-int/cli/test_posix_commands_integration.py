@@ -402,7 +402,7 @@ def check_find_meta_predicates() -> None:
         "has_more",
     }
     assert shape["total"] == 2
-    assert shape["total_is_exact"] is True
+    assert shape["total_is_exact"] is False
     for row in shape["results"]:
         assert "content" in row
         assert "fields" not in row

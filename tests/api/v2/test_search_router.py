@@ -1,6 +1,5 @@
 """Tests for v2 search router endpoints."""
 
-import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -142,8 +141,9 @@ async def test_search_with_pagination(
     data = response.json()
     assert data["current_page"] == 1
     assert data["page_size"] == 3
-    assert data["total"] == 5
-    assert data["total_is_exact"] is True
+    # Page one proves three rows; the probe row proves there is a next page.
+    assert data["total"] == 3
+    assert data["total_is_exact"] is False
     assert data["has_more"] is True
 
     response = await client.request(
@@ -158,7 +158,7 @@ async def test_search_with_pagination(
     assert data["current_page"] == 2
     assert data["page_size"] == 3
     assert data["total"] == 5
-    assert data["total_is_exact"] is True
+    assert data["total_is_exact"] is False
     assert data["has_more"] is False
     assert len(data["results"]) == 2
 
@@ -172,7 +172,7 @@ async def test_search_with_item_type_filter_returns_total(
     search_service,
     file_service,
 ):
-    """Metadata-only graph searches should include exact totals for pagination."""
+    """Metadata-only graph searches page the same way as text searches."""
     for i in range(5):
         entity_data = {
             "title": f"Structured Entity {i}",
@@ -194,8 +194,8 @@ async def test_search_with_item_type_filter_returns_total(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 5
-    assert data["total_is_exact"] is True
+    assert data["total"] == 3
+    assert data["total_is_exact"] is False
     assert data["has_more"] is True
     assert len(data["results"]) == 3
 
@@ -371,7 +371,7 @@ async def test_search_whitespace_text_is_treated_as_empty(
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
-    assert data["total_is_exact"] is True
+    assert data["total_is_exact"] is False
     assert data["has_more"] is False
     assert data["results"] == []
 
@@ -484,10 +484,10 @@ async def test_search_router_accepts_bare_and_multi_operator_filters(
 async def test_search_router_refuses_a_bad_operator_before_running_any_query(
     client: AsyncClient, app, v2_project_url
 ):
-    """A malformed filter answers 400 without scheduling search or count.
+    """A malformed filter answers 400 without running the search.
 
-    Production regression (basic-memory#1675): both queries ran, each failed on
-    the same parse, and the count outlived its request.
+    Production regression (basic-memory#1675): the queries ran and each failed on
+    the same parse.
     """
     calls: list[str] = []
 
@@ -495,10 +495,6 @@ async def test_search_router_refuses_a_bad_operator_before_running_any_query(
         async def search(self, *args, **kwargs):
             calls.append("search")
             return []
-
-        async def count(self, *args, **kwargs):
-            calls.append("count")
-            return 0
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RecordingSearchService()
     try:
@@ -516,44 +512,6 @@ async def test_search_router_refuses_a_bad_operator_before_running_any_query(
 
 
 @pytest.mark.asyncio
-async def test_search_failure_cancels_the_count_before_responding(
-    client: AsyncClient, app, v2_project_url
-):
-    """When the page query fails, its count is cancelled, not left running.
-
-    asyncio.gather propagated the search error but left the count running with
-    no owner; it later raised an exception nobody retrieved. The count here
-    blocks until cancelled, so it can only have finished if the router owned it.
-    """
-    count_cancelled = False
-
-    class FailingSearchService:
-        async def search(self, *args, **kwargs):
-            raise ValueError("search failed")
-
-        async def count(self, *args, **kwargs):
-            nonlocal count_cancelled
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                count_cancelled = True
-                raise
-            return 0
-
-    app.dependency_overrides[get_search_service_v2_external] = lambda: FailingSearchService()
-    try:
-        response = await client.request(
-            "QUERY", f"{v2_project_url}/search/", json={"text": "anything"}
-        )
-    finally:
-        app.dependency_overrides.pop(get_search_service_v2_external, None)
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "search failed"
-    assert count_cancelled
-
-
-@pytest.mark.asyncio
 async def test_search_router_returns_400_for_semantic_disabled(
     client: AsyncClient, app, v2_project_url
 ):
@@ -561,9 +519,6 @@ async def test_search_router_returns_400_for_semantic_disabled(
 
     class RaisingSearchService:
         async def search(self, *args, **kwargs):
-            raise SemanticSearchDisabledError("Semantic search is disabled for this project.")
-
-        async def count(self, *args, **kwargs):
             raise SemanticSearchDisabledError("Semantic search is disabled for this project.")
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
@@ -590,9 +545,6 @@ async def test_search_router_returns_400_for_semantic_missing_deps(
         async def search(self, *args, **kwargs):
             raise SemanticDependenciesMissingError("Semantic dependencies are missing.")
 
-        async def count(self, *args, **kwargs):
-            raise SemanticDependenciesMissingError("Semantic dependencies are missing.")
-
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
         response = await client.request(
@@ -615,9 +567,6 @@ async def test_search_router_returns_503_for_transient_reranker_failure(
 
     class RaisingSearchService:
         async def search(self, *args, **kwargs):
-            raise RerankTransientError("Reranker is temporarily unavailable.")
-
-        async def count(self, *args, **kwargs):
             raise RerankTransientError("Reranker is temporarily unavailable.")
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
@@ -644,9 +593,6 @@ async def test_search_router_returns_502_for_reranker_contract_failure(
         async def search(self, *args, **kwargs):
             raise RerankProviderContractError("Reranker returned malformed scores.")
 
-        async def count(self, *args, **kwargs):
-            raise RerankProviderContractError("Reranker returned malformed scores.")
-
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
         response = await client.request(
@@ -671,9 +617,6 @@ async def test_search_router_returns_400_for_invalid_vector_query(
         async def search(self, *args, **kwargs):
             raise ValueError("Vector retrieval requires a text query.")
 
-        async def count(self, *args, **kwargs):
-            raise ValueError("Vector retrieval requires a text query.")
-
     app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
     try:
         response = await client.request(
@@ -689,14 +632,14 @@ async def test_search_router_returns_400_for_invalid_vector_query(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("retrieval_mode", ["vector", "hybrid"])
-async def test_semantic_search_uses_probe_pagination_without_count(
+@pytest.mark.parametrize("retrieval_mode", ["fts", "vector", "hybrid"])
+async def test_search_uses_probe_pagination_without_count(
     client: AsyncClient,
     app,
     v2_project_url: str,
     retrieval_mode: str,
 ):
-    """Semantic searches should not run an extra count query."""
+    """Every mode pages by fetching one row past the page; no count query runs."""
     now = datetime.now(timezone.utc)
     fake_rows = [
         SearchIndexRow(
@@ -719,9 +662,6 @@ async def test_semantic_search_uses_probe_pagination_without_count(
             assert limit == 3
             assert offset == 0
             return fake_rows
-
-        async def count(self, *args, **kwargs):
-            raise AssertionError("semantic search must not run count")
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
@@ -895,9 +835,6 @@ async def test_search_result_includes_matched_chunk(
         async def search(self, *args, **kwargs):
             return [fake_row]
 
-        async def count(self, *args, **kwargs):
-            return 1
-
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:
         response = await client.request(
@@ -939,9 +876,6 @@ async def test_search_result_omits_matched_chunk_when_none(
     class FakeSearchService:
         async def search(self, *args, **kwargs):
             return [fake_row]
-
-        async def count(self, *args, **kwargs):
-            return 1
 
     app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
     try:

@@ -125,17 +125,6 @@ async def test_semantic_modes_route_to_the_pipeline():
     hybrid.assert_awaited_once_with(HYBRID_QUERY, limit=3, offset=1, trace=None)
 
 
-@pytest.mark.asyncio
-async def test_count_is_full_text_only():
-    reader = SearchReader(SCOPE, FakeFts([FakeRow(id=1), FakeRow(id=2)]))
-
-    assert await reader.count(PreparedSearchQuery(search_text="auth"), allow_relaxed=True) == 2
-    with pytest.raises(ValueError, match="Exact counts are only supported"):
-        await reader.count(
-            PreparedSearchQuery(search_text="auth", retrieval_mode=SearchRetrievalMode.VECTOR)
-        )
-
-
 # --- SemanticSearch edges ---
 
 

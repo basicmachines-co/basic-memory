@@ -4,8 +4,6 @@ This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
-import asyncio
-
 from fastapi import APIRouter, Path, Response
 
 import logfire
@@ -28,44 +26,13 @@ from basic_memory.deps import (
     SessionMakerDep,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
-from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_index_freshness import semantic_index_current_as_of
-from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
-from basic_memory.services.search_service import SearchService
+from basic_memory.schemas.search import SearchQuery, SearchResponse
 from basic_memory.services.search_guidance import unspaced_script_query_hint
 
 # App registration mounts this router at /v2/projects/{project_id}.
 router = APIRouter(tags=["search"], route_class=ReadCacheRoute)
-
-
-async def _search_with_exact_count(
-    search_service: SearchService,
-    query: SearchQuery,
-    *,
-    limit: int,
-    offset: int,
-) -> tuple[list[SearchIndexRow], int]:
-    """Run the page query and its exact count together, as one owned unit of work.
-
-    Trigger: either query fails while the other is still running.
-    Why: asyncio.gather propagates the first failure but leaves its sibling
-         running with no owner — a count kept querying after its request had
-         already answered 400, then raised an exception nobody retrieved.
-    Outcome: a TaskGroup cancels the sibling and waits for it before anything
-             leaves this function. The first failure is re-raised bare, not as an
-             ExceptionGroup, so search_error_boundary maps it to the same status
-             as before.
-    """
-    try:
-        async with asyncio.TaskGroup() as task_group:
-            results_task = task_group.create_task(
-                search_service.search(query, limit=limit, offset=offset)
-            )
-            total_task = task_group.create_task(search_service.count(query))
-    except ExceptionGroup as group:
-        raise group.exceptions[0]
-    return results_task.result(), total_task.result()
 
 
 # QUERY only: a search is a safe, cacheable read with a body (RFC 9110 draft).
@@ -151,7 +118,6 @@ async def search(
         if query.metadata_filters:
             with search_error_boundary():
                 parse_metadata_filters(query.metadata_filters)
-        exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
         with search_error_boundary():
             with logfire.span(
                 "api.search.search.execute_query",
@@ -161,13 +127,7 @@ async def search(
                 page=page,
                 page_size=page_size,
             ):
-                if exact_count_available:
-                    results, total = await _search_with_exact_count(
-                        search_service, query, limit=page_size, offset=offset
-                    )
-                else:
-                    results = await search_service.search(query, limit=page_size + 1, offset=offset)
-                    total = 0
+                results = await search_service.search(query, limit=page_size + 1, offset=offset)
 
         with logfire.span(
             "api.search.search.paginate_results",
@@ -176,19 +136,16 @@ async def search(
             phase="paginate_results",
             result_count=len(results),
         ):
-            if exact_count_available:
-                has_more = offset + len(results) < total
-            else:
-                # Trigger: semantic modes would need another vector/hybrid retrieval to count.
-                # Why: search requests should not pay for a second semantic pass.
-                # Outcome: preserve probe pagination and report a lower bound, marked
-                #   inexact: a row returned at this offset proves the ranking holds at
-                #   least offset + len(results) rows. An empty page proves nothing about
-                #   the offset it skipped, so it reports 0.
-                has_more = len(results) > page_size
-                if has_more:
-                    results = results[:page_size]
-                total = offset + len(results) if results else 0
+            # Why no exact count: a COUNT(*) over every match cost as much as the
+            #   search on large projects, and semantic modes would need a second
+            #   retrieval to count at all. One row past the page answers has_more.
+            # Outcome: total is a lower bound, marked inexact: a row returned at this
+            #   offset proves the ranking holds at least offset + len(results) rows. An
+            #   empty page proves nothing about the offset it skipped, so it reports 0.
+            has_more = len(results) > page_size
+            if has_more:
+                results = results[:page_size]
+            total = offset + len(results) if results else 0
 
         with logfire.span(
             "api.search.search.hydrate_results",
@@ -229,7 +186,7 @@ async def search(
                 current_page=page,
                 page_size=page_size,
                 total=total,
-                total_is_exact=exact_count_available,
+                total_is_exact=False,
                 has_more=has_more,
                 # A later empty page is pagination, not evidence of a compound miss.
                 # Guidance adds no retrieval pass and makes no index-completeness claim.

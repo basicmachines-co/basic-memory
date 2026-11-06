@@ -230,7 +230,6 @@ async def test_postgres_search_indexes_full_note_content(session_maker, test_pro
     assert len(deep_content.encode()) > 1_048_575
     results = await repo.search(search_text="shallowmarker AND deepmarker")
     assert [result.permalink for result in results] == ["docs/deep-search-note"]
-    assert await repo.count(search_text="shallowmarker AND deepmarker") == 1
 
 
 @pytest.mark.asyncio
@@ -263,7 +262,6 @@ async def test_postgres_search_preserves_long_lexeme_across_chunk_edge(
     results = await repo.search(search_text=long_identifier)
 
     assert [result.permalink for result in results] == ["docs/chunk-edge-note"]
-    assert await repo.count(search_text=long_identifier) == 1
 
 
 @pytest.mark.asyncio
@@ -342,7 +340,6 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
 
     negated_results = await repo.search(search_text="coffee NOT french")
     assert [result.permalink for result in negated_results] == ["docs/pour-over"]
-    assert await repo.count(search_text="coffee NOT french") == 1
 
 
 @pytest.mark.asyncio
@@ -393,7 +390,6 @@ async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
         )
         results = await repo.search(search_text="coffee")
         assert results == []
-        assert await repo.count(search_text="coffee") == 0
 
 
 @pytest.mark.asyncio
@@ -1585,10 +1581,9 @@ async def test_postgres_search_categories_exact_match(session_maker, test_projec
     assert {r.id for r in filtered} == {70101}
     assert filtered[0].category == "requirement"
 
-    # Standalone filter and count both honor the exact category.
+    # A standalone filter honors the exact category.
     filtered_only = await repo.search(categories=["requirement"])
     assert {r.id for r in filtered_only} == {70101}
-    assert await repo.count(categories=["requirement"]) == 1
 
     # Multiple categories union.
     multi = await repo.search(categories=["requirement", "decision"])
@@ -1701,9 +1696,6 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
         assert (await caller_session.execute(text("SELECT 1"))).scalar_one() == 1
 
     assert syntax_errors
-    search_syntax_error_count = len(syntax_errors)
-    assert await repo.count(search_text=query, allow_relaxed=True) == 1
-    assert len(syntax_errors) > search_syntax_error_count
 
 
 @pytest.mark.asyncio
@@ -1734,7 +1726,6 @@ async def test_postgres_relaxed_retry_probes_joined_formatting_characters(
     results = await repo.search(search_text=query, allow_relaxed=True)
 
     assert any(row.id == 79 for row in results)
-    assert await repo.count(search_text=query, allow_relaxed=True) == 1
 
 
 @pytest.mark.asyncio
@@ -1765,7 +1756,6 @@ async def test_postgres_relaxed_retry_quotes_apostrophe_operands(
     results = await repo.search(search_text=query, allow_relaxed=True)
 
     assert any(row.id == 81 for row in results)
-    assert await repo.count(search_text=query, allow_relaxed=True) == 1
 
 
 @pytest.mark.asyncio
@@ -1796,7 +1786,6 @@ async def test_postgres_search_supports_more_than_one_hundred_operands(
     results = await repo.search(search_text=query, allow_relaxed=True)
 
     assert any(row.id == 80 for row in results)
-    assert await repo.count(search_text=query, allow_relaxed=True) == 1
 
 
 @pytest.mark.asyncio
