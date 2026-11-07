@@ -19,6 +19,11 @@ from basic_memory.temporal import TemporalQualifierError, reject_blank_temporal_
 # hosted search. Agent prompts and the similar-notes probe (900 chars) fit well under this.
 MAX_SEARCH_TEXT_CHARS = 4_000
 
+# SQLite expands each alternative into an OR predicate (patterns can include MATCH
+# subqueries). Cap each field at 100: at most 200 alternatives together, leaving
+# headroom below SQLite's 1,000-level expression limit for ranking and other filters.
+MAX_PERMALINK_ALTERNATIVES = 100
+
 
 class SearchItemType(str, Enum):
     """Types of searchable items."""
@@ -109,8 +114,18 @@ class SearchQuery(BaseModel):
     """
 
     # Primary search modes (use ONE of these)
-    permalink: Optional[str] = None  # Exact permalink match
-    permalink_match: Optional[str] = None  # Glob permalink match
+    # A nonempty list matches any alternative within the same project scope.
+    # Reusing these fields makes older string-only servers reject the request.
+    permalink: (
+        str
+        | Annotated[list[str], Field(min_length=1, max_length=MAX_PERMALINK_ALTERNATIVES)]
+        | None
+    ) = None
+    permalink_match: (
+        str
+        | Annotated[list[str], Field(min_length=1, max_length=MAX_PERMALINK_ALTERNATIVES)]
+        | None
+    ) = None
     text: Optional[str] = Field(  # Full-text search (supports boolean operators)
         default=None, max_length=MAX_SEARCH_TEXT_CHARS
     )
@@ -138,6 +153,16 @@ class SearchQuery(BaseModel):
     valid_at: Optional[str] = None  # Date or RFC 3339 instant the range must contain
     valid_overlaps: Optional[str] = None  # Range literal, e.g. "[2026-06-10,2026-07-27)"
     time_kind: Optional[str] = None  # effective | valid | occurred | due | mentioned
+
+    @field_validator("permalink", "permalink_match")
+    @classmethod
+    def validate_permalink_alternatives(
+        cls, value: str | list[str] | None
+    ) -> str | list[str] | None:
+        """Reject blank alternatives without changing scalar or backend normalization."""
+        if isinstance(value, list) and any(not alternative.strip() for alternative in value):
+            raise ValueError("Permalink alternatives must not be blank")
+        return value
 
     @model_validator(mode="after")
     def validate_temporal_filter(self) -> "SearchQuery":
