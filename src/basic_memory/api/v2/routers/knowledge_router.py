@@ -70,7 +70,6 @@ from basic_memory.read_cache.routes import (
     cached_read,
     note_group,
     project_group,
-    skip_read_cache_store,
 )
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_BASE_CHECKSUM_HEADER,
@@ -270,8 +269,8 @@ async def get_orphan_entities(
 
 
 # QUERY only: resolution is a safe, cacheable read with a body (RFC 9110 draft).
-# OpenAPI cannot describe QUERY, so the route stays out of the schema. Exact
-# answers change only with the project's names; see skip_read_cache_store below.
+# OpenAPI cannot describe QUERY, so the route stays out of the schema. Answers are
+# cached until the project's names change; see the note at the end of the handler.
 @router.api_route(
     "/resolve",
     methods=["QUERY"],
@@ -332,11 +331,13 @@ async def resolve_identifier(
         entrypoint="api",
         domain="knowledge",
         action="resolve_entity",
-    ):
+    ) as span:
         logger.debug("API v2 request: resolve_identifier for {!r}", data.identifier)
 
         entity = await entity_repository.get_by_external_id(session, data.identifier)
         resolution_method = "external_id" if entity else "search"
+        # Only fuzzy search can guess; every other way of finding the note is exact.
+        exact = entity is not None
 
         if not entity:
             # Trigger: the identifier uses legacy ``project/note`` syntax and the prefix
@@ -364,7 +365,7 @@ async def resolve_identifier(
             )
 
             try:
-                entity = await link_resolver.resolve_entity(
+                match = await link_resolver.match_entity(
                     data.identifier,
                     source_path=data.source_path,
                     strict=True if qualified_other_project else data.strict,
@@ -375,7 +376,7 @@ async def resolve_identifier(
                     # An ambiguity proves that exact local title candidates exist, so retain
                     # the non-strict caller's historical shortest-path selection without
                     # opening the fuzzy qualified-miss path.
-                    entity = await link_resolver.resolve_entity(
+                    match = await link_resolver.match_entity(
                         data.identifier,
                         source_path=data.source_path,
                         strict=False,
@@ -389,6 +390,8 @@ async def resolve_identifier(
                         status_code=status.HTTP_409_CONFLICT,
                         detail=str(exc),
                     ) from exc
+            entity = match.entity if match else None
+            exact = match.exact if match else False
             if entity:
                 if entity.permalink == data.identifier:
                     resolution_method = "permalink"
@@ -425,10 +428,14 @@ async def resolve_identifier(
             f"API v2 response: resolved '{data.identifier}' "
             f"to external_id={result.external_id} via {resolution_method}"
         )
-        # A fuzzy match can change when any note's content changes, but resolve
-        # entries are retired only when the project's names change. Keep it uncached.
-        if resolution_method == "search":
-            skip_read_cache_store(request)
+        # Every answer is cached: a client that reads the same note by the same
+        # identifier again and again must not reach the database each time. Entries
+        # retire when the project's names change (a note created, renamed, moved or
+        # deleted). An exact match changes only then, whatever spelling found it. A
+        # fuzzy match could also shift when a note's body changes; serving the earlier
+        # guess until the next name change is accepted. The span records how often a
+        # resolve is fuzzy.
+        span.set_attribute("resolve.match", "exact" if exact else "fuzzy")
         return result
 
 
