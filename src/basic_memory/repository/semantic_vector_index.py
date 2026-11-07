@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+from sqlalchemy import RowMapping
 
 from basic_memory.repository.search_scope import ProjectScope
 
@@ -130,6 +132,19 @@ class VectorRowMatch:
     source_row_id: int
 
 
+@dataclass(frozen=True, slots=True)
+class VectorRowSearch:
+    """The rows one scan found, and whether the scan stopped at its chunk limit.
+
+    A ``truncated`` scan read as many chunks as it was allowed, so more admitted rows
+    may sit past it; a scan that read fewer, or ranked every admitted chunk, saw them
+    all.
+    """
+
+    matches: list[VectorRowMatch]
+    truncated: bool
+
+
 @runtime_checkable
 class SourceRowVectorIndex(Protocol):
     """Nearest search rows, ranked and collapsed inside the SQL database (#1746).
@@ -142,6 +157,11 @@ class SourceRowVectorIndex(Protocol):
     ``limit`` rows' worth.
     """
 
+    @property
+    def max_chunk_scan(self) -> int:
+        """The most chunks one approximate scan can read."""
+        ...
+
     async def search_rows(
         self,
         query: Sequence[float],
@@ -151,14 +171,43 @@ class SourceRowVectorIndex(Protocol):
         projects: ProjectScope,
         admission: VectorAdmission | None = None,
         chunks_per_row: int = 1,
-    ) -> list[VectorRowMatch]:
+    ) -> VectorRowSearch:
         """Return the ``limit`` nearest rows' best chunks, nearest row first.
 
         A row's chunks follow it, nearest first. ``chunk_scan`` bounds how many of the
-        nearest chunks an approximate scan reads before collapsing them to rows; an
-        exact ranking reads every admitted chunk and ignores it.
+        nearest chunks an approximate scan reads before collapsing them to rows, up to
+        ``max_chunk_scan``; an exact ranking reads every admitted chunk and ignores it.
         """
         ...
+
+
+def read_row_search(
+    rows: Sequence[RowMapping],
+    *,
+    similarity: Callable[[float], float],
+    chunk_limit: int | None,
+) -> VectorRowSearch:
+    """Read ``collapse_to_rows_sql`` results into a row search.
+
+    ``similarity`` converts the engine's distance; ``chunk_limit`` is the most chunks
+    the scan could read, or None when it ranked every admitted chunk. An empty result
+    means the scan found no candidates at all, so nothing was cut off.
+    """
+    matches = [
+        VectorRowMatch(
+            key=VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])),
+            similarity=similarity(float(row["distance"])),
+            project_id=int(row["project_id"]),
+            source_type=str(row["source_type"]),
+            source_row_id=int(row["source_row_id"]),
+        )
+        for row in rows
+    ]
+    chunks_scanned = int(rows[0]["chunks_scanned"]) if rows else 0
+    return VectorRowSearch(
+        matches=matches,
+        truncated=chunk_limit is not None and chunks_scanned >= chunk_limit,
+    )
 
 
 def collapse_to_rows_sql(candidate_ctes: str) -> str:
@@ -166,7 +215,9 @@ def collapse_to_rows_sql(candidate_ctes: str) -> str:
 
     ``candidate_ctes`` defines a CTE named ``candidates`` with the columns
     ``entity_id, chunk_key, project_id, source_type, source_row_id, distance``.
-    Binds ``:row_limit`` and ``:chunks_per_row``. Ties order by row location and chunk
+    Binds ``:row_limit`` and ``:chunks_per_row``. Every result row also carries
+    ``chunks_scanned``, the number of candidates, so the caller can tell whether the
+    scan stopped at its limit. Ties order by row location and chunk
     key, so the ranking is the same on every page of a query. Both engines run it.
     """
     return (
@@ -182,7 +233,8 @@ def collapse_to_rows_sql(candidate_ctes: str) -> str:
         "ORDER BY distance, project_id, source_type, source_row_id "
         "LIMIT :row_limit) "
         "SELECT r.entity_id, r.chunk_key, r.project_id, r.source_type, r.source_row_id, "
-        "r.distance FROM ranked r JOIN nearest_rows n "
+        "r.distance, (SELECT count(*) FROM candidates) AS chunks_scanned "
+        "FROM ranked r JOIN nearest_rows n "
         "ON n.project_id = r.project_id AND n.source_type = r.source_type "
         "AND n.source_row_id = r.source_row_id "
         "WHERE r.chunk_rank <= :chunks_per_row "

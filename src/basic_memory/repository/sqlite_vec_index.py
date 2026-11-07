@@ -22,8 +22,9 @@ from basic_memory.repository.semantic_vector_index import (
     VectorKey,
     VectorMatch,
     VectorRecord,
-    VectorRowMatch,
+    VectorRowSearch,
     collapse_to_rows_sql,
+    read_row_search,
     validate_query_dimensions,
     validate_vector_dimensions,
 )
@@ -39,6 +40,8 @@ def similarity_from_distance(distance: float) -> float:
 
 class SQLiteVecIndex:
     """Persist and query semantic vectors in SQLite with sqlite-vec."""
+
+    max_chunk_scan = SQLITE_VEC_MAX_K
 
     def __init__(
         self,
@@ -386,7 +389,9 @@ class SQLiteVecIndex:
             return []
         await self.initialize()
         params: dict[str, object] = {"limit": limit}
-        candidates = self._candidates(query, params, projects, admission, chunk_scan=limit)
+        candidates = self._candidates(
+            query, params, projects, admission, vector_k=min(limit, SQLITE_VEC_MAX_K)
+        )
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(
@@ -417,25 +422,23 @@ class SQLiteVecIndex:
         projects: ProjectScope,
         admission: VectorAdmission | None = None,
         chunks_per_row: int = 1,
-    ) -> list[VectorRowMatch]:
+    ) -> VectorRowSearch:
         if not query or limit <= 0 or projects.is_empty:
-            return []
+            return VectorRowSearch(matches=[], truncated=False)
         await self.initialize()
         params: dict[str, object] = {"row_limit": limit, "chunks_per_row": chunks_per_row}
-        candidates = self._candidates(query, params, projects, admission, chunk_scan=chunk_scan)
+        vector_k = min(chunk_scan, SQLITE_VEC_MAX_K)
+        candidates = self._candidates(query, params, projects, admission, vector_k=vector_k)
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(text(collapse_to_rows_sql(candidates)), params)
-        return [
-            VectorRowMatch(
-                key=VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])),
-                similarity=similarity_from_distance(float(row["distance"])),
-                project_id=int(row["project_id"]),
-                source_type=str(row["source_type"]),
-                source_row_id=int(row["source_row_id"]),
-            )
-            for row in result.mappings().all()
-        ]
+        return read_row_search(
+            result.mappings().all(),
+            similarity=similarity_from_distance,
+            # vec0 returns k neighbours per partition, so reaching k in total means the
+            # scan may have stopped short (with several partitions, conservatively).
+            chunk_limit=vector_k,
+        )
 
     def _candidates(
         self,
@@ -444,19 +447,19 @@ class SQLiteVecIndex:
         projects: ProjectScope,
         admission: VectorAdmission | None,
         *,
-        chunk_scan: int,
+        vector_k: int,
     ) -> str:
-        """Return CTEs ending in ``candidates``: the nearest ``chunk_scan`` ready chunks.
+        """Return CTEs ending in ``candidates``: the nearest ``vector_k`` ready chunks.
 
-        vec0 answers at most SQLITE_VEC_MAX_K neighbours per partition, so a larger
-        scan reads that many: the one bounded overfetch SQLite allows (#1746).
+        vec0 answers at most SQLITE_VEC_MAX_K neighbours per partition, so callers cap
+        ``vector_k`` there: the one bounded overfetch SQLite allows (#1746).
         Binds its own names into ``params``.
         """
         validate_query_dimensions(self.scope, query)
         params.update(
             {
                 "query": json.dumps(list(query)),
-                "vector_k": min(chunk_scan, SQLITE_VEC_MAX_K),
+                "vector_k": vector_k,
                 "embedding_identity": self.scope.embedding_identity,
             }
         )

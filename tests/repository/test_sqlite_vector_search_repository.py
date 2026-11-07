@@ -34,6 +34,7 @@ from basic_memory.repository.semantic_vector_index import (
     VectorKey,
     VectorMatch,
     VectorRecord,
+    VectorRowSearch,
 )
 from basic_memory.repository.semantic_vector_sync import (
     PendingEmbeddingJob,
@@ -901,16 +902,18 @@ async def test_search_rows_collapses_chunks_to_their_nearest_rows(search_reposit
         await session.commit()
 
     scope = ProjectScope.single(project)
-    assert await index.search_rows([], limit=2, chunk_scan=7, projects=scope) == []
-    assert await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=7, projects=scope) == []
+    nothing = VectorRowSearch(matches=[], truncated=False)
+    assert await index.search_rows([], limit=2, chunk_scan=7, projects=scope) == nothing
+    assert await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=7, projects=scope) == nothing
 
-    matches = await index.search_rows(
+    search = await index.search_rows(
         [1.0, 0.0, 0.0, 0.0],
         limit=2,
         chunk_scan=len(chunks),
-        projects=ProjectScope.single(project),
+        projects=scope,
         chunks_per_row=2,
     )
+    matches = search.matches
 
     assert [(match.source_row_id, match.key.chunk_key) for match in matches] == [
         (501, "entity:501:5011"),
@@ -923,6 +926,11 @@ async def test_search_rows_collapses_chunks_to_their_nearest_rows(search_reposit
     assert [match.similarity for match in matches] == sorted(
         (match.similarity for match in matches), reverse=True
     )
+    # The scan read as many chunks as it was allowed, so more rows may sit past it.
+    assert search.truncated
+    # A scan allowed more chunks than exist saw them all.
+    wide = await index.search_rows([1.0, 0, 0, 0], limit=2, chunk_scan=100, projects=scope)
+    assert not wide.truncated
 
 
 @pytest.mark.asyncio
@@ -1041,11 +1049,14 @@ async def test_filtered_vector_search_ranks_only_admitted_chunks_in_one_read(sea
     search_rows = index.search_rows
 
     async def spy(query, **kwargs):
-        matches = await search_rows(query, **kwargs)
+        search = await search_rows(query, **kwargs)
         calls.append(
-            {"admission": kwargs["admission"], "entities": [m.key.entity_id for m in matches]}
+            {
+                "admission": kwargs["admission"],
+                "entities": [m.key.entity_id for m in search.matches],
+            }
         )
-        return matches
+        return search
 
     with patch.object(index, "search_rows", spy):
         results = await search_repository.search(

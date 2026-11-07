@@ -13,6 +13,7 @@ from unittest.mock import patch
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
@@ -1861,15 +1862,21 @@ async def test_postgres_filtered_vector_search_ranks_only_admitted_chunks(
         await repo.sync_entity_vectors(row_id)
 
     index = repo._semantic_vector_index
-    search = index.search
+    assert isinstance(index, PgVectorIndex)
+    search_rows = index.search_rows
     calls: list[dict[str, object]] = []
 
-    async def spy(query, *, limit, projects, admission=None):
-        matches = await search(query, limit=limit, projects=projects, admission=admission)
-        calls.append({"admission": admission, "entities": sorted(m.key.entity_id for m in matches)})
-        return matches
+    async def spy(query, **kwargs):
+        search = await search_rows(query, **kwargs)
+        calls.append(
+            {
+                "admission": kwargs["admission"],
+                "entities": sorted(m.key.entity_id for m in search.matches),
+            }
+        )
+        return search
 
-    with patch.object(index, "search", spy):
+    with patch.object(index, "search_rows", spy):
         results = await repo.search(
             search_text="session token auth",
             file_path_prefix="notes",
@@ -1878,9 +1885,10 @@ async def test_postgres_filtered_vector_search_ranks_only_admitted_chunks(
         )
 
     assert sorted(row.id for row in results) == notes
-    [call] = calls
-    assert call["admission"] is not None
-    assert call["entities"] == notes
+    # The first read is the window; a later one ranks the returned rows' excerpts.
+    window = calls[0]
+    assert window["admission"] is not None
+    assert window["entities"] == notes
 
 
 def _plan_relations(plan: dict[str, Any]) -> set[str]:

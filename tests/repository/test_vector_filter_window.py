@@ -93,6 +93,7 @@ def _adapter(ranking: list[HydratedChunk]) -> AsyncMock:
         candidate_limit: int,
         *,
         admission: Any = None,
+        row_target: int = 0,
         trace: Any = None,
     ):
         return ranking[:candidate_limit]

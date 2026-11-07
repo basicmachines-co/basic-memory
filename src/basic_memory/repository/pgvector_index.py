@@ -21,8 +21,9 @@ from basic_memory.repository.semantic_vector_index import (
     VectorKey,
     VectorMatch,
     VectorRecord,
-    VectorRowMatch,
+    VectorRowSearch,
     collapse_to_rows_sql,
+    read_row_search,
     validate_query_dimensions,
     validate_vector_dimensions,
 )
@@ -38,6 +39,17 @@ HNSW_EF_SEARCH_MAX = 1000
 # 270,000; the forced HNSW scan took about 100 ms at any selectivity but recalled only
 # 66% of the true top 100 when 10% of chunks were admitted.
 EXACT_ADMISSION_CHUNK_LIMIT = 50_000
+# The most chunks one approximate HNSW scan may read before collapsing them to rows.
+HNSW_MAX_CHUNK_SCAN = 50_000
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateScan:
+    """A ``candidates`` CTE and the most chunks it can read; None ranks every one."""
+
+    cte: str
+    chunk_limit: int | None
+
 
 _PGVECTOR_VERSION = re.compile(r"^(\d+)\.(\d+)")
 
@@ -118,6 +130,8 @@ class PgVectorStorage:
 
 class PgVectorIndex:
     """Persist and query semantic vectors in PostgreSQL with pgvector."""
+
+    max_chunk_scan = HNSW_MAX_CHUNK_SCAN
 
     def __init__(
         self,
@@ -439,12 +453,12 @@ class PgVectorIndex:
             return []
         params: dict[str, object] = {"limit": limit}
         async with db.scoped_session(self._session_maker) as session:
-            candidates = await self._candidates(
+            scan = await self._candidates(
                 session, query, params, projects, admission, chunk_scan=limit
             )
             result = await session.execute(
                 text(
-                    f"WITH {candidates} "
+                    f"WITH {scan.cte} "
                     "SELECT entity_id, chunk_key, 1 - distance AS similarity "
                     "FROM candidates "
                     "ORDER BY distance ASC, entity_id ASC, chunk_key ASC "
@@ -472,25 +486,25 @@ class PgVectorIndex:
         projects: ProjectScope,
         admission: VectorAdmission | None = None,
         chunks_per_row: int = 1,
-    ) -> list[VectorRowMatch]:
+    ) -> VectorRowSearch:
         if not query or limit <= 0 or projects.is_empty:
-            return []
+            return VectorRowSearch(matches=[], truncated=False)
         params: dict[str, object] = {"row_limit": limit, "chunks_per_row": chunks_per_row}
         async with db.scoped_session(self._session_maker) as session:
-            candidates = await self._candidates(
-                session, query, params, projects, admission, chunk_scan=chunk_scan
+            scan = await self._candidates(
+                session,
+                query,
+                params,
+                projects,
+                admission,
+                chunk_scan=min(chunk_scan, HNSW_MAX_CHUNK_SCAN),
             )
-            result = await session.execute(text(collapse_to_rows_sql(candidates)), params)
-        return [
-            VectorRowMatch(
-                key=VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])),
-                similarity=max(0.0, min(1.0, 1.0 - float(row["distance"]))),
-                project_id=int(row["project_id"]),
-                source_type=str(row["source_type"]),
-                source_row_id=int(row["source_row_id"]),
-            )
-            for row in result.mappings().all()
-        ]
+            result = await session.execute(text(collapse_to_rows_sql(scan.cte)), params)
+        return read_row_search(
+            result.mappings().all(),
+            similarity=lambda distance: max(0.0, min(1.0, 1.0 - distance)),
+            chunk_limit=scan.chunk_limit,
+        )
 
     async def _candidates(
         self,
@@ -501,7 +515,7 @@ class PgVectorIndex:
         admission: VectorAdmission | None,
         *,
         chunk_scan: int,
-    ) -> str:
+    ) -> CandidateScan:
         """Prepare ``session`` and return a ``candidates`` CTE of ranked ready chunks.
 
         Binds its own names into ``params``. The CTE's columns are those
@@ -561,7 +575,9 @@ class PgVectorIndex:
                 # No ORDER BY on the distance, so the HNSW index cannot serve this
                 # scan: Postgres computes every admitted chunk's distance, and the
                 # caller ranks them.
-                return f"candidates AS MATERIALIZED (SELECT {columns})"
+                return CandidateScan(
+                    cte=f"candidates AS MATERIALIZED (SELECT {columns})", chunk_limit=None
+                )
 
         # Both settings are transaction-local, so they last exactly as long as the
         # caller's scoped session. The scan is sized to the chunks it must read and
@@ -580,7 +596,10 @@ class PgVectorIndex:
             await session.execute(text("SELECT set_config('enable_sort', 'off', true)"))
         # A relaxed iterative scan may hand rows back slightly out of distance order,
         # so the scan takes its chunks by distance alone and the caller sorts them.
-        return (
-            f"candidates AS MATERIALIZED (SELECT {columns} "
-            "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :chunk_scan)"
+        return CandidateScan(
+            cte=(
+                f"candidates AS MATERIALIZED (SELECT {columns} "
+                "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :chunk_scan)"
+            ),
+            chunk_limit=chunk_scan,
         )

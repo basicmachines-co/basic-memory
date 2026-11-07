@@ -202,6 +202,7 @@ def _stub_vector_stream(monkeypatch: pytest.MonkeyPatch, stream: list[HydratedCh
         candidate_limit: int,
         *,
         admission: Any = None,
+        row_target: int = 0,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         # The stream holds only entity chunks, which is all these queries admit.

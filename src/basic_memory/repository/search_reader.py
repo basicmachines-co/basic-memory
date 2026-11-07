@@ -466,11 +466,14 @@ class SemanticSearch:
         candidate_limit: int,
         *,
         admission: VectorAdmission | None = None,
+        row_target: int = 0,
         trace: SearchTraceCollector | None = None,
     ) -> list[HydratedChunk]:
         """Query the configured adapter and hydrate only live, ready manifest rows.
 
         ``admission`` restricts a built-in index to the chunks a filtered query admits.
+        ``row_target`` is how many rows a built-in index's window must reach before it
+        stops widening its chunk scan; see ``_run_row_query``.
         """
         if trace is not None:
             trace.vector = build_vector_stage(
@@ -483,7 +486,12 @@ class SemanticSearch:
 
         if not self.vector.external:
             return await self._run_row_query(
-                session, query_embedding, candidate_limit, admission=admission, trace=trace
+                session,
+                query_embedding,
+                candidate_limit,
+                row_target=row_target,
+                admission=admission,
+                trace=trace,
             )
 
         if admission is not None:  # pragma: no cover - the reader never builds one
@@ -550,22 +558,58 @@ class SemanticSearch:
         query_embedding: list[float],
         row_limit: int,
         *,
+        row_target: int,
         admission: VectorAdmission | None,
         trace: SearchTraceCollector | None,
     ) -> list[HydratedChunk]:
         """The nearest ``row_limit`` search rows, one best chunk each, from a built-in index.
 
         The database ranks the chunks, applies the manifest and the filters, and collapses
-        them to rows, so the window holds rows rather than chunks and is read once (#1746).
-        Each returned chunk's position is its row's rank.
+        them to rows, so the window holds rows rather than chunks (#1746). Each returned
+        chunk's position is its row's rank.
+
+        Trigger: an approximate scan stopped at its chunk limit and collapsed to fewer
+            than ``row_target`` rows.
+        Why: notes cut into hundreds of chunks can fill a chunk scan with a few rows
+            while more admitted rows sit past it, and the page would come up short.
+        Outcome: the chunk scan doubles, up to the index's ``max_chunk_scan``, until
+            the window holds ``row_target`` rows or the scan saw every candidate. Each
+            read still returns at most ``row_limit`` rows, never chunk keys.
         """
-        matches = await self.vector.row_index.search_rows(
+        index = self.vector.row_index
+        chunk_scan = min(row_limit * ROW_CHUNK_SCAN_FANOUT, index.max_chunk_scan)
+        rounds = 1
+        search = await index.search_rows(
             query_embedding,
             limit=row_limit,
-            chunk_scan=min(row_limit * ROW_CHUNK_SCAN_FANOUT, VECTOR_FILTER_SCAN_LIMIT),
+            chunk_scan=chunk_scan,
             projects=self.scope,
             admission=admission,
         )
+        while (
+            search.truncated
+            and len(search.matches) < row_target
+            and chunk_scan < index.max_chunk_scan
+        ):
+            chunk_scan = min(chunk_scan * 2, index.max_chunk_scan)
+            rounds += 1
+            search = await index.search_rows(
+                query_embedding,
+                limit=row_limit,
+                chunk_scan=chunk_scan,
+                projects=self.scope,
+                admission=admission,
+            )
+        logfire.info(
+            "search.vector_rows",
+            rounds=rounds,
+            chunk_scan=chunk_scan,
+            rows=len(search.matches),
+            row_limit=row_limit,
+            row_target=row_target,
+            truncated=search.truncated,
+        )
+        matches = search.matches
         chunks = [
             HydratedChunk(
                 entity_id=match.key.entity_id,
@@ -1070,7 +1114,7 @@ class SemanticSearch:
             predicate=f"(c.project_id, c.source_type, c.source_row_id) IN (VALUES {values})",
             params=params,
         )
-        matches = await self.vector.row_index.search_rows(
+        search = await self.vector.row_index.search_rows(
             list(window.query_embedding),
             limit=len(locations),
             chunk_scan=chunk_count,
@@ -1079,7 +1123,7 @@ class SemanticSearch:
             chunks_per_row=TOP_CHUNKS_PER_RESULT,
         )
         excerpts: dict[SearchIndexKey, list[VectorKey]] = {}
-        for match in matches:
+        for match in search.matches:
             excerpts.setdefault((match.source_type, match.source_row_id), []).append(match.key)
         return excerpts
 
@@ -1311,7 +1355,12 @@ class SemanticSearch:
             # defers checkout until hydration runs after adapter search has released it.
             async with self.session_maker() as session:
                 chunks = await self._run_vector_query(
-                    session, query_embedding, scan_limit, admission=admission, trace=trace
+                    session,
+                    query_embedding,
+                    scan_limit,
+                    admission=admission,
+                    row_target=row_target,
+                    trace=trace,
                 )
             vector_query_ms += (time.perf_counter() - vector_query_start) * 1000
             hydrate_start = time.perf_counter()

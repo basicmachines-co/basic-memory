@@ -23,6 +23,7 @@ from basic_memory.repository.semantic_vector_index import (
     VectorIndexScope,
     VectorKey,
     VectorRecord,
+    VectorRowSearch,
 )
 
 
@@ -123,10 +124,11 @@ class FakeSession:
             return FakeResult(rows=self.chunk_rows)
         if "AS similarity" in sql:
             return FakeResult(rows=self.search_rows)
-        if "SELECT count(*)" in sql:
-            return FakeResult(scalar=self.admitted_chunks)
+        # The collapse query also counts its candidates, so match it first.
         if "chunk_rank" in sql:
             return FakeResult(rows=self.row_matches)
+        if "SELECT count(*)" in sql:
+            return FakeResult(scalar=self.admitted_chunks)
         return FakeResult()
 
     async def commit(self) -> None:
@@ -511,6 +513,7 @@ async def test_search_rows_ranks_few_admitted_chunks_exactly_and_collapses_them(
                 "source_type": "entity",
                 "source_row_id": 30,
                 "distance": -0.1,
+                "chunks_scanned": 12,
             },
             {
                 "entity_id": 4,
@@ -519,17 +522,22 @@ async def test_search_rows_ranks_few_admitted_chunks_exactly_and_collapses_them(
                 "source_type": "entity",
                 "source_row_id": 40,
                 "distance": 1.4,
+                "chunks_scanned": 12,
             },
         ],
     )
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    assert await index.search_rows([], limit=2, chunk_scan=20, projects=PROJECTS) == []
-    assert await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=20, projects=PROJECTS) == []
+    nothing = VectorRowSearch(matches=[], truncated=False)
+    assert await index.search_rows([], limit=2, chunk_scan=20, projects=PROJECTS) == nothing
+    assert (
+        await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=20, projects=PROJECTS)
+        == nothing
+    )
     assert session.calls == []
 
-    matches = await index.search_rows(
+    search = await index.search_rows(
         [1.0, 0.0, 0.0, 0.0],
         limit=2,
         chunk_scan=20,
@@ -537,7 +545,10 @@ async def test_search_rows_ranks_few_admitted_chunks_exactly_and_collapses_them(
         admission=ENTITY_ADMISSION,
         chunks_per_row=3,
     )
+    matches = search.matches
 
+    # An exact ranking read every admitted chunk, so nothing was cut off.
+    assert not search.truncated
     assert [(m.source_type, m.source_row_id, m.key.chunk_key) for m in matches] == [
         ("entity", 30, "entity:3:0"),
         ("entity", 40, "entity:4:2"),
@@ -557,11 +568,24 @@ async def test_search_rows_ranks_few_admitted_chunks_exactly_and_collapses_them(
 @pytest.mark.asyncio
 async def test_search_rows_scans_hnsw_when_many_chunks_are_admitted(monkeypatch):
     """Past the exact limit the scan reads ``chunk_scan`` chunks through HNSW, sorts off."""
-    session = FakeSession(admitted_chunks=EXACT_ADMISSION_CHUNK_LIMIT + 1)
+    session = FakeSession(
+        admitted_chunks=EXACT_ADMISSION_CHUNK_LIMIT + 1,
+        row_matches=[
+            {
+                "entity_id": 3,
+                "chunk_key": "entity:3:0",
+                "project_id": PROJECT,
+                "source_type": "entity",
+                "source_row_id": 30,
+                "distance": 0.2,
+                "chunks_scanned": 300,
+            }
+        ],
+    )
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.search_rows(
+    search = await index.search_rows(
         [1.0, 0.0, 0.0, 0.0],
         limit=10,
         chunk_scan=300,
@@ -576,3 +600,5 @@ async def test_search_rows_scans_hnsw_when_many_chunks_are_admitted(monkeypatch)
     assert any("'enable_sort', 'off'" in sql for sql, _params in settings)
     rows_sql = next(sql for sql, _params in session.calls if "chunk_rank" in sql)
     assert "LIMIT :chunk_scan" in rows_sql
+    # The scan read all 300 chunks it was allowed, so more rows may sit past it.
+    assert search.truncated
