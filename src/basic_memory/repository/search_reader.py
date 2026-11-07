@@ -238,6 +238,8 @@ class CandidateWindow:
     chunks_by_key: dict[SearchIndexKey, list[WindowChunk]]
     rows: dict[SearchIndexKey, SearchIndexRow]
     chunk_count: int
+    # How many reads the window took; only an external index ever needs more than one.
+    rounds: int = 1
     # The embedded query, kept so the returned rows' excerpts are ranked against it.
     query_embedding: tuple[float, ...] = ()
     embed_ms: float = 0.0
@@ -956,53 +958,57 @@ class SemanticSearch:
         """
         if not rows:
             return []
-        keys = [row_key(row) for row in rows]
-        texts = await self._fetch_row_texts([key for key in keys if key in vector_keys])
-        lexical_keys = [key for key in keys if key not in vector_keys]
-        texts.update(await self._fetch_row_texts(lexical_keys, lexical_snippet_limit))
-        rows = [
-            replace(
-                row,
-                content_snippet=texts[row_key(row)][0],
-                content_snippet_length=texts[row_key(row)][1],
+        with logfire.span("search.materialize") as span:
+            keys = [row_key(row) for row in rows]
+            texts = await self._fetch_row_texts([key for key in keys if key in vector_keys])
+            lexical_keys = [key for key in keys if key not in vector_keys]
+            texts.update(await self._fetch_row_texts(lexical_keys, lexical_snippet_limit))
+            rows = [
+                replace(
+                    row,
+                    content_snippet=texts[row_key(row)][0],
+                    content_snippet_length=texts[row_key(row)][1],
+                )
+                if row_key(row) in texts
+                else row
+                for row in rows
+            ]
+            # Small notes quote themselves whole, so the answer is always present.
+            excerpt_rows = [
+                row
+                for row in rows
+                if row_key(row) in vector_keys
+                and not (
+                    row.content_snippet and (row.content_length or 0) <= SMALL_NOTE_CONTENT_LIMIT
+                )
+            ]
+            excerpt_keys = await self._excerpt_chunk_keys(excerpt_rows, window, position_bound)
+            chunk_texts = await self._fetch_chunk_texts(
+                [key for keys in excerpt_keys.values() for key in keys]
             )
-            if row_key(row) in texts
-            else row
-            for row in rows
-        ]
-        # Small notes quote themselves whole, so the answer is always present.
-        excerpt_rows = [
-            row
-            for row in rows
-            if row_key(row) in vector_keys
-            and not (row.content_snippet and (row.content_length or 0) <= SMALL_NOTE_CONTENT_LIMIT)
-        ]
-        excerpt_keys = await self._excerpt_chunk_keys(excerpt_rows, window, position_bound)
-        chunk_texts = await self._fetch_chunk_texts(
-            [key for keys in excerpt_keys.values() for key in keys]
-        )
 
-        materialized: list[SearchIndexRow] = []
-        for row in rows:
-            key = row_key(row)
-            if key not in vector_keys:
-                materialized.append(row)
-            elif key in excerpt_keys:
-                passages = [
-                    chunk_texts[chunk] for chunk in excerpt_keys[key] if chunk in chunk_texts
-                ]
-                materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
-            else:
-                materialized.append(replace(row, matched_chunk_text=row.content_snippet))
-        # Every byte of note text a search moves is read here, so this is its budget.
-        logfire.info(
-            "search.materialize",
-            rows=len(materialized),
-            excerpt_rows=len(excerpt_keys),
-            snippet_chars=sum(len(row.content_snippet or "") for row in materialized),
-            excerpt_chars=sum(len(text) for text in chunk_texts.values()),
-        )
-        return materialized
+            materialized: list[SearchIndexRow] = []
+            for row in rows:
+                key = row_key(row)
+                if key not in vector_keys:
+                    materialized.append(row)
+                elif key in excerpt_keys:
+                    passages = [
+                        chunk_texts[chunk] for chunk in excerpt_keys[key] if chunk in chunk_texts
+                    ]
+                    materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
+                else:
+                    materialized.append(replace(row, matched_chunk_text=row.content_snippet))
+            # Every byte of note text a search moves is read here, so this is its budget.
+            span.set_attributes(
+                {
+                    "rows": len(materialized),
+                    "excerpt_rows": len(excerpt_keys),
+                    "snippet_chars": sum(len(row.content_snippet or "") for row in materialized),
+                    "excerpt_chars": sum(len(text) for text in chunk_texts.values()),
+                }
+            )
+            return materialized
 
     async def _materialize_unread(
         self,
@@ -1281,14 +1287,30 @@ class SemanticSearch:
             query.min_similarity if query.min_similarity is not None else self.vector.min_similarity
         )
 
-        window = await self._candidate_window(
-            query,
-            query_embedding,
-            candidate_limit,
-            row_target,
-            min_similarity=effective_min_similarity,
-            trace=trace,
-        )
+        # One span per window: its outcome rides on it as attributes, since Logfire
+        # bills per record and every vector search resolves exactly one window.
+        with logfire.span(
+            "search.vector_window",
+            candidate_limit=candidate_limit,
+            row_target=row_target,
+            has_filters=query.has_filters,
+            filtered_in_index=query.has_filters and not self.vector.external,
+        ) as window_span:
+            window = await self._candidate_window(
+                query,
+                query_embedding,
+                candidate_limit,
+                row_target,
+                min_similarity=effective_min_similarity,
+                trace=trace,
+            )
+            window_span.set_attributes(
+                {
+                    "rounds": window.rounds,
+                    "chunks_scanned": window.chunk_count,
+                    "rows_admitted": window.admitted,
+                }
+            )
 
         if trace is not None:
             trace.vector = build_vector_stage(
@@ -1411,17 +1433,9 @@ class SemanticSearch:
                 or exhausted
                 or tail_below_threshold
             ):
-                logfire.info(
-                    "search.vector_window",
-                    rounds=rounds,
-                    chunks_scanned=len(chunks),
-                    candidate_limit=candidate_limit,
-                    row_target=row_target,
-                    rows_admitted=window.admitted,
-                    has_filters=query.has_filters,
-                    filtered_in_index=admission is not None,
+                return replace(
+                    window, rounds=rounds, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms
                 )
-                return replace(window, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms)
             scanned = len(chunks)
             scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
 
