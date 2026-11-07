@@ -119,6 +119,7 @@ async def test_an_unhandled_request_exception_does_not_repr_frame_values(
             raise RuntimeError(f"resolver exploded {id(held)}")
 
         resolve_link = resolve_entity
+        match_entity = resolve_entity
 
     app.dependency_overrides[get_link_resolver_v2_external] = lambda: ExplodingResolver()
     try:
