@@ -37,6 +37,7 @@ from basic_memory.models import NoteContent, Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
     PROJECT,
+    WORKSPACE_ENTRIES_PROJECT_ID,
     NoteGroup,
     ReadCacheChange,
     ReadCacheInvalidator,
@@ -1002,3 +1003,40 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
     assert all((Path(test_project.path) / path).exists() for path in destination_paths)
     generation_after = await _project_version(redis_cache, project_external_id)
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_project_resolve_is_cached_workspace_wide_until_projects_change(
+    cached_app: Any,
+    client: AsyncClient,
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Every cloud-mode tool call resolves its project first; repeats are cache hits.
+
+    The answer depends on the whole set of projects, so it is kept under the reserved
+    workspace entries id and any project change retires it.
+    """
+    body = {"identifier": test_project.name}
+    first = await client.request("QUERY", "/v2/projects/resolve", json=body)
+    second = await client.request("QUERY", "/v2/projects/resolve", json=body)
+
+    assert first.status_code == 200
+    assert (first.headers["x-redis-cache"], second.headers["x-redis-cache"]) == ("MISS", "HIT")
+    assert second.json()["external_id"] == str(test_project.external_id)
+
+    # A miss is never stored as an answer.
+    unknown = {"identifier": f"no-such-project-{uuid4()}"}
+    for _ in range(2):
+        missing = await client.request("QUERY", "/v2/projects/resolve", json=unknown)
+        assert missing.status_code == 404
+
+    # Changing the default retires every cached project resolve.
+    workspace_before = await _project_version(redis_cache, WORKSPACE_ENTRIES_PROJECT_ID)
+    default_response = await client.put(f"/v2/projects/{test_project.external_id}/default")
+    assert default_response.status_code == 200
+    assert await _project_version(redis_cache, WORKSPACE_ENTRIES_PROJECT_ID) != workspace_before
+
+    after = await client.request("QUERY", "/v2/projects/resolve", json=body)
+    assert after.headers["x-redis-cache"] == "MISS"
+    assert after.json()["is_default"] is True

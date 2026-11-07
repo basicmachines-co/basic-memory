@@ -2156,7 +2156,7 @@ async def test_get_project_client_clears_stale_cached_project_for_workspace_rout
 
     calls = {"count": 0}
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         calls["count"] += 1
         return FakeResponse()
 
@@ -2170,7 +2170,7 @@ async def test_get_project_client_clears_stale_cached_project_for_workspace_rout
     monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: False)
     monkeypatch.setattr("basic_memory.mcp.async_client._explicit_routing", lambda: False)
     monkeypatch.setattr("basic_memory.mcp.async_client._force_local_mode", lambda: False)
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
 
     async with project_context.get_project_client(
         project="personal/main",
@@ -2359,7 +2359,7 @@ async def test_resolve_project_and_path_uses_cached_project_for_memory_url_prefi
     async def fake_resolve_project_parameter(project=None, **kwargs):
         return cached_project.name if project else cached_project.name
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fail_if_called)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fail_if_called)
     monkeypatch.setattr(
         "basic_memory.mcp.project_context.resolve_project_parameter",
         fake_resolve_project_parameter,
@@ -2408,10 +2408,10 @@ async def test_resolve_project_and_path_keeps_workspace_qualified_canonical_path
     await context.set_state("active_project", cached_project.model_dump())
     await context.set_state("active_workspace", team_workspace.model_dump())
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         raise ToolError("project not found")
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
 
     active_project, resolved_path, is_memory_url = await resolve_project_and_path(
         client=cast(Any, None),
@@ -2457,10 +2457,10 @@ async def test_resolve_project_and_path_preserves_personal_workspace_prefix(
     await context.set_state("active_project", cached_project.model_dump())
     await context.set_state("active_workspace", personal_workspace.model_dump())
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         raise ToolError("project not found")
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
 
     active_project, resolved_path, is_memory_url = await resolve_project_and_path(
         client=cast(Any, None),
@@ -2538,13 +2538,13 @@ async def test_resolve_project_and_path_uses_cached_workspace_for_active_route(
     await context.set_state("active_project", cached_project.model_dump())
     await context.set_state("active_workspace", team_workspace.model_dump())
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         raise ToolError("project not found")
 
     async def fake_get_active_project(*args, **kwargs):
         return cached_project
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
     monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
 
     active_project, resolved_path, is_memory_url = await resolve_project_and_path(
@@ -2641,13 +2641,13 @@ async def test_resolve_project_and_path_uses_cached_workspace_for_cached_project
     await context.set_state("active_project", cached_project.model_dump())
     await context.set_state("active_workspace", team_workspace.model_dump())
 
-    async def fail_call_post(*args, **kwargs):  # pragma: no cover
+    async def fail_call_query(*args, **kwargs):  # pragma: no cover
         raise AssertionError("Cached project prefix should not call project resolve API")
 
     async def fake_resolve_project_parameter(project=None, **kwargs):
         return cached_project.name if project else cached_project.name
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fail_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fail_call_query)
     monkeypatch.setattr(
         project_context,
         "resolve_project_parameter",
@@ -2700,13 +2700,13 @@ async def test_resolve_project_and_path_uses_cached_workspace_for_resolved_proje
                 "resolution_method": "permalink",
             }
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         return FakeResponse()
 
     async def fake_resolve_project_parameter(project=None, **kwargs):
         return "Research" if project else "Research"
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
     monkeypatch.setattr(
         project_context,
         "resolve_project_parameter",
@@ -2887,7 +2887,7 @@ class TestGetProjectClientRoutingOrder:
             assert project_name == "local-proj"
             return active
 
-        async def fake_call_post(*args, **kwargs):
+        async def fake_call_query(*args, **kwargs):
             raise ToolError("project not found")
 
         monkeypatch.setattr(
@@ -2897,7 +2897,7 @@ class TestGetProjectClientRoutingOrder:
         )
         monkeypatch.setattr("basic_memory.mcp.async_client.get_client", fake_get_client)
         monkeypatch.setattr(project_context, "get_active_project", fake_get_active_project)
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
 
         async with get_project_client(
             project="local-proj",
@@ -3665,10 +3665,10 @@ async def test_resolve_project_and_path_keeps_patterns_project_qualified(
     await context.set_state("active_project", cached_project.model_dump())
     await context.set_state("active_workspace", team_workspace.model_dump())
 
-    async def fake_call_post(*args, **kwargs):
+    async def fake_call_query(*args, **kwargs):
         raise ToolError("project not found")
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", fake_call_post)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", fake_call_query)
 
     # Bare pattern: project prefix only — no workspace slug
     _, resolved_path, _ = await resolve_project_and_path(

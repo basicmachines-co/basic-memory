@@ -117,9 +117,9 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_query
 
-        response = await call_post(
+        response = await call_query(
             self.http_client,
             "/v2/projects/resolve",
             json={"identifier": identifier},

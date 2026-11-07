@@ -38,6 +38,7 @@ from redis_fastapi.cache import CacheHitException, cache
 from basic_memory.read_cache.contract import (
     CONTENT,
     PROJECT,
+    WORKSPACE_ENTRIES_PROJECT_ID,
     NoteGroup,
     ReadCacheGroup,
     ReadCacheOperation,
@@ -68,6 +69,7 @@ class ReadCacheScope:
 
 type ReadCacheScopeResolver = Callable[[Request], Awaitable[ReadCacheScope | None]]
 type GroupForRequest = Callable[[Request], ReadCacheGroup]
+type ProjectForRequest = Callable[[Request], str]
 type RouteHandler = Callable[[Request], Coroutine[Any, Any, Response]]
 type SdkCacheDependency = Callable[..., AsyncGenerator[None]]
 type LookupOutcome = Literal["hit", "miss", "bypass", "unavailable"]
@@ -139,6 +141,7 @@ class _ReadThrough:
 
     operation: ReadCacheOperation
     group: GroupForRequest
+    project: ProjectForRequest
     ttl_seconds: int
     hit_headers: Mapping[str, str]
     sdk_dependency: SdkCacheDependency
@@ -155,7 +158,7 @@ class _ReadThrough:
     async def serve(self, request: Request, endpoint: RouteHandler) -> Response:
         """Answer from the cache, or run the endpoint and let the SDK store its response."""
         setattr(request.state, _SERVED_STATE, True)
-        target = await _cached_target(request, self.group)
+        target = await _cached_target(request, self.group, self.project)
         if target is None:
             return await endpoint(request)
 
@@ -236,10 +239,14 @@ def cached_read(
     group: GroupForRequest,
     ttl_seconds: int,
     hit_headers: Mapping[str, str] | None = None,
+    project: ProjectForRequest | None = None,
 ) -> Any:
     """A route dependency that marks the route's reads as cached under ``operation``.
 
     The router must use ``route_class=ReadCacheRoute``, which does the serving.
+
+    ``project`` names the project whose versions key the entry: by default the
+    ``project_id`` path parameter; ``workspace_project`` for workspace-wide reads.
 
     ``hit_headers`` are response headers the route always sets. A hit returns before
     the route runs, and fastapi-redis-sdk 0.8.1 does not replay stored headers, so
@@ -266,6 +273,7 @@ def cached_read(
         _ReadThrough(
             operation=operation,
             group=group,
+            project=project or path_project,
             ttl_seconds=ttl_seconds,
             hit_headers=dict(hit_headers or {}),
             sdk_dependency=cache(ttl=ttl_seconds, key_builder=key_builder, cache_prefix=""),
@@ -327,7 +335,9 @@ class _CachedTarget:
     identity: str
 
 
-async def _cached_target(request: Request, group: GroupForRequest) -> _CachedTarget | None:
+async def _cached_target(
+    request: Request, group: GroupForRequest, project: ProjectForRequest
+) -> _CachedTarget | None:
     """Everything the key needs, or ``None`` when this request bypasses the cache."""
     if request.method not in {"GET", "QUERY"}:
         return None
@@ -339,7 +349,7 @@ async def _cached_target(request: Request, group: GroupForRequest) -> _CachedTar
     if scope is None:
         return None
     try:
-        project_id = canonical_uuid(request.path_params["project_id"], label="project id")
+        project_id = canonical_uuid(project(request), label="project id")
         resolved_group = group(request)
         identity = await _request_identity(request)
     except ValueError:
@@ -438,6 +448,19 @@ def _route_dependencies(dependant: Dependant) -> Iterator[Dependant]:
         yield from _route_dependencies(dependency)
 
 
+# --- Projects by route ---
+
+
+def path_project(request: Request) -> str:
+    """The project named in the route's path."""
+    return request.path_params["project_id"]
+
+
+def workspace_project(request: Request) -> str:
+    """Workspace-wide reads, kept under the reserved workspace entries id."""
+    return WORKSPACE_ENTRIES_PROJECT_ID
+
+
 # --- Groups by route ---
 
 
@@ -460,6 +483,8 @@ __all__ = [
     "cached_read",
     "content_group",
     "note_group",
+    "path_project",
     "project_group",
     "skip_read_cache_store",
+    "workspace_project",
 ]
