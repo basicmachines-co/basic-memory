@@ -745,7 +745,6 @@ async def test_hybrid_fts_only_preview_stays_bounded_through_api_hydration(
         "search.fts",
         "search.embed_query",
         "search.vector_query",
-        "search.vector_manifest_hydration",
         "search.fetch_candidate_rows",
         "search.fusion",
         "search.hydrate_results",

@@ -10,6 +10,7 @@ import pytest
 
 from basic_memory.repository import pgvector_index as pgvector_index_module
 from basic_memory.repository.pgvector_index import (
+    EXACT_ADMISSION_CHUNK_LIMIT,
     PgVectorIndex,
     hnsw_ef_search_for,
     pgvector_supports_iterative_scan,
@@ -17,6 +18,7 @@ from basic_memory.repository.pgvector_index import (
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
+    VectorAdmission,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -70,6 +72,8 @@ class FakeSession:
         has_source_hash: bool = True,
         chunk_rows: list[dict[str, object]] | None = None,
         search_rows: list[dict[str, object]] | None = None,
+        row_matches: list[dict[str, object]] | None = None,
+        admitted_chunks: int = 0,
         extension_installed: bool | None = None,
         extension_available: bool = True,
         pgvector_version: str = "0.8.0",
@@ -79,6 +83,8 @@ class FakeSession:
         self.has_source_hash = has_source_hash
         self.chunk_rows = chunk_rows or []
         self.search_rows = search_rows or []
+        self.row_matches = row_matches or []
+        self.admitted_chunks = admitted_chunks
         # An existing embeddings table implies the extension that defines its type.
         self.extension_installed = (
             table_exists if extension_installed is None else extension_installed
@@ -117,6 +123,10 @@ class FakeSession:
             return FakeResult(rows=self.chunk_rows)
         if "AS similarity" in sql:
             return FakeResult(rows=self.search_rows)
+        if "SELECT count(*)" in sql:
+            return FakeResult(scalar=self.admitted_chunks)
+        if "chunk_rank" in sql:
+            return FakeResult(rows=self.row_matches)
         return FakeResult()
 
     async def commit(self) -> None:
@@ -396,6 +406,7 @@ async def test_search_returns_normalized_stable_matches(monkeypatch) -> None:
         "scope_0": 7,
         "dimensions": 4,
         "embedding_identity": "stub:4",
+        "chunk_scan": 5,
         "limit": 5,
     }
 
@@ -463,7 +474,7 @@ async def test_search_sizes_the_scan_to_the_window_it_must_fill(monkeypatch) -> 
     assert ef_search[1] == {"ef_search": "250"}
     search_sql = next(sql for sql, _params in session.calls if "AS similarity" in sql)
     # The window is taken by distance inside the CTE, then re-sorted with tie-breaks.
-    assert "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :limit" in search_sql
+    assert "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :chunk_scan" in search_sql
 
 
 @pytest.mark.asyncio
@@ -482,3 +493,86 @@ async def test_search_keeps_scanning_until_the_window_fills(monkeypatch) -> None
     assert max(ordered.index(sql) for sql in settings) < next(
         position for position, sql in enumerate(ordered) if "AS similarity" in sql
     )
+
+
+ENTITY_ADMISSION = VectorAdmission(predicate="c.source_type = :kind", params={"kind": "entity"})
+
+
+@pytest.mark.asyncio
+async def test_search_rows_ranks_few_admitted_chunks_exactly_and_collapses_them(monkeypatch):
+    """Few admitted chunks are ranked exactly, then collapsed to rows in the same query."""
+    session = FakeSession(
+        admitted_chunks=12,
+        row_matches=[
+            {
+                "entity_id": 3,
+                "chunk_key": "entity:3:0",
+                "project_id": PROJECT,
+                "source_type": "entity",
+                "source_row_id": 30,
+                "distance": -0.1,
+            },
+            {
+                "entity_id": 4,
+                "chunk_key": "entity:4:2",
+                "project_id": PROJECT,
+                "source_type": "entity",
+                "source_row_id": 40,
+                "distance": 1.4,
+            },
+        ],
+    )
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    assert await index.search_rows([], limit=2, chunk_scan=20, projects=PROJECTS) == []
+    assert await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=20, projects=PROJECTS) == []
+    assert session.calls == []
+
+    matches = await index.search_rows(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=2,
+        chunk_scan=20,
+        projects=PROJECTS,
+        admission=ENTITY_ADMISSION,
+        chunks_per_row=3,
+    )
+
+    assert [(m.source_type, m.source_row_id, m.key.chunk_key) for m in matches] == [
+        ("entity", 30, "entity:3:0"),
+        ("entity", 40, "entity:4:2"),
+    ]
+    # Similarity is clamped to [0, 1] like every other match.
+    assert [m.similarity for m in matches] == [1.0, 0.0]
+    assert _settings(session) == []
+    rows_sql, rows_params = next(call for call in session.calls if "chunk_rank" in call[0])
+    assert "LIMIT :chunk_scan" not in rows_sql
+    assert "AND c.source_type = :kind" in rows_sql
+    assert rows_params is not None
+    assert rows_params["row_limit"] == 2
+    assert rows_params["chunks_per_row"] == 3
+    assert rows_params["kind"] == "entity"
+
+
+@pytest.mark.asyncio
+async def test_search_rows_scans_hnsw_when_many_chunks_are_admitted(monkeypatch):
+    """Past the exact limit the scan reads ``chunk_scan`` chunks through HNSW, sorts off."""
+    session = FakeSession(admitted_chunks=EXACT_ADMISSION_CHUNK_LIMIT + 1)
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    await index.search_rows(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=10,
+        chunk_scan=300,
+        projects=PROJECTS,
+        admission=ENTITY_ADMISSION,
+    )
+
+    settings = _settings(session)
+    assert ("SELECT set_config('hnsw.ef_search', :ef_search, true)", {"ef_search": "300"}) in [
+        (sql, params) for sql, params in settings
+    ]
+    assert any("'enable_sort', 'off'" in sql for sql, _params in settings)
+    rows_sql = next(sql for sql, _params in session.calls if "chunk_rank" in sql)
+    assert "LIMIT :chunk_scan" in rows_sql

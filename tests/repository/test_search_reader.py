@@ -17,6 +17,7 @@ from basic_memory.repository.search_reader import (
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import ManifestReadiness, SearchTraceCollector
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
+from basic_memory.repository.semantic_vector_index import VectorKey, VectorRowMatch
 from basic_memory.schemas.search import SearchRetrievalMode
 from tests.repository.test_hybrid_fusion import (
     OfflineSemanticSearch,
@@ -180,8 +181,26 @@ async def test_hybrid_slow_query_warning_names_the_scope(monkeypatch):
 @pytest.mark.asyncio
 async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatch):
     """A traced built-in lookup reports how much of the manifest retrieval can answer from."""
-    adapter = MagicMock()
-    adapter.search = AsyncMock(return_value=[])
+
+    class RowIndex:
+        """A built-in index that finds nothing and records how it was asked."""
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        async def search_rows(self, query, **kwargs):
+            self.calls.append({"query": query, **kwargs})
+            return [
+                VectorRowMatch(
+                    key=VectorKey(entity_id=8, chunk_key="entity:8:1"),
+                    similarity=0.75,
+                    project_id=1,
+                    source_type="entity",
+                    source_row_id=80,
+                )
+            ]
+
+    adapter = RowIndex()
     semantic = OfflineSemanticSearch(
         cast(Any, None), SCOPE, FakeFts(), replace(fake_vector_retrieval(), index=adapter)
     )
@@ -199,11 +218,25 @@ async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatc
     trace = SearchTraceCollector()
     session = AsyncMock()
 
-    assert await semantic._run_vector_query(session, [0.1], 5, trace=trace) == []
+    [chunk] = await semantic._run_vector_query(session, [0.1], 5, trace=trace)
 
+    # The row's best chunk comes back named with the search row it was cut from.
+    assert (chunk.source_key, chunk.chunk_key, chunk.similarity) == (
+        ("entity", 80),
+        "entity:8:1",
+        0.75,
+    )
+    assert trace.vector is not None
+    assert [(m.key, m.chunk_key) for m in trace.vector.chunk_matches] == [
+        (("entity", 80), "entity:8:1")
+    ]
+    assert trace.vector.drops == ()
     assert trace.readiness is readiness
     read_readiness.assert_awaited_once_with(session, SCOPE, "sqlite-vec", "fake:384")
-    adapter.search.assert_awaited_once_with([0.1], limit=5, projects=SCOPE, admission=None)
+    # Five rows, read through a scan of ten chunks per row.
+    assert adapter.calls == [
+        {"query": [0.1], "limit": 5, "chunk_scan": 50, "projects": SCOPE, "admission": None}
+    ]
 
 
 @pytest.mark.asyncio

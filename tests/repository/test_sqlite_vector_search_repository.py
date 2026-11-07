@@ -841,6 +841,91 @@ async def test_sqlite_vec_scope_is_a_partition_not_a_filter_on_the_nearest(searc
 
 
 @pytest.mark.asyncio
+async def test_search_rows_collapses_chunks_to_their_nearest_rows(search_repository):
+    """Many chunks of one note come back as one row, with its best chunks first (#1746).
+
+    Row 501's three chunks are the three nearest chunks. A chunk window of three would
+    hold one row; the row search returns the two nearest rows, each with its two best
+    chunks, and reads no other row's chunks.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    # (chunk id, source row, embedding): row 501 nearest, then 502, then 503.
+    chunks = [
+        (5011, 501, "[1,0,0,0]"),
+        (5012, 501, "[1,0.05,0,0]"),
+        (5013, 501, "[1,0.1,0,0]"),
+        (5021, 502, "[1,0.3,0,0]"),
+        (5022, 502, "[1,0.4,0,0]"),
+        (5023, 502, "[1,0.5,0,0]"),
+        (5031, 503, "[0,1,0,0]"),
+    ]
+    embedding_identity = search_repository._embedding_model_key()
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, "
+                "chunk_text, source_hash, entity_fingerprint, embedding_model, vector_index, "
+                "embedding_status) VALUES ("
+                ":id, :row, :project_id, :chunk_key, 'entity', :row, 0, 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            [
+                {
+                    "id": chunk_id,
+                    "row": row,
+                    "project_id": project,
+                    "chunk_key": f"entity:{row}:{chunk_id}",
+                    "embedding_model": embedding_identity,
+                }
+                for chunk_id, row, _embedding in chunks
+            ],
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, project_id, embedding, source_hash) "
+                "VALUES (:rowid, :project_id, :embedding, 'hash')"
+            ),
+            [
+                {"rowid": chunk_id, "project_id": project, "embedding": embedding}
+                for chunk_id, _row, embedding in chunks
+            ],
+        )
+        await session.commit()
+
+    scope = ProjectScope.single(project)
+    assert await index.search_rows([], limit=2, chunk_scan=7, projects=scope) == []
+    assert await index.search_rows([1.0, 0, 0, 0], limit=0, chunk_scan=7, projects=scope) == []
+
+    matches = await index.search_rows(
+        [1.0, 0.0, 0.0, 0.0],
+        limit=2,
+        chunk_scan=len(chunks),
+        projects=ProjectScope.single(project),
+        chunks_per_row=2,
+    )
+
+    assert [(match.source_row_id, match.key.chunk_key) for match in matches] == [
+        (501, "entity:501:5011"),
+        (501, "entity:501:5012"),
+        (502, "entity:502:5021"),
+        (502, "entity:502:5022"),
+    ]
+    assert all(match.project_id == project for match in matches)
+    assert matches[0].similarity == pytest.approx(1.0)
+    assert [match.similarity for match in matches] == sorted(
+        (match.similarity for match in matches), reverse=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_filtered_vector_search_fills_its_window_past_nearer_rejected_rows(
     search_repository,
 ):
@@ -953,14 +1038,16 @@ async def test_filtered_vector_search_ranks_only_admitted_chunks_in_one_read(sea
     )
 
     calls: list[dict[str, Any]] = []
-    search = index.search
+    search_rows = index.search_rows
 
-    async def spy(query, *, limit, projects, admission=None):
-        matches = await search(query, limit=limit, projects=projects, admission=admission)
-        calls.append({"admission": admission, "entities": [m.key.entity_id for m in matches]})
+    async def spy(query, **kwargs):
+        matches = await search_rows(query, **kwargs)
+        calls.append(
+            {"admission": kwargs["admission"], "entities": [m.key.entity_id for m in matches]}
+        )
         return matches
 
-    with patch.object(index, "search", spy):
+    with patch.object(index, "search_rows", spy):
         results = await search_repository.search(
             search_text="auth",
             file_path_prefix="notes",
@@ -969,9 +1056,10 @@ async def test_filtered_vector_search_ranks_only_admitted_chunks_in_one_read(sea
         )
 
     assert [row.id for row in results] == farther
-    [call] = calls
-    assert call["admission"] is not None
-    assert call["entities"] == farther
+    # The first read is the window; any later one ranks the returned rows' excerpts.
+    window = calls[0]
+    assert window["admission"] is not None
+    assert window["entities"] == farther
 
 
 @pytest.mark.asyncio

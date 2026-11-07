@@ -119,6 +119,77 @@ class SemanticVectorIndex(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class VectorRowMatch:
+    """One of a search row's nearest chunks, named with the row it was cut from."""
+
+    key: VectorKey
+    similarity: float
+    project_id: int
+    source_type: str
+    source_row_id: int
+
+
+@runtime_checkable
+class SourceRowVectorIndex(Protocol):
+    """Nearest search rows, ranked and collapsed inside the SQL database (#1746).
+
+    Implemented by the built-in indexes, which store vectors beside the chunk manifest.
+    A note is cut into dozens of chunks, so ranking chunks and collapsing them to rows
+    in the application read thousands of chunk keys to fill one page, and a filtered
+    search re-read a widening window until enough rows appeared. Here the database
+    ranks the chunks, keeps each row's best ``chunks_per_row``, and returns at most
+    ``limit`` rows' worth.
+    """
+
+    async def search_rows(
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+        chunk_scan: int,
+        projects: ProjectScope,
+        admission: VectorAdmission | None = None,
+        chunks_per_row: int = 1,
+    ) -> list[VectorRowMatch]:
+        """Return the ``limit`` nearest rows' best chunks, nearest row first.
+
+        A row's chunks follow it, nearest first. ``chunk_scan`` bounds how many of the
+        nearest chunks an approximate scan reads before collapsing them to rows; an
+        exact ranking reads every admitted chunk and ignores it.
+        """
+        ...
+
+
+def collapse_to_rows_sql(candidate_ctes: str) -> str:
+    """Rank candidate chunks per search row and keep the nearest rows' best chunks.
+
+    ``candidate_ctes`` defines a CTE named ``candidates`` with the columns
+    ``entity_id, chunk_key, project_id, source_type, source_row_id, distance``.
+    Binds ``:row_limit`` and ``:chunks_per_row``. Ties order by row location and chunk
+    key, so the ranking is the same on every page of a query. Both engines run it.
+    """
+    return (
+        f"WITH {candidate_ctes}, "
+        "ranked AS ("
+        "SELECT candidates.*, ROW_NUMBER() OVER ("
+        "PARTITION BY project_id, source_type, source_row_id "
+        "ORDER BY distance, entity_id, chunk_key) AS chunk_rank "
+        "FROM candidates), "
+        "nearest_rows AS ("
+        "SELECT project_id, source_type, source_row_id, distance AS row_distance "
+        "FROM ranked WHERE chunk_rank = 1 "
+        "ORDER BY distance, project_id, source_type, source_row_id "
+        "LIMIT :row_limit) "
+        "SELECT r.entity_id, r.chunk_key, r.project_id, r.source_type, r.source_row_id, "
+        "r.distance FROM ranked r JOIN nearest_rows n "
+        "ON n.project_id = r.project_id AND n.source_type = r.source_type "
+        "AND n.source_row_id = r.source_row_id "
+        "WHERE r.chunk_rank <= :chunks_per_row "
+        "ORDER BY n.row_distance, n.project_id, n.source_type, n.source_row_id, r.chunk_rank"
+    )
+
+
 @runtime_checkable
 class SemanticVectorIndexReconciler(Protocol):
     """Optional cleanup capability for removing vectors absent from the live manifest."""
