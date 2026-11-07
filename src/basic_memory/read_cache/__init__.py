@@ -3,6 +3,7 @@
 from basic_memory.read_cache.contract import (
     CONTENT,
     PROJECT,
+    WORKSPACE_ENTRIES_PROJECT_ID,
     ContentGroup,
     NoteGroup,
     ProjectGroup,
@@ -36,6 +37,7 @@ __all__ = [
     "ReadCacheInvalidator",
     "ReadCacheOperation",
     "ReadCacheUnavailable",
+    "WORKSPACE_ENTRIES_PROJECT_ID",
     "finish_project_read_cache_invalidation",
     "finish_read_cache_invalidation",
     "invalidate_cache",

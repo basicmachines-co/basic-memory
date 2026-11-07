@@ -736,7 +736,7 @@ async def get_active_project(
         has_context=context is not None,
     ):
         # Deferred import to avoid circular dependency with tools
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_query
 
         cached_project = await _get_cached_active_project(context)
         if cached_project and _project_matches_identifier(cached_project, project):
@@ -760,7 +760,7 @@ async def get_active_project(
 
         # Validate project exists by calling API
         logger.debug(f"Validating project: {project}")
-        response = await call_post(
+        response = await call_query(
             client,
             "/v2/projects/resolve",
             json={"identifier": project},
@@ -916,9 +916,9 @@ async def resolve_project_and_path(
             from fastmcp.exceptions import ToolError
 
             try:
-                from basic_memory.mcp.tools.utils import call_post
+                from basic_memory.mcp.tools.utils import call_query
 
-                response = await call_post(
+                response = await call_query(
                     client,
                     "/v2/projects/resolve",
                     json={"identifier": project_prefix},

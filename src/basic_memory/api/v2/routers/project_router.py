@@ -10,7 +10,7 @@ Key improvements:
 - Consistent with v2 entity operations
 """
 
-from contextlib import nullcontext
+from contextlib import AbstractAsyncContextManager, nullcontext
 import os
 from typing import Literal, Optional
 
@@ -31,7 +31,19 @@ from basic_memory.deps import (
     SessionMakerDep,
 )
 from basic_memory.index.local_project import ProjectIndexRouteRequest
-from basic_memory.read_cache import invalidate_cache
+from basic_memory.read_cache import (
+    WORKSPACE_ENTRIES_PROJECT_ID,
+    ReadCacheInvalidator,
+    ReadCacheOperation,
+    invalidate_cache,
+)
+from basic_memory.read_cache.policy import PROJECT_RESOLVE_READ_CACHE_TTL_SECONDS
+from basic_memory.read_cache.routes import (
+    ReadCacheRoute,
+    cached_read,
+    project_group,
+    workspace_project,
+)
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
 from basic_memory.schemas.doctor import ProjectDoctorReport
@@ -51,8 +63,23 @@ from basic_memory.schemas.v2 import (
 )
 from basic_memory.utils import normalize_project_path, generate_permalink
 
-router = APIRouter(prefix="/projects", tags=["project_management-v2"])
+# ReadCacheRoute serves the cached project resolve; routes without cached_read run
+# unchanged.
+router = APIRouter(prefix="/projects", tags=["project_management-v2"], route_class=ReadCacheRoute)
 ProjectResolveMethod = Literal["external_id", "name", "permalink"]
+
+
+def _retire_project_resolve(
+    read_cache: ReadCacheInvalidator | None,
+) -> AbstractAsyncContextManager[None]:
+    """Retire the cached project resolves when the enclosed project change exits.
+
+    Project resolve is cached workspace-wide, so any change to the set of projects,
+    their names, paths, status or default makes every cached answer stale.
+    """
+    if read_cache is None:
+        return nullcontext()
+    return invalidate_cache(read_cache, WORKSPACE_ENTRIES_PROJECT_ID)
 
 
 def _split_qualified_project_identifier(identifier: str) -> tuple[str | None, str]:
@@ -156,6 +183,7 @@ async def list_projects(
 async def add_project(
     project_data: ProjectInfoRequest,
     project_service: ProjectServiceDep,
+    read_cache: ReadCacheDep,
 ) -> ProjectStatusResponse:
     """Add a new project to configuration and database.
 
@@ -199,9 +227,10 @@ async def add_project(
 
     try:  # pragma: no cover
         # The service layer handles cloud mode validation and path sanitization
-        await project_service.add_project(
-            project_data.name, project_data.path, set_default=project_data.set_default
-        )
+        async with _retire_project_resolve(read_cache):
+            await project_service.add_project(
+                project_data.name, project_data.path, set_default=project_data.set_default
+            )
 
         # Fetch the newly created project to get its ID
         new_project = await project_service.get_project(project_data.name)
@@ -227,10 +256,12 @@ async def add_project(
 @router.post("/config/sync", response_model=ProjectStatusResponse)
 async def synchronize_projects(
     project_service: ProjectServiceDep,
+    read_cache: ReadCacheDep,
 ) -> ProjectStatusResponse:
     """Synchronize projects between configuration file and database."""
     try:  # pragma: no cover
-        await project_service.synchronize_projects()
+        async with _retire_project_resolve(read_cache):
+            await project_service.synchronize_projects()
 
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
             message="Projects synchronized successfully between configuration and database",
@@ -314,7 +345,24 @@ router.add_api_route(
 )
 
 
-@router.post("/resolve", response_model=ProjectResolveResponse)
+# QUERY only: resolution is a safe, cacheable read with a body (RFC 9110 draft), so
+# it is cached like note resolve. Every cloud-mode tool call starts here. Hosts that
+# still receive released clients' POST rewrite it to QUERY. OpenAPI cannot describe
+# QUERY, so the route stays out of the schema.
+@router.api_route(
+    "/resolve",
+    methods=["QUERY"],
+    response_model=ProjectResolveResponse,
+    include_in_schema=False,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.project_resolve,
+            group=project_group,
+            project=workspace_project,
+            ttl_seconds=PROJECT_RESOLVE_READ_CACHE_TTL_SECONDS,
+        )
+    ],
+)
 async def resolve_project_identifier(
     data: ProjectResolveRequest,
     session: SessionDep,
@@ -338,7 +386,7 @@ async def resolve_project_identifier(
         HTTPException: 404 if project not found
 
     Example:
-        POST /v2/projects/resolve
+        QUERY /v2/projects/resolve
         {"identifier": "my-project"}
 
         Returns:
@@ -508,10 +556,11 @@ async def update_project_by_id(
                 if read_cache is not None
                 else nullcontext()
             )
-            async with invalidation_scope:
+            async with invalidation_scope, _retire_project_resolve(read_cache):
                 await project_service.move_project(old_project.name, path)
         elif is_active is not None:
-            await project_service.update_project(old_project.name, is_active=is_active)
+            async with _retire_project_resolve(read_cache):
+                await project_service.update_project(old_project.name, is_active=is_active)
 
         # Get updated project info (use the same external_id)
         async with db.scoped_session(session_maker) as session:
@@ -599,7 +648,7 @@ async def delete_project_by_id(
             if read_cache is not None
             else nullcontext()
         )
-        async with invalidation_scope:
+        async with invalidation_scope, _retire_project_resolve(read_cache):
             # Delete using project name (service layer still uses names internally)
             file_delete_status = await project_service.remove_project(
                 old_project.name, delete_notes=delete_notes
@@ -628,6 +677,7 @@ async def set_default_project_by_id(
     project_service: ProjectServiceDep,
     session_maker: SessionMakerDep,
     project_repository: ProjectRepositoryDep,
+    read_cache: ReadCacheDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
 ) -> ProjectStatusResponse:
     """Set a project as the default project by external ID.
@@ -661,7 +711,8 @@ async def set_default_project_by_id(
             )
 
         # Set as default using project name (service layer still uses names internally)
-        await project_service.set_default_project(new_default_project.name)
+        async with _retire_project_resolve(read_cache):
+            await project_service.set_default_project(new_default_project.name)
 
         # Trigger: a previous default existed
         # Why: ProjectStatusResponse.old_project is Optional; the no-default

@@ -30,6 +30,7 @@ class ReadCacheOperation(StrEnum):
     directory_structure = "directory_structure"
     directory_tree = "directory_tree"
     entity = "entity"
+    project_resolve = "project_resolve"
     recent_activity = "recent_activity"
     resolve = "resolve"
     search = "search"
@@ -50,6 +51,12 @@ def canonical_uuid(value: str, *, label: str) -> str:
         return str(UUID(value))
     except ValueError as error:
         raise ValueError(f"read-cache {label} must be a valid UUID") from error
+
+
+# Workspace-wide reads (project resolve) have no project in their path. They are
+# kept under this reserved project id, whose project epoch is retired whenever the
+# set of projects changes. No real project has the nil UUID.
+WORKSPACE_ENTRIES_PROJECT_ID = "00000000-0000-0000-0000-000000000000"
 
 
 # --- Eviction groups a cached read belongs to ---

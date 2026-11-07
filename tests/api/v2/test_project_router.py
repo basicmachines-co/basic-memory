@@ -523,7 +523,7 @@ async def test_update_project_active_status(
 async def test_resolve_project_by_name(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test resolving a project by name returns correct project external_id."""
     resolve_data = {"identifier": test_project.name}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 200
     resolved = ProjectResolveResponse.model_validate(response.json())
@@ -545,7 +545,7 @@ async def test_resolve_project_by_permalink(
 
     project_permalink = generate_permalink(test_project.name)
     resolve_data = {"identifier": project_permalink}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 200
     resolved = ProjectResolveResponse.model_validate(response.json())
@@ -561,7 +561,7 @@ async def test_resolve_project_by_workspace_qualified_permalink(
 ):
     """Resolve the workspace/project form shown by MCP disambiguation errors."""
     resolve_data = {"identifier": f"personal/{test_project.name}"}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 200
     resolved = ProjectResolveResponse.model_validate(response.json())
@@ -574,7 +574,7 @@ async def test_resolve_project_by_workspace_qualified_permalink(
 async def test_resolve_project_by_id(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test resolving a project by external_id string returns correct project external_id."""
     resolve_data = {"identifier": test_project.external_id}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 200
     resolved = ProjectResolveResponse.model_validate(response.json())
@@ -589,7 +589,7 @@ async def test_resolve_project_case_insensitive(
 ):
     """Test resolving a project by name is case-insensitive."""
     resolve_data = {"identifier": test_project.name.upper()}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 200
     resolved = ProjectResolveResponse.model_validate(response.json())
@@ -601,7 +601,7 @@ async def test_resolve_project_case_insensitive(
 async def test_resolve_project_not_found(client: AsyncClient, v2_projects_url):
     """Test resolving a non-existent project returns 404."""
     resolve_data = {"identifier": "nonexistent-project"}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
@@ -621,7 +621,9 @@ async def test_resolve_project_not_found_fresh_install_names_setup_command(
     for project in await _find_projects(project_repository, session_maker):
         await _delete_project(project_repository, session_maker, project.id)
 
-    response = await client.post(f"{v2_projects_url}/resolve", json={"identifier": "main"})
+    response = await client.request(
+        "QUERY", f"{v2_projects_url}/resolve", json={"identifier": "main"}
+    )
 
     assert response.status_code == 404
     detail = response.json()["detail"]
@@ -634,8 +636,8 @@ async def test_resolve_project_not_found_with_projects_keeps_plain_message(
     client: AsyncClient, test_project: Project, v2_projects_url
 ):
     """A miss against a populated projects table stays a plain not-found."""
-    response = await client.post(
-        f"{v2_projects_url}/resolve", json={"identifier": "nonexistent-project"}
+    response = await client.request(
+        "QUERY", f"{v2_projects_url}/resolve", json={"identifier": "nonexistent-project"}
     )
 
     assert response.status_code == 404
@@ -646,6 +648,6 @@ async def test_resolve_project_not_found_with_projects_keeps_plain_message(
 async def test_resolve_project_empty_identifier(client: AsyncClient, v2_projects_url):
     """Test resolving with empty identifier returns 422."""
     resolve_data = {"identifier": ""}
-    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+    response = await client.request("QUERY", f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 422  # Validation error
