@@ -312,7 +312,9 @@ async def test_semantic_retrieval_honors_the_scope(
     monkeypatch.setattr(search_repository, "_semantic_vector_index_name", index_name)
     admissions: list[VectorAdmission | None] = []
 
-    async def nearest(self, session, query_embedding, limit, *, admission=None, trace=None):
+    async def nearest(
+        self, session, query_embedding, limit, *, admission=None, row_target=0, trace=None
+    ):
         admissions.append(admission)
         row_ids = list(seeded_paths.values())
         if admission is not None:

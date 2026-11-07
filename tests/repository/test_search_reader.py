@@ -17,6 +17,11 @@ from basic_memory.repository.search_reader import (
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import ManifestReadiness, SearchTraceCollector
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
+from basic_memory.repository.semantic_vector_index import (
+    VectorKey,
+    VectorRowMatch,
+    VectorRowSearch,
+)
 from basic_memory.schemas.search import SearchRetrievalMode
 from tests.repository.test_hybrid_fusion import (
     OfflineSemanticSearch,
@@ -177,11 +182,83 @@ async def test_hybrid_slow_query_warning_names_the_scope(monkeypatch):
     assert warning.call_args.kwargs["scope"] == (1,)
 
 
+def row_match(row_id: int, similarity: float = 0.75) -> VectorRowMatch:
+    """Row ``row_id``'s best chunk."""
+    return VectorRowMatch(
+        key=VectorKey(entity_id=row_id, chunk_key=f"entity:{row_id}:0"),
+        similarity=similarity,
+        project_id=1,
+        source_type="entity",
+        source_row_id=row_id,
+    )
+
+
+class RowIndex:
+    """A built-in index over ``rows`` (nearest first), each cut into ``chunks_per_row``.
+
+    A scan of ``chunk_scan`` chunks reaches the rows whose chunks it read, and is
+    truncated while chunks remain past it. Records how it was asked.
+    """
+
+    max_chunk_scan = 4096
+
+    def __init__(self, rows: list[VectorRowMatch], *, chunks_per_row: int = 1) -> None:
+        self.rows = rows
+        self.chunks_per_row = chunks_per_row
+        self.calls: list[dict[str, Any]] = []
+
+    async def search_rows(self, query, *, limit, chunk_scan, **kwargs) -> VectorRowSearch:
+        self.calls.append({"query": query, "limit": limit, "chunk_scan": chunk_scan, **kwargs})
+        reached = self.rows[: chunk_scan // self.chunks_per_row]
+        return VectorRowSearch(
+            matches=reached[:limit],
+            truncated=chunk_scan < len(self.rows) * self.chunks_per_row,
+        )
+
+
+def _row_reader(index: RowIndex) -> SemanticSearch:
+    return OfflineSemanticSearch(
+        cast(Any, None), SCOPE, FakeFts(), replace(fake_vector_retrieval(), index=index)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_row_scan_widens_until_the_page_fills():
+    """Notes of hundreds of chunks can fill a chunk scan with too few rows (#1746).
+
+    Five notes of 300 chunks each: a 100-row window scans 1,000 chunks and reaches three
+    notes, so the scan doubles until it reaches the five the page needs.
+    """
+    index = RowIndex([row_match(row_id) for row_id in range(1, 6)], chunks_per_row=300)
+
+    chunks = await _row_reader(index)._run_vector_query(AsyncMock(), [0.1], 100, row_target=5)
+
+    assert [chunk.source_key[1] for chunk in chunks] == [1, 2, 3, 4, 5]
+    assert [call["chunk_scan"] for call in index.calls] == [1000, 2000]
+    assert all(call["limit"] == 100 for call in index.calls)
+
+
+@pytest.mark.asyncio
+async def test_a_row_scan_stops_at_the_index_limit_or_when_it_saw_every_chunk():
+    """A short window is the answer once the scan saw everything or cannot grow."""
+    # Every chunk was read: three rows exist, so the page stays short.
+    complete = RowIndex([row_match(row_id) for row_id in range(1, 4)])
+    found = await _row_reader(complete)._run_vector_query(AsyncMock(), [0.1], 20, row_target=5)
+    assert len(found) == 3
+    assert len(complete.calls) == 1
+
+    # Truncated, but the scan already reads the most chunks the index allows.
+    capped = RowIndex([row_match(row_id) for row_id in range(1, 10)], chunks_per_row=2000)
+    found = await _row_reader(capped)._run_vector_query(AsyncMock(), [0.1], 500, row_target=5)
+    assert len(found) == 2
+    assert [call["chunk_scan"] for call in capped.calls] == [4096]
+
+
 @pytest.mark.asyncio
 async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatch):
     """A traced built-in lookup reports how much of the manifest retrieval can answer from."""
-    adapter = MagicMock()
-    adapter.search = AsyncMock(return_value=[])
+
+    adapter = RowIndex([row_match(80)])
     semantic = OfflineSemanticSearch(
         cast(Any, None), SCOPE, FakeFts(), replace(fake_vector_retrieval(), index=adapter)
     )
@@ -199,11 +276,25 @@ async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatc
     trace = SearchTraceCollector()
     session = AsyncMock()
 
-    assert await semantic._run_vector_query(session, [0.1], 5, trace=trace) == []
+    [chunk] = await semantic._run_vector_query(session, [0.1], 5, trace=trace)
 
+    # The row's best chunk comes back named with the search row it was cut from.
+    assert (chunk.source_key, chunk.chunk_key, chunk.similarity) == (
+        ("entity", 80),
+        "entity:80:0",
+        0.75,
+    )
+    assert trace.vector is not None
+    assert [(m.key, m.chunk_key) for m in trace.vector.chunk_matches] == [
+        (("entity", 80), "entity:80:0")
+    ]
+    assert trace.vector.drops == ()
     assert trace.readiness is readiness
     read_readiness.assert_awaited_once_with(session, SCOPE, "sqlite-vec", "fake:384")
-    adapter.search.assert_awaited_once_with([0.1], limit=5, projects=SCOPE, admission=None)
+    # Five rows, read through a scan of ten chunks per row.
+    assert adapter.calls == [
+        {"query": [0.1], "limit": 5, "chunk_scan": 50, "projects": SCOPE, "admission": None}
+    ]
 
 
 @pytest.mark.asyncio

@@ -168,11 +168,18 @@ async def test_postgres_hybrid_preserves_candidate_windows(
         candidate_limit: int,
         *,
         admission: Any = None,
+        row_target: int = 0,
         trace: Any = None,
     ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
         return await run_vector_query(
-            self, session, query_embedding, candidate_limit, admission=admission, trace=trace
+            self,
+            session,
+            query_embedding,
+            candidate_limit,
+            admission=admission,
+            row_target=row_target,
+            trace=trace,
         )
 
     monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)

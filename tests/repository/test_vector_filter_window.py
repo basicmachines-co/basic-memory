@@ -93,6 +93,7 @@ def _adapter(ranking: list[HydratedChunk]) -> AsyncMock:
         candidate_limit: int,
         *,
         admission: Any = None,
+        row_target: int = 0,
         trace: Any = None,
     ):
         return ranking[:candidate_limit]
@@ -332,21 +333,23 @@ async def test_a_query_without_filters_has_no_admission():
 
 
 @pytest.mark.asyncio
-async def test_a_built_in_index_widens_until_long_notes_fill_the_page():
-    """Admitted chunks still collapse to rows: a few long notes can fill a chunk window.
+async def test_a_built_in_index_reads_its_row_window_once():
+    """A built-in index returns rows, so a short window is the whole answer (#1746).
 
-    With 52 chunks per note, a 100-chunk admitted read holds two notes; a five-result
-    page widens, each read still handed the admission, until five rows are admitted.
+    Chunks collapse to rows in the database: a window of 100 is 100 rows however many
+    chunks each note holds. Fewer rows than the page means fewer admitted rows exist,
+    so the reader does not re-read a wider window.
     """
     fts = AdmittingFts(admitted=set())
-    adapter = _adapter(_multi_chunk_ranking(rows=1000, chunks_per_row=52))
+    adapter = _adapter(_ranking(2))
 
     found = await _search(
         _semantic(fts, vector_k=100, index_name="sqlite-vec"), adapter, query=FILTERED, limit=5
     )
 
-    assert found == [1, 2, 3, 4, 5]
-    assert _windows(adapter) == [100, 200, 400]
-    assert all(call.kwargs["admission"] is not None for call in adapter.await_args_list)
-    # The index admitted the chunks, so no reader-side filter pass ran.
+    assert found == [1, 2]
+    assert _windows(adapter) == [100]
+    assert adapter.await_args is not None
+    assert adapter.await_args.kwargs["admission"] is not None
+    # The index admitted the rows, so no reader-side filter pass ran.
     assert fts.calls == []

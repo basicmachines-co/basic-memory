@@ -54,6 +54,7 @@ from basic_memory.repository.search_trace import (
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
+    SourceRowVectorIndex,
     VectorAdmission,
     VectorKey,
     VectorMatch,
@@ -67,6 +68,10 @@ from basic_memory.schemas.search import SearchRetrievalMode
 # outside it and needs the stale-hit overfetch below.
 BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 VECTOR_FILTER_SCAN_LIMIT = 50000
+# Chunks an approximate built-in scan reads per row it must return. Chunks of one note
+# cluster near the query, so a row window reads several times its size in chunks before
+# the database collapses them to rows; an exact ranking reads every admitted chunk.
+ROW_CHUNK_SCAN_FANOUT = 10
 # The shared bind-parameter bound for any statement that carries a list of vector
 # candidate keys. Both engines cap bind parameters (asyncpg at 32767), so every such
 # list — manifest hydration and the filter intersection alike — is split at this size.
@@ -167,6 +172,12 @@ class VectorRetrieval:
         """Whether vectors live outside the SQL database that owns the manifest."""
         return self.index_name not in BUILT_IN_VECTOR_INDEX_NAMES
 
+    @property
+    def row_index(self) -> SourceRowVectorIndex:
+        """The built-in index, which ranks and collapses chunks to rows in SQL."""
+        assert isinstance(self.index, SourceRowVectorIndex), self.index_name
+        return self.index
+
 
 @dataclass(frozen=True, slots=True)
 class Reranking:
@@ -187,6 +198,16 @@ class HydratedChunk:
     # The search_index row this chunk was cut from, read from the manifest's location
     # columns. Several chunks of one row collapse into one candidate on this key.
     source_key: SearchIndexKey
+
+
+@dataclass(frozen=True, slots=True)
+class RowWindow:
+    """A built-in index's row window and how far its chunk scan went to fill it."""
+
+    chunks: list[HydratedChunk]
+    rounds: int
+    chunk_scan: int
+    truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +238,8 @@ class CandidateWindow:
     chunks_by_key: dict[SearchIndexKey, list[WindowChunk]]
     rows: dict[SearchIndexKey, SearchIndexRow]
     chunk_count: int
+    # How many reads the window took; only an external index ever needs more than one.
+    rounds: int = 1
     # The embedded query, kept so the returned rows' excerpts are ranked against it.
     query_embedding: tuple[float, ...] = ()
     embed_ms: float = 0.0
@@ -407,7 +430,11 @@ class SemanticSearch:
         return max(self.vector.vector_k, rerank.candidates * RERANK_POOL_CHUNK_FANOUT)
 
     def _candidate_limit(self, limit: int, offset: int, query_text: str) -> int:
-        """Size the retrieval candidate *chunk* pool for vector/hybrid search.
+        """Size the retrieval candidate pool for vector/hybrid search.
+
+        A built-in index collapses chunks to rows in the database, so for it this is a
+        row count, and the full-text leg reads the same number of rows. The sizing below
+        was made for an external index, where it bounds chunks.
 
         ``candidate_limit`` bounds vector chunks, but many chunks of one large note
         collapse to a single ``(type, id)`` row before reranking, so a chunk count does
@@ -443,7 +470,6 @@ class SemanticSearch:
 
     # --- Vector nearest neighbours through the ready manifest ---
 
-    @logfire.instrument("search.vector_query", extract_args=False)
     async def _run_vector_query(
         self,
         session: AsyncSession,
@@ -451,39 +477,61 @@ class SemanticSearch:
         candidate_limit: int,
         *,
         admission: VectorAdmission | None = None,
+        row_target: int = 0,
         trace: SearchTraceCollector | None = None,
     ) -> list[HydratedChunk]:
         """Query the configured adapter and hydrate only live, ready manifest rows.
 
         ``admission`` restricts a built-in index to the chunks a filtered query admits.
+        ``row_target`` is how many rows a built-in index's window must reach before it
+        stops widening its chunk scan; see ``_run_row_query``.
         """
-        if trace is not None:
-            trace.vector = build_vector_stage(
-                candidate_limit=candidate_limit,
-                adapter_match_count=0,
-                hydrated_count=0,
-            )
-        if candidate_limit <= 0:
-            return []
-
-        if not self.vector.external:
-            matches = await self.vector.index.search(
-                query_embedding,
-                limit=candidate_limit,
-                projects=self.scope,
-                admission=admission,
-            )
+        with logfire.span("search.vector_query", candidate_limit=candidate_limit) as span:
             if trace is not None:
-                trace.readiness = await read_manifest_readiness(
-                    session,
-                    self.scope,
-                    self.vector.index_name,
-                    self.vector.embedding_model,
+                trace.vector = build_vector_stage(
+                    candidate_limit=candidate_limit,
+                    adapter_match_count=0,
+                    hydrated_count=0,
                 )
-            return await self._hydrate_vector_matches(session, matches, trace=trace)
+            if candidate_limit <= 0:
+                return []
+            if self.vector.external:
+                if admission is not None:  # pragma: no cover - the reader never builds one
+                    raise ValueError("An external vector index cannot evaluate a SQL admission.")
+                return await self._run_external_query(
+                    session, query_embedding, candidate_limit, trace=trace
+                )
 
-        if admission is not None:  # pragma: no cover - the reader never builds one
-            raise ValueError("An external vector index cannot evaluate a SQL admission.")
+            rows = await self._run_row_query(
+                session,
+                query_embedding,
+                candidate_limit,
+                row_target=row_target,
+                admission=admission,
+                trace=trace,
+            )
+            # The scan's outcome rides on this span rather than a record of its own:
+            # Logfire bills per record, and every vector search runs this once.
+            span.set_attributes(
+                {
+                    "rounds": rows.rounds,
+                    "chunk_scan": rows.chunk_scan,
+                    "rows": len(rows.chunks),
+                    "row_target": row_target,
+                    "truncated": rows.truncated,
+                }
+            )
+            return rows.chunks
+
+    async def _run_external_query(
+        self,
+        session: AsyncSession,
+        query_embedding: list[float],
+        candidate_limit: int,
+        *,
+        trace: SearchTraceCollector | None,
+    ) -> list[HydratedChunk]:
+        """Query an external index, overfetching past stale hits the manifest rejects."""
         scan_limit = min(candidate_limit, VECTOR_FILTER_SCAN_LIMIT)
         while True:
             matches = await self.vector.index.search(
@@ -539,6 +587,88 @@ class SemanticSearch:
             # Outcome: retry from the same ranked prefix with bounded geometric
             # overfetch until enough live rows survive or the adapter is exhausted.
             scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
+
+    async def _run_row_query(
+        self,
+        session: AsyncSession,
+        query_embedding: list[float],
+        row_limit: int,
+        *,
+        row_target: int,
+        admission: VectorAdmission | None,
+        trace: SearchTraceCollector | None,
+    ) -> RowWindow:
+        """The nearest ``row_limit`` search rows, one best chunk each, from a built-in index.
+
+        The database ranks the chunks, applies the manifest and the filters, and collapses
+        them to rows, so the window holds rows rather than chunks (#1746). Each returned
+        chunk's position is its row's rank.
+
+        Trigger: an approximate scan stopped at its chunk limit and collapsed to fewer
+            than ``row_target`` rows.
+        Why: notes cut into hundreds of chunks can fill a chunk scan with a few rows
+            while more admitted rows sit past it, and the page would come up short.
+        Outcome: the chunk scan doubles, up to the index's ``max_chunk_scan``, until
+            the window holds ``row_target`` rows or the scan saw every candidate. Each
+            read still returns at most ``row_limit`` rows, never chunk keys.
+        """
+        index = self.vector.row_index
+        chunk_scan = min(row_limit * ROW_CHUNK_SCAN_FANOUT, index.max_chunk_scan)
+        rounds = 1
+        search = await index.search_rows(
+            query_embedding,
+            limit=row_limit,
+            chunk_scan=chunk_scan,
+            projects=self.scope,
+            admission=admission,
+        )
+        while (
+            search.truncated
+            and len(search.matches) < row_target
+            and chunk_scan < index.max_chunk_scan
+        ):
+            chunk_scan = min(chunk_scan * 2, index.max_chunk_scan)
+            rounds += 1
+            search = await index.search_rows(
+                query_embedding,
+                limit=row_limit,
+                chunk_scan=chunk_scan,
+                projects=self.scope,
+                admission=admission,
+            )
+        matches = search.matches
+        chunks = [
+            HydratedChunk(
+                entity_id=match.key.entity_id,
+                chunk_key=match.key.chunk_key,
+                similarity=match.similarity,
+                source_key=(match.source_type, match.source_row_id),
+            )
+            for match in matches
+        ]
+        if trace is not None:
+            trace.readiness = await read_manifest_readiness(
+                session,
+                self.scope,
+                self.vector.index_name,
+                self.vector.embedding_model,
+            )
+            chunk_matches: dict[SearchIndexKey, list[tuple[str, float, int | None]]] = {}
+            for chunk in chunks:
+                chunk_matches.setdefault(chunk.source_key, []).append(
+                    (chunk.chunk_key, chunk.similarity, chunk.entity_id)
+                )
+            # The index joins the ready manifest itself, so nothing is dropped here.
+            trace.vector = build_vector_stage(
+                previous=trace.vector,
+                adapter_match_count=len(chunks),
+                hydrated_count=len(chunks),
+                drops=(),
+                chunk_matches=chunk_matches,
+            )
+        return RowWindow(
+            chunks=chunks, rounds=rounds, chunk_scan=chunk_scan, truncated=search.truncated
+        )
 
     @logfire.instrument("search.vector_manifest_hydration", extract_args=False)
     async def _hydrate_vector_matches(
@@ -828,53 +958,57 @@ class SemanticSearch:
         """
         if not rows:
             return []
-        keys = [row_key(row) for row in rows]
-        texts = await self._fetch_row_texts([key for key in keys if key in vector_keys])
-        lexical_keys = [key for key in keys if key not in vector_keys]
-        texts.update(await self._fetch_row_texts(lexical_keys, lexical_snippet_limit))
-        rows = [
-            replace(
-                row,
-                content_snippet=texts[row_key(row)][0],
-                content_snippet_length=texts[row_key(row)][1],
+        with logfire.span("search.materialize") as span:
+            keys = [row_key(row) for row in rows]
+            texts = await self._fetch_row_texts([key for key in keys if key in vector_keys])
+            lexical_keys = [key for key in keys if key not in vector_keys]
+            texts.update(await self._fetch_row_texts(lexical_keys, lexical_snippet_limit))
+            rows = [
+                replace(
+                    row,
+                    content_snippet=texts[row_key(row)][0],
+                    content_snippet_length=texts[row_key(row)][1],
+                )
+                if row_key(row) in texts
+                else row
+                for row in rows
+            ]
+            # Small notes quote themselves whole, so the answer is always present.
+            excerpt_rows = [
+                row
+                for row in rows
+                if row_key(row) in vector_keys
+                and not (
+                    row.content_snippet and (row.content_length or 0) <= SMALL_NOTE_CONTENT_LIMIT
+                )
+            ]
+            excerpt_keys = await self._excerpt_chunk_keys(excerpt_rows, window, position_bound)
+            chunk_texts = await self._fetch_chunk_texts(
+                [key for keys in excerpt_keys.values() for key in keys]
             )
-            if row_key(row) in texts
-            else row
-            for row in rows
-        ]
-        # Small notes quote themselves whole, so the answer is always present.
-        excerpt_rows = [
-            row
-            for row in rows
-            if row_key(row) in vector_keys
-            and not (row.content_snippet and (row.content_length or 0) <= SMALL_NOTE_CONTENT_LIMIT)
-        ]
-        excerpt_keys = await self._excerpt_chunk_keys(excerpt_rows, window, position_bound)
-        chunk_texts = await self._fetch_chunk_texts(
-            [key for keys in excerpt_keys.values() for key in keys]
-        )
 
-        materialized: list[SearchIndexRow] = []
-        for row in rows:
-            key = row_key(row)
-            if key not in vector_keys:
-                materialized.append(row)
-            elif key in excerpt_keys:
-                passages = [
-                    chunk_texts[chunk] for chunk in excerpt_keys[key] if chunk in chunk_texts
-                ]
-                materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
-            else:
-                materialized.append(replace(row, matched_chunk_text=row.content_snippet))
-        # Every byte of note text a search moves is read here, so this is its budget.
-        logfire.info(
-            "search.materialize",
-            rows=len(materialized),
-            excerpt_rows=len(excerpt_keys),
-            snippet_chars=sum(len(row.content_snippet or "") for row in materialized),
-            excerpt_chars=sum(len(text) for text in chunk_texts.values()),
-        )
-        return materialized
+            materialized: list[SearchIndexRow] = []
+            for row in rows:
+                key = row_key(row)
+                if key not in vector_keys:
+                    materialized.append(row)
+                elif key in excerpt_keys:
+                    passages = [
+                        chunk_texts[chunk] for chunk in excerpt_keys[key] if chunk in chunk_texts
+                    ]
+                    materialized.append(replace(row, matched_chunk_text="\n---\n".join(passages)))
+                else:
+                    materialized.append(replace(row, matched_chunk_text=row.content_snippet))
+            # Every byte of note text a search moves is read here, so this is its budget.
+            span.set_attributes(
+                {
+                    "rows": len(materialized),
+                    "excerpt_rows": len(excerpt_keys),
+                    "snippet_chars": sum(len(row.content_snippet or "") for row in materialized),
+                    "excerpt_chars": sum(len(text) for text in chunk_texts.values()),
+                }
+            )
+            return materialized
 
     async def _materialize_unread(
         self,
@@ -949,40 +1083,31 @@ class SemanticSearch:
                 excerpts[row_key(row)] = [chunk.key for chunk in chunks[:TOP_CHUNKS_PER_RESULT]]
             return excerpts
 
-        # --- Built-in index: rank each row's own chunks ---
+        # --- Built-in index: rank each row's own chunks in the database ---
+        # Only the best TOP_CHUNKS_PER_RESULT chunks of each row come back. Reading every
+        # chunk key of every returned note cost more than the page's text (#1746).
         locations = [(row.project_id, row.type, row.id) for row in rows]
-        chunk_rows = await self._ready_chunks_of(locations)
-        ranked: dict[SearchIndexKey, list[tuple[float, VectorKey]]] = {}
+        chunk_counts = await self._ready_chunk_counts(locations)
+        excerpts: dict[SearchIndexKey, list[VectorKey]] = {}
         batch: list[tuple[int, str, int]] = []
         batch_chunks = 0
-        chunk_counts: dict[tuple[int, str, int], int] = {}
-        for location in chunk_rows.values():
-            chunk_counts[location] = chunk_counts.get(location, 0) + 1
         for location in locations:
             count = chunk_counts.get(location, 0)
             if count == 0:
                 continue
             if batch and batch_chunks + count > EXCERPT_RANKING_CHUNK_BUDGET:
-                await self._rank_chunks_of(batch, batch_chunks, window, chunk_rows, ranked)
+                excerpts.update(await self._rank_chunks_of(batch, batch_chunks, window))
                 batch, batch_chunks = [], 0
             batch.append(location)
             batch_chunks += count
         if batch:
-            await self._rank_chunks_of(batch, batch_chunks, window, chunk_rows, ranked)
-        return {
-            key: [
-                chunk
-                for _, chunk in sorted(
-                    scored, key=lambda item: (-item[0], item[1].entity_id, item[1].chunk_key)
-                )[:TOP_CHUNKS_PER_RESULT]
-            ]
-            for key, scored in ranked.items()
-        }
+            excerpts.update(await self._rank_chunks_of(batch, batch_chunks, window))
+        return excerpts
 
-    async def _ready_chunks_of(
+    async def _ready_chunk_counts(
         self, locations: Sequence[tuple[int, str, int]]
-    ) -> dict[VectorKey, tuple[int, str, int]]:
-        """Every ready chunk cut from the given search rows, keyed to its row location."""
+    ) -> dict[tuple[int, str, int], int]:
+        """How many ready chunks were cut from each of the given search rows."""
         params: dict[str, Any] = {
             "vector_index": self.vector.index_name,
             "embedding_model": self.vector.embedding_model,
@@ -992,17 +1117,16 @@ class SemanticSearch:
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(
                 text(
-                    "SELECT entity_id, chunk_key, project_id, source_type, source_row_id "
+                    "SELECT project_id, source_type, source_row_id, count(*) AS chunk_count "
                     "FROM search_vector_chunks WHERE " + manifest_predicate + " "
-                    f"AND (project_id, source_type, source_row_id) IN (VALUES {values})"
+                    f"AND (project_id, source_type, source_row_id) IN (VALUES {values}) "
+                    "GROUP BY project_id, source_type, source_row_id"
                 ),
                 params,
             )
             return {
-                VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])): (
-                    int(row["project_id"]),
-                    str(row["source_type"]),
-                    int(row["source_row_id"]),
+                (int(row["project_id"]), str(row["source_type"]), int(row["source_row_id"])): int(
+                    row["chunk_count"]
                 )
                 for row in result.mappings().all()
             }
@@ -1012,28 +1136,29 @@ class SemanticSearch:
         locations: Sequence[tuple[int, str, int]],
         chunk_count: int,
         window: CandidateWindow,
-        chunk_rows: dict[VectorKey, tuple[int, str, int]],
-        ranked: dict[SearchIndexKey, list[tuple[float, VectorKey]]],
-    ) -> None:
-        """Rank every chunk of ``locations`` against the query through the index."""
+    ) -> dict[SearchIndexKey, list[VectorKey]]:
+        """Each of ``locations``' TOP_CHUNKS_PER_RESULT chunks nearest the query, best first.
+
+        ``chunk_count`` is how many chunks the rows hold, so the scan reads all of them.
+        """
         params: dict[str, object] = {}
         values = _location_values(locations, params, prefix="excerpt_")
         admission = VectorAdmission(
             predicate=f"(c.project_id, c.source_type, c.source_row_id) IN (VALUES {values})",
             params=params,
         )
-        matches = await self.vector.index.search(
+        search = await self.vector.row_index.search_rows(
             list(window.query_embedding),
-            limit=chunk_count,
+            limit=len(locations),
+            chunk_scan=chunk_count,
             projects=self.scope,
             admission=admission,
+            chunks_per_row=TOP_CHUNKS_PER_RESULT,
         )
-        for match in matches:
-            location = chunk_rows.get(match.key)
-            if location is not None:
-                ranked.setdefault((location[1], location[2]), []).append(
-                    (match.similarity, match.key)
-                )
+        excerpts: dict[SearchIndexKey, list[VectorKey]] = {}
+        for match in search.matches:
+            excerpts.setdefault((match.source_type, match.source_row_id), []).append(match.key)
+        return excerpts
 
     async def _fetch_chunk_texts(self, keys: Sequence[VectorKey]) -> dict[VectorKey, str]:
         """The text of each chunk in ``keys``, read from the manifest."""
@@ -1162,14 +1287,30 @@ class SemanticSearch:
             query.min_similarity if query.min_similarity is not None else self.vector.min_similarity
         )
 
-        window = await self._candidate_window(
-            query,
-            query_embedding,
-            candidate_limit,
-            row_target,
-            min_similarity=effective_min_similarity,
-            trace=trace,
-        )
+        # One span per window: its outcome rides on it as attributes, since Logfire
+        # bills per record and every vector search resolves exactly one window.
+        with logfire.span(
+            "search.vector_window",
+            candidate_limit=candidate_limit,
+            row_target=row_target,
+            has_filters=query.has_filters,
+            filtered_in_index=query.has_filters and not self.vector.external,
+        ) as window_span:
+            window = await self._candidate_window(
+                query,
+                query_embedding,
+                candidate_limit,
+                row_target,
+                min_similarity=effective_min_similarity,
+                trace=trace,
+            )
+            window_span.set_attributes(
+                {
+                    "rounds": window.rounds,
+                    "chunks_scanned": window.chunk_count,
+                    "rows_admitted": window.admitted,
+                }
+            )
 
         if trace is not None:
             trace.vector = build_vector_stage(
@@ -1223,12 +1364,16 @@ class SemanticSearch:
     ) -> CandidateWindow:
         """Resolve the nearest chunks to admitted search rows, widening past rejections.
 
-        The first read takes ``candidate_limit`` chunks, the same window an unfiltered
-        query reads, so a filtered ranking is the unfiltered one restricted to the
-        filter.
+        A built-in index evaluates the filters (``_vector_admission``) and collapses
+        chunks to rows itself, so its window is the nearest ``candidate_limit`` admitted
+        rows, read once (#1746).
 
-        Trigger: the query carries structured filters the adapter cannot evaluate, and
-            that first window admitted fewer than ``row_target`` rows.
+        An external index ranks chunks by similarity alone. Its first read takes
+        ``candidate_limit`` chunks, the same window an unfiltered query reads, so a
+        filtered ranking is the unfiltered one restricted to the filter.
+
+        Trigger: an external index serves a query with structured filters, and that
+            first window admitted fewer than ``row_target`` rows.
         Why: the adapter ranks by similarity alone, so a window taken straight from
             its ranking can hold few admitted rows while more sit just past it, and a
             page built from that window comes up short although matches exist.
@@ -1238,15 +1383,7 @@ class SemanticSearch:
             qualify. A query without filters resolves its window once.
 
         ``row_target`` counts rows, not chunks (#1746). Comparing admitted rows to the
-        chunk budget could never succeed for notes cut into dozens of chunks, so nearly
-        every filtered search (and every default MCP search, which filters to entities)
-        widened to the scan limit.
-
-        A built-in index evaluates the filters itself (``_vector_admission``): each read
-        is the exact top ``scan_limit`` of the admitted chunks, so no filter pass runs,
-        and it widens only while its chunks collapse to fewer rows than ``row_target``.
-        An external index, which cannot see the SQL search rows, filters its matches
-        here as well.
+        chunk budget could never succeed for notes cut into dozens of chunks.
         """
         # Trigger: the vectors live in the SQL database (sqlite-vec, pgvector).
         # Why: the index can rank only admitted chunks; filtering a similarity-only
@@ -1267,7 +1404,12 @@ class SemanticSearch:
             # defers checkout until hydration runs after adapter search has released it.
             async with self.session_maker() as session:
                 chunks = await self._run_vector_query(
-                    session, query_embedding, scan_limit, admission=admission, trace=trace
+                    session,
+                    query_embedding,
+                    scan_limit,
+                    admission=admission,
+                    row_target=row_target,
+                    trace=trace,
                 )
             vector_query_ms += (time.perf_counter() - vector_query_start) * 1000
             hydrate_start = time.perf_counter()
@@ -1283,24 +1425,17 @@ class SemanticSearch:
             )
             tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
             # Admitted rows, not chunks, decide: a few long notes can fill a chunk
-            # window with one or two rows, so even an admitted read widens to the target.
+            # window with one or two rows. A built-in index already returned rows.
             if (
-                not query.has_filters
+                not self.vector.external
+                or not query.has_filters
                 or window.admitted >= row_target
                 or exhausted
                 or tail_below_threshold
             ):
-                logfire.info(
-                    "search.vector_window",
-                    rounds=rounds,
-                    chunks_scanned=len(chunks),
-                    candidate_limit=candidate_limit,
-                    row_target=row_target,
-                    rows_admitted=window.admitted,
-                    has_filters=query.has_filters,
-                    filtered_in_index=admission is not None,
+                return replace(
+                    window, rounds=rounds, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms
                 )
-                return replace(window, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms)
             scanned = len(chunks)
             scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
 

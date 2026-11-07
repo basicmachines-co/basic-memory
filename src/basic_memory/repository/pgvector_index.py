@@ -21,6 +21,9 @@ from basic_memory.repository.semantic_vector_index import (
     VectorKey,
     VectorMatch,
     VectorRecord,
+    VectorRowSearch,
+    collapse_to_rows_sql,
+    read_row_search,
     validate_query_dimensions,
     validate_vector_dimensions,
 )
@@ -36,6 +39,17 @@ HNSW_EF_SEARCH_MAX = 1000
 # 270,000; the forced HNSW scan took about 100 ms at any selectivity but recalled only
 # 66% of the true top 100 when 10% of chunks were admitted.
 EXACT_ADMISSION_CHUNK_LIMIT = 50_000
+# The most chunks one approximate HNSW scan may read before collapsing them to rows.
+HNSW_MAX_CHUNK_SCAN = 50_000
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateScan:
+    """A ``candidates`` CTE and the most chunks it can read; None ranks every one."""
+
+    cte: str
+    chunk_limit: int | None
+
 
 _PGVECTOR_VERSION = re.compile(r"^(\d+)\.(\d+)")
 
@@ -116,6 +130,8 @@ class PgVectorStorage:
 
 class PgVectorIndex:
     """Persist and query semantic vectors in PostgreSQL with pgvector."""
+
+    max_chunk_scan = HNSW_MAX_CHUNK_SCAN
 
     def __init__(
         self,
@@ -435,13 +451,85 @@ class PgVectorIndex:
     ) -> list[VectorMatch]:
         if not query or limit <= 0 or projects.is_empty:
             return []
+        params: dict[str, object] = {"limit": limit}
+        async with db.scoped_session(self._session_maker) as session:
+            scan = await self._candidates(
+                session, query, params, projects, admission, chunk_scan=limit
+            )
+            result = await session.execute(
+                text(
+                    f"WITH {scan.cte} "
+                    "SELECT entity_id, chunk_key, 1 - distance AS similarity "
+                    "FROM candidates "
+                    "ORDER BY distance ASC, entity_id ASC, chunk_key ASC "
+                    "LIMIT :limit"
+                ),
+                params,
+            )
+        return [
+            VectorMatch(
+                key=VectorKey(
+                    entity_id=int(row["entity_id"]),
+                    chunk_key=str(row["chunk_key"]),
+                ),
+                similarity=max(0.0, min(1.0, float(row["similarity"]))),
+            )
+            for row in result.mappings().all()
+        ]
+
+    async def search_rows(
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+        chunk_scan: int,
+        projects: ProjectScope,
+        admission: VectorAdmission | None = None,
+        chunks_per_row: int = 1,
+    ) -> VectorRowSearch:
+        if not query or limit <= 0 or projects.is_empty:
+            return VectorRowSearch(matches=[], truncated=False)
+        params: dict[str, object] = {"row_limit": limit, "chunks_per_row": chunks_per_row}
+        async with db.scoped_session(self._session_maker) as session:
+            scan = await self._candidates(
+                session,
+                query,
+                params,
+                projects,
+                admission,
+                chunk_scan=min(chunk_scan, HNSW_MAX_CHUNK_SCAN),
+            )
+            result = await session.execute(text(collapse_to_rows_sql(scan.cte)), params)
+        return read_row_search(
+            result.mappings().all(),
+            similarity=lambda distance: max(0.0, min(1.0, 1.0 - distance)),
+            chunk_limit=scan.chunk_limit,
+        )
+
+    async def _candidates(
+        self,
+        session: AsyncSession,
+        query: Sequence[float],
+        params: dict[str, object],
+        projects: ProjectScope,
+        admission: VectorAdmission | None,
+        *,
+        chunk_scan: int,
+    ) -> CandidateScan:
+        """Prepare ``session`` and return a ``candidates`` CTE of ranked ready chunks.
+
+        Binds its own names into ``params``. The CTE's columns are those
+        ``collapse_to_rows_sql`` reads; ``distance`` is the cosine distance.
+        """
         validate_query_dimensions(self.scope, query)
-        params: dict[str, object] = {
-            "query": self._format_vector(query),
-            "dimensions": self.scope.dimensions,
-            "embedding_identity": self.scope.embedding_identity,
-            "limit": limit,
-        }
+        params.update(
+            {
+                "query": self._format_vector(query),
+                "dimensions": self.scope.dimensions,
+                "embedding_identity": self.scope.embedding_identity,
+                "chunk_scan": chunk_scan,
+            }
+        )
         # The scope binds its ids once; both predicates reference the same names.
         embeddings_in_scope = projects.predicate("e.project_id", params)
         chunks_in_scope = projects.predicate("c.project_id", params)
@@ -458,86 +546,60 @@ class PgVectorIndex:
         if admission is not None:
             params.update(admission.params)
             admitted = f" AND {admission.predicate}"
-        async with db.scoped_session(self._session_maker) as session:
-            # --- Choosing the scan for a filtered search (#1746) ---
-            # Trigger: the search carries structured filters.
-            # Why: neither plan suits every filter. An HNSW scan that filters as it goes
-            #     is fast when most chunks pass, but a selective filter makes it give up
-            #     before it has the window (recall 0.66 at 10% admitted) or scan for long.
-            #     An exact ranking of just the admitted chunks is always complete and is
-            #     fast while they are few (47 ms for 30,000), slow when they are many
-            #     (600 ms for 270,000). The planner cannot pick: it underestimates the
-            #     filter's rows and chose the exact plan even at 90% admitted.
-            # Outcome: count the admitted chunks, stopping at the limit. Few: rank them
-            #     exactly. Many: force the HNSW scan, which then needs only a short
-            #     iterative walk because most of what it visits passes.
-            exact = False
-            if admission is not None:
-                counted = await session.execute(
-                    text(admission_count_sql(chunks_in_scope, admission)),
-                    {**params, "exact_cap": EXACT_ADMISSION_CHUNK_LIMIT + 1},
-                )
-                exact = int(counted.scalar_one()) <= EXACT_ADMISSION_CHUNK_LIMIT
+        columns = (
+            "c.entity_id, c.chunk_key, c.project_id, c.source_type, c.source_row_id, "
+            "e.embedding <=> CAST(:query AS vector) AS distance "
+            "FROM search_vector_embeddings e "
+            "JOIN search_vector_chunks c ON c.id = e.chunk_id "
+            f"WHERE {manifest}{admitted}"
+        )
 
-            if exact:
-                # Adding zero keeps the HNSW index from serving the ORDER BY, so Postgres
-                # computes every admitted chunk's distance and keeps the nearest.
-                result = await session.execute(
-                    text(
-                        "SELECT c.entity_id, c.chunk_key, "
-                        "1 - (e.embedding <=> CAST(:query AS vector)) AS similarity "
-                        "FROM search_vector_chunks c "
-                        "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                        f"WHERE {manifest}{admitted} "
-                        "ORDER BY (e.embedding <=> CAST(:query AS vector)) + 0 ASC, "
-                        "c.entity_id ASC, c.chunk_key ASC "
-                        "LIMIT :limit"
-                    ),
-                    params,
-                )
-            else:
-                # Both settings are transaction-local, so they last exactly as long as
-                # this scoped session. The scan is sized to the window it must fill
-                # and continues past that until the scope and manifest filters have
-                # admitted enough rows, instead of stopping at the first ef_search
-                # candidates and returning whatever of them survived.
-                await session.execute(
-                    text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
-                    {"ef_search": str(hnsw_ef_search_for(limit))},
-                )
-                await session.execute(
-                    text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
-                )
-                if admission is not None:
-                    # The only plan without a sort is the ordered HNSW scan; disabling
-                    # sorts keeps the misestimated filter from choosing the exact plan.
-                    await session.execute(text("SELECT set_config('enable_sort', 'off', true)"))
-                # A relaxed iterative scan may hand rows back slightly out of distance
-                # order, so the window is taken by distance alone and sorted once more.
-                result = await session.execute(
-                    text(
-                        "WITH nearest AS MATERIALIZED ("
-                        "SELECT c.entity_id, c.chunk_key, "
-                        "e.embedding <=> CAST(:query AS vector) AS distance "
-                        "FROM search_vector_embeddings e "
-                        "JOIN search_vector_chunks c ON c.id = e.chunk_id "
-                        f"WHERE {manifest}{admitted} "
-                        "ORDER BY e.embedding <=> CAST(:query AS vector) "
-                        "LIMIT :limit"
-                        ") "
-                        "SELECT entity_id, chunk_key, 1 - distance AS similarity "
-                        "FROM nearest "
-                        "ORDER BY distance ASC, entity_id ASC, chunk_key ASC"
-                    ),
-                    params,
-                )
-        return [
-            VectorMatch(
-                key=VectorKey(
-                    entity_id=int(row["entity_id"]),
-                    chunk_key=str(row["chunk_key"]),
-                ),
-                similarity=max(0.0, min(1.0, float(row["similarity"]))),
+        # --- Choosing the scan for a filtered search (#1746) ---
+        # Trigger: the search carries structured filters.
+        # Why: neither plan suits every filter. An HNSW scan that filters as it goes
+        #     is fast when most chunks pass, but a selective filter makes it give up
+        #     before it has the window (recall 0.66 at 10% admitted) or scan for long.
+        #     An exact ranking of just the admitted chunks is always complete and is
+        #     fast while they are few (47 ms for 30,000), slow when they are many
+        #     (600 ms for 270,000). The planner cannot pick: it underestimates the
+        #     filter's rows and chose the exact plan even at 90% admitted.
+        # Outcome: count the admitted chunks, stopping at the limit. Few: rank them
+        #     exactly. Many: force the HNSW scan, which then needs only a short
+        #     iterative walk because most of what it visits passes.
+        if admission is not None:
+            counted = await session.execute(
+                text(admission_count_sql(chunks_in_scope, admission)),
+                {**params, "exact_cap": EXACT_ADMISSION_CHUNK_LIMIT + 1},
             )
-            for row in result.mappings().all()
-        ]
+            if int(counted.scalar_one()) <= EXACT_ADMISSION_CHUNK_LIMIT:
+                # No ORDER BY on the distance, so the HNSW index cannot serve this
+                # scan: Postgres computes every admitted chunk's distance, and the
+                # caller ranks them.
+                return CandidateScan(
+                    cte=f"candidates AS MATERIALIZED (SELECT {columns})", chunk_limit=None
+                )
+
+        # Both settings are transaction-local, so they last exactly as long as the
+        # caller's scoped session. The scan is sized to the chunks it must read and
+        # continues past that until the scope and manifest filters have admitted
+        # enough, instead of stopping at the first ef_search candidates.
+        await session.execute(
+            text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
+            {"ef_search": str(hnsw_ef_search_for(chunk_scan))},
+        )
+        await session.execute(
+            text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+        )
+        if admission is not None:
+            # The only plan without a sort is the ordered HNSW scan; disabling sorts
+            # keeps the misestimated filter from choosing the exact plan.
+            await session.execute(text("SELECT set_config('enable_sort', 'off', true)"))
+        # A relaxed iterative scan may hand rows back slightly out of distance order,
+        # so the scan takes its chunks by distance alone and the caller sorts them.
+        return CandidateScan(
+            cte=(
+                f"candidates AS MATERIALIZED (SELECT {columns} "
+                "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :chunk_scan)"
+            ),
+            chunk_limit=chunk_scan,
+        )

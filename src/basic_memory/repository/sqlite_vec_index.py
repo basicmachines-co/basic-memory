@@ -22,6 +22,9 @@ from basic_memory.repository.semantic_vector_index import (
     VectorKey,
     VectorMatch,
     VectorRecord,
+    VectorRowSearch,
+    collapse_to_rows_sql,
+    read_row_search,
     validate_query_dimensions,
     validate_vector_dimensions,
 )
@@ -30,8 +33,15 @@ from basic_memory.repository.semantic_vector_index import (
 SQLITE_VEC_MAX_K = 4096
 
 
+def similarity_from_distance(distance: float) -> float:
+    """Cosine similarity of unit vectors from the L2 distance vec0 reports."""
+    return max(0.0, min(1.0, 1.0 - (distance**2) / 2.0))
+
+
 class SQLiteVecIndex:
     """Persist and query semantic vectors in SQLite with sqlite-vec."""
+
+    max_chunk_scan = SQLITE_VEC_MAX_K
 
     def __init__(
         self,
@@ -377,15 +387,82 @@ class SQLiteVecIndex:
     ) -> list[VectorMatch]:
         if not query or limit <= 0 or projects.is_empty:
             return []
-        validate_query_dimensions(self.scope, query)
         await self.initialize()
-        vector_k = min(limit, SQLITE_VEC_MAX_K)
-        params: dict[str, object] = {
-            "query": json.dumps(list(query)),
-            "vector_k": vector_k,
-            "embedding_identity": self.scope.embedding_identity,
-            "limit": limit,
-        }
+        params: dict[str, object] = {"limit": limit}
+        candidates = self._candidates(
+            query, params, projects, admission, vector_k=min(limit, SQLITE_VEC_MAX_K)
+        )
+        async with db.scoped_session(self._session_maker) as session:
+            await self._ensure_loaded(session)
+            result = await session.execute(
+                text(
+                    f"WITH {candidates} "
+                    "SELECT entity_id, chunk_key, distance FROM candidates "
+                    "ORDER BY distance ASC, entity_id ASC, chunk_key ASC LIMIT :limit"
+                ),
+                params,
+            )
+        return [
+            VectorMatch(
+                key=VectorKey(
+                    entity_id=int(row["entity_id"]),
+                    chunk_key=str(row["chunk_key"]),
+                ),
+                similarity=similarity_from_distance(float(row["distance"])),
+            )
+            for row in result.mappings().all()
+        ]
+
+    async def search_rows(
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+        chunk_scan: int,
+        projects: ProjectScope,
+        admission: VectorAdmission | None = None,
+        chunks_per_row: int = 1,
+    ) -> VectorRowSearch:
+        if not query or limit <= 0 or projects.is_empty:
+            return VectorRowSearch(matches=[], truncated=False)
+        await self.initialize()
+        params: dict[str, object] = {"row_limit": limit, "chunks_per_row": chunks_per_row}
+        vector_k = min(chunk_scan, SQLITE_VEC_MAX_K)
+        candidates = self._candidates(query, params, projects, admission, vector_k=vector_k)
+        async with db.scoped_session(self._session_maker) as session:
+            await self._ensure_loaded(session)
+            result = await session.execute(text(collapse_to_rows_sql(candidates)), params)
+        return read_row_search(
+            result.mappings().all(),
+            similarity=similarity_from_distance,
+            # vec0 returns k neighbours per partition, so reaching k in total means the
+            # scan may have stopped short (with several partitions, conservatively).
+            chunk_limit=vector_k,
+        )
+
+    def _candidates(
+        self,
+        query: Sequence[float],
+        params: dict[str, object],
+        projects: ProjectScope,
+        admission: VectorAdmission | None,
+        *,
+        vector_k: int,
+    ) -> str:
+        """Return CTEs ending in ``candidates``: the nearest ``vector_k`` ready chunks.
+
+        vec0 answers at most SQLITE_VEC_MAX_K neighbours per partition, so callers cap
+        ``vector_k`` there: the one bounded overfetch SQLite allows (#1746).
+        Binds its own names into ``params``.
+        """
+        validate_query_dimensions(self.scope, query)
+        params.update(
+            {
+                "query": json.dumps(list(query)),
+                "vector_k": vector_k,
+                "embedding_identity": self.scope.embedding_identity,
+            }
+        )
         # vec0 ranks the k nearest within each partition in scope, so a small
         # project is never crowded out of its own window by a larger neighbour that
         # shares the database; the outer ORDER BY merges the partitions.
@@ -408,38 +485,20 @@ class SQLiteVecIndex:
                 "AND c.embedding_model = :embedding_identity "
                 f"AND {admission.predicate})"
             )
-        async with db.scoped_session(self._session_maker) as session:
-            await self._ensure_loaded(session)
-            result = await session.execute(
-                text(
-                    "WITH vector_matches AS MATERIALIZED ("
-                    " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
-                    f" WHERE {partitions_in_scope} "
-                    " AND embedding MATCH :query AND k = :vector_k"
-                    f"{admitted_rowids}"
-                    ") "
-                    "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
-                    "FROM vector_matches "
-                    "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
-                    "AND c.source_hash = vector_matches.source_hash "
-                    "WHERE c.vector_index = 'sqlite-vec' "
-                    "AND c.embedding_status = 'ready' "
-                    "AND c.embedding_model = :embedding_identity "
-                    "ORDER BY vector_matches.distance ASC, "
-                    "c.entity_id ASC, c.chunk_key ASC LIMIT :limit"
-                ),
-                params,
-            )
-        return [
-            VectorMatch(
-                key=VectorKey(
-                    entity_id=int(row["entity_id"]),
-                    chunk_key=str(row["chunk_key"]),
-                ),
-                similarity=max(
-                    0.0,
-                    min(1.0, 1.0 - (float(row["distance"]) ** 2) / 2.0),
-                ),
-            )
-            for row in result.mappings().all()
-        ]
+        return (
+            "vector_matches AS MATERIALIZED ("
+            " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
+            f" WHERE {partitions_in_scope} "
+            " AND embedding MATCH :query AND k = :vector_k"
+            f"{admitted_rowids}"
+            "), "
+            "candidates AS ("
+            "SELECT c.entity_id, c.chunk_key, c.project_id, c.source_type, "
+            "c.source_row_id, vector_matches.distance "
+            "FROM vector_matches "
+            "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
+            "AND c.source_hash = vector_matches.source_hash "
+            "WHERE c.vector_index = 'sqlite-vec' "
+            "AND c.embedding_status = 'ready' "
+            "AND c.embedding_model = :embedding_identity)"
+        )
