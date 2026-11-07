@@ -201,6 +201,16 @@ class HydratedChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class RowWindow:
+    """A built-in index's row window and how far its chunk scan went to fill it."""
+
+    chunks: list[HydratedChunk]
+    rounds: int
+    chunk_scan: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
 class WindowChunk:
     """One chunk of a candidate window and its position in the adapter's ranking.
 
@@ -458,7 +468,6 @@ class SemanticSearch:
 
     # --- Vector nearest neighbours through the ready manifest ---
 
-    @logfire.instrument("search.vector_query", extract_args=False)
     async def _run_vector_query(
         self,
         session: AsyncSession,
@@ -475,17 +484,23 @@ class SemanticSearch:
         ``row_target`` is how many rows a built-in index's window must reach before it
         stops widening its chunk scan; see ``_run_row_query``.
         """
-        if trace is not None:
-            trace.vector = build_vector_stage(
-                candidate_limit=candidate_limit,
-                adapter_match_count=0,
-                hydrated_count=0,
-            )
-        if candidate_limit <= 0:
-            return []
+        with logfire.span("search.vector_query", candidate_limit=candidate_limit) as span:
+            if trace is not None:
+                trace.vector = build_vector_stage(
+                    candidate_limit=candidate_limit,
+                    adapter_match_count=0,
+                    hydrated_count=0,
+                )
+            if candidate_limit <= 0:
+                return []
+            if self.vector.external:
+                if admission is not None:  # pragma: no cover - the reader never builds one
+                    raise ValueError("An external vector index cannot evaluate a SQL admission.")
+                return await self._run_external_query(
+                    session, query_embedding, candidate_limit, trace=trace
+                )
 
-        if not self.vector.external:
-            return await self._run_row_query(
+            rows = await self._run_row_query(
                 session,
                 query_embedding,
                 candidate_limit,
@@ -493,9 +508,28 @@ class SemanticSearch:
                 admission=admission,
                 trace=trace,
             )
+            # The scan's outcome rides on this span rather than a record of its own:
+            # Logfire bills per record, and every vector search runs this once.
+            span.set_attributes(
+                {
+                    "rounds": rows.rounds,
+                    "chunk_scan": rows.chunk_scan,
+                    "rows": len(rows.chunks),
+                    "row_target": row_target,
+                    "truncated": rows.truncated,
+                }
+            )
+            return rows.chunks
 
-        if admission is not None:  # pragma: no cover - the reader never builds one
-            raise ValueError("An external vector index cannot evaluate a SQL admission.")
+    async def _run_external_query(
+        self,
+        session: AsyncSession,
+        query_embedding: list[float],
+        candidate_limit: int,
+        *,
+        trace: SearchTraceCollector | None,
+    ) -> list[HydratedChunk]:
+        """Query an external index, overfetching past stale hits the manifest rejects."""
         scan_limit = min(candidate_limit, VECTOR_FILTER_SCAN_LIMIT)
         while True:
             matches = await self.vector.index.search(
@@ -561,7 +595,7 @@ class SemanticSearch:
         row_target: int,
         admission: VectorAdmission | None,
         trace: SearchTraceCollector | None,
-    ) -> list[HydratedChunk]:
+    ) -> RowWindow:
         """The nearest ``row_limit`` search rows, one best chunk each, from a built-in index.
 
         The database ranks the chunks, applies the manifest and the filters, and collapses
@@ -600,15 +634,6 @@ class SemanticSearch:
                 projects=self.scope,
                 admission=admission,
             )
-        logfire.info(
-            "search.vector_rows",
-            rounds=rounds,
-            chunk_scan=chunk_scan,
-            rows=len(search.matches),
-            row_limit=row_limit,
-            row_target=row_target,
-            truncated=search.truncated,
-        )
         matches = search.matches
         chunks = [
             HydratedChunk(
@@ -639,7 +664,9 @@ class SemanticSearch:
                 drops=(),
                 chunk_matches=chunk_matches,
             )
-        return chunks
+        return RowWindow(
+            chunks=chunks, rounds=rounds, chunk_scan=chunk_scan, truncated=search.truncated
+        )
 
     @logfire.instrument("search.vector_manifest_hydration", extract_args=False)
     async def _hydrate_vector_matches(

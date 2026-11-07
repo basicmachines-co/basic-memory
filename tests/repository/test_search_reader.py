@@ -6,6 +6,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from logfire.testing import CaptureLogfire, capfire as capfire
 
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_reader import (
@@ -236,6 +237,30 @@ async def test_a_truncated_row_scan_widens_until_the_page_fills():
     assert [chunk.source_key[1] for chunk in chunks] == [1, 2, 3, 4, 5]
     assert [call["chunk_scan"] for call in index.calls] == [1000, 2000]
     assert all(call["limit"] == 100 for call in index.calls)
+
+
+@pytest.mark.asyncio
+async def test_the_row_scan_reports_on_the_vector_query_span(capfire: CaptureLogfire):
+    """Rounds and scan size ride on the one search.vector_query span, not a record of their own.
+
+    Logfire bills per record and every vector search runs this once.
+    """
+    index = RowIndex([row_match(row_id) for row_id in range(1, 6)], chunks_per_row=300)
+    capfire.exporter.clear()
+
+    await _row_reader(index)._run_vector_query(AsyncMock(), [0.1], 100, row_target=5)
+
+    spans = capfire.exporter.exported_spans_as_dict()
+    [query_span] = [span for span in spans if span["name"] == "search.vector_query"]
+    attributes = query_span["attributes"]
+    assert (
+        attributes["rounds"],
+        attributes["chunk_scan"],
+        attributes["rows"],
+        attributes["row_target"],
+        attributes["truncated"],
+    ) == (2, 2000, 5, 5, False)
+    assert [span["name"] for span in spans] == ["search.vector_query"]
 
 
 @pytest.mark.asyncio
