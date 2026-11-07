@@ -291,11 +291,15 @@ async def test_an_entry_that_cannot_be_tracked_is_served_but_not_stored(
 
 
 @pytest.mark.asyncio
-async def test_a_fuzzy_resolution_is_never_cached(
+async def test_a_fuzzy_resolution_is_cached_until_names_change(
     cached_app: CachedApp, client: AsyncClient, project_url: str
 ) -> None:
-    """Rule: a fuzzy name match can change with any content, so it is not stored."""
-    await _create(client, project_url, "Quarterly Planning Notes")
+    """Rule: a fuzzy match is cached like an exact one and retires when names change.
+
+    A client repeating the same read must not reach the database each time. Creating
+    a note retires the entry, so a new exact match is found on the next resolve.
+    """
+    note = await _create(client, project_url, "Quarterly Planning Notes")
     body = {"identifier": "quarterly planning"}
 
     first = await _query(client, f"{project_url}/knowledge/resolve", body)
@@ -303,7 +307,45 @@ async def test_a_fuzzy_resolution_is_never_cached(
 
     assert first.status_code == 200, first.text
     assert first.json()["resolution_method"] == "search"
-    assert _status(second) != "HIT"
+    assert _status(second) == "HIT"
+    assert second.json()["external_id"] == note["external_id"]
+
+    exact = await _create(client, project_url, "quarterly planning")
+    after_create = await _query(client, f"{project_url}/knowledge/resolve", body)
+
+    assert _status(after_create) != "HIT"
+    assert after_create.json()["external_id"] == exact["external_id"]
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        # The file path without its .md extension.
+        "rules/Cache Layer Design",
+        # The note's slug under its folder, as clients and memory:// URLs write it.
+        "rules/cache-layer-design",
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_exact_match_is_cached_whatever_spelling_found_it(
+    cached_app: CachedApp, client: AsyncClient, project_url: str, spelling: str
+) -> None:
+    """Rule: only fuzzy search guesses; an exact lookup under any spelling is cached.
+
+    These spellings never equal the stored title, permalink or file path character
+    for character, so the route used to label them a search and leave them uncached,
+    and a client reading notes by path reached the database on every read.
+    """
+    note = await _create(client, project_url, "Cache Layer Design")
+    body = {"identifier": spelling}
+
+    first = await _query(client, f"{project_url}/knowledge/resolve", body)
+    second = await _query(client, f"{project_url}/knowledge/resolve", body)
+
+    assert first.status_code == 200, first.text
+    assert first.json()["external_id"] == note["external_id"]
+    assert _status(second) == "HIT"
+    assert second.json()["external_id"] == note["external_id"]
 
 
 @pytest.mark.asyncio

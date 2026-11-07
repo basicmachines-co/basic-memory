@@ -1,6 +1,7 @@
 """Service and helpers for resolving markdown links and permalink-like identifiers."""
 
 import uuid as uuid_mod
+from dataclasses import dataclass
 from typing import Optional, Tuple, Dict
 
 from loguru import logger
@@ -39,6 +40,20 @@ def normalize_link_text(link_text: str) -> tuple[str, str | None]:
         alias = alias.strip()
 
     return text.strip(), alias
+
+
+@dataclass(frozen=True, slots=True)
+class EntityMatch:
+    """A resolved entity and whether an exact lookup found it.
+
+    ``exact`` is False only when fuzzy search chose the note after every exact
+    reading (external id, path, title, permalink and their normalized spellings)
+    missed. An exact answer changes only when notes are created, renamed, moved or
+    deleted; a fuzzy one can change with any note's content.
+    """
+
+    entity: Entity
+    exact: bool
 
 
 class LinkResolver:
@@ -90,11 +105,31 @@ class LinkResolver:
         Unlike :meth:`resolve_link`, project-qualified identifiers do not select a different
         repository. This is the target-project contract used by entity read and mutation flows.
         """
+        match = await self.match_entity(
+            identifier,
+            strict=strict,
+            source_path=source_path,
+            load_relations=load_relations,
+            session=session,
+        )
+        return match.entity if match else None
+
+    async def match_entity(
+        self,
+        identifier: str,
+        *,
+        strict: bool = False,
+        source_path: Optional[str] = None,
+        load_relations: bool = True,
+        session: AsyncSession | None = None,
+    ) -> Optional[EntityMatch]:
+        """Like :meth:`resolve_entity`, also reporting whether the match was exact."""
         clean_text, _ = self._normalize_link_text(identifier)
         if is_path_target(clean_text):
-            return await self._resolve_path_target(
+            entity = await self._resolve_path_target(
                 clean_text, source_path, load_relations=load_relations, session=session
             )
+            return EntityMatch(entity=entity, exact=True) if entity else None
 
         async with db.scoped_session(self.session_maker, session) as active_session:
             try:
@@ -105,7 +140,7 @@ class LinkResolver:
                     load_relations=load_relations,
                 )
                 if entity:
-                    return entity
+                    return EntityMatch(entity=entity, exact=True)
             except ValueError:
                 pass
 
@@ -127,7 +162,7 @@ class LinkResolver:
         strict: bool,
         source_path: Optional[str],
         load_relations: bool,
-    ) -> Optional[Entity]:
+    ) -> Optional[EntityMatch]:
         """Resolve in this resolver's project: exact spellings first, fuzzy search last.
 
         Shared by resolve_link and resolve_entity so entity reads and link
@@ -162,18 +197,19 @@ class LinkResolver:
                 load_relations=load_relations,
             )
             if resolved:
-                return resolved
+                return EntityMatch(entity=resolved, exact=True)
 
         # Fuzzy matching is the last resort, after every exact spelling has missed.
         # Strict resolution never guesses.
         if use_search and not strict:
-            return await self._search_best_match(
+            guessed = await self._search_best_match(
                 session=session,
                 entity_repository=self.entity_repository,
                 search_service=self.search_service,
                 link_text=link_text,
                 load_relations=load_relations,
             )
+            return EntityMatch(entity=guessed, exact=False) if guessed else None
         return None
 
     async def resolve_link(
@@ -251,7 +287,7 @@ class LinkResolver:
                     load_relations=load_relations,
                 )
 
-            resolved = await self._resolve_in_current_project(
+            match = await self._resolve_in_current_project(
                 session=active_session,
                 link_text=clean_text,
                 use_search=use_search,
@@ -259,8 +295,8 @@ class LinkResolver:
                 source_path=source_path,
                 load_relations=load_relations,
             )
-            if resolved:
-                return resolved
+            if match:
+                return match.entity
 
             # Trigger: local resolution failed and identifier looks like project/path
             # Why: allow explicit project path references without namespace syntax
