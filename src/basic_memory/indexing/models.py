@@ -257,9 +257,19 @@ class FileIndexResult:
     @property
     def read_cache_change(self) -> ReadCacheChange:
         """The cached reads this index pass made stale."""
+        note_ids = {self.external_id, *self.detached_note_ids}
+        # Trigger: the file has no entity row before this pass.
+        # Why: a new row has no inbound links yet, so it adds a name but cannot change
+        #   another note's response; relation resolution retires the notes whose
+        #   forward links it later resolves to this one.
+        # Outcome: names, content-wide reads and the notes this pass touched.
+        if self.operation is FileIndexOperation.created:
+            return ReadCacheChange.note_identity(note_ids)
+        # A rename found by indexing does not look up the notes linked to it, so it
+        # cannot name every response that shows the old name.
         if self.identity_changed:
             return ReadCacheChange.whole_project()
-        return ReadCacheChange.note_content({self.external_id, *self.detached_note_ids})
+        return ReadCacheChange.note_content(note_ids)
 
     @classmethod
     def from_fields(

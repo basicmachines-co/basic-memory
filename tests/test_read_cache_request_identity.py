@@ -27,7 +27,7 @@ async def test_nested_query_parameters_and_aliases_partition_cache_entries() -> 
 
     @app.get("/identity")
     async def identity(request: Request, page: Annotated[int, Depends(search_scope)]) -> str:
-        return await _request_identity(request)
+        return await _request_identity(request, excluded=frozenset())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.get("/identity?page-number=1&nonce=a")
@@ -48,7 +48,7 @@ async def test_nested_body_model_normalizes_cache_identity() -> None:
 
     @app.api_route("/identity", methods=["QUERY"])
     async def identity(request: Request, body: Annotated[SearchBody, Depends(search_body)]) -> str:
-        return await _request_identity(request)
+        return await _request_identity(request, excluded=frozenset())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.request("QUERY", "/identity", json={"text": "needle"})

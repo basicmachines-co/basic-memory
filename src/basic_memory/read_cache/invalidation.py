@@ -26,6 +26,8 @@ def _invalidation_scope(change: ReadCacheChange) -> str:
     """Bounded label for the widest group a change retires."""
     if change.project:
         return "project"
+    if change.names:
+        return "names"
     if change.notes:
         return "notes"
     if change.content:

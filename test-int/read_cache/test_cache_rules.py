@@ -8,7 +8,9 @@ reports whether a response came from the cache.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Generator
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, Protocol
 
 import pytest
@@ -18,12 +20,28 @@ from httpx import AsyncClient, Response
 from logfire.testing import CaptureLogfire, TestExporter, capfire as capfire, get_collected_metrics
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.deps import (
+    AppConfigDep,
+    EntityRepositoryV2ExternalDep,
+    FileServiceV2ExternalDep,
+    IndexFileExecutorV2ExternalDep,
+    ProjectRepositoryDep,
+    ReadCacheDep,
+    SessionMakerDep,
+)
+from basic_memory.deps.services import get_note_content_mutation_service
 
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
+from basic_memory.models.knowledge import Entity
+from basic_memory.repository import EntityRepository
 from basic_memory.read_cache.contract import ReadCacheUnavailable
 from basic_memory.read_cache.policy import READ_CACHE_MAX_PAYLOAD_BYTES
 from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
+from basic_memory.services.note_content_writes import NoteContentMutationService
 
 pytestmark = pytest.mark.redis
 
@@ -171,28 +189,234 @@ async def test_adding_a_link_keeps_the_linked_note_cached(
     assert _status(target_read) == "HIT"
 
 
+async def _file_entity(
+    session_maker: async_sessionmaker[AsyncSession], project: Project, title: str
+) -> Entity:
+    """A regular file entity. Its response is rendered from its entity row, so it lists
+    incoming relations: the one kind of response that shows another note's links."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        return await EntityRepository(project_id=project.id).add(
+            session,
+            Entity(
+                title=title,
+                note_type="file",
+                content_type="image/png",
+                file_path=f"files/{title}.png",
+                checksum=f"{title}-checksum",
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+
+
+def _incoming_from(entity_response: Response) -> set[str | None]:
+    return {relation["from_id"] for relation in entity_response.json()["relations"]}
+
+
+@pytest.fixture
+def db_first_writes(app: FastAPI) -> Generator[None]:
+    """Accept writes as a DB-first host (cloud) does: no file freshening first.
+
+    Locally, freshening re-indexes the note's file before a mutation and retires the
+    notes its links touch. A DB-first host has no file to freshen, so the mutation's
+    own recorded change is all that retires linked notes; this fixture tests that.
+    """
+
+    async def without_freshening(
+        project_repository: ProjectRepositoryDep,
+        entity_repository: EntityRepositoryV2ExternalDep,
+        file_service: FileServiceV2ExternalDep,
+        file_indexer: IndexFileExecutorV2ExternalDep,
+        session_maker: SessionMakerDep,
+        app_config: AppConfigDep,
+        read_cache: ReadCacheDep,
+    ) -> NoteContentMutationService:
+        service = await get_note_content_mutation_service(
+            project_repository=project_repository,
+            entity_repository=entity_repository,
+            file_service=file_service,
+            file_indexer=file_indexer,
+            session_maker=session_maker,
+            app_config=app_config,
+            read_cache=read_cache,
+        )
+        service.content_freshener = None
+        return service
+
+    app.dependency_overrides[get_note_content_mutation_service] = without_freshening
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_note_content_mutation_service, None)
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedNotes:
+    """A note between a regular file it links to and a note that links to it.
+
+    The file's response lists the source's link. The linker's response renders no
+    relations (an accepted note shows only its content), but a linker without stored
+    note content is rendered from its entity row and would show the source's
+    permalink, so a move or rename retires linkers too.
+    """
+
+    source: dict[str, Any]
+    target_url: str
+    linker_url: str
+    bystander_url: str
+
+
+async def _linked_notes(
+    client: AsyncClient,
+    project_url: str,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> LinkedNotes:
+    target = await _file_entity(engine_factory[1], test_project, "Diagram")
+    source = await _create(client, project_url, "Diagram Source", "- shows [[Diagram]]")
+    linker = await _create(client, project_url, "Source Linker", "- cites [[Diagram Source]]")
+    bystander = await _create(client, project_url, "Unrelated Bystander")
+    target_url = f"{project_url}/knowledge/entities/{target.external_id}"
+    linker_url = f"{project_url}/knowledge/entities/{linker['external_id']}"
+    bystander_url = f"{project_url}/knowledge/entities/{bystander['external_id']}"
+    for _ in range(2):
+        target_read = await client.get(target_url)
+        linker_read = await client.get(linker_url)
+        await client.get(bystander_url)
+    assert (_status(target_read), _status(linker_read)) == ("HIT", "HIT")
+    assert _incoming_from(target_read) == {source["permalink"]}
+    return LinkedNotes(
+        source=source, target_url=target_url, linker_url=linker_url, bystander_url=bystander_url
+    )
+
+
 @pytest.mark.asyncio
-async def test_a_rename_retires_the_whole_project(
+async def test_a_create_keeps_other_notes_cached(
     cached_app: CachedApp, client: AsyncClient, project_url: str
 ) -> None:
-    """Rule: a rename changes name lookups and links shown elsewhere, so all reads go."""
-    renamed = await _create(client, project_url, "Before Rename")
-    bystander = await _create(client, project_url, "Bystander")
-    bystander_url = f"{project_url}/knowledge/entities/{bystander['external_id']}"
-    resolve_body = {"identifier": bystander["permalink"]}
+    """Rule: a new note adds a name, so name lookups and listings go; other notes stay."""
+    existing = await _create(client, project_url, "Existing Note", "Stays cached.")
+    existing_url = f"{project_url}/knowledge/entities/{existing['external_id']}"
+    resolve_body = {"identifier": existing["permalink"]}
+    search_body = {"text": "freshly"}
     for _ in range(2):
-        await client.get(bystander_url)
+        existing_read = await client.get(existing_url)
         await _query(client, f"{project_url}/knowledge/resolve", resolve_body)
+        await client.get(f"{project_url}/directory/structure")
+        await _query(client, f"{project_url}/search/", search_body)
+    assert _status(existing_read) == "HIT"
 
-    put = await client.put(
-        f"{project_url}/knowledge/entities/{renamed['external_id']}",
-        json={"title": "After Rename", "directory": "rules", "content": "# After Rename\n"},
+    created = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={"title": "Fresh Note", "directory": "fresh", "content": "freshly made"},
     )
-    assert put.status_code == 202, put.text
+    assert created.status_code == 202, created.text
     await drain_pending_materializations()
 
-    assert _status(await client.get(bystander_url)) == "MISS"
+    existing_after = await client.get(existing_url)
+    assert _status(existing_after) == "HIT"
+    assert existing_after.json() == existing_read.json()
+
+    structure = await client.get(f"{project_url}/directory/structure")
+    assert _status(structure) == "MISS"
+    assert "fresh" in structure.text
+    search = await _query(client, f"{project_url}/search/", search_body)
+    assert _status(search) == "MISS"
+    assert "Fresh Note" in search.text
     assert _status(await _query(client, f"{project_url}/knowledge/resolve", resolve_body)) == "MISS"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_note_retires_the_notes_linked_to_it(
+    cached_app: CachedApp,
+    db_first_writes: None,
+    client: AsyncClient,
+    project_url: str,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """Rule: a delete retires the deleted note and every note that renders a link to it."""
+    linked = await _linked_notes(client, project_url, test_project, engine_factory)
+    source_url = f"{project_url}/knowledge/entities/{linked.source['external_id']}"
+    await client.get(source_url)
+
+    deleted = await client.delete(source_url)
+    assert deleted.status_code in {200, 202}, deleted.text
+    await drain_pending_materializations()
+
+    target_after = await client.get(linked.target_url)
+    assert _status(target_after) == "MISS"
+    assert _incoming_from(target_after) == set()
+    assert (await client.get(source_url)).status_code == 404
+    assert _status(await client.get(linked.linker_url)) == "MISS"
+    assert _status(await client.get(linked.bystander_url)) == "HIT"
+
+
+@pytest.mark.asyncio
+async def test_moving_a_note_retires_the_notes_linked_to_it(
+    cached_app: CachedApp,
+    db_first_writes: None,
+    client: AsyncClient,
+    project_url: str,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """Rule: a move retires the moved note and the notes that render its old permalink."""
+    linked = await _linked_notes(client, project_url, test_project, engine_factory)
+
+    moved = await client.put(
+        f"{project_url}/knowledge/entities/{linked.source['external_id']}/move",
+        json={"destination_path": "elsewhere/Diagram Source.md"},
+    )
+    assert moved.status_code in {200, 202}, moved.text
+    await drain_pending_materializations()
+
+    target_after = await client.get(linked.target_url)
+    assert _status(target_after) == "MISS"
+    assert _incoming_from(target_after) == {moved.json()["permalink"]}
+    assert moved.json()["permalink"] != linked.source["permalink"]
+    assert _status(await client.get(linked.linker_url)) == "MISS"
+    assert _status(await client.get(linked.bystander_url)) == "HIT"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_retires_names_and_linked_notes_only(
+    cached_app: CachedApp,
+    db_first_writes: None,
+    client: AsyncClient,
+    project_url: str,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """Rule: a rename changes name lookups and linked notes; bystanders stay cached."""
+    linked = await _linked_notes(client, project_url, test_project, engine_factory)
+    source_url = f"{project_url}/knowledge/entities/{linked.source['external_id']}"
+    resolve_body = {"identifier": "Diagram Source"}
+    for _ in range(2):
+        await _query(client, f"{project_url}/knowledge/resolve", resolve_body)
+
+    # A frontmatter title edit renames the note in place: same path, new name.
+    renamed = await client.patch(
+        source_url,
+        json={
+            "operation": "find_replace",
+            "find_text": "title: Diagram Source",
+            "content": "title: Renamed Source",
+        },
+    )
+    assert renamed.status_code == 202, renamed.text
+    await drain_pending_materializations()
+    assert renamed.json()["title"] == "Renamed Source"
+    assert renamed.json()["file_path"] == linked.source["file_path"]
+
+    target_after = await client.get(linked.target_url)
+    assert _status(target_after) == "MISS"
+    assert _incoming_from(target_after) == {renamed.json()["permalink"]}
+    resolved = await _query(client, f"{project_url}/knowledge/resolve", resolve_body)
+    assert _status(resolved) == "MISS"
+    assert _status(await client.get(linked.linker_url)) == "MISS"
+    assert _status(await client.get(linked.bystander_url)) == "HIT"
 
 
 @pytest.mark.asyncio
@@ -225,11 +449,10 @@ async def test_a_body_edit_deletes_the_retired_note_entry_from_redis(
 
 
 @pytest.mark.asyncio
-async def test_a_rename_deletes_every_entry_in_the_project_from_redis(
-    cached_app: CachedApp, client: AsyncClient, project_url: str
+async def test_a_project_invalidation_deletes_every_entry_in_the_project_from_redis(
+    cached_app: CachedApp, client: AsyncClient, project_url: str, test_project: Project
 ) -> None:
     """Rule: retiring the whole project deletes every entry it held, of every kind."""
-    renamed = await _create(client, project_url, "Renamed Away")
     bystander = await _create(client, project_url, "Bystander Entry")
     await client.get(f"{project_url}/knowledge/entities/{bystander['external_id']}")
     await _query(client, f"{project_url}/knowledge/resolve", {"identifier": bystander["permalink"]})
@@ -237,12 +460,7 @@ async def test_a_rename_deletes_every_entry_in_the_project_from_redis(
     await client.get(f"{project_url}/directory/structure")
     assert len(await _stored_entries(cached_app.cache)) >= 4
 
-    put = await client.put(
-        f"{project_url}/knowledge/entities/{renamed['external_id']}",
-        json={"title": "Renamed Here", "directory": "rules", "content": "# Renamed Here\n"},
-    )
-    assert put.status_code == 202, put.text
-    await drain_pending_materializations()
+    await cached_app.cache.invalidate_project(str(test_project.external_id))
 
     assert await _stored_entries(cached_app.cache) == set()
 
@@ -419,23 +637,50 @@ async def test_search_and_resolve_accept_query_only(
 
 
 @pytest.mark.asyncio
-async def test_each_slice_of_a_note_is_its_own_entry(
+async def test_every_slice_of_a_note_shares_one_entry(
     cached_app: CachedApp, client: AsyncClient, project_url: str
 ) -> None:
-    """Rule: a hit returns exactly what the database would; slice params are in the key."""
+    """Rule: one full entry per note; each slice is rendered from it, exactly as uncached."""
     note = await _create(client, project_url, "Sliced Note", "## Ops\no1\n\n## Dev\nd1")
     url = f"{project_url}/knowledge/entities/{note['external_id']}"
+    slices: list[dict[str, str | int]] = [
+        {"section": "Ops"},
+        {"lines": "1-2"},
+        {"max_tokens": 1},
+    ]
+    uncached = [
+        (await client.get(url, params=params, headers={"cache-control": "no-store"})).json()
+        for params in slices
+    ]
 
+    first = await client.get(url, params=slices[0])
+    rest = [await client.get(url, params=params) for params in slices[1:]]
     full = await client.get(url)
-    section = await client.get(url, params={"section": "Ops"})
-    full_again = await client.get(url)
-    section_again = await client.get(url, params={"section": "Ops"})
 
-    assert (_status(full), _status(section)) == ("MISS", "MISS")
-    assert (_status(full_again), _status(section_again)) == ("HIT", "HIT")
-    assert full_again.json()["content"] == full.json()["content"]
-    assert section_again.json()["content"] == section.json()["content"]
-    assert section.json()["content"].strip() == "## Ops\no1"
+    assert _status(first) == "MISS"
+    assert [_status(response) for response in [*rest, full]] == ["HIT", "HIT", "HIT"]
+    assert [response.json() for response in [first, *rest]] == uncached
+    assert first.json()["content"].strip() == "## Ops\no1"
+    assert full.json()["content_truncated"] is None
+    assert len(await _stored_entries(cached_app.cache, "entity")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_slice_the_route_would_reject_is_not_answered_from_cache(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: invalid slice params reach the route's own validation, even after a hit."""
+    note = await _create(client, project_url, "Validated Slice", "## Ops\no1")
+    url = f"{project_url}/knowledge/entities/{note['external_id']}"
+    await client.get(url)
+    assert _status(await client.get(url)) == "HIT"
+
+    assert (await client.get(url, params={"max_tokens": 0})).status_code == 422
+    assert (await client.get(url, params={"lines": "x"})).status_code == 422
+    assert (await client.get(url, params={"section": "Ops", "lines": "1"})).status_code == 422
+    missing_section = await client.get(url, params={"section": "Nowhere"})
+    assert missing_section.status_code == 404
+    assert _status(missing_section) is None
 
 
 @dataclass(frozen=True, slots=True)
@@ -589,6 +834,56 @@ async def test_a_cache_hit_is_not_recorded_as_an_exception_on_the_request_span(
         if event["name"] == "exception"
     ]
     assert recorded == []
+
+
+@pytest.mark.asyncio
+async def test_a_link_resolved_in_the_route_project_is_cached_until_names_change(
+    cached_app: CachedApp, client: AsyncClient, project_url: str
+) -> None:
+    """Rule: link lookups live in the names group, like /resolve."""
+    target = await _create(client, project_url, "Link Lookup Target")
+    url = f"{project_url}/knowledge/links/resolve"
+    body = {"identifier": "Link Lookup Target"}
+
+    first = await _query(client, url, body)
+    second = await _query(client, url, body)
+    assert (_status(first), _status(second)) == ("MISS", "HIT")
+    assert second.json()["external_id"] == target["external_id"]
+
+    await _create(client, project_url, "Another Name")
+    assert _status(await _query(client, url, body)) == "MISS"
+
+
+@pytest.mark.asyncio
+async def test_a_link_resolved_into_another_project_is_never_stored(
+    cached_app: CachedApp,
+    client: AsyncClient,
+    project_url: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Rule: a cross-project answer changes with the other project's names, which the
+    route project's names group does not track, so it is answered from the database."""
+    created = await client.post(
+        "/v2/projects/",
+        json={
+            "name": "elsewhere",
+            "path": str(tmp_path_factory.mktemp("elsewhere")),
+            "set_default": False,
+        },
+    )
+    assert created.status_code == 201, created.text
+    other_url = f"/v2/projects/{created.json()['new_project']['external_id']}"
+    other_note = await _create(client, other_url, "Remote Note")
+    url = f"{project_url}/knowledge/links/resolve"
+    body = {"identifier": "elsewhere::Remote Note"}
+
+    first = await _query(client, url, body)
+    second = await _query(client, url, body)
+
+    assert first.status_code == 200, first.text
+    assert second.json()["external_id"] == other_note["external_id"]
+    assert _status(second) != "HIT"
+    assert await _stored_entries(cached_app.cache, "link_resolve") == set()
 
 
 @pytest.mark.asyncio

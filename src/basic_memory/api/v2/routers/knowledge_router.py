@@ -12,6 +12,7 @@ Key improvements:
 
 from collections.abc import Mapping
 from contextlib import nullcontext
+from dataclasses import dataclass
 from hashlib import sha256
 import os
 import pathlib
@@ -19,6 +20,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, Path, status
 from loguru import logger
+from pydantic import Field, TypeAdapter
 
 import logfire
 from basic_memory import db
@@ -68,8 +70,9 @@ from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
 from basic_memory.read_cache.routes import (
     ReadCacheRoute,
     cached_read,
+    names_group,
     note_group,
-    project_group,
+    skip_read_cache_store,
 )
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_BASE_CHECKSUM_HEADER,
@@ -279,7 +282,7 @@ async def get_orphan_entities(
     dependencies=[
         cached_read(
             ReadCacheOperation.resolve,
-            group=project_group,
+            group=names_group,
             ttl_seconds=READ_CACHE_TTL_SECONDS,
         )
     ],
@@ -505,13 +508,20 @@ async def place_note(
                 return OutsideProjectPlacementResponse(readings=list(readings), path=path)
 
 
-# QUERY only, like /resolve: a safe read with a body. Not cached: its answer
-# depends on the source note's project and on other projects' names.
+# QUERY only, like /resolve: a safe read with a body. Answers inside the route project
+# are cached until its names change; see the note at the end of the handler.
 @router.api_route(
     "/links/resolve",
     methods=["QUERY"],
     response_model=LinkResolveResponse,
     include_in_schema=False,
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.link_resolve,
+            group=names_group,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+        )
+    ],
 )
 async def resolve_link(
     project_id: ProjectExternalIdPathDep,
@@ -526,6 +536,7 @@ async def resolve_link(
     link_resolver: LinkResolverV2ExternalDep,
     project_repository: ProjectRepositoryDep,
     session: SessionDep,
+    request: Request,
 ) -> LinkResolveResponse:
     """Resolve a wikilink from the route project and return its explicit target project.
 
@@ -533,8 +544,8 @@ async def resolve_link(
     reference may select another target project. Hosted callers must authorize the returned
     ``target_project_external_id`` separately before exposing target metadata.
 
-    This endpoint is intentionally not stored in the project read cache: a cross-project result
-    depends on both source and target generations, while entity resolution depends on one target.
+    Only answers in the route project are cached: a cross-project answer depends on the
+    target project's names, which the route project's names group does not track.
     """
     with logfire.span(
         "api.request.knowledge.resolve_link",
@@ -575,6 +586,15 @@ async def resolve_link(
             resolution_method = "title"
         elif entity.file_path == data.identifier:
             resolution_method = "path"
+
+        # Trigger: the link resolved into another project.
+        # Why: the answer changes with that project's names, and only the route
+        #   project's names retire this entry.
+        # Outcome: serve it uncached. A link the route project resolves itself is
+        #   answered before any other project is consulted, so it depends on the
+        #   route project's names alone, like /resolve.
+        if entity.project_id != project_id:
+            skip_read_cache_store(request)
 
         return LinkResolveResponse(
             external_id=entity.external_id,
@@ -795,52 +815,62 @@ async def index_file(
 ## Read endpoints
 
 
-def _parse_note_slice_params(
-    *,
-    section: str | None,
-    lines: str | None,
-) -> tuple[SectionSelector | None, LineRange | None]:
-    """Validate raw slice query params into typed selectors, failing fast with 422s."""
-    if section is not None and lines is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="section and lines are mutually exclusive; a section response carries "
-            "content_start_line/content_end_line for follow-up line reads",
-        )
+@dataclass(frozen=True, slots=True)
+class NoteSlice:
+    """The part of a note one read asks for: a section, a line range, a token budget."""
+
     selector: SectionSelector | None = None
-    if section is not None:
-        selector = parse_section_selector(section)
-        if selector is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid section selector: '{section}'",
-            )
     line_range: LineRange | None = None
-    if lines is not None:
-        line_range = parse_line_range(lines)
-        if line_range is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid lines range: '{lines}' (expected 'N-M', 'N-', or 'N')",
+    max_tokens: int | None = None
+
+    @classmethod
+    def from_values(
+        cls, *, section: str | None, lines: str | None, max_tokens: int | None
+    ) -> "NoteSlice":
+        """Validate raw slice params, raising ValueError with the route's 422 message."""
+        if section is not None and lines is not None:
+            raise ValueError(
+                "section and lines are mutually exclusive; a section response carries "
+                "content_start_line/content_end_line for follow-up line reads"
             )
-    return selector, line_range
+        selector: SectionSelector | None = None
+        if section is not None:
+            selector = parse_section_selector(section)
+            if selector is None:
+                raise ValueError(f"Invalid section selector: '{section}'")
+        line_range: LineRange | None = None
+        if lines is not None:
+            line_range = parse_line_range(lines)
+            if line_range is None:
+                raise ValueError(f"Invalid lines range: '{lines}' (expected 'N-M', 'N-', or 'N')")
+        return cls(selector=selector, line_range=line_range, max_tokens=max_tokens)
+
+    @classmethod
+    def from_query(cls, request: Request) -> "NoteSlice":
+        """Read the slice params as the route declares them, raising ValueError if invalid."""
+        query = request.query_params
+        raw_max_tokens = query.get("max_tokens")
+        return cls.from_values(
+            section=query.get("section"),
+            lines=query.get("lines"),
+            # The route declares max_tokens as an int >= 1; the same validation keeps a
+            # value the route would reject with 422 from being answered from cache.
+            max_tokens=(
+                None if raw_max_tokens is None else _MAX_TOKENS.validate_python(raw_max_tokens)
+            ),
+        )
+
+    @property
+    def is_whole_note(self) -> bool:
+        return self.selector is None and self.line_range is None and self.max_tokens is None
 
 
-def _apply_note_slice(
-    result: EntityResponseV2,
-    *,
-    selector: SectionSelector | None,
-    line_range: LineRange | None,
-    max_tokens: int | None,
-) -> EntityResponseV2:
-    """Slice a full note response after cache retrieval.
+_MAX_TOKENS = TypeAdapter(Annotated[int, Field(ge=1)])
 
-    Slice params are deliberately NOT part of the read-cache digest: the cache
-    keeps exactly one pristine full-note entry per entity and every slice is
-    computed from it per request, so differently-sliced reads share one entry
-    and the cached value is never a partial note.
-    """
-    if selector is None and line_range is None and max_tokens is None:
+
+def _apply_note_slice(result: EntityResponseV2, note_slice: NoteSlice) -> EntityResponseV2:
+    """Slice a full note response."""
+    if note_slice.is_whole_note:
         return result
     if result.content is None:
         raise HTTPException(
@@ -849,9 +879,9 @@ def _apply_note_slice(
         )
     sliced = slice_note_content(
         result.content,
-        section=selector,
-        lines=line_range,
-        max_tokens=max_tokens,
+        section=note_slice.selector,
+        lines=note_slice.line_range,
+        max_tokens=note_slice.max_tokens,
         note_title=result.title,
     )
     if isinstance(sliced, NoteSliceError):
@@ -869,6 +899,32 @@ def _apply_note_slice(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class NoteSliceRead:
+    """Cache one full entry per note and slice every read from it.
+
+    ``?max_tokens=1600`` and an unsliced read of the same note share the entry, and
+    the stored value is never a partial note.
+    """
+
+    params: frozenset[str] = frozenset({"section", "lines", "max_tokens"})
+
+    def check(self, request: Request) -> None:
+        NoteSlice.from_query(request)
+
+    def store(self, response: Response) -> bytes:
+        return bytes(response.body)
+
+    def render(self, stored: bytes, request: Request) -> Response:
+        note_slice = NoteSlice.from_query(request)
+        if note_slice.is_whole_note:
+            return Response(content=stored, media_type="application/json")
+        sliced = _apply_note_slice(EntityResponseV2.model_validate_json(stored), note_slice)
+        return Response(
+            content=sliced.model_dump_json(by_alias=True), media_type="application/json"
+        )
+
+
 @router.get(
     "/entities/{entity_id}",
     response_model=EntityResponseV2,
@@ -877,6 +933,7 @@ def _apply_note_slice(
             ReadCacheOperation.entity,
             group=note_group,
             ttl_seconds=READ_CACHE_TTL_SECONDS,
+            rendered=NoteSliceRead(),
         )
     ],
 )
@@ -935,7 +992,10 @@ async def get_entity_by_id(
     ):
         logger.debug("API v2 request: get_entity_by_id entity_id={}", entity_id)
 
-        selector, line_range = _parse_note_slice_params(section=section, lines=lines)
+        try:
+            note_slice = NoteSlice.from_values(section=section, lines=lines, max_tokens=max_tokens)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
         note_payload = await note_content_query_service.get_note_entity_payload_with_read_repair(
             project_external_id=project_external_id,
@@ -954,12 +1014,7 @@ async def get_entity_by_id(
                 )
             result = EntityResponseV2.model_validate(entity)
         logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
-        return _apply_note_slice(
-            result,
-            selector=selector,
-            line_range=line_range,
-            max_tokens=max_tokens,
-        )
+        return _apply_note_slice(result, note_slice)
 
 
 ## Create endpoints

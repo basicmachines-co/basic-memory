@@ -12,7 +12,7 @@ storage-event indexing pipeline. No API endpoint writes resource files inline.
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Header, HTTPException, Response, Path
+from fastapi import APIRouter, Header, HTTPException, Request, Response, Path
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
@@ -26,9 +26,12 @@ from basic_memory.deps import (
     ReadCacheDep,
     SessionMakerDep,
 )
+from basic_memory.read_cache import ReadCacheOperation
+from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
+from basic_memory.read_cache.routes import ReadCacheRoute, cached_read, note_group
 from basic_memory.utils import validate_project_path
 
-router = APIRouter(prefix="/resource", tags=["resources-v2"])
+router = APIRouter(prefix="/resource", tags=["resources-v2"], route_class=ReadCacheRoute)
 
 
 class CachedResourceResponse(BaseModel):
@@ -38,6 +41,32 @@ class CachedResourceResponse(BaseModel):
     media_type: str
 
     model_config = ConfigDict(ser_json_bytes="base64", val_json_bytes="base64")
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceRead:
+    """Cache a resource as its bytes and media type, and serve it with that media type.
+
+    The SDK replays a stored body as JSON text, which would corrupt binary content
+    and relabel markdown as application/json, so the entry is a typed envelope.
+    """
+
+    params: frozenset[str] = frozenset()
+
+    def check(self, request: Request) -> None:
+        return None
+
+    def store(self, response: Response) -> bytes:
+        if response.media_type is None:  # pragma: no cover
+            raise TypeError("resource responses always carry a media type")
+        return (
+            CachedResourceResponse(content=bytes(response.body), media_type=response.media_type)
+            .model_dump_json()
+            .encode()
+        )
+
+    def render(self, stored: bytes, request: Request) -> Response:
+        return _content_response(CachedResourceResponse.model_validate_json(stored), None)
 
 
 # --- HTTP Range support (RFC 9110, single bytes range) ---
@@ -129,7 +158,20 @@ def _content_response(resource: CachedResourceResponse, range_header: str | None
     )
 
 
-@router.get("/{entity_id}")
+# A note's resource is its accepted markdown, and a file's is its stored bytes; both
+# change only through writes and index passes that retire the note's own group.
+# Ranged reads bypass the cache (see read_cache.routes._cached_target).
+@router.get(
+    "/{entity_id}",
+    dependencies=[
+        cached_read(
+            ReadCacheOperation.resource,
+            group=note_group,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+            rendered=ResourceRead(),
+        )
+    ],
+)
 async def get_resource_content(
     config: ProjectConfigV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,

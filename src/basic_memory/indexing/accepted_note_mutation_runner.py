@@ -375,6 +375,10 @@ class AcceptedNoteMutationResult:
     # An update changed the note's title or permalink, so name lookups and the
     # links rendered in other notes may have changed too.
     identity_changed: bool = False
+    # A delete's linked notes, captured before the entity row goes: its SET NULL
+    # cascade erases the inbound relations that name them. None for every other
+    # mutation, whose links survive the commit and are looked up after it.
+    deleted_linked_note_ids: frozenset[str] | None = None
 
 
 async def record_accepted_project_note_change(
@@ -800,6 +804,13 @@ async def run_accepted_note_delete(
         reject_stale_base_checksum(
             current_db_checksum=note_content.db_checksum if note_content is not None else None
         )
+    # Captured under the note's mutation lock, before the delete unresolves the
+    # inbound links. A linker that commits a new link to this note between here and
+    # the delete keeps a cached link to it until its next write; the window is the
+    # same one relation cleanup accepts for search rows (#1351).
+    linked_note_ids = await dependencies.write_repositories.relation_repository(
+        project.id
+    ).linked_note_ids(session, entity_id=entity.id)
     change = await delete_accepted_note(
         session,
         project_id=project.id,
@@ -825,7 +836,8 @@ async def run_accepted_note_delete(
         dependencies=dependencies,
     )
     return AcceptedNoteMutationResult(
-        change=attach_accepted_project_note_change(change, project_change)
+        change=attach_accepted_project_note_change(change, project_change),
+        deleted_linked_note_ids=linked_note_ids,
     )
 
 
@@ -1225,6 +1237,9 @@ async def _run_accepted_note_edit(
     ):
         reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
     reject_locked_note(current_note_content)
+    # Read before preparation: it copies the edited frontmatter's title and permalink
+    # onto this entity, after which a frontmatter rename would look unchanged.
+    previous_identity = (entity.title, entity.permalink)
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     try:
         prepared_write = await prepare_accepted_note_edit(
@@ -1249,7 +1264,6 @@ async def _run_accepted_note_edit(
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
     prepared = prepared_write.prepared
-    previous_identity = (entity.title, entity.permalink)
     persisted = await persist_accepted_note_snapshot(
         session,
         entity=entity,

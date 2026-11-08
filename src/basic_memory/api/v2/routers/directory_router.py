@@ -17,7 +17,7 @@ from basic_memory.read_cache.routes import (
     ReadCacheRoute,
     cached_read,
     content_group,
-    project_group,
+    names_group,
 )
 from basic_memory.deps import DirectoryServiceV2ExternalDep
 from basic_memory.schemas.directory import (
@@ -68,7 +68,7 @@ async def get_directory_tree(
     dependencies=[
         cached_read(
             ReadCacheOperation.directory_structure,
-            group=project_group,
+            group=names_group,
             ttl_seconds=READ_CACHE_TTL_SECONDS,
         )
     ],

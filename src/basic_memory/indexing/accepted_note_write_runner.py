@@ -211,6 +211,15 @@ class AcceptedNoteRelationRepository(RelationGenerationStore, Protocol):
     ) -> None:
         """Mark an accepted generation's graph as not yet published."""
 
+    async def linked_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: RuntimeEntityId,
+    ) -> frozenset[str]:
+        """External ids of the notes on the other end of this note's resolved links."""
+        ...
+
 
 class AcceptedNoteWriteRepositories(Protocol):
     """Repository capability set needed by accepted-note DB-first writes."""

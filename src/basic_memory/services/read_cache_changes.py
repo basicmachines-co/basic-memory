@@ -23,30 +23,45 @@ def accepted_note_read_cache_change(
     *,
     identity_changed: bool,
     detached_note_ids: Iterable[str] = (),
+    linked_note_ids: Iterable[str] | None = None,
 ) -> ReadCacheChange:
     """The reads an accepted create, update, move or delete made stale.
 
-    Creates, moves and deletes change which names resolve and which files a listing
-    shows. So does an update that renames the note or changes its permalink. An
-    update that only changes the body retires the note itself, the notes whose links
-    it republished, and the content-wide reads (search, listings, recent activity).
+    ``detached_note_ids`` are the notes whose links this write republished.
+    ``linked_note_ids`` are the notes on either end of the note's resolved links,
+    whose rendered relations show its name and path; ``None`` means the caller did
+    not look them up.
+
+    - A create adds a name: name lookups, the folder structure and content-wide reads
+      change, and no other note's response can show the new note yet. Notes whose
+      forward links now resolve to it are retired by relation resolution
+      (``resolved_relations_read_cache_change``) when it rewrites them.
+    - A move, a delete, or an update that renames the note or changes its permalink
+      also changes the responses of the notes linked to it.
+    - An update that only changes the body retires the note itself, the notes whose
+      links it republished, and the content-wide reads.
     """
     if project_change is None:
         # The mutation did not record what it changed, so nothing narrower is safe.
         return ReadCacheChange.whole_project()
+    note_ids = {project_change.note_external_id, *detached_note_ids}
     match project_change.operation:
+        case RuntimeProjectNoteOperation.created:
+            return ReadCacheChange.note_identity(note_ids)
+        case RuntimeProjectNoteOperation.updated if not identity_changed:
+            return ReadCacheChange.note_content(note_ids)
         case (
-            RuntimeProjectNoteOperation.created
-            | RuntimeProjectNoteOperation.moved
+            RuntimeProjectNoteOperation.moved
             | RuntimeProjectNoteOperation.deleted
+            | RuntimeProjectNoteOperation.updated
         ):
-            return ReadCacheChange.whole_project()
-        case RuntimeProjectNoteOperation.updated:
-            if identity_changed:
+            # Trigger: the note's name or path changed, or it is gone.
+            # Why: linked notes render its permalink and title in their relations,
+            #   and without their ids we cannot name every response that changed.
+            # Outcome: retire the linked notes, or the whole project if unknown.
+            if linked_note_ids is None:
                 return ReadCacheChange.whole_project()
-            return ReadCacheChange.note_content(
-                {project_change.note_external_id, *detached_note_ids}
-            )
+            return ReadCacheChange.note_identity({*note_ids, *linked_note_ids})
 
 
 def materialization_status_read_cache_change(

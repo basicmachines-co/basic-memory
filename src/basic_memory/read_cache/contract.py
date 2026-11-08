@@ -11,9 +11,10 @@ Groups:
 - one per note: that note's rendered response
 - one per project for content: search, listings with titles and modified times,
   recent activity
-- the project epoch: everything in the project, including name lookups and the
-  folder structure, which change only when notes are created, renamed, moved or
-  deleted
+- one per project for names: name and link lookups and the folder structure, which
+  change only when notes are created, renamed, moved or deleted
+- the project epoch: part of every key in the project, so replacing it retires
+  everything; used when a writer cannot say what it changed
 """
 
 from collections.abc import Iterable
@@ -30,9 +31,11 @@ class ReadCacheOperation(StrEnum):
     directory_structure = "directory_structure"
     directory_tree = "directory_tree"
     entity = "entity"
+    link_resolve = "link_resolve"
     project_resolve = "project_resolve"
     recent_activity = "recent_activity"
     resolve = "resolve"
+    resource = "resource"
     search = "search"
 
 
@@ -86,17 +89,34 @@ class ContentGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class NamesGroup:
+    """Reads that change only when the project's set of notes or their names change.
+
+    Name and link lookups and the folder structure. A body edit leaves them alone.
+    """
+
+    @property
+    def name(self) -> str:
+        return "names"
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectGroup:
-    """Reads that change only when the project's set of notes or names changes."""
+    """The project epoch, embedded in every key of the project.
+
+    Reads keyed only by it change when anything in the project does. Replacing it
+    retires every cached read in the project.
+    """
 
     @property
     def name(self) -> str:
         return "project"
 
 
-type ReadCacheGroup = NoteGroup | ContentGroup | ProjectGroup
+type ReadCacheGroup = NoteGroup | ContentGroup | NamesGroup | ProjectGroup
 
 CONTENT = ContentGroup()
+NAMES = NamesGroup()
 PROJECT = ProjectGroup()
 
 
@@ -107,6 +127,8 @@ def group_kind(group: ReadCacheGroup) -> str:
             return "note"
         case ContentGroup():
             return "content"
+        case NamesGroup():
+            return "names"
         case ProjectGroup():
             return "project"
 
@@ -119,6 +141,7 @@ class ReadCacheChange:
     """The groups one committed change made stale. An empty change retires nothing."""
 
     project: bool = False
+    names: bool = False
     content: bool = False
     notes: frozenset[str] = field(default_factory=frozenset)
 
@@ -133,11 +156,21 @@ class ReadCacheChange:
     def whole_project(cls) -> "ReadCacheChange":
         """Retire every cached read in the project.
 
-        Used for creates, renames, moves and deletes, which change name lookups and
-        the links rendered in other notes, and whenever a writer cannot say exactly
-        what it changed.
+        Used whenever a writer cannot say exactly what it changed: failure paths,
+        imports, bulk moves and reindexes.
         """
         return cls(project=True)
+
+    @classmethod
+    def note_identity(cls, entity_ids: Iterable[str]) -> "ReadCacheChange":
+        """A note was created, renamed, moved or deleted.
+
+        Name lookups and the folder structure change, and so do the content-wide
+        reads. ``entity_ids`` are the notes whose own responses changed: the note
+        itself and any note that renders a link to or from it. No other note's
+        response can show the change, so their entries stay.
+        """
+        return cls(names=True, content=True, notes=frozenset(entity_ids))
 
     @classmethod
     def note_content(cls, entity_ids: Iterable[str]) -> "ReadCacheChange":
@@ -155,13 +188,14 @@ class ReadCacheChange:
     def __or__(self, other: "ReadCacheChange") -> "ReadCacheChange":
         return ReadCacheChange(
             project=self.project or other.project,
+            names=self.names or other.names,
             content=self.content or other.content,
             notes=self.notes | other.notes,
         )
 
     @property
     def is_empty(self) -> bool:
-        return not (self.project or self.content or self.notes)
+        return not (self.project or self.names or self.content or self.notes)
 
     @property
     def groups(self) -> tuple[ReadCacheGroup, ...]:
@@ -171,6 +205,8 @@ class ReadCacheChange:
         if self.project:
             return (PROJECT,)
         bumped: list[ReadCacheGroup] = []
+        if self.names:
+            bumped.append(NAMES)
         if self.content:
             bumped.append(CONTENT)
         bumped.extend(NoteGroup(note_id) for note_id in sorted(self.notes))
