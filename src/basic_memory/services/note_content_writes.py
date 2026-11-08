@@ -11,6 +11,7 @@ from uuid import UUID
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 
 from basic_memory.indexing.accepted_note_mutation_runner import (
@@ -46,6 +47,7 @@ from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
 )
+from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
 from basic_memory.read_cache import (
     ReadCacheChange,
     ReadCacheChangeRecorder,
@@ -308,9 +310,32 @@ class NoteContentMutationService:
                     result.change.project_change,
                     identity_changed=result.identity_changed,
                     detached_note_ids=detached_note_ids,
+                    linked_note_ids=await self._linked_note_ids(result),
                 )
             )
         return result.change
+
+    async def _linked_note_ids(self, result: AcceptedNoteMutationResult) -> frozenset[str] | None:
+        """The notes whose rendered links show this note's old name or path.
+
+        Only a move, a delete or a renaming update needs them. A delete captured
+        them before its commit; the others still have their links and are read
+        after it, so a link committed while the mutation ran is seen too.
+        """
+        project_change = result.change.project_change
+        if project_change is None:
+            return None
+        operation = project_change.operation
+        if operation is RuntimeProjectNoteOperation.deleted:
+            return result.deleted_linked_note_ids
+        renamed = operation is RuntimeProjectNoteOperation.updated and result.identity_changed
+        if operation is not RuntimeProjectNoteOperation.moved and not renamed:
+            return frozenset()
+        repository = self.mutation_dependencies.write_repositories.relation_repository(
+            project_change.project_id
+        )
+        async with db.scoped_session(self.session_maker) as session:
+            return await repository.linked_note_ids(session, entity_id=project_change.entity_id)
 
     @asynccontextmanager
     async def _mutation_cache_scope(

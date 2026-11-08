@@ -598,6 +598,37 @@ class RelationRepository(Repository[Relation]):
         )
         return frozenset(sources.scalars().all()) | frozenset(targets.scalars().all())
 
+    async def linked_note_ids(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+    ) -> frozenset[str]:
+        """External ids of the notes on the other end of this note's resolved links.
+
+        Sources render this note's permalink and title in their relations, and
+        targets rendered from their entity row list it as an incoming relation.
+        Every linked note is returned, not only the ones rendered today, so a
+        rename, move or delete of this note retires every response that can show it.
+        """
+        sources = select(Relation.from_id).where(
+            Relation.project_id == self.project_id,
+            Relation.to_id == entity_id,
+        )
+        targets = select(Relation.to_id).where(
+            Relation.project_id == self.project_id,
+            Relation.from_id == entity_id,
+            Relation.to_id.is_not(None),
+        )
+        result = await session.execute(
+            select(Entity.external_id).where(
+                Entity.project_id == self.project_id,
+                Entity.id != entity_id,
+                or_(Entity.id.in_(sources), Entity.id.in_(targets)),
+            )
+        )
+        return frozenset(result.scalars().all())
+
     async def cleanup_relation_generations(
         self,
         session: AsyncSession,

@@ -7,6 +7,8 @@ leaves to the application:
 - the key: tenant, project, user, workspace, the group's current version and the
   request itself, so invalidation is a version replacement instead of a key scan
 - QUERY support, which the SDK's ``cache()`` bypasses (it caches GET only)
+- rendered reads, whose stored entry is the route's full answer and whose response
+  is rendered from it per request (a note slice, a resource's own media type)
 - a no-op when the host has no cache configured
 
 Attach with ``dependencies=[cached_read(...)]`` on a router built with
@@ -20,11 +22,14 @@ itself and catches the hit before the instrumented route code runs, so a hit is
 returned as a response and never raised through the app.
 """
 
+import importlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Literal, override
+from hashlib import blake2b
+from typing import Any, Literal, Protocol, override
+from urllib.parse import urlencode
 
 import logfire
 from fastapi import Depends, Request, Response
@@ -32,11 +37,15 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 from opentelemetry import trace
 from opentelemetry.trace import Span
+from loguru import logger
 from pydantic import TypeAdapter
-from redis_fastapi.cache import CacheHitException, cache
+from redis.exceptions import RedisError
+from redis_fastapi.cache import CacheHitException, CachePending, cache
+from redis_fastapi.config import CACHE_STATUS_HEADER
 
 from basic_memory.read_cache.contract import (
     CONTENT,
+    NAMES,
     PROJECT,
     WORKSPACE_ENTRIES_PROJECT_ID,
     NoteGroup,
@@ -50,6 +59,11 @@ from basic_memory.read_cache.keys import entry_key, read_cache_request_digest
 from basic_memory.read_cache.redis import EntryVersions, RedisReadCache
 from basic_memory.telemetry import debug_span
 from basic_memory.workspace_context import current_workspace_permalink_context
+
+# The package re-exports a function named ``cache`` that shadows this submodule on
+# attribute access. Its MAX_CACHEABLE_BODY_SIZE is the payload cap the app configures,
+# read on every store so a rendered read honors the same cap as the SDK's capture.
+_sdk_cache = importlib.import_module("redis_fastapi.cache")
 
 _PENDING_STATE = "redis_cache_pending"
 _SERVED_STATE = "basic_memory_read_cache_served"
@@ -73,6 +87,33 @@ type ProjectForRequest = Callable[[Request], str]
 type RouteHandler = Callable[[Request], Coroutine[Any, Any, Response]]
 type SdkCacheDependency = Callable[..., AsyncGenerator[None]]
 type LookupOutcome = Literal["hit", "miss", "bypass", "unavailable"]
+
+
+class RenderedRead(Protocol):
+    """A cached read whose stored entry is not the response it sends.
+
+    The entry holds the route's full answer once, and every request's response is
+    rendered from it. Requests that differ only in ``params`` share one entry, so a
+    note read with a token budget and one without do not each reach the database.
+    """
+
+    @property
+    def params(self) -> frozenset[str]:
+        """Query parameters that only shape the response, kept out of the key."""
+        ...
+
+    def check(self, request: Request) -> None:
+        """Raise ValueError when ``params`` are invalid, so the route answers them."""
+        ...
+
+    def store(self, response: Response) -> bytes:
+        """The entry to store for the route's full answer."""
+        ...
+
+    def render(self, stored: bytes, request: Request) -> Response:
+        """This request's response, rendered from a stored entry."""
+        ...
+
 
 _read_cache_lookups = logfire.metric_counter(
     "read_cache.lookups",
@@ -145,6 +186,7 @@ class _ReadThrough:
     ttl_seconds: int
     hit_headers: Mapping[str, str]
     sdk_dependency: SdkCacheDependency
+    rendered: RenderedRead | None
 
     async def __call__(self, request: Request) -> None:
         """Fail fast when the route was built without ``ReadCacheRoute``.
@@ -158,15 +200,15 @@ class _ReadThrough:
     async def serve(self, request: Request, endpoint: RouteHandler) -> Response:
         """Answer from the cache, or run the endpoint and let the SDK store its response."""
         setattr(request.state, _SERVED_STATE, True)
-        target = await _cached_target(request, self.group, self.project)
+        target = await _cached_target(request, self.group, self.project, self.rendered)
         if target is None:
             return await endpoint(request)
 
         request.state.basic_memory_read_cache_target = target
-        sdk_request = (
-            _AsGet(request.scope, request.receive) if request.method == "QUERY" else request
+        steps = self.sdk_dependency(
+            _sdk_request(request, rendered=self.rendered is not None),
+            target.scope.cache.client,
         )
-        steps = self.sdk_dependency(sdk_request, target.scope.cache.client)
         # The lookup outcome lives on the request span (FastAPI's route span when
         # the app is instrumented) and in a counter. The step span below is debug
         # only, so a host exporting at info still sees every outcome without
@@ -190,8 +232,16 @@ class _ReadThrough:
                 # The SDK raises on a hit. It is caught here, before FastAPI solves
                 # dependencies, so instrumentation never records a hit as an error.
                 lookup.record("hit")
-                hit.response.headers.update(self.hit_headers)
-                return hit.response
+                response = hit.response
+                if self.rendered is not None:
+                    response = _with_validators(
+                        request,
+                        self.rendered.render(bytes(response.body), request),
+                        cache_status="HIT",
+                        cache_control=response.headers["cache-control"],
+                    )
+                response.headers.update(self.hit_headers)
+                return response
             except ReadCacheUnavailable:
                 # Version lookup failed: Redis is down, so the database answers
                 # and nothing is stored under a version we could not read.
@@ -202,9 +252,35 @@ class _ReadThrough:
                     await _track_pending_entry(request, target, ttl_seconds=self.ttl_seconds)
                 )
         try:
-            return await endpoint(request)
+            if self.rendered is None:
+                return await endpoint(request)
+            return await self._fill_rendered(request, endpoint, self.rendered)
         finally:
             await steps.aclose()
+
+    async def _fill_rendered(
+        self, request: Request, endpoint: RouteHandler, rendered: RenderedRead
+    ) -> Response:
+        """Run the route for its full answer, store that, and render this request's response.
+
+        The SDK's capture middleware stores the bytes it sends, which here are the
+        rendered response, so the full answer is stored before rendering and the
+        middleware is told to store nothing.
+        """
+        pending: CachePending | None = getattr(request.state, _PENDING_STATE, None)
+        skip_read_cache_store(request)
+        response = await endpoint(_without_query_params(request, rendered.params))
+        if not 200 <= response.status_code < 300:
+            return response
+        stored = rendered.store(response)
+        if pending is not None and len(stored) <= _sdk_cache.MAX_CACHEABLE_BODY_SIZE:
+            await _store_entry(pending, stored)
+        return _with_validators(
+            request,
+            rendered.render(stored, request),
+            cache_status="MISS" if pending is not None else None,
+            cache_control=f"max-age={self.ttl_seconds}",
+        )
 
 
 class ReadCacheRoute(APIRoute):
@@ -240,6 +316,7 @@ def cached_read(
     ttl_seconds: int,
     hit_headers: Mapping[str, str] | None = None,
     project: ProjectForRequest | None = None,
+    rendered: RenderedRead | None = None,
 ) -> Any:
     """A route dependency that marks the route's reads as cached under ``operation``.
 
@@ -251,6 +328,9 @@ def cached_read(
     ``hit_headers`` are response headers the route always sets. A hit returns before
     the route runs, and fastapi-redis-sdk 0.8.1 does not replay stored headers, so
     they are added to every cached response here.
+
+    ``rendered`` stores the route's full answer and renders each response from it;
+    see ``RenderedRead``.
     """
 
     async def key_builder(request: Request, eviction_group: str = "", prefix: str = "") -> str:
@@ -277,8 +357,75 @@ def cached_read(
             ttl_seconds=ttl_seconds,
             hit_headers=dict(hit_headers or {}),
             sdk_dependency=cache(ttl=ttl_seconds, key_builder=key_builder, cache_prefix=""),
+            rendered=rendered,
         )
     )
+
+
+def _sdk_request(request: Request, *, rendered: bool) -> Request:
+    """The request as the SDK should see it.
+
+    A rendered read's validators belong to its rendered response, not to the stored
+    entry the SDK compares them with, so the SDK never sees ``If-None-Match``.
+    """
+    scope = request.scope
+    if rendered:
+        scope = {
+            **scope,
+            "headers": [
+                (name, value) for name, value in scope["headers"] if name != b"if-none-match"
+            ],
+        }
+    if request.method == "QUERY":
+        return _AsGet(scope, request.receive)
+    return Request(scope, request.receive) if rendered else request
+
+
+def _without_query_params(request: Request, names: frozenset[str]) -> Request:
+    """The same request without ``names`` in its query string.
+
+    The copy shares the request's state, so the cache target and pending entry the
+    lookup recorded stay visible to the route.
+    """
+    if not names & request.query_params.keys():
+        return request
+    query = urlencode(
+        [(name, value) for name, value in request.query_params.multi_items() if name not in names]
+    )
+    return Request({**request.scope, "query_string": query.encode("latin-1")}, request.receive)
+
+
+async def _store_entry(pending: CachePending, stored: bytes) -> None:
+    """Write one entry in the SDK's format, so its hit path can serve it.
+
+    The SDK's capture middleware writes the same two fields. A failed write leaves
+    the read uncached, as a failed capture does.
+    """
+    entry = {
+        "body": stored.decode(errors="replace"),
+        "etag": _etag(stored),
+    }
+    try:
+        await pending.redis.set(pending.key, json.dumps(entry), ex=pending.ttl)
+    except (RedisError, OSError):  # pragma: no cover - needs a Redis failure mid-request
+        logger.warning("Read cache store failed; serving uncached", key=pending.key)
+
+
+def _etag(body: bytes) -> str:
+    return f'W/"{blake2b(body, digest_size=16).hexdigest()}"'
+
+
+def _with_validators(
+    request: Request, response: Response, *, cache_status: str | None, cache_control: str
+) -> Response:
+    """Add the validators the SDK adds to stored responses, and answer a revalidation."""
+    headers = {"ETag": _etag(bytes(response.body)), "Cache-Control": cache_control}
+    if cache_status is not None:
+        headers[CACHE_STATUS_HEADER] = cache_status
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
+    response.headers.update(headers)
+    return response
 
 
 async def _track_pending_entry(
@@ -336,7 +483,10 @@ class _CachedTarget:
 
 
 async def _cached_target(
-    request: Request, group: GroupForRequest, project: ProjectForRequest
+    request: Request,
+    group: GroupForRequest,
+    project: ProjectForRequest,
+    rendered: RenderedRead | None,
 ) -> _CachedTarget | None:
     """Everything the key needs, or ``None`` when this request bypasses the cache."""
     if request.method not in {"GET", "QUERY"}:
@@ -351,7 +501,11 @@ async def _cached_target(
     try:
         project_id = canonical_uuid(project(request), label="project id")
         resolved_group = group(request)
-        identity = await _request_identity(request)
+        presentation_params = frozenset[str]()
+        if rendered is not None:
+            rendered.check(request)
+            presentation_params = rendered.params
+        identity = await _request_identity(request, excluded=presentation_params)
     except ValueError:
         # Malformed ids or body: the route answers with an error, never cached.
         return None
@@ -363,14 +517,15 @@ async def _cached_target(
     )
 
 
-async def _request_identity(request: Request) -> str:
-    """Everything besides tenant, user and versions that shapes the response.
+async def _request_identity(request: Request, *, excluded: frozenset[str]) -> str:
+    """Everything besides tenant, user and versions that shapes the stored answer.
 
     Only the query parameters the route declares go into the key, serialized as
     JSON so values can never run together (``a=b%26c=d`` is not ``a=b&c=d``), and
     undeclared parameters (a cache-busting nonce) cannot multiply entries. A QUERY
     body is keyed by its validated model for the same reason: fields the model
     ignores, key order and spelled-out defaults do not change the response.
+    ``excluded`` parameters only shape a rendered read's response, not its entry.
     """
     body = None
     if request.method == "QUERY":
@@ -379,7 +534,7 @@ async def _request_identity(request: Request) -> str:
             body = _validated_body(request, json.loads(raw))
     query = {
         name: request.query_params.getlist(name)
-        for name in sorted(_declared_query_params(request))
+        for name in sorted(_declared_query_params(request) - excluded)
         if name in request.query_params
     }
     workspace = current_workspace_permalink_context()
@@ -472,6 +627,10 @@ def content_group(request: Request) -> ReadCacheGroup:
     return CONTENT
 
 
+def names_group(request: Request) -> ReadCacheGroup:
+    return NAMES
+
+
 def project_group(request: Request) -> ReadCacheGroup:
     return PROJECT
 
@@ -480,8 +639,10 @@ __all__ = [
     "ReadCacheRoute",
     "ReadCacheScope",
     "ReadCacheScopeResolver",
+    "RenderedRead",
     "cached_read",
     "content_group",
+    "names_group",
     "note_group",
     "path_project",
     "project_group",

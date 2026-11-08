@@ -2,9 +2,11 @@
 
 from basic_memory.read_cache.contract import (
     CONTENT,
+    NAMES,
     PROJECT,
     WORKSPACE_ENTRIES_PROJECT_ID,
     ContentGroup,
+    NamesGroup,
     NoteGroup,
     ProjectGroup,
     ReadCacheChange,
@@ -26,8 +28,10 @@ from basic_memory.read_cache.invalidation import (
 
 __all__ = [
     "CONTENT",
+    "NAMES",
     "PROJECT",
     "ContentGroup",
+    "NamesGroup",
     "NoteGroup",
     "ProjectGroup",
     "ReadCacheChange",

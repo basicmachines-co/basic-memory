@@ -36,6 +36,7 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.models import NoteContent, Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
+    NAMES,
     PROJECT,
     WORKSPACE_ENTRIES_PROJECT_ID,
     NoteGroup,
@@ -523,29 +524,27 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
 @pytest.mark.parametrize(
     ("file_path", "content_type", "body"),
     [
-        ("cache/plain.txt", "text/plain", "Plain text remains uncached."),
-        ("cache/resource-note.md", "text/markdown", "# Markdown resources stay uncached\n"),
+        ("cache/plain.txt", "text/plain", b"Plain text is cached as bytes."),
+        ("cache/resource-note.md", "text/markdown", b"# Markdown resources keep their type\n"),
+        # Not valid UTF-8: the SDK replays a body as text, so only the typed
+        # envelope keeps these bytes intact.
+        ("cache/pixel.png", "image/png", b"\x89PNG\r\n\x1a\n\xff\xfe\x00binary"),
     ],
 )
-async def test_resources_are_never_cached(
+async def test_resources_are_cached_byte_exact_with_their_media_type(
     cached_app: Any,
     client: AsyncClient,
     test_project: Project,
-    redis_cache: RedisCacheHarness,
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     file_path: str,
     content_type: str,
-    body: str,
+    body: bytes,
 ) -> None:
-    """Raw resources are served from storage on every read.
-
-    fastapi-redis-sdk 0.8.1 replays every hit as application/json, which would
-    corrupt a markdown or binary resource, so the resource route has no cache.
-    """
+    """A repeat resource read is a hit that returns the same bytes and media type."""
     project_external_id = str(test_project.external_id)
     disk_path = Path(test_project.path) / file_path
     disk_path.parent.mkdir(parents=True, exist_ok=True)
-    disk_path.write_text(body, encoding="utf-8")
+    disk_path.write_bytes(body)
 
     repository = EntityRepository(project_id=test_project.id)
     _, session_maker = engine_factory
@@ -566,15 +565,43 @@ async def test_resources_are_never_cached(
     resource_url = f"/v2/projects/{project_external_id}/resource/{entity.external_id}"
     first = await client.get(resource_url)
     second = await client.get(resource_url)
+    revalidated = await client.get(resource_url, headers={"if-none-match": second.headers["etag"]})
 
-    assert first.status_code == 200
-    assert second.text == body
-    assert "x-redis-cache" not in second.headers
-    stored = {key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*")}
-    versions = {
-        key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:version:*")
-    }
-    assert stored == versions
+    assert (first.headers["x-redis-cache"], second.headers["x-redis-cache"]) == ("MISS", "HIT")
+    assert first.content == second.content == body
+    assert first.headers["content-type"] == second.headers["content-type"]
+    assert second.headers["content-type"].startswith(content_type)
+    assert second.headers["accept-ranges"] == "bytes"
+    assert revalidated.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_a_note_edit_retires_its_cached_resource(
+    cached_app: Any, client: AsyncClient, test_project: Project
+) -> None:
+    """A note's resource lives in the note's group, so editing the note retires it."""
+    project_url = f"/v2/projects/{test_project.external_id}"
+    created = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={"title": "Resource Note", "directory": "cache", "content": "Version one."},
+    )
+    assert created.status_code == 202, created.text
+    await drain_pending_materializations()
+    resource_url = f"{project_url}/resource/{created.json()['external_id']}"
+    assert (await client.get(resource_url)).headers["x-redis-cache"] == "MISS"
+    assert (await client.get(resource_url)).headers["x-redis-cache"] == "HIT"
+
+    patch = await client.patch(
+        f"{project_url}/knowledge/entities/{created.json()['external_id']}",
+        json={"operation": "append", "content": "\n\nVersion two."},
+    )
+    assert patch.status_code == 202, patch.text
+    await drain_pending_materializations()
+
+    after = await client.get(resource_url)
+    assert after.headers["x-redis-cache"] == "MISS"
+    assert "Version two." in after.text
+    assert after.headers["content-type"].startswith("text/markdown")
 
 
 @pytest.mark.asyncio
@@ -983,7 +1010,9 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
         destination_paths=destination_paths,
     )
     app.dependency_overrides[get_read_cache] = lambda: observing_cache
-    generation_before = await _project_version(redis_cache, project_external_id)
+    # Each note move is a name change: it retires name lookups and the moved notes,
+    # not the whole project.
+    names_before = await redis_cache.cache.versions(project_external_id, NAMES)
 
     response = await client.post(
         f"{project_url}/knowledge/move-directory",
@@ -1001,8 +1030,8 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
     assert (counts[0], counts[-1]) == (1, 2)
     assert counts == sorted(counts)
     assert all((Path(test_project.path) / path).exists() for path in destination_paths)
-    generation_after = await _project_version(redis_cache, project_external_id)
-    assert generation_after != generation_before
+    names_after = await redis_cache.cache.versions(project_external_id, NAMES)
+    assert names_after != names_before
 
 
 @pytest.mark.asyncio
