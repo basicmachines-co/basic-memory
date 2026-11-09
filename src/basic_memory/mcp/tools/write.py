@@ -19,6 +19,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
@@ -428,14 +429,14 @@ async def _similar_notes(
         probe_log = logger.debug if probe_declined_by_server(probe_error) else logger.warning
         probe_log(f"bm_write similar-note probe failed for {written.file_path}: {probe_error}")
         return []
-    except Exception as probe_error:
-        # Trigger: the routed search raised something other than a ToolError. Through the
-        #   local ASGI transport a server-side exception (a sqlite-vec OperationalError,
-        #   #2065) reaches the client as itself rather than as an HTTP 500.
+    except SQLAlchemyError as probe_error:
+        # Trigger: the routed search failed in the database. Through the local ASGI
+        #   transport a server-side database error (a sqlite-vec OperationalError, #2065)
+        #   reaches the client as itself rather than as an HTTP 500, so it is no ToolError.
         # Why: the note is already on disk; failing the call reports a write that happened
         #   as failed, and a caller that retries can duplicate it.
-        # Outcome: the write succeeds without the advisory, and the cause is logged.
-        #   CancelledError is a BaseException, so cancellation still propagates.
+        # Outcome: the write succeeds without the advisory, and the cause is logged with
+        #   its traceback. Other exceptions (schema, programming errors) still fail fast.
         logger.opt(exception=probe_error).warning(
             f"bm_write similar-note probe failed for {written.file_path}: "
             f"{type(probe_error).__name__}: {probe_error}"
