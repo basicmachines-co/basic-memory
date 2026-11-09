@@ -397,6 +397,18 @@ async def test_a_database_error_in_the_probe_does_not_fail_the_write(
     assert "Body" in str(read_back)
 
 
+@pytest.mark.asyncio
+async def test_a_programming_error_in_the_probe_still_fails_fast(client, test_project, monkeypatch):
+    """Only database failures are absorbed; a defect in the probe itself surfaces."""
+
+    async def probe_has_a_bug(*_args: Any, **_kwargs: Any) -> list[SimilarNote]:
+        raise ValueError("probe defect")
+
+    monkeypatch.setattr(write_module, "find_similar_notes", probe_has_a_bug)
+    with pytest.raises(Exception, match="probe defect"):
+        await write_json(identifier="notes/a.md", content="Body", project=test_project.name)
+
+
 # --- Refusals ---
 
 
