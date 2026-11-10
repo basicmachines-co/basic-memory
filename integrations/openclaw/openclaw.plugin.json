@@ -30,6 +30,7 @@
     "skills/memory-reflect",
     "skills/memory-research",
     "skills/memory-schema",
+    "skills/memory-start",
     "skills/memory-tasks"
   ],
   "uiHints": {

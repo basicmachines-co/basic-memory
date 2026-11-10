@@ -15,6 +15,7 @@ basic-memory/skills/
 ├── memory-ingest/SKILL.md          # External input processing skill
 ├── memory-research/SKILL.md        # Web research skill
 ├── memory-literary-analysis/SKILL.md # Literary analysis skill
+├── memory-start/SKILL.md           # First-session skill
 └── README.md
 ```
 

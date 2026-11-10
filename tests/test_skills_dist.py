@@ -450,6 +450,25 @@ def test_combined_references_rewrite_resource_links(repo_dist: Path, tmp_path: P
     assert "`references/assistant-setup.md`" not in onboarding
 
 
+@pytest.mark.parametrize(
+    "asset", ["skills/basic-memory.zip", "skills-openai/basic-memory-chatgpt.zip"]
+)
+def test_combined_skill_routes_new_users_to_memory_start(
+    repo_dist: Path, tmp_path: Path, asset: str
+) -> None:
+    """A first session goes to memory-start, which saves by default, not onboarding."""
+    skill_root = _extract(repo_dist / asset, tmp_path)
+    router = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+    rows = {target: row for row in router.splitlines() for target in _routing_targets(row + "\n")}
+    assert "getting started" in rows["references/memory-start.md"]
+    assert "getting started" not in rows["references/memory-onboarding.md"]
+    assert "Ask before saving" not in router
+    assert "save mode" in router
+
+    start = (skill_root / "references/memory-start.md").read_text(encoding="utf-8")
+    assert "save_mode" in start
+
+
 def test_combined_openai_yaml(repo_dist: Path) -> None:
     plain = _names(repo_dist / "skills/basic-memory.zip")
     assert "basic-memory/agents/openai.yaml" not in plain
