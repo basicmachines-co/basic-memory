@@ -240,6 +240,91 @@ def test_ordinary_errors_do_not_restart(bm, monkeypatch):
     assert "error" in json.loads(p.handle_tool_call("bm_search", {"query": "x"}))
 
 
+def test_shutdown_during_a_call_does_not_restart_bm_mcp(bm, monkeypatch):
+    """Stopping the actor closes the connection under an in-flight call.
+
+    That call must fail. Restarting `bm mcp` for it would start a process that
+    shutdown() then drops without stopping it.
+    """
+    p, actor = _provider(bm)
+    in_flight, connection_closed = threading.Event(), threading.Event()
+
+    def call_until_the_connection_closes(tool, args, timeout):
+        in_flight.set()
+        connection_closed.wait(5)
+        raise RuntimeError("Connection closed")
+
+    def stop_actor(timeout=5.0):
+        actor.is_alive.return_value = False
+        connection_closed.set()
+        # The real actor joins its loop thread here, so the failed call handles
+        # its error while shutdown() is still waiting on the actor.
+        if threading.current_thread() is not caller:
+            caller.join(5)
+
+    actor.call.side_effect = call_until_the_connection_closes
+    actor.shutdown.side_effect = stop_actor
+    replacements = []
+
+    def restart_bm_mcp(session_id, **kwargs):
+        fresh = MagicMock()
+        fresh.call.return_value = json.dumps({"results": []})
+        replacements.append(fresh)
+        p._actor, p._initialized = fresh, True
+
+    monkeypatch.setattr(p, "initialize", restart_bm_mcp)
+    results = []
+    caller = threading.Thread(
+        target=lambda: results.append(p.handle_tool_call("bm_search", {"query": "x"})),
+        daemon=True,
+    )
+    caller.start()
+    assert in_flight.wait(5)
+
+    p.shutdown()
+    caller.join(5)
+
+    assert replacements == [], "a provider that is shutting down started a new bm mcp"
+    assert "error" in json.loads(results[0])
+    assert p._actor is None
+
+
+def test_shutdown_waits_for_a_restart_in_progress_and_stops_its_replacement(bm, monkeypatch):
+    """`bm mcp` died first and a restart is already running when shutdown() starts.
+
+    shutdown() lets that restart finish, then stops the replacement it made.
+    """
+    p, dead = _provider(bm)
+    dead.call.side_effect = RuntimeError("Connection closed")
+    dead.is_alive.return_value = False
+    fresh = MagicMock()
+    fresh.call.return_value = json.dumps({"results": []})
+    restarting, finish_restart = threading.Event(), threading.Event()
+
+    def slow_restart(session_id, **kwargs):
+        restarting.set()
+        finish_restart.wait(5)
+        p._actor, p._initialized = fresh, True
+
+    monkeypatch.setattr(p, "initialize", slow_restart)
+    caller = threading.Thread(
+        target=p.handle_tool_call, args=("bm_search", {"query": "x"}), daemon=True
+    )
+    caller.start()
+    assert restarting.wait(5)
+
+    closer = threading.Thread(target=p.shutdown, daemon=True)
+    closer.start()
+    closer.join(0.2)
+    assert closer.is_alive(), "shutdown() did not wait for the restart in progress"
+
+    finish_restart.set()
+    caller.join(5)
+    closer.join(5)
+    fresh.shutdown.assert_called_once()
+    assert p._actor is None
+
+
 def test_closed_stream_errors_count_as_a_lost_connection(bm):
     actor = MagicMock()
     actor.is_alive.return_value = True
