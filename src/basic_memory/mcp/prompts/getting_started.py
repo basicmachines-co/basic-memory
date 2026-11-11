@@ -5,8 +5,8 @@ affordance we can plant in a client whose chrome we do not control. A user who j
 from a connector directory can pick "Getting started with Basic Memory" and get oriented
 instead of facing an empty tool list with no next step.
 
-Stays offer-not-act: it guides the model to *offer* a first note and wait for the user's
-go-ahead, never to write one unprompted, so it is safe to invoke in any session.
+Save-and-tell: it guides the model to save one useful first note and say in one line what
+it saved and how to undo it. A user who asked to approve saves is asked first.
 """
 
 from textwrap import dedent
@@ -233,16 +233,16 @@ async def getting_started(
         f"""
         Based on what you see above:
         - **If they have no notes yet**, briefly explain that shared-memory loop and offer to
-          save something useful from this conversation as their first note.
-          Wait for them to say yes before writing anything:
+          save one useful first note about what they are working on. Then tell them in one
+          line what you saved and how to undo it. If they asked to approve saves, ask first:
           ```
           bm_write({project_arg}title="...", content="...", directory="notes")
           ```
         - **If they already have notes**, help them keep the loop going:
           `bm_read({project_arg}identifier="permalink")` to open one,
           `bm_search({project_arg}query="...")` to find a topic, or
-          `bm_write({project_arg}...)` to capture something new (offer first; don't write
-          unprompted).
+          `bm_write({project_arg}...)` to capture something new (tell them in one line what
+          you saved; ask first if they asked to approve saves).
         """
     ).strip()
     return f"{introduction}\n\n{activity_text}\n\n{next_steps}"

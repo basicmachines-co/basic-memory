@@ -1,7 +1,7 @@
 """Tests for MCP first-connect onboarding (levers 1 & 3).
 
 These cover the changes that help a freshly-connected model orient itself and offer a first
-note against an empty knowledge base, without ever writing one unprompted:
+note against an empty knowledge base and say what it saved:
 
 - the server `instructions` string (surfaced at the `initialize` handshake),
 - the enriched empty-state returns of `recent_activity` (the orientation call) and `search`,
@@ -48,13 +48,15 @@ def test_server_sets_first_connect_instructions():
 async def test_recent_activity_empty_project_offers_first_note(
     client, test_project, indexed_project
 ):
-    """An empty project (no test_graph) should surface the offer-not-act first-note guidance."""
+    """An empty project (no test_graph) should surface the save-and-tell first-note guidance."""
     result = await bm_recent(project=test_project.name, since="7d")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert isinstance(result, str)
     assert "No recent activity" in result
-    # The offer must be gated on the user agreeing first.
-    assert "wait for them to agree" in result
+    # Save-and-tell: save a first note, say what was saved and how to undo it.
+    assert "tell them in one line what you saved and how to undo it" in result
+    assert "If they asked to approve saves, ask first" in result
+    assert "wait for them to agree" not in result
     # Examples route by the collision-safe external id, and the widened call stays scoped.
     assert "bm_write(project=" in result
     assert 'directory="notes"' in result
@@ -125,7 +127,7 @@ async def test_recent_activity_populated_project_has_no_first_note_offer(
     """A populated project must not nag with the first-note offer."""
     result = await bm_recent(project=test_project.name, since="1w")  # pyright: ignore[reportGeneralTypeIssues]
 
-    assert "wait for them to agree" not in result
+    assert "first note" not in result
 
 
 @pytest.mark.asyncio
@@ -148,7 +150,7 @@ async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(
 
     assert isinstance(result, str)
     assert "No recent activity matched the requested type filter" in result
-    assert "wait for them to agree" not in result
+    assert "first note" not in result
     assert "bm_write(" not in result
 
 
@@ -166,7 +168,7 @@ async def test_recent_activity_out_of_range_page_has_no_first_note_offer(
     assert isinstance(result, str)
     assert "No recent activity was found on page 100" in result
     assert "Try page=99 or return to page=1" in result
-    assert "wait for them to agree" not in result
+    assert "first note" not in result
     assert "bm_write(" not in result
 
 
@@ -199,14 +201,16 @@ async def test_getting_started_prompt_is_registered():
 
 @pytest.mark.asyncio
 async def test_getting_started_offers_first_note_conditionally(client, test_project):
-    """The guide offers a first note but conditions it on the user being new, and keeps the
+    """The guide saves a first note but conditions it on the user being new, and keeps the
     'already have notes' path — it must not assert emptiness (a quiet base looks the same)."""
     result = await getting_started(project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 
     assert "Getting started with Basic Memory" in result
     assert "bm_write" in result
-    # Offer-not-act.
-    assert "Wait for them to say yes before writing" in result
+    # Save-and-tell.
+    assert "tell them in one" in result
+    assert "If they asked to approve saves, ask first" in result
+    assert "Wait for them to say yes" not in result
     # Both paths present — the model chooses; the prompt does not decide emptiness for it.
     assert "If they have no notes yet" in result
     assert "If they already have notes" in result
