@@ -471,8 +471,8 @@ def test_missing_local_project_is_created_once_then_reused(bm, monkeypatch, tmp_
     real_call = bm._BmMcpActor.call
 
     def spy(self, tool_name, arguments, timeout=30.0):
-        if tool_name == "bm_project":
-            commands.append(arguments.get("command"))
+        if tool_name in ("bm_project_list", "bm_project_create"):
+            commands.append(tool_name.removeprefix("bm_project_"))
         return real_call(self, tool_name, arguments, timeout=timeout)
 
     monkeypatch.setattr(bm._BmMcpActor, "call", spy)

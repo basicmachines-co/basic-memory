@@ -95,9 +95,9 @@ _HERMES_TO_BM: dict[str, str] = {
     "bm_context": "bm_context",
     "bm_delete": "bm_delete",
     "bm_move": "bm_move",
-    "bm_recent": "bm_project",
-    "bm_projects": "bm_project",
-    "bm_workspaces": "bm_project",
+    "bm_recent": "bm_recent",
+    "bm_projects": "bm_project_list",
+    "bm_workspaces": "bm_project_list",
 }
 
 # Discovery tools that operate across all projects/workspaces. They don't
@@ -516,14 +516,14 @@ def _config_path(hermes_home: str) -> Path:
     return Path(hermes_home) / "basic-memory.json"
 
 
-# `source` values in `bm_project list` rows that mean the project is registered
+# `source` values in `bm_project_list` rows that mean the project is registered
 # in this machine's local config. A local project sharing a permalink with cloud
 # projects is attached to one of them and listed as "local+cloud".
 _LOCALLY_REGISTERED_SOURCES = frozenset({"local", "local+cloud"})
 
 
 def _project_listed(projects: list[dict[str, Any]], project: str, *, local: bool) -> bool:
-    """True when `bm_project list` rows include `project`.
+    """True when `bm_project_list` rows include `project`.
 
     Accepts every spelling Basic Memory routes by: the name, the
     workspace-qualified name, or the external id. With `local`, only rows
@@ -1036,7 +1036,6 @@ def _translate_args(
         out["identifier"] = args["identifier"]
         out["destination"] = str(args["new_folder"]).rstrip("/") + "/"
     elif hermes_tool == "bm_recent":
-        out["command"] = "recent"
         if args.get("timeframe"):
             out["since"] = str(args["timeframe"])
         if args.get("limit") is not None:
@@ -1046,7 +1045,6 @@ def _translate_args(
     elif hermes_tool in _GLOBAL_TOOLS:
         # The agent needs to parse identifiers (UUIDs, workspace slugs) out
         # of the response, so request JSON regardless of BM's text default.
-        out["command"] = "list"
         out["output_format"] = "json"
     return bm_tool, out
 
@@ -1332,7 +1330,7 @@ class BasicMemoryProvider(MemoryProvider):
         """
         try:
             listing = json.loads(
-                actor.call("bm_project", {"command": "list", "output_format": "json"}, timeout=60.0)
+                actor.call("bm_project_list", {"output_format": "json"}, timeout=60.0)
             )
             if "error" in listing:
                 return self._project_check_failed(
@@ -1355,9 +1353,8 @@ class BasicMemoryProvider(MemoryProvider):
             os.makedirs(self._project_path, exist_ok=True)
             created = json.loads(
                 actor.call(
-                    "bm_project",
+                    "bm_project_create",
                     {
-                        "command": "create",
                         "name": self._project,
                         "path": self._project_path,
                         "output_format": "json",
@@ -2237,10 +2234,9 @@ def _build_slash_commands(
             return err
         try:
             raw = p._call(
-                "bm_project",
+                "bm_recent",
                 {
                     "project": p._project,
-                    "command": "recent",
                     "since": timeframe,
                     "page_size": 10,
                     "output_format": "json",
@@ -2325,8 +2321,8 @@ def _build_slash_commands(
             return err
         try:
             raw = p._call(
-                "bm_project",
-                {"command": "list", "output_format": "json"},
+                "bm_project_list",
+                {"output_format": "json"},
                 timeout=15.0,
             )
         except Exception as e:
@@ -2368,8 +2364,8 @@ def _build_slash_commands(
             )
         try:
             raw = p._call(
-                "bm_project",
-                {"command": "list", "output_format": "json"},
+                "bm_project_list",
+                {"output_format": "json"},
                 timeout=15.0,
             )
         except Exception as e:

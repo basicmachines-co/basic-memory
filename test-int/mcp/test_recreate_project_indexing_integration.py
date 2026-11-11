@@ -30,12 +30,11 @@ async def test_recreate_retained_project_indexes_existing_notes(
 
     async with Client(mcp_server) as client:
         initial_create = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": project_name,
                 "path": str(project_path),
                 "output_format": "json",
-                "command": "create",
             },
         )
         initial_payload = _json_content(initial_create)
@@ -59,12 +58,11 @@ async def test_recreate_retained_project_indexes_existing_notes(
         assert list(project_path.rglob("*.md")), "delete_notes=false removed retained notes"
 
         recreated = await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": project_name,
                 "path": str(project_path),
                 "output_format": "json",
-                "command": "create",
             },
         )
         recreated_payload = _json_content(recreated)

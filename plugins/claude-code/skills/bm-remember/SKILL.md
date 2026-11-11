@@ -8,7 +8,7 @@ argument-hint: <text to remember>
 
 Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words.
 
-When no project is pinned, discover projects with `bm_project(command="list")`
+When no project is pinned, discover projects with `bm_project_list()`
 and pass the selected project's external ID as `project` on note/search calls.
 With several addressable projects, these calls require an explicit scope even
 when a default is configured.

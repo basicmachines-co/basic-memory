@@ -142,8 +142,8 @@ def test_bm_projects_returns_routing_fields_verbatim(bm, fake_result):
     out = json.loads(p.handle_tool_call("bm_projects", {}))
 
     assert actor.call.call_args[0][:2] == (
-        "bm_project",
-        {"command": "list", "output_format": "json"},
+        "bm_project_list",
+        {"output_format": "json"},
     )
     assert out == payload
 

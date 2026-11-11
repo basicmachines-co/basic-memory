@@ -1,4 +1,4 @@
-"""bm_project and bm_schema: one name per group, commands delegate (#1832)."""
+"""Project tools (one per operation, #2030) and bm_schema."""
 
 import json
 from typing import Any
@@ -9,7 +9,15 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.server import lifespan, mcp, set_project_delete_visibility
-from basic_memory.mcp.tools import bm_project, bm_project_delete, bm_read, bm_schema, bm_write
+from basic_memory.mcp.tools import (
+    bm_project_create,
+    bm_project_delete,
+    bm_project_list,
+    bm_read,
+    bm_recent,
+    bm_schema,
+    bm_write,
+)
 from basic_memory.mcp.tools import projects as projects_module
 
 
@@ -26,17 +34,24 @@ async def _listed_names() -> set[str]:
 async def test_project_delete_is_hidden_by_default():
     names = await _listed_names()
 
-    assert "bm_project" in names
+    assert {"bm_project_list", "bm_project_create", "bm_recent"} <= names
     assert "bm_project_delete" not in names
 
 
 @pytest.mark.asyncio
-async def test_bm_project_is_never_destructive():
-    (tool,) = [tool for tool in await mcp.list_tools() if tool.name == "bm_project"]
+async def test_each_project_tool_requires_only_its_own_arguments():
+    """No `command` dispatch: the schema itself says what each operation needs."""
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    required = {
+        name: sorted(tools[name].parameters.get("required", []))
+        for name in ("bm_project_list", "bm_project_create", "bm_recent")
+    }
 
-    assert tool.parameters["properties"]["command"]["enum"] == ["list", "create", "recent"]
-    assert tool.annotations is not None
-    assert tool.annotations.destructive_hint is False
+    assert required == {
+        "bm_project_list": [],
+        "bm_project_create": ["name", "path"],
+        "bm_recent": ["project"],
+    }
 
 
 @pytest.mark.asyncio
@@ -60,7 +75,7 @@ async def test_config_flag_lists_project_delete_through_lifespan(config_manager)
 
 @pytest.mark.asyncio
 async def test_list(app, test_project):
-    result = await bm_project(command="list", output_format="json")
+    result = await bm_project_list(output_format="json")
 
     assert isinstance(result, dict)
     assert test_project.name in {project["name"] for project in result["projects"]}
@@ -70,9 +85,9 @@ async def test_list(app, test_project):
 async def test_create_and_delete(app, tmp_path_factory):
     project_root = tmp_path_factory.mktemp("bm-project-home")
 
-    created = await bm_project(command="create", name="Scratch", path=str(project_root))
+    created = await bm_project_create(name="Scratch", path=str(project_root))
     deleted = await bm_project_delete(name="Scratch")
-    await bm_project(command="create", name="Scratch Two", path=str(project_root))
+    await bm_project_create(name="Scratch Two", path=str(project_root))
     deleted_json = await bm_project_delete(name="Scratch Two", output_format="json")
 
     assert isinstance(created, str) and created.startswith("✓")
@@ -89,15 +104,14 @@ async def test_recent_maps_items_and_since(client, test_project):
         project=test_project.name,
     )
 
-    notes = await bm_project(
-        command="recent",
+    notes = await bm_recent(
         items=["note"],
         since="1d",
         output_format="json",
         project=test_project.name,
     )
-    observations = await bm_project(
-        command="recent", items=["observation"], output_format="json", project=test_project.name
+    observations = await bm_recent(
+        items=["observation"], output_format="json", project=test_project.name
     )
 
     assert isinstance(notes, dict) and isinstance(observations, dict)
@@ -111,33 +125,11 @@ async def test_recent_json_carries_paging(client, test_project):
     for name in ("one", "two"):
         await bm_write(identifier=f"notes/{name}.md", content="# x", project=test_project.name)
 
-    first = await bm_project(
-        command="recent", page_size=1, output_format="json", project=test_project.name
-    )
+    first = await bm_recent(page_size=1, output_format="json", project=test_project.name)
 
     assert isinstance(first, dict)
     assert (first["page"], first["page_size"], first["has_more"]) == (1, 1, True)
     assert len(first["results"]) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("output_format", ["text", "json"])
-async def test_recent_requires_project(output_format):
-    with pytest.raises(ToolError, match="recent needs `project`"):
-        await bm_project(command="recent", output_format=output_format)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        ({"command": "create", "name": "x"}, "create needs `name` and `path`"),
-        ({"command": "create", "path": "/tmp/x"}, "create needs `name` and `path`"),
-    ],
-)
-async def test_project_argument_refusals(arguments, message):
-    with pytest.raises(ToolError, match=f"^INVALID_ARGUMENTS: {message}"):
-        await bm_project(**arguments)
 
 
 @pytest.mark.asyncio
@@ -146,9 +138,9 @@ async def test_constrained_server_refuses_project_changes(monkeypatch):
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "only-this")
 
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project creation disabled"):
-        await bm_project(command="create", name="x", path="/tmp/x")
+        await bm_project_create(name="x", path="/tmp/x")
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project creation disabled.*'only-this'"):
-        await bm_project(command="create", name="x", path="/tmp/x", workspace="missing-team")
+        await bm_project_create(name="x", path="/tmp/x", workspace="missing-team")
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled"):
         await bm_project_delete(name="x")
     with pytest.raises(ToolError, match="^UNSUPPORTED: Project deletion disabled.*'only-this'"):
@@ -163,7 +155,7 @@ async def test_create_api_refusals_honor_the_output_format(app, test_project):
     nested = f"{test_project.path}/nested"
 
     with pytest.raises(ToolError, match='"error": "INVALID_ARGUMENTS"'):
-        await bm_project(command="create", name="Nested", path=nested, output_format="json")
+        await bm_project_create(name="Nested", path=nested, output_format="json")
 
 
 # --- Local projects ---
@@ -171,7 +163,7 @@ async def test_create_api_refusals_honor_the_output_format(app, test_project):
 
 @pytest.mark.asyncio
 async def test_list_text_names_local_projects(app, test_project):
-    result = await bm_project(command="list")
+    result = await bm_project_list()
 
     assert isinstance(result, str)
     assert result.startswith("Available projects:")
@@ -183,11 +175,11 @@ async def test_list_text_names_local_projects(app, test_project):
 async def test_constrained_server_lists_only_its_project(
     monkeypatch, app, test_project, tmp_path_factory
 ):
-    await bm_project(command="create", name="other", path=str(tmp_path_factory.mktemp("other")))
+    await bm_project_create(name="other", path=str(tmp_path_factory.mktemp("other")))
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
 
-    text = await bm_project(command="list")
-    payload = await bm_project(command="list", output_format="json")
+    text = await bm_project_list()
+    payload = await bm_project_list(output_format="json")
 
     assert text == (
         f"Project: {test_project.name}\n\n"
@@ -203,10 +195,8 @@ async def test_constrained_server_lists_only_its_project(
 async def test_create_can_set_the_default_project(app, test_project, tmp_path_factory):
     project_root = tmp_path_factory.mktemp("new-default-project-home")
 
-    created = await bm_project(
-        command="create", name="New Default", path=str(project_root), set_default=True
-    )
-    listed = await bm_project(command="list", output_format="json")
+    created = await bm_project_create(name="New Default", path=str(project_root), set_default=True)
+    listed = await bm_project_list(output_format="json")
 
     assert isinstance(created, str)
     assert "• Set as default project\n" in created
@@ -217,7 +207,7 @@ async def test_create_can_set_the_default_project(app, test_project, tmp_path_fa
 @pytest.mark.asyncio
 async def test_delete_keeps_note_files_by_default(app, tmp_path_factory):
     project_root = tmp_path_factory.mktemp("kept-project-home")
-    await bm_project(command="create", name="Kept", path=str(project_root))
+    await bm_project_create(name="Kept", path=str(project_root))
 
     deleted = await bm_project_delete(name="Kept")
 
@@ -233,7 +223,7 @@ async def test_delete_notes_removes_local_files(app, tmp_path_factory):
     """delete_notes=true reaches the API, which removes the directory before answering (#1034)."""
     project_root = tmp_path_factory.mktemp("delete-notes-project-home")
     (project_root / "note.md").write_text("# Note\n\ncontent\n")
-    await bm_project(command="create", name="Delete Notes Project", path=str(project_root))
+    await bm_project_create(name="Delete Notes Project", path=str(project_root))
 
     deleted = await bm_project_delete(name="Delete Notes Project", delete_notes=True)
 
@@ -247,13 +237,11 @@ async def test_delete_notes_removes_local_files(app, tmp_path_factory):
 async def test_create_repeated_for_the_same_directory_is_idempotent(app, tmp_path_factory):
     """The same directory, with a trailing slash and another name case, is not a new project."""
     project_root = tmp_path_factory.mktemp("same-path-project-home")
-    created = await bm_project(
-        command="create", name="Same Path", path=str(project_root), output_format="json"
+    created = await bm_project_create(
+        name="Same Path", path=str(project_root), output_format="json"
     )
-    retry = await bm_project(
-        command="create", name="same path", path=f"{project_root}/", output_format="json"
-    )
-    retry_text = await bm_project(command="create", name="Same Path", path=str(project_root))
+    retry = await bm_project_create(name="same path", path=f"{project_root}/", output_format="json")
+    retry_text = await bm_project_create(name="Same Path", path=str(project_root))
 
     assert isinstance(created, dict) and isinstance(retry, dict)
     assert (created["created"], created["already_exists"]) == (True, False)
@@ -277,9 +265,7 @@ async def test_create_retry_indexes_a_project_that_was_never_indexed(app, tmp_pa
             {"name": "Partial", "path": str(project_root), "set_default": False}
         )
 
-    retry = await bm_project(
-        command="create", name="Partial", path=str(project_root), output_format="json"
-    )
+    retry = await bm_project_create(name="Partial", path=str(project_root), output_format="json")
     note = await bm_read(identifier="kept.md", project="Partial")
 
     assert isinstance(retry, dict)
@@ -293,20 +279,18 @@ async def test_create_refuses_the_same_name_in_another_directory(app, tmp_path_f
     """A repeated name with another directory is refused, in either format (#1811)."""
     existing_root = tmp_path_factory.mktemp("mismatch-existing-home")
     requested_root = tmp_path_factory.mktemp("mismatch-requested-home")
-    await bm_project(command="create", name="Mismatch", path=str(existing_root))
+    await bm_project_create(name="Mismatch", path=str(existing_root))
 
     with pytest.raises(ToolError) as refused:
-        await bm_project(command="create", name="Mismatch", path=str(requested_root))
+        await bm_project_create(name="Mismatch", path=str(requested_root))
     with pytest.raises(ToolError) as refused_json:
-        await bm_project(
-            command="create", name="Mismatch", path=str(requested_root), output_format="json"
-        )
+        await bm_project_create(name="Mismatch", path=str(requested_root), output_format="json")
 
     # Project paths are serialized with '/', while requested paths may use '\\' on Windows.
     assert str(refused.value).replace("\\", "/") == (
         f"ALREADY_EXISTS: Project 'Mismatch' already exists at "
         f"{existing_root.as_posix()}, not {requested_root.as_posix()}.\n"
-        f"Try instead: another name, or bm_project(command='create', "
+        f"Try instead: another name, or bm_project_create("
         f"name='Mismatch', path='{existing_root.as_posix()}')"
     )
     payload = json.loads(str(refused_json.value))
@@ -323,13 +307,11 @@ async def test_workspace_without_cloud_credentials_fails_fast(app, test_project,
     project_root = tmp_path_factory.mktemp("ws-local-project-home")
 
     with pytest.raises(RuntimeError, match="cloud workspace was requested \\('team-paul'\\)"):
-        await bm_project(
-            command="create", name="WS Local", path=str(project_root), workspace="team-paul"
-        )
+        await bm_project_create(name="WS Local", path=str(project_root), workspace="team-paul")
     with pytest.raises(RuntimeError, match="cloud workspace was requested \\('team-paul'\\)"):
         await bm_project_delete(name=test_project.name, workspace="team-paul")
 
-    listed = await bm_project(command="list")
+    listed = await bm_project_list()
     assert isinstance(listed, str)
     assert "WS Local" not in listed and f"- {test_project.name}" in listed
 
@@ -343,8 +325,7 @@ async def test_explicit_local_routing_keeps_a_workspace_create_local(
     monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
     project_root = tmp_path_factory.mktemp("explicit-local-project-home")
 
-    created = await bm_project(
-        command="create",
+    created = await bm_project_create(
         name="Explicit Local",
         path=str(project_root),
         workspace="some-workspace",
@@ -499,7 +480,7 @@ async def test_recent_guidance_keeps_the_json_shape(client, test_project, monkey
         return "Index the project first."
 
     monkeypatch.setattr(projects_module, "recent_activity_page", not_indexed)
-    payload = await bm_project(command="recent", output_format="json", project=test_project.name)
+    payload = await bm_recent(output_format="json", project=test_project.name)
 
     assert payload == {"results": [], "guidance": "Index the project first."}
 

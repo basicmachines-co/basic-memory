@@ -15,7 +15,12 @@ from basic_memory.mcp.tools.manual import bm_man
 from basic_memory.mcp.tools.move import bm_move
 from basic_memory.mcp.tools.note_schemas import bm_schema
 
-from basic_memory.mcp.tools.projects import bm_project, bm_project_delete
+from basic_memory.mcp.tools.projects import (
+    bm_project_create,
+    bm_project_delete,
+    bm_project_list,
+    bm_recent,
+)
 from basic_memory.mcp.tools.ranked_search import bm_search
 from basic_memory.mcp.tools.read import bm_read
 from basic_memory.mcp.tools.write import bm_write
@@ -28,9 +33,11 @@ __all__ = [
     "bm_list",
     "bm_man",
     "bm_move",
-    "bm_project",
+    "bm_project_create",
     "bm_project_delete",
+    "bm_project_list",
     "bm_read",
+    "bm_recent",
     "bm_schema",
     "bm_search",
     "bm_write",

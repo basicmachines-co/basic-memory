@@ -13,7 +13,7 @@ will be written.
 
 Confirm Basic Memory is reachable before changing files:
 
-1. Prefer MCP: call `bm_project(command="list")`.
+1. Prefer MCP: call `bm_project_list()`.
 2. If MCP tools are not available, run `basic-memory --version` or `bm --version`.
 3. If neither works, stop and tell the user to install Basic Memory and connect the
    MCP server. The plugin bundles an `.mcp.json` that starts

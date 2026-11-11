@@ -1362,12 +1362,11 @@ async def test_move_note_cross_project_detection(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Create a test project to simulate cross-project scenario
         await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "test-project-b",
                 "path": "/tmp/test-project-b",
                 "set_default": False,
-                "command": "create",
             },
         )
 
@@ -1649,12 +1648,11 @@ async def test_move_note_destination_folder_boundary_rejected(mcp_server, app, t
 
     async with Client(mcp_server) as client:
         await client.call_tool(
-            "bm_project",
+            "bm_project_create",
             {
                 "name": "boundary-target-project",
                 "path": "/tmp/boundary-target-project",
                 "set_default": False,
-                "command": "create",
             },
         )
 
@@ -1823,8 +1821,8 @@ async def test_move_note_interior_projects_segment_still_succeeds(mcp_server, ap
 async def _create_sibling_project(client: Client[Any], name: str, project_path: Path) -> None:
     """Create a second project whose name the tests reuse as a local folder name."""
     await client.call_tool(
-        "bm_project",
-        {"name": name, "path": str(project_path), "set_default": False, "command": "create"},
+        "bm_project_create",
+        {"name": name, "path": str(project_path), "set_default": False},
     )
 
 

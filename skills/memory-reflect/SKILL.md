@@ -15,7 +15,7 @@ not during them.
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.
@@ -41,7 +41,7 @@ bm_list(path="reflections", sort="title_desc", page_size=1, project="<project>")
 
 # Everything changed since that date (json gives one row per note). With no
 # reflection yet, use since="7d".
-bm_project(command="recent", since="2026-10-13", items=["note"], output_format="json", page_size=50, project="<project>")
+bm_recent(since="2026-10-13", items=["note"], output_format="json", page_size=50, project="<project>")
 # Ask for page=2, 3, ... until has_more is false.
 
 # Read each changed note in full before judging it
@@ -52,7 +52,7 @@ Timeframes count whole days, so the window can overlap the last reflection.
 Skip notes it lists as `reviewed`, and notes you wrote in an earlier
 reflection, unless someone edited them since.
 
-`bm_project(command="recent", project="<project>")` looks back at most a year. If the last reflection is older
+`bm_recent(project="<project>")` looks back at most a year. If the last reflection is older
 than that, use `since="365d"` and record in this reflection that changes
 before that window were not reviewed.
 

@@ -1,4 +1,4 @@
-"""bm_project(command="recent"): what changed lately in one project.
+"""bm_recent(): what changed lately in one project.
 
 Tool calls run the real ASGI stack through the shared `client` fixture; argument
 validation runs through the MCP server, where the published schema applies. The text
@@ -17,7 +17,7 @@ from sqlalchemy import text as sa_text
 
 from basic_memory import db
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools import bm_project
+from basic_memory.mcp.tools import bm_recent
 from basic_memory.mcp.tools.recent_activity import _format_project_output, _truncate_at_word
 from basic_memory.schemas.memory import (
     ContextResult,
@@ -30,13 +30,13 @@ from basic_memory.schemas.memory import (
 
 
 async def recent_text(project: str, **arguments: Any) -> str:
-    result = await bm_project(command="recent", project=project, **arguments)
+    result = await bm_recent(project=project, **arguments)
     assert isinstance(result, str)
     return result
 
 
 async def recent_rows(project: str, **arguments: Any) -> list[dict[str, Any]]:
-    result = await bm_project(command="recent", project=project, output_format="json", **arguments)
+    result = await bm_recent(project=project, output_format="json", **arguments)
     assert isinstance(result, dict)
     return result["results"]
 
@@ -67,9 +67,7 @@ async def test_since_accepts_relative_and_natural_language(client, test_project,
 async def test_invalid_arguments_are_refused_through_mcp(client, test_project, arguments):
     async with Client(mcp) as mcp_client:
         with pytest.raises(ToolError):
-            await mcp_client.call_tool(
-                "bm_project", {"command": "recent", "project": test_project.name, **arguments}
-            )
+            await mcp_client.call_tool("bm_recent", {"project": test_project.name, **arguments})
 
 
 @pytest.mark.asyncio
@@ -137,7 +135,7 @@ async def test_never_indexed_project_says_so(client, test_project, session_maker
         )
 
     text = await recent_text(test_project.name)
-    payload = await bm_project(command="recent", project=test_project.name, output_format="json")
+    payload = await bm_recent(project=test_project.name, output_format="json")
 
     assert "never been indexed" in text
     assert "bm project index" in text
@@ -165,7 +163,7 @@ async def test_indexed_empty_project_offers_a_first_note(
     # Names collide across cloud workspaces; external ids do not.
     route = f'project="{test_project.external_id}"'
     assert f"bm_write({route}" in text
-    assert f'bm_project(command="recent", {route}' in text
+    assert f"bm_recent({route}" in text
     assert f"bm_search({route}" in text
 
 
@@ -228,7 +226,7 @@ def test_quiet_populated_project_has_hint_only():
     assert "If the user is just getting started" not in out
     assert "first note" not in out
     assert "bm_write(" not in out
-    assert 'bm_project(command="recent", project="ext-123", since="30d")' in out
+    assert 'bm_recent(project="ext-123", since="30d")' in out
     assert 'bm_search(project="ext-123", query="...")' in out
 
 

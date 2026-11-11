@@ -523,8 +523,8 @@ def test_translate_move(bm):
 
 def test_translate_recent_defaults(bm):
     tool, args = bm._translate_args("bm_recent", {}, "proj")
-    assert tool == "bm_project"
-    assert args == {"project": "proj", "command": "recent"}
+    assert tool == "bm_recent"
+    assert args == {"project": "proj"}
 
 
 def test_translate_recent_full(bm):
@@ -533,10 +533,9 @@ def test_translate_recent_full(bm):
         {"timeframe": "2 weeks", "limit": 25, "type": "entity"},
         "proj",
     )
-    assert tool == "bm_project"
+    assert tool == "bm_recent"
     assert args == {
         "project": "proj",
-        "command": "recent",
         "since": "2 weeks",
         "page_size": 25,
         "items": ["note"],
@@ -629,18 +628,18 @@ def test_translate_bm_projects_no_routing(bm):
     (would make BM scope the listing) and MUST request JSON so the agent
     can parse identifiers out of the response."""
     tool, out = bm._translate_args("bm_projects", {}, "default-proj")
-    assert tool == "bm_project"
+    assert tool == "bm_project_list"
     assert "project_id" not in out
     assert "project_id" not in out
-    assert out == {"command": "list", "output_format": "json"}
+    assert out == {"output_format": "json"}
 
 
 def test_translate_bm_workspaces_no_routing(bm):
     tool, out = bm._translate_args("bm_workspaces", {}, "default-proj")
-    assert tool == "bm_project"
+    assert tool == "bm_project_list"
     assert "project_id" not in out
     assert "project_id" not in out
-    assert out == {"command": "list", "output_format": "json"}
+    assert out == {"output_format": "json"}
 
 
 def test_translate_global_tools_ignore_project_kwargs(bm):

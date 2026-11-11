@@ -177,11 +177,11 @@ def make_scripted_actor(
     return actor
 
 
-# ---- bm_project answers, in bm 1.0's JSON shape ----
+# ---- project tool answers, in bm's JSON shape ----
 
 
 def project_listing(*names: str, sources: dict[str, str] | None = None) -> str:
-    """What `bm_project(command="list", output_format="json")` returns for `names`.
+    """What `bm_project_list(output_format="json")` returns for `names`.
 
     Every project is local unless `sources` maps its name to "cloud" or
     "local+cloud".
@@ -205,7 +205,7 @@ def project_listing(*names: str, sources: dict[str, str] | None = None) -> str:
 
 
 class ProjectActor:
-    """Stand-in for _BmMcpActor that answers bm_project like bm 1.0.
+    """Stand-in for _BmMcpActor that answers the project tools like bm does.
 
     `listing` and `create` are the raw JSON strings the actor returns;
     `raises` makes every call raise instead.
@@ -232,7 +232,7 @@ class ProjectActor:
         return self.alive
 
     def list_tools(self):
-        return [{"name": "bm_project", "description": ""}]
+        return [{"name": "bm_project_list", "description": ""}]
 
     def shutdown(self, timeout: float = 5.0) -> None:
         self.shutdowns += 1
@@ -244,11 +244,16 @@ class ProjectActor:
         self.calls.append((tool_name, dict(arguments)))
         if self.raises is not None:
             raise self.raises
-        if tool_name == "bm_project" and arguments.get("command") == "list":
+        if tool_name == "bm_project_list":
             return self.listing
-        if tool_name == "bm_project" and arguments.get("command") == "create":
+        if tool_name == "bm_project_create":
             return self.create
         return json.dumps({"ok": True})
 
     def commands(self) -> list[str]:
-        return [args.get("command") for tool, args in self.calls if tool == "bm_project"]
+        """The project operations called, in order: "list", "create"."""
+        return [
+            tool.removeprefix("bm_project_")
+            for tool, _args in self.calls
+            if tool in ("bm_project_list", "bm_project_create")
+        ]

@@ -9,7 +9,7 @@ from fastmcp.tools import ToolResult
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.tool_params import OutputFormat
 
-DISCOVER_PROJECTS = "bm_project(command='list') to discover projects"
+DISCOVER_PROJECTS = "bm_project_list() to discover projects"
 
 
 class MissingProjectMiddleware(Middleware):
@@ -38,7 +38,7 @@ class MissingProjectMiddleware(Middleware):
         tool = await context.fastmcp_context.fastmcp.get_tool(name)
         # Trigger: an unknown tool, or one whose schema does not require project.
         # Why: FastMCP reports unknown tools itself, and optional project scope
-        #      (bm_search, bm_project) is the tool's own decision.
+        #      (bm_search, bm_recent) is the tool's own decision.
         # Outcome: the call proceeds untouched.
         if tool is None or "project" not in _required(tool.parameters):
             return await call_next(context)

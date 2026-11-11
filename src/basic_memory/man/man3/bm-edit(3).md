@@ -46,7 +46,7 @@ missing note is an error; create notes with bm_write.
 
 - **identifier** (string, required) — The note or file: a file path ('notes/plan.md'), permalink, memory:// URL, exact title, external id, or '<project>/path'.
 - **command** (required) — The edit.
-- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project(command='list'). Paths are relative to this project; a qualified path must agree with it.
+- **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **content** (string | null, optional, default: None) — The text to add or the replacement. Not used by set_metadata.
 - **section** (string | null, optional, default: None) — The heading for section commands: "Decisions", "Auth/Decisions" for one under "Auth", or "Decisions[1]" for the second of two.
 - **find_text** (string | null, optional, default: None) — For find_replace: the exact, case-sensitive text to replace.

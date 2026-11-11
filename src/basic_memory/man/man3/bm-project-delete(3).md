@@ -34,7 +34,7 @@ deleted.
 
 ## PARAMETERS
 
-- **name** (string, required) — The project to delete, as bm_project(command='list') names it.
+- **name** (string, required) — The project to delete, as bm_project_list names it.
 - **delete_notes** (boolean, optional, default: False) — Also delete the project's note files.
 - **workspace** (string | null, optional, default: None) — In Cloud: the workspace slug, name or id that holds the project.
 - **output_format** (optional, default: "text")
@@ -51,4 +51,4 @@ bm_project_delete(name="scratch")
 
 ## SEE ALSO
 
-- see_also [[bm-project(3)]]
+- see_also [[bm-project-list(3)]]

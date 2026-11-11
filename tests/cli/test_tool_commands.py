@@ -23,7 +23,9 @@ COMMAND_TOOLS = {
     "find": tools.bm_find,
     "search": tools.bm_search,
     "context": tools.bm_context,
-    "project": tools.bm_project,
+    "project-list": tools.bm_project_list,
+    "project-create": tools.bm_project_create,
+    "recent": tools.bm_recent,
     "schema": tools.bm_schema,
 }
 

@@ -16,7 +16,7 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.projects import bm_project
+from basic_memory.mcp.tools.projects import bm_project_list, bm_recent
 
 
 type ProjectMetadata = dict[str, object]
@@ -121,8 +121,8 @@ def _selection_guide(
         next_step = dedent(
             """
             No Basic Memory projects are available yet. Ask the user to create or connect a
-            project first. Then call `bm_project(command="list")` and continue with
-            `bm_project(command="recent", project="...", since="30d")` using the selected project's
+            project first. Then call `bm_project_list()` and continue with
+            `bm_recent(project="...", since="30d")` using the selected project's
             returned `external_id`.
 
             Do not read, search, or write notes until a concrete project has been selected.
@@ -143,11 +143,11 @@ def _selection_guide(
             argument_name, argument_value = route_argument
             options.append(f'- `{name}` (`{argument_name}="{argument_value}"`)')
 
-    project_options = "\n".join(options) if options else '- Call `bm_project(command="list")`'
+    project_options = "\n".join(options) if options else "- Call `bm_project_list()`"
     next_step = dedent(
         """
         Ask the user which project to use. Once they choose, continue with
-        `bm_project(command="recent", ...)` using the route argument listed for that choice, and keep that
+        `bm_recent(...)` using the route argument listed for that choice, and keep that
         same argument in later note calls. Do not read, search, or write notes until one concrete
         project has been selected.
         """
@@ -182,7 +182,7 @@ async def getting_started(
     """
     logger.info("Rendering getting_started prompt")
 
-    project_listing = await bm_project(command="list", output_format="json")
+    project_listing = await bm_project_list(output_format="json")
     if not isinstance(project_listing, dict):
         raise TypeError("Structured project listing returned text")
 
@@ -211,7 +211,7 @@ async def getting_started(
     # timeframe-limited, so an established base that is simply quiet looks identical to a
     # brand-new one. Let the model judge from the activity output (which already carries its own
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
-    activity = await bm_project(command="recent", since="30d", project=argument_value)
+    activity = await bm_recent(since="30d", project=argument_value)
     activity_text = str(activity).strip()
 
     # Every example call keeps the exact route the prompt inspected. Cloud-only rows use their

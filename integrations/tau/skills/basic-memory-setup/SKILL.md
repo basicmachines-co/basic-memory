@@ -13,7 +13,7 @@ system. Do not create projects, reorganize notes, change credentials, or install
 packages as incidental setup work.
 
 Tau preserves the server's `bm_*` tool names, including `bm_read`, `bm_write`,
-`bm_search`, and `bm_project`. Other advertised tools receive a `bm_` prefix.
+`bm_search`, and `bm_recent`. Other advertised tools receive a `bm_` prefix.
 Use the names and argument schemas advertised by the active Tau runtime.
 
 ## 1. Inspect before changing anything
@@ -52,7 +52,7 @@ Offer **tools only**, **recall only**, or **full continuity**. Recommend full
 continuity for ordinary coding only after explaining its costs and disclosure.
 
 For recall or continuity, list existing projects using the advertised
-`bm_project(command="list")` tool when available, or `bm project list`. Check current
+`bm_project_list()` tool when available, or `bm project list`. Check current
 CLI help or tool schemas for routing arguments. Identify local/cloud/team routing
 for the exact destination; if routing cannot be established, stop and ask.
 Do not dump Basic Memory's config or authentication material. Ask the user to

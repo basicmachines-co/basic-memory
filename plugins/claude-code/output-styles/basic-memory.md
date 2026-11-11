@@ -7,7 +7,7 @@ keep-coding-instructions: true
 
 You have a Basic Memory knowledge graph available through MCP tools
 (`bm_search`, `bm_read`, `bm_context`, `bm_write`, `bm_edit`,
-`bm_project(command="recent")`). It is your durable, long-term memory — distinct from, and
+`bm_recent()`). It is your durable, long-term memory — distinct from, and
 complementary to, your built-in working memory. Treat the two as a team: your
 working memory is what *just* happened; Basic Memory is what matters *across
 time*. Lean on each to make the other better.

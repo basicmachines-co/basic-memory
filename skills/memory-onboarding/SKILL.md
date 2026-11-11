@@ -11,7 +11,7 @@ This skill works with any LLM or assistant platform. Where platform-specific set
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`.
+If the project is unknown, discover it with `bm_project_list()`.
 Pass a nonempty `project` on every note, folder, context and schema call, even
 with one project or a qualified `memory://` URL. Use the chosen project's name,
 `workspace/project`, or external ID; `<project>` below is a placeholder for it.
@@ -58,7 +58,7 @@ Do not skip the approval gate between Phase 2 and Phase 3. Building the wrong st
 Before asking the user anything:
 
 1. Confirm Basic Memory tools are available (`bm_write`, `bm_read`, `bm_search`, `bm_list`, and ideally `bm_schema(command="infer", project="<project>")`/`bm_schema(command="validate", project="<project>")`). If they aren't, stop and help the user connect Basic Memory first.
-2. List their projects (`bm_project(command="list")`). Ask which project to build in, or whether to create a fresh one. **Every subsequent call must pass this project explicitly** — mixed-project writes are one of the most common and painful setup errors.
+2. List their projects (`bm_project_list()`). Ask which project to build in, or whether to create a fresh one. **Every subsequent call must pass this project explicitly** — mixed-project writes are one of the most common and painful setup errors.
 3. Check for existing content (`bm_find(path="/", depth=2, project="<project>")`). Three situations:
    - **Empty** — greenfield, proceed normally.
    - **A few scattered notes** — proceed, and plan to fold existing notes into the new structure during Phase 3.

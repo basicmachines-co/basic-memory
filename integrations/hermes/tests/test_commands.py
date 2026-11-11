@@ -590,7 +590,7 @@ def test_bm_recent_default_timeframe(bm):
 def test_bm_recent_custom_timeframe(bm):
     session = FakeSession()
     session.stub(
-        "bm_project",
+        "bm_recent",
         lambda args: {"results": [{"title": "Recent thing", "permalink": "x/y"}]},
     )
     provider, actor = _ready_provider(bm, session)
@@ -670,7 +670,7 @@ def test_bm_remember_uses_configured_folder(bm):
 def test_bm_project_lists_and_marks_active(bm):
     session = FakeSession()
     session.stub(
-        "bm_project",
+        "bm_project_list",
         lambda args: {
             "projects": [
                 {"name": "other-proj"},
@@ -707,7 +707,7 @@ def test_bm_workspace_local_mode_message(bm):
 def test_bm_workspace_cloud_mode_lists(bm):
     session = FakeSession()
     session.stub(
-        "bm_project",
+        "bm_project_list",
         lambda args: {
             "projects": [
                 {
@@ -740,7 +740,7 @@ def test_bm_workspace_cloud_mode_lists(bm):
 def test_bm_workspace_lazily_initializes_before_mode_check(bm, monkeypatch):
     session = FakeSession()
     session.stub(
-        "bm_project",
+        "bm_project_list",
         lambda args: {
             "projects": [
                 {
@@ -768,7 +768,7 @@ def test_bm_workspace_lazily_initializes_before_mode_check(bm, monkeypatch):
         assert "Personal" in out
         assert "no workspaces to list" not in out
         assert calls
-        assert session.calls[-1][0] == "bm_project"
+        assert session.calls[-1][0] == "bm_project_list"
     finally:
         if provider._actor is not None:
             provider._actor.shutdown()

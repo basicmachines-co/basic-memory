@@ -279,7 +279,7 @@ async def bm_search(
         raise refusal(
             "INVALID_ARGUMENTS",
             "Search needs an explicit scope: `project`, `projects`, or `all_projects=true`.",
-            try_instead="bm_project(command='list') to discover projects",
+            try_instead="bm_project_list() to discover projects",
             output_format=output_format,
         )
     # max_matches bounds a line scan; ranked results have no matching lines to bound.

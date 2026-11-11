@@ -74,7 +74,9 @@ const REQUIRED_TOOLS = [
   "bm_write",
   "bm_edit",
   "bm_context",
-  "bm_project",
+  "bm_project_list",
+  "bm_project_create",
+  "bm_recent",
   "bm_delete",
   "bm_move",
   "bm_schema",
@@ -381,7 +383,7 @@ function parseProjectList(payload: unknown): ProjectListResult[] {
   if (isRecord(payload) && Array.isArray(payload.projects)) {
     return payload.projects as ProjectListResult[]
   }
-  throw new Error("invalid bm_project response")
+  throw new Error("invalid bm_project_list response")
 }
 
 export class BmClient {
@@ -508,8 +510,7 @@ export class BmClient {
     // local create against the local project, so only local_path qualifies.
     const name = this.project.toLowerCase()
     const localPath = parseProjectList(
-      await this.callStructured("bm_project", {
-        command: "list",
+      await this.callStructured("bm_project_list", {
         output_format: "json",
       }),
     ).find(
@@ -819,8 +820,7 @@ export class BmClient {
   }
 
   private async createProject(projectPath: string): Promise<void> {
-    const payload = await this.callStructured("bm_project", {
-      command: "create",
+    const payload = await this.callStructured("bm_project_create", {
       name: this.project,
       path: projectPath,
       set_default: true,
@@ -828,7 +828,7 @@ export class BmClient {
     })
 
     if (!isRecord(payload)) {
-      throw new Error("invalid bm_project response")
+      throw new Error("invalid bm_project_create response")
     }
   }
 
@@ -852,8 +852,7 @@ export class BmClient {
     // it, the listing is how the user finds where it is actually stored.
     await this.waitForStartup()
     const projects = parseProjectList(
-      await this.callStructured("bm_project", {
-        command: "list",
+      await this.callStructured("bm_project_list", {
         output_format: "json",
       }),
     )
@@ -1040,19 +1039,18 @@ export class BmClient {
     project?: string,
   ): Promise<RecentResult[]> {
     const args: Record<string, unknown> = {
-      command: "recent",
       since: timeframe,
       output_format: "json",
       project: this.routedProject(project),
     }
 
-    const payload = await this.callTool("bm_project", args)
+    const payload = await this.callTool("bm_recent", args)
 
     if (isRecord(payload) && Array.isArray(payload.results)) {
       return payload.results as RecentResult[]
     }
 
-    throw new Error("invalid bm_project response")
+    throw new Error("invalid bm_recent response")
   }
 
   async editNote(

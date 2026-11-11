@@ -1,4 +1,4 @@
-"""Recent activity for bm_project(command="recent").
+"""Recent activity for bm_recent().
 
 One project's recently changed notes, observations and relations, rendered as text
 or returned as rows with paging for JSON callers.
@@ -185,7 +185,7 @@ def _format_project_output(
             lead = "Widen"
         lines.append(
             f"{lead} the window with "
-            f'bm_project(command="recent", {route}, since="30d") or find a topic '
+            f'bm_recent({route}, since="30d") or find a topic '
             f'with bm_search({route}, query="...").'
         )
         return "\n".join(lines)

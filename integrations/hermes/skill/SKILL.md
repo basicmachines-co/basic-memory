@@ -29,7 +29,7 @@ The CLI is fine when you genuinely need a feature these wrappers don't expose (r
 
 These are Hermes-native wrappers, with their own argument schemas. For example,
 `bm_recent`, `bm_projects`, `bm_workspaces`, `limit`, `folder`, and `operation`
-below belong to Hermes. Direct Basic Memory 1.0 MCP tools use `bm_project`,
+below belong to Hermes. Direct Basic Memory MCP tools use `bm_project_list`,
 `page_size`, `directory`/`identifier`, and `command` instead. Follow the active
 Hermes tool schema when adapting examples from the shared memory skills.
 

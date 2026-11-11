@@ -197,9 +197,7 @@ async def test_recall_repository_identity_and_shared_sources(tmp_path: Path) -> 
     inserted = api.append_message.call_args.args[0]
     assert "From private" in inserted and "From team/shared" in inserted
     assert "Read-only sources" in inserted
-    assert not any(
-        call.args[0] == "bm_project" for call in lifecycle.connection.call.call_args_list
-    )
+    assert not any(call.args[0] == "bm_recent" for call in lifecycle.connection.call.call_args_list)
     assert lifecycle.connection.call.call_args.args[1]["note_types"] == ["task", "decision"]
     api.append_entry.assert_not_called()
 

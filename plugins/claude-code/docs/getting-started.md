@@ -13,7 +13,7 @@ A ~5-minute walkthrough from zero to a working memory bridge. New to the idea? R
   (`--prerelease=allow` is required: Basic Memory depends on a FastMCP pre-release,
   and without the flag uv silently installs an older release.)
   Then add it to Claude Code (`claude mcp add` or your MCP config). Confirm it's
-  reachable — Claude should be able to call `bm_project(command="list")`.
+  reachable — Claude should be able to call `bm_project_list()`.
 
 You don't need a Basic Memory Cloud account. Everything works local-first; cloud and
 teams are optional (see step 5).
@@ -93,7 +93,7 @@ and publish back deliberately.
 Re-run `/basic-memory:bm-setup` (or edit `.claude/settings.json`). Because project names
 repeat across workspaces, team projects use **workspace-qualified names**
 (`my-team/notes`) or `external_id` UUIDs — setup finds these for you via
-`bm_project(command="list")`.
+`bm_project_list()`.
 
 ```json
 {

@@ -8,7 +8,7 @@ argument-hint: (no arguments — runs an interactive interview)
 
 Run a short, adaptive interview (~2-3 minutes) and then write the configuration.
 Be conversational and **skip questions whose answer is already obvious** from
-context (e.g. if `bm_project(command="list")` shows a single local project and no cloud
+context (e.g. if `bm_project_list()` shows a single local project and no cloud
 workspaces, don't ask about cloud/teams — just confirm). Suggest a sensible default
 for every question so the user can accept with one word. Don't do any writes until
 the interview is done and you've confirmed the plan.
@@ -16,7 +16,7 @@ the interview is done and you've confirmed the plan.
 ## Prerequisite check
 
 First confirm the **Basic Memory MCP server is connected** — call
-`bm_project(command="list")`. If that tool isn't available or errors, Basic Memory isn't
+`bm_project_list()`. If that tool isn't available or errors, Basic Memory isn't
 wired into Claude Code yet. **Stop and walk the user through it first** (everything
 below depends on it):
 
@@ -27,7 +27,7 @@ below depends on it):
 2. Connect it: `claude mcp add basic-memory -- uvx --prerelease=allow basic-memory mcp`,
    then restart the session so the MCP server loads.
 
-Re-check `bm_project(command="list")` before continuing — don't start the interview until
+Re-check `bm_project_list()` before continuing — don't start the interview until
 it succeeds.
 
 ## Interview
@@ -53,14 +53,14 @@ Ask only what you can't infer. Cover:
 
 2. **Project mapping.** "Do you already have a Basic Memory project for this, or
    should I create one?"
-   - Existing → show `bm_project(command="list")` and let them pick. That name becomes
+   - Existing → show `bm_project_list()` and let them pick. That name becomes
      `primaryProject`.
    - New → propose a name (default: this repo's directory name) and create it with
-     `bm_project(command="create", name="<name>", path="<path>")`.
+     `bm_project_create(name="<name>", path="<path>")`.
      - *Local project* (default): path defaults to `~/basic-memory/<name>/`; any
        connected Basic Memory server can create it.
      - *Cloud project* (the user wants capture in a cloud workspace): pass the
-       `workspace` selector (a slug from `bm_project(command="list")`) and a cloud-style path
+       `workspace` selector (a slug from `bm_project_list()`) and a cloud-style path
        like `/<name>`, and create it with a **cloud-connected** MCP server. A purely
        local server (`uvx --prerelease=allow basic-memory mcp`) treats the path as a local directory and
        fails to create it (e.g. read-only `/`). When both a local and a cloud server
@@ -69,9 +69,9 @@ Ask only what you can't infer. Cover:
        (collision-proof across workspaces).
 
 3. **Cloud / teams** (skip if there are no extra workspaces). Run
-   `bm_project(command="list")`. If the user belongs to more than one workspace, they likely
+   `bm_project_list()`. If the user belongs to more than one workspace, they likely
    have a **team** workspace alongside their personal/default one. Use
-   `bm_project(command="list")` to see the projects in each (note: project names collide
+   `bm_project_list()` to see the projects in each (note: project names collide
    across workspaces, so always use the **workspace-qualified name**, e.g.
    `my-team-2/notes`, or the `external_id` UUID — never a bare name).
    - **Read from the team** (recommended): ask which team projects to pull into the

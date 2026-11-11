@@ -48,7 +48,7 @@ class TrackingActor:
             raise RuntimeError("shutdown boom")
 
     def call(self, tool_name, arguments, timeout: float = 30.0) -> str:
-        if tool_name == "bm_project" and arguments.get("command") == "list":
+        if tool_name == "bm_project_list":
             return project_listing("test-proj")
         return json.dumps({"ok": True})
 

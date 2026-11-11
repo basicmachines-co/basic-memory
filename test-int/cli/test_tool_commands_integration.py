@@ -80,12 +80,12 @@ def test_missing_default_project_asks_for_one(app, test_project, config_manager)
     assert "pass --project" in result.stderr
 
 
-def test_project_recent_uses_the_default_project(app, test_project, config_manager) -> None:
+def test_recent_uses_the_default_project(app, test_project, config_manager) -> None:
     bm_tool(
         "write", "--identifier", "recent.md", "--content", "fresh", "--project", test_project.name
     )
 
-    recent = CliRunner().invoke(cli_app, ["tool", "project", "recent", "--json"])
+    recent = CliRunner().invoke(cli_app, ["tool", "recent", "--json"])
 
     assert recent.exit_code == 0, recent.output
     assert "recent.md" in recent.stdout
