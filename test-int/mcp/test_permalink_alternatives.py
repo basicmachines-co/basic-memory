@@ -68,8 +68,9 @@ async def test_mcp_permalink_union_pages(
                 },
             )
             payload = result.data
-            assert payload["total"] == len(expected)
-            assert payload["total_is_exact"] is True
+            # total counts results through this page, a lower bound (#2063).
+            assert payload["total"] == (page if page <= len(expected) else 0)
+            assert payload["total_is_exact"] is False
             assert payload["has_more"] is (page < len(expected))
             assert len(payload["results"]) == (1 if page <= len(expected) else 0)
             assert all(row["project_id"] == test_project.id for row in payload["results"])
@@ -114,7 +115,7 @@ async def test_single_segment_permalink_is_exact(
     payload = response.data
     assert {row["permalink"] for row in payload["results"]} == expected
     assert len(payload["results"]) == payload["total"] == 2
-    assert payload["total_is_exact"] is True
+    assert payload["total_is_exact"] is False
     assert payload["has_more"] is False
 
 
@@ -142,8 +143,9 @@ async def test_api_permalink_alternatives_and_scalar_controls(
             )
             assert response.status_code == 200, response.text
             payload = response.json()
-            assert payload["total"] == len(expected)
-            assert payload["total_is_exact"] is True
+            # total counts results through this page, a lower bound (#2063).
+            assert payload["total"] == (page if page <= len(expected) else 0)
+            assert payload["total_is_exact"] is False
             assert payload["has_more"] is (page < len(expected))
             assert len(payload["results"]) == (1 if page <= len(expected) else 0)
             assert all(row["project_id"] == test_project.id for row in payload["results"])
@@ -179,7 +181,7 @@ async def test_api_mixed_pattern_alternatives_with_filters(
     payload = response.json()
     assert {row["permalink"] for row in payload["results"]} == expected
     assert payload["total"] == len(expected)
-    assert payload["total_is_exact"] is True
+    assert payload["total_is_exact"] is False
     assert payload["has_more"] is False
     assert all(row["project_id"] == test_project.id for row in payload["results"])
     if ranking:
