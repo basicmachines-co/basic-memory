@@ -134,7 +134,11 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 TOOLS_WITHOUT_PAGES: set[str] = set()
 PAGES_WITHOUT_LOCAL_TOOLS = {
     # Cloud registers these; core ships their pages so the manual is one corpus.
-    "bm_agent",
+    "bm_agent_get",
+    "bm_agent_list",
+    "bm_agent_mark",
+    "bm_agent_run",
+    "bm_agent_runs",
     "bm_log",
     "bm_open",
     "bm_review",
@@ -427,7 +431,7 @@ def test_pages_carry_no_release_pending_claims(stale: str) -> None:
 
 def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
     index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
-    hosted_only = find_page(PageRef("bm-agent", 3))
+    hosted_only = find_page(PageRef("bm-agent-list", 3))
     local = find_page(PageRef("bm-search", 3))
     assert hosted_only is not None and local is not None
 

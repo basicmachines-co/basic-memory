@@ -53,10 +53,11 @@ bm_man(page="bm_search")
 bm_man(query="frontmatter filters")
 # → Manual pages for 'frontmatter filters':
 #   - apropos(1) — search the Basic Memory manual
-#   - bm-agent(3) — run Basic Memory agents, follow their runs, and review what they changed (hosted server only)
+#   - find(1) — recursively list files, or query notes by frontmatter metadata
 #   - bm-find(3) — find files by name or notes by frontmatter, recursively
 #   - bm-man(3) — read the Basic Memory manual
 #   - bm-search(3) — search a project's notes, ranked by relevance
+#   - tools-migration(7) — map pre-1.0 and 1.0 MCP tools and bm tool commands to their replacements
 
 bm_man(page="nope(3)")
 # → error: NOT_FOUND: No manual page 'nope(3)'.

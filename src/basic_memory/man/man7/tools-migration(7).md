@@ -24,7 +24,7 @@ Basic Memory Cloud still registers them. Section 3 documents each tool.
 `recent`, `schema-validate`, `schema-infer` and `schema-diff`, with flags named after the
 tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
 `bm man`, [[bm-project-delete(3)]] is `bm project remove`, and the Cloud-only tools
-([[bm-agent(3)]], the ChatGPT `search` and `fetch` adapters) have no `bm tool` command.
+(the agent tools in [[agents(7)]], the ChatGPT `search` and `fetch` adapters) have no `bm tool` command.
 
 ## MCP TOOLS
 
