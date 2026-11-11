@@ -14,37 +14,22 @@ Say "note", not "entity".
 
 ## Project scope
 
-If the project is unknown, discover it with `bm_project(command="list")`. The
+If the project is unknown, discover it with `bm_project_list()`. The
 list marks the default project. Use it unless the user names another. Pass the
 same `project` on every note, search, and folder call.
 
-## Save mode
+## Saving
 
-New users save by default. Connecting a memory service already says they want
-notes saved, so don't ask before the first save.
+Save by default. Connecting a memory service already says the user wants notes
+saved, so don't ask before the first save. Tell the user in one line what you
+saved and how to undo it.
 
-Before the first save, look for a note titled `Basic Memory preferences` in the
-default project (`bm_search`, then `bm_read`). Its frontmatter field
-`save_mode` decides how you save:
+If the user says "ask me first", say what you would save and where, and save
+only on yes, for the rest of this conversation. To make that hold in every
+chat, suggest they add a line like this to their assistant's custom
+instructions:
 
-- `auto`, or no preferences note: save at natural points and say so in one line.
-- `ask`: say what you would save and where, and save only on yes.
-
-If the user says "ask me first", write or update the preferences note with
-`save_mode: ask`. If they say "just save things", set `save_mode: auto`.
-Confirm the change in one line and follow it from then on.
-
-```
-bm_write(
-    project="<default project>",
-    title="Basic Memory preferences",
-    metadata={"save_mode": "ask"},
-    content="How I want my assistant to use Basic Memory.\n\n## Observations\n- [preference] Ask before saving notes",
-)
-```
-
-Update an existing preferences note with `bm_edit` after reading it. Don't
-create a second one.
+> Ask me before saving anything to Basic Memory.
 
 ## 1. Save one thing
 

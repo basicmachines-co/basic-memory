@@ -463,10 +463,10 @@ def test_combined_skill_routes_new_users_to_memory_start(
     assert "getting started" in rows["references/memory-start.md"]
     assert "getting started" not in rows["references/memory-onboarding.md"]
     assert "Ask before saving" not in router
-    assert "save mode" in router
+    assert "Save by default" in router
 
     start = (skill_root / "references/memory-start.md").read_text(encoding="utf-8")
-    assert "save_mode" in start
+    assert "ask me first" in start
 
 
 def test_combined_openai_yaml(repo_dist: Path) -> None:

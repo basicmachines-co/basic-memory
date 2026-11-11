@@ -18,9 +18,8 @@ conversation. What one session learns, the next one can find.
   `bm_context` with a `memory://` URL to pull in a note with its related notes.
 - **Write connected notes.** Give each note observations (`- [decision] ...`) and
   relations (`- relates_to [[Other Note]]`) so it joins the graph.
-- **Follow the user's save mode.** A `Basic Memory preferences` note in the default
-  project may set `save_mode: ask` or `save_mode: auto`. With no preference, save
-  what's worth keeping and say what you saved, with how to undo it.
+- **Save by default.** Save useful outcomes and tell the user in one line what you
+  saved and how to undo it. Ask first only if the user or their instructions say so.
 - **Don't overwrite by accident.** Pass `overwrite: false` to `bm_write` unless you
   are deliberately replacing a note you have read in full.
 - **Name the project.** Discover projects with `bm_project_list()` when

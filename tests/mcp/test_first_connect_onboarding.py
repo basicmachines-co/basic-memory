@@ -33,8 +33,10 @@ def test_server_sets_first_connect_instructions():
     assert "bm_write" in instructions
     assert "https://docs.basicmemory.com/llms.txt" in instructions
     assert "/raw/...md" in instructions
-    # Offer-not-act: the model must be told not to write unprompted.
-    assert "unprompted" in instructions
+    # Save-and-tell: save by default, say what was saved and how to undo, honor "ask first".
+    assert "tell the user in one line what you saved and how to undo it" in instructions
+    assert "If the user asks you to ask first, ask before every save." in instructions
+    assert "unprompted" not in instructions
     # find refuses an unqualified root path with several projects, like grep and tail (#1634).
     assert "bm_find" in instructions
 

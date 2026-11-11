@@ -220,19 +220,22 @@ async def lifespan(app: FastMCP):
                         logger.debug("Skipping DB shutdown - engine provided externally")
 
 
-# A newly-connected model only sees the server `instructions` for free — everything else
-# (the manual, tool descriptions) requires it to choose to fetch. Without
-# this, a client that connects to an empty knowledge base has nothing telling it what Basic
-# Memory is or that a first note is worth offering, and it stays idle. The framing is
-# offer-not-act on purpose: orient, then *offer* a first note, but never write one unprompted so
-# power-user / coding sessions stay unobtrusive.
+# A newly-connected model only sees the server `instructions` for free; everything else
+# (the manual, tool descriptions) requires it to choose to fetch.
+# The framing is save-and-tell: connecting a memory service already says the user wants
+# notes saved, so the model saves what is worth keeping and says in one line what it saved
+# and how to undo it. A user who says "ask me first" gets an approval step on every save.
+# Cloud appends its own link rule to this constant, so it is the one source of
+# instructions for every client.
 BASIC_MEMORY_INSTRUCTIONS = (
-    "Basic Memory is the user's personal knowledge base: Markdown notes that persist "
-    "across conversations and that both the user and their AI assistants can read and write.\n\n"
-    "When a request may draw on the user's notes, use bm_search or "
-    'bm_recent(project="...") before answering from memory. No recent activity does not '
-    "prove a project is empty. If the knowledge base is empty, explain the shared-memory loop "
-    "and offer a useful first note with bm_write; wait for agreement before writing. Do not write unprompted.\n\n"
+    "Basic Memory is the user's memory across chats: Markdown notes that the user and "
+    "their AI assistants both read and write.\n\n"
+    "When the user starts on a topic, look for related notes with bm_search or "
+    'bm_recent(project="...") before answering from memory. '
+    "No recent activity does not prove a project is empty. When something worth keeping "
+    "comes up, such as a decision, a plan, or a fact about the user's work, save it with "
+    "bm_write and tell the user in one line what you saved and how to undo it. Leave out "
+    "sensitive details. If the user asks you to ask first, ask before every save.\n\n"
     "Use bm_list for one folder, bm_find for recursive names or frontmatter inventories, "
     "bm_search for ranked retrieval or matching lines, and bm_read for note and file content. "
     "bm_read supports bounded lines, sections, and token budgets. Follow relations with "
