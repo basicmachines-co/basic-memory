@@ -49,7 +49,9 @@ from basic_memory.utils import generate_permalink, validate_project_path
     annotations={
         "title": "Move note",
         "readOnlyHint": False,
-        "destructiveHint": False,
+        # A cross-project move writes a new note (new id, no history, links not
+        # rewritten) and deletes the original, which is hard to reverse.
+        "destructiveHint": True,
         "idempotentHint": False,
         "openWorldHint": False,
     },
