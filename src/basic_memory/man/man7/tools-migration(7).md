@@ -51,8 +51,8 @@ The guide's "Tool-by-tool change list" gives each tool's renamed arguments and r
 | `delete_note` | `bm_delete` |
 | `man` | `bm_man` |
 
-Two more retired tools: `cloud_info` is `bm_project(command="info")` on Basic Memory Cloud, with no
-local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config list` in a shell.
+Two more retired tools: `cloud_info` is `bm_cloud_setup_status` (setup status) and
+`bm_project_usage` (workspace usage) on Basic Memory Cloud, with no local replacement, and `basic_memory_diagnostics` is `bm doctor` and `bm config list` in a shell.
 
 ## 1.1 CHANGES
 
