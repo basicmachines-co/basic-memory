@@ -217,8 +217,9 @@ Invent categories as needed — these are suggestions, not a fixed list.
 
 For each entity the user approved, create a structured note. Match the entity type to an appropriate template.
 
-If `bm_write` reports similar existing notes, treat that as a match Step 3 missed: merge into
-the existing note and delete the new one, or link the two.
+If `bm_write` reports similar existing notes, treat that as a match Step 3 missed. Ask the
+user whether to merge the new note into the existing one or link the two, and keep both
+notes until they decide.
 
 ### Person
 
