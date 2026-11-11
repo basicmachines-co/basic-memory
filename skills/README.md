@@ -28,7 +28,7 @@ These skills target the Basic Memory 1.0 MCP surface. Use `bm_man(page="bm_searc
 - `bm_schema_validate`, `bm_schema_infer` and `bm_schema_diff` check notes against a
   schema, suggest one from existing notes, and report drift. `infer` and `diff` need
   `note_type`.
-- Cloud adds `bm_agent` and Cloud-only read options. Check that the connected server
+- Cloud adds the `bm_agent_*` tools and Cloud-only read options. Check that the connected server
   exposes them before using those workflows.
 
 `project` accepts a name, `workspace/project`, or external ID. Pass it explicitly
