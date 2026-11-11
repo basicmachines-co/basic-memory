@@ -19,9 +19,9 @@ import re
 
 from markdown_it import MarkdownIt
 
-# Path segments join on "/" for storage and selector matching. A heading whose text
-# itself contains "/" cannot be addressed by full-path selector; suffix matching and
-# duplicate indexes remain available for it.
+# Path segments join on "/" for storage and for the split form of a selector.
+# A heading whose own text contains "/" stays addressable: _match_sections tries
+# the unsplit selector before that split. See that function for which spelling wins.
 HEADING_PATH_SEPARATOR = "/"
 
 # Plain parser: heading boundaries need no observation/relation plugins, and the
@@ -239,13 +239,16 @@ _ATX_HEADING_PREFIX = re.compile(r"^#{1,6} ")
 class SectionSelector:
     """A parsed ``section=`` selector: path segments plus a duplicate index.
 
-    ``raw`` keeps the caller's original spelling for error messages. Bare
-    selectors address duplicate index 0 (the first section with that path).
+    ``raw`` keeps the caller's original spelling for error messages. ``literal``
+    is that spelling with the ``[n]`` suffix and one leading ATX prefix removed,
+    before ``/`` is treated as a separator. Bare selectors address duplicate
+    index 0 (the first section with that path).
     """
 
     raw: str
     segments: tuple[str, ...]
     duplicate_index: int
+    literal: str
     # True when the caller wrote the [n] suffix; edits need it to pick among duplicates.
     indexed: bool = False
 
@@ -265,6 +268,10 @@ def parse_section_selector(selector: str) -> SectionSelector | None:
         duplicate_index = int(suffix.group(1))
         text = text[: suffix.start()].rstrip()
 
+    # One leading ATX prefix is heading markup, not part of the heading text, so
+    # "## Pros / Cons" matches that heading before "/" is read as a separator.
+    literal = _ATX_HEADING_PREFIX.sub("", text, count=1).strip()
+
     segments: list[str] = []
     for segment in text.split(HEADING_PATH_SEPARATOR):
         cleaned = _ATX_HEADING_PREFIX.sub("", segment.strip()).strip()
@@ -275,6 +282,7 @@ def parse_section_selector(selector: str) -> SectionSelector | None:
         raw=selector,
         segments=tuple(segments),
         duplicate_index=duplicate_index,
+        literal=literal,
         indexed=indexed,
     )
 
@@ -372,6 +380,86 @@ def _section_labels(sections: tuple[MarkdownSection, ...]) -> list[str]:
     ]
 
 
+def _split_matches(
+    sections: tuple[MarkdownSection, ...],
+    segments: tuple[str, ...],
+) -> list[MarkdownSection]:
+    """Sections whose path ends with the split parent/child segments."""
+    return [section for section in sections if section.path[-len(segments) :] == segments]
+
+
+def _unsplit_matches(
+    sections: tuple[MarkdownSection, ...],
+    literal: str,
+) -> list[MarkdownSection]:
+    """Match the selector text whole: full heading path, then one heading's text.
+
+    An exact ``heading_path`` hit is decisive. That is the spelling the
+    available-sections list prints, so the listed name selects that section
+    even when a shorter heading text would also match.
+    """
+    by_path = [section for section in sections if section.heading_path == literal]
+    if by_path:
+        return by_path
+    return [section for section in sections if section.heading == literal]
+
+
+def _match_sections(
+    sections: tuple[MarkdownSection, ...],
+    selector: SectionSelector,
+) -> list[MarkdownSection]:
+    """Match a selector, trying an unsplit heading path before ``/`` segments.
+
+    ``Plan/Other`` still splits into a parent/child suffix. The split is not
+    the first try when it would drop whitespace that is part of a heading
+    (``Plan/Pros / Cons`` versus segments ``Plan``, ``Pros``, ``Cons``), and
+    it is not the last try when it finds nothing (a heading ``Pros/Cons``).
+    The unsplit text then matches a ``heading_path`` or, failing that, one
+    heading's text (``Pros / Cons``). When the split spelling and the heading
+    path are the same string, an existing parent/child match wins over a
+    heading that contains ``/``.
+    """
+    split_matches = _split_matches(sections, selector.segments)
+    split_spelling = HEADING_PATH_SEPARATOR.join(selector.segments)
+    # Trigger: joining the stripped segments is not the selector text.
+    # Why: segment stripping drops spaces around "/", so "Pros / Cons" becomes
+    #      Pros, Cons and can never name the heading the list just printed.
+    # Outcome: the unsplit text wins when it names a heading path or heading.
+    if selector.literal != split_spelling:
+        unsplit = _unsplit_matches(sections, selector.literal)
+        if unsplit:
+            return unsplit
+    if split_matches:
+        return split_matches
+    # Trigger: "/" segments match no path.
+    # Why: a heading such as "Pros/Cons" has no segment boundary to split on,
+    #      so its listed path is invisible to the parent/child match.
+    # Outcome: the same unsplit comparison addresses that heading.
+    return _unsplit_matches(sections, selector.literal)
+
+
+def _ambiguity_message(
+    raw: str,
+    note_label: str,
+    paths: list[tuple[str, ...]],
+) -> str:
+    """Explain an ambiguous selector. Distinct paths use their passable spellings.
+
+    When a heading contains ``/``, two different paths can join to one spelling.
+    Those are shown as headings separated by `` > ``, which is not itself a
+    selector: the parent/child segmentation keeps the joined spelling, and a
+    slash heading is named by its own text when that text is unique.
+    """
+    labels = [HEADING_PATH_SEPARATOR.join(path) for path in paths]
+    if len(set(labels)) == len(labels):
+        return f"Section '{raw}' is ambiguous{note_label}. Qualify it: {', '.join(labels)}."
+    rendered = "; ".join(" > ".join(path) for path in paths)
+    return (
+        f"Section '{raw}' is ambiguous{note_label}. "
+        f"It spells more than one heading path: {rendered}."
+    )
+
+
 def _find_section(
     sections: tuple[MarkdownSection, ...],
     selector: SectionSelector,
@@ -379,28 +467,20 @@ def _find_section(
 ) -> tuple[MarkdownSection, str] | NoteSliceError:
     """Match a selector against scanned sections, returning the section and its label.
 
-    A selector matches when a section's full path ends with the selector segments
-    (suffix match), so ``"Decisions"`` finds ``("Auth", "Decisions")`` and
-    ``"Auth/Decisions"`` disambiguates. Comparison is exact and case-sensitive.
+    Comparison is exact and case-sensitive. ``_match_sections`` decides which
+    spelling wins when a heading contains ``/``.
     """
     note_label = f" in note '{note_title}'" if note_title else ""
-    matches = [
-        section
-        for section in sections
-        if section.path[-len(selector.segments) :] == selector.segments
-    ]
+    matches = _match_sections(sections, selector)
     if not matches:
         available = ", ".join(_section_labels(sections)) or "(note has no headings)"
         return NoteSliceError(
             f"Section '{selector.raw}' not found{note_label}. Available sections: {available}."
         )
 
-    distinct_paths = list(dict.fromkeys(section.heading_path for section in matches))
+    distinct_paths = list(dict.fromkeys(section.path for section in matches))
     if len(distinct_paths) > 1:
-        return NoteSliceError(
-            f"Section '{selector.raw}' is ambiguous{note_label}. "
-            f"Qualify it: {', '.join(distinct_paths)}."
-        )
+        return NoteSliceError(_ambiguity_message(selector.raw, note_label, distinct_paths))
 
     # All matches share one full path; document order equals duplicate_index order.
     for section in matches:
@@ -413,7 +493,7 @@ def _find_section(
             return section, label
     return NoteSliceError(
         f"Section '{selector.raw}' not found{note_label}: {len(matches)} section(s) share "
-        f"the path '{distinct_paths[0]}' (duplicate indexes 0-{len(matches) - 1})."
+        f"the path '{matches[0].heading_path}' (duplicate indexes 0-{len(matches) - 1})."
     )
 
 
