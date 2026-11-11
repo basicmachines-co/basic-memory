@@ -106,6 +106,13 @@ bm_search(query="release", mode="text", page_size=1, output_format="json", proje
 
 - `max_matches` bounds matching lines; without `lines` or `identifier` it is
   refused.
+- `identifier` searches one note, which has no ranking or pages: `mode`,
+  `min_similarity`, `compact`, `page` and `page_size` are ignored, and the result
+  names them (`ignored_arguments` in JSON). Filters, `note_types`, `items`,
+  `categories`, `since` and the valid-time arguments would change what matches,
+  so they are refused.
+- `lines` with `projects` or `all_projects` reads each hit's lines from the
+  project it came from.
 - A search across projects reaches at most result 1000 (`page * page_size`).
 - `total` is a lower bound, not a count of every match (`total_is_exact` is
   false): it counts the results through the current page. Page with `has_more`.

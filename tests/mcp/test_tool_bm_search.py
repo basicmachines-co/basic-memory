@@ -259,6 +259,48 @@ async def test_identifier_that_names_no_note(client, test_project):
         await bm_search(query="deploy", identifier="tasks/Nope.md", project=test_project.name)
 
 
+@pytest.mark.asyncio
+async def test_identifier_ignores_ranking_and_paging_arguments(client, test_project):
+    """One note has no ranking or pages; models send defaults for them, so they run."""
+    await _seed(test_project.name)
+    arguments: dict[str, Any] = {
+        "query": "rollback",
+        "identifier": "tasks/Deploy Plan.md",
+        "mode": "hybrid",
+        "min_similarity": 0.5,
+        "compact": True,
+        "page": 2,
+        "page_size": 20,
+        "lines": 0,
+        "project": test_project.name,
+    }
+
+    text = await search_text(**arguments)
+    row = await search_json(**arguments)
+
+    assert ": Rollback is manual." in text
+    assert text.endswith(
+        "Ignored for a one-note search: mode, min_similarity, compact, page, page_size."
+    )
+    assert row["match_count"] == 1
+    assert row["ignored_arguments"] == ["mode", "min_similarity", "compact", "page", "page_size"]
+
+
+@pytest.mark.asyncio
+async def test_identifier_without_ignored_arguments_says_nothing_about_them(client, test_project):
+    await _seed(test_project.name)
+
+    text = await search_text(
+        query="rollback", identifier="tasks/Deploy Plan.md", project=test_project.name
+    )
+    row = await search_json(
+        query="rollback", identifier="tasks/Deploy Plan.md", project=test_project.name
+    )
+
+    assert "Ignored" not in text
+    assert "ignored_arguments" not in row
+
+
 # --- Query terms ---
 
 
@@ -287,7 +329,6 @@ def test_query_terms(query, terms):
         ({"query": "x", "path": "notes", "all_projects": True}, "`path` and `all_projects` each"),
         ({"query": "memory://a/b", "all_projects": True}, "memory:// query and `all_projects`"),
         ({"query": "memory://a/b", "projects": ["a"]}, "memory:// query and `projects`"),
-        ({"query": "x", "lines": 1, "projects": ["a"]}, "not several"),
         ({"query": "x", "projects": []}, "`projects` is empty"),
         (
             {"query": "x", "all_projects": True, "page": 11, "page_size": 100},
@@ -308,8 +349,14 @@ def test_query_terms(query, terms):
             {"query": "x", "identifier": "a.md", "filters": {"status": "active"}},
             "filters cannot apply",
         ),
-        ({"query": "x", "identifier": "a.md", "mode": "text", "compact": True}, "mode, compact"),
-        ({"query": "x", "identifier": "a.md", "page": 2}, "page cannot apply"),
+        (
+            {"query": "x", "identifier": "a.md", "note_types": ["task"], "since": "1d"},
+            "note_types, since cannot apply",
+        ),
+        (
+            {"query": "x", "identifier": "a.md", "mode": "text", "items": ["observation"]},
+            "; items cannot apply",
+        ),
     ],
 )
 async def test_invalid_arguments(client, test_project, arguments, message):
@@ -415,6 +462,38 @@ async def test_results_across_projects_carry_routable_paths(client, test_project
     assert text.startswith("Results for 'rollback' in all projects:")
     note = await bm_read(paths[0], project=test_project.name)
     assert isinstance(note, str)
+
+
+@pytest.mark.asyncio
+async def test_lines_across_projects_reads_each_project(client, test_project, second_project):
+    """`lines` with several projects scans each hit in the project it came from."""
+    await _seed(test_project.name)
+    await bm_write(
+        title="Drill Schedule",
+        directory="ops",
+        content="# Drill Schedule\n\nPractice the rollback monthly.",
+        project=second_project.name,
+    )
+
+    payload = await search_json(
+        query="rollback",
+        mode="text",
+        lines=0,
+        projects=[test_project.name, second_project.name],
+    )
+    text = await search_text(query="rollback", mode="text", lines=0, all_projects=True)
+
+    lines_by_path = {
+        row["file_path"]: [window["content"] for window in row["windows"]]
+        for row in payload["results"]
+    }
+    assert lines_by_path == {
+        f"{test_project.permalink}/tasks/Deploy Plan.md": ["Rollback is manual."],
+        f"{second_project.permalink}/ops/Drill Schedule.md": ["Practice the rollback monthly."],
+    }
+    assert payload["total_is_exact"] is False
+    assert ": Practice the rollback monthly." in text
+    assert ": Rollback is manual." in text
 
 
 @pytest.mark.asyncio
