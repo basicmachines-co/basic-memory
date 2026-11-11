@@ -104,17 +104,18 @@ async def test_all_embeddings_current_is_none(
 
 
 @pytest.mark.asyncio
-async def test_a_note_changed_after_its_embedding_reports_its_modified_time(
+async def test_notes_behind_report_the_latest_embedded_change(
     entity_repository, search_service, session_maker, app_config, test_project
 ):
-    """The oldest note behind is the answer; current notes, even older ones, do not count."""
+    """The newest note that is current is the answer; the notes behind only switch it on."""
+    newest_current_time = _local_time(10)
     await _embedded_note(
         entity_repository,
         search_service,
         session_maker,
         test_project,
         title="Old Current",
-        updated_at=_local_time(10),
+        updated_at=newest_current_time,
     )
     held = await _embedded_note(
         entity_repository,
@@ -132,11 +133,10 @@ async def test_a_note_changed_after_its_embedding_reports_its_modified_time(
         title="Newer Held",
         updated_at=_local_time(4),
     )
-    held_edit_time = _local_time(2)
-    await _edit_without_embedding(session_maker, held, held_edit_time)
+    await _edit_without_embedding(session_maker, held, _local_time(2))
     await _edit_without_embedding(session_maker, newer_held, _local_time(1))
 
-    assert await _current_as_of(session_maker, app_config, test_project) == held_edit_time
+    assert await _current_as_of(session_maker, app_config, test_project) == newest_current_time
 
     # The held pass runs: those notes catch up and search is current again.
     await search_service.sync_entity_vectors(held.id)
@@ -145,10 +145,41 @@ async def test_a_note_changed_after_its_embedding_reports_its_modified_time(
 
 
 @pytest.mark.asyncio
+async def test_one_stuck_note_does_not_date_the_index_back(
+    entity_repository, search_service, session_maker, app_config, test_project
+):
+    """A note behind for weeks must not make every search claim weeks-old vectors."""
+    stuck = await _embedded_note(
+        entity_repository,
+        search_service,
+        session_maker,
+        test_project,
+        title="Stuck",
+        updated_at=_local_time(60),
+    )
+    await _edit_without_embedding(session_maker, stuck, _local_time(59))
+    recent_time = _local_time(1)
+    await _embedded_note(
+        entity_repository,
+        search_service,
+        session_maker,
+        test_project,
+        title="Recent",
+        updated_at=recent_time,
+    )
+
+    assert await _current_as_of(session_maker, app_config, test_project) == recent_time
+
+
+@pytest.mark.asyncio
 async def test_a_note_never_embedded_is_behind(
     entity_repository, search_service, session_maker, app_config, test_project
 ):
-    """A new note whose first vector pass has not run is not in semantic search yet."""
+    """A new note whose first vector pass has not run is not in semantic search yet.
+
+    With nothing embedded there is no embedded change to report, so the answer is the
+    oldest note behind.
+    """
     created_at = _local_time(1)
     await _write_file(test_project, "Fresh")
     async with db.scoped_session(session_maker) as session:
@@ -297,7 +328,7 @@ async def test_an_empty_scope_is_none(session_maker, app_config):
 
 @pytest.mark.asyncio
 async def test_the_lookup_reads_the_partial_index(session_maker, app_config, test_project):
-    """Each search pays for this lookup, so it must not scan the project's entities."""
+    """Each search pays for this check, so it must not scan the project's entities."""
     if app_config.database_backend != DatabaseBackend.SQLITE:
         pytest.skip("Postgres picks partial indexes by cost; the planner is not asserted.")
     compiled = oldest_behind_statement(ProjectScope.single(test_project.id)).compile(

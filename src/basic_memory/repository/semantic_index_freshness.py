@@ -6,9 +6,11 @@ pass leaves work owed, and Basic Memory Cloud defers a legacy workspace's embedd
 the next UTC day once it passes its fair-use budget. Search results say how far behind
 the vectors are, so a client can tell "no semantic match" from "not embedded yet".
 
-The answer is the oldest last-modified time among notes whose embeddings are not
-current. Every note changed before it is reflected in vector search. Derived state,
-read without locking, per the consistency model in CLAUDE.md.
+The answer is the newest last-modified time among notes whose embeddings are current:
+the latest change semantic search reflects. It is reported only while some note is
+behind. One note that stays behind (a failing embed, a stuck shard) therefore does not
+date the whole index back to its own edit time. Derived state, read without locking,
+per the consistency model in CLAUDE.md.
 """
 
 from datetime import datetime
@@ -22,6 +24,20 @@ from basic_memory.models.knowledge import ENTITY_EMBEDDING_NOT_CURRENT_PREDICATE
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_runtime import semantic_runtime_available
 from basic_memory.utils import ensure_timezone_aware
+
+
+def latest_embedded_statement(scope: ProjectScope) -> Select[tuple[datetime]]:
+    """The newest last-modified time among ``scope``'s notes whose embeddings are current.
+
+    "Current" is the exact negation of the not-current predicate: embedded at the note's
+    present checksum, with no part of it left for a later pass.
+    """
+    return select(func.max(Entity.updated_at)).where(
+        Entity.project_id.in_(scope.project_ids),
+        Entity.content_type == "text/markdown",
+        Entity.embedded_checksum == Entity.checksum,
+        Entity.vector_sync_deferred_at.is_(None),
+    )
 
 
 def oldest_behind_statement(scope: ProjectScope) -> Select[tuple[datetime]]:
@@ -41,7 +57,7 @@ async def semantic_index_current_as_of(
     app_config: BasicMemoryConfig,
     scope: ProjectScope,
 ) -> datetime | None:
-    """Return when semantic search stopped being current for ``scope``, or None.
+    """Return the latest note change semantic search reflects for ``scope``, or None.
 
     None means every note's embeddings are current, or there is no semantic search to
     be current: a host that cannot load sqlite-vec runs keyword-only (#711), and an
@@ -52,10 +68,17 @@ async def semantic_index_current_as_of(
 
     async with db.scoped_session(session_maker) as session:
         oldest_behind = (await session.execute(oldest_behind_statement(scope))).scalar_one()
-    if oldest_behind is None:
-        return None
+        # Trigger: no note is behind. Why: the common case, answered from the partial
+        # index without touching current notes. Outcome: no freshness to report.
+        if oldest_behind is None:
+            return None
+        latest_embedded = (await session.execute(latest_embedded_statement(scope))).scalar_one()
+    # Trigger: notes are behind and none is embedded yet (a first pass still owed).
+    # Why: there is no embedded change to point at, and null would claim every note is
+    # current. Outcome: the oldest note behind, before which nothing is missing.
+    current_as_of = latest_embedded if latest_embedded is not None else oldest_behind
     # SQLite hands back naive local times. An aware value is what lets a client compare
     # answers from a local and a cloud database, as the all-projects search does.
     return ensure_timezone_aware(
-        oldest_behind, cloud_mode=app_config.database_backend == DatabaseBackend.POSTGRES
+        current_as_of, cloud_mode=app_config.database_backend == DatabaseBackend.POSTGRES
     )
