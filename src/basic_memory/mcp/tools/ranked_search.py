@@ -100,7 +100,7 @@ DEFAULT_MAX_MATCHES = 10
         "with `filters` (frontmatter), `note_types`, `items` (notes, observations, "
         "relations) and `since`. `lines` returns the matching lines of each hit with that "
         "many lines of context, like grep. `path` limits the search to a folder; "
-        "`identifier` searches one note. Scope every search with `project` (one project), "
+        "`identifier` searches one note's lines and ignores mode and paging. Scope every search with `project` (one project), "
         "`projects` (a list), or `all_projects=true`. Read full notes with bm_read."
     ),
     tags={"search"},
@@ -263,12 +263,6 @@ async def bm_search(
             try_instead="narrow the query, or search one project with `project`",
             output_format=output_format,
         )
-    if several_projects and lines is not None:
-        raise refusal(
-            "INVALID_ARGUMENTS",
-            "`lines` matches lines in one project, not several.",
-            output_format=output_format,
-        )
     if several_projects and project is not None:
         raise refusal(
             "INVALID_ARGUMENTS",
@@ -290,8 +284,9 @@ async def bm_search(
             try_instead="add `lines`, or drop `max_matches`",
             output_format=output_format,
         )
-    # Matching lines are note content, which `compact` exists to leave out.
-    if lines is not None and compact:
+    # Matching lines are note content, which `compact` exists to leave out. A one-note
+    # search always returns lines, so there `compact` is ignored like the ranking options.
+    if lines is not None and compact and identifier is None:
         raise refusal(
             "INVALID_ARGUMENTS",
             "`lines` returns note lines and `compact` omits note content; give one.",
@@ -326,14 +321,13 @@ async def bm_search(
 
     # --- One note: grep on a single file ---
     if identifier is not None:
-        # Trigger: a one-note search also names filters or a ranking mode.
-        # Why: one note is scanned for lines, not searched; silently dropping a
-        #      filter would turn an AND-filtered request into an unfiltered grep.
-        # Outcome: the arguments that cannot apply are refused by name.
-        ignored = [
+        # Trigger: a one-note search also names filters.
+        # Why: silently dropping a filter would turn an AND-filtered request into an
+        #      unfiltered grep, a different answer.
+        # Outcome: the arguments that would change what matches are refused by name.
+        unmatched = [
             name
             for name, value in (
-                ("mode", mode),
                 ("filters", filters),
                 ("note_types", note_types),
                 ("items", items),
@@ -342,24 +336,38 @@ async def bm_search(
                 ("valid_at", valid_at),
                 ("valid_overlaps", valid_overlaps),
                 ("time_kind", time_kind),
-                ("min_similarity", min_similarity),
-                ("page", page if page != 1 else None),
-                ("page_size", page_size if page_size != 10 else None),
             )
             if value is not None
-        ] + (["compact"] if compact else [])
-        if ignored:
+        ]
+        if unmatched:
             raise refusal(
                 "INVALID_ARGUMENTS",
-                f"`identifier` searches one note's lines; {', '.join(ignored)} cannot apply to it.",
+                f"`identifier` searches one note's lines; {', '.join(unmatched)} "
+                "cannot apply to it.",
                 try_instead="drop them, or search a folder with `path` instead",
                 output_format=output_format,
             )
+        # Trigger: a one-note search also names ranking or paging options.
+        # Why: models send default-looking values for these with `identifier`; one note
+        #      has no ranking or pages, so they change nothing about the answer.
+        # Outcome: the search runs, and the result names the arguments it ignored.
+        ignored = [
+            name
+            for name, given in (
+                ("mode", mode is not None),
+                ("min_similarity", min_similarity is not None),
+                ("compact", compact),
+                ("page", page != 1),
+                ("page_size", page_size != 10),
+            )
+            if given
+        ]
         return await _search_one_note(
             identifier,
             line_query,
             context_lines=lines or 0,
             max_matches=max_matches,
+            ignored=ignored,
             project=project,
             context=context,
             output_format=output_format,
@@ -398,6 +406,10 @@ async def bm_search(
         )
         match searched:
             case MultiProjectRan(payload=rows):
+                if lines is not None:
+                    rows = await _with_matching_lines_across_projects(
+                        rows, _query_terms(line_query), lines, max_matches, context
+                    )
                 # Each hit carries its project, so its path can be routed back to it.
                 payload = {
                     **rows,
@@ -611,6 +623,48 @@ async def _with_matching_lines(
     return payload
 
 
+async def _with_matching_lines_across_projects(
+    payload: dict[str, Any],
+    terms: list[str],
+    context_lines: int,
+    max_matches: int,
+    context: Context | None,
+) -> dict[str, Any]:
+    """Matching lines for a page merged across projects, kept in its merged order.
+
+    Each hit's Markdown is read from its own project, one request per project.
+    """
+    rows_by_project: dict[str, list[dict[str, Any]]] = {}
+    for row in payload["results"]:
+        if row.get("external_id") is not None:
+            rows_by_project.setdefault(row["project_external_id"], []).append(row)
+    contents: dict[str, str] = {}
+    for project_id, rows in rows_by_project.items():
+        async with open_project_target("", project_id, context) as target:
+            contents |= await KnowledgeClient(
+                target.client, target.project.external_id
+            ).accepted_note_contents([row["external_id"] for row in rows])
+    line_rows: list[dict[str, Any]] = []
+    for row in payload["results"]:
+        content = contents.get(row.get("external_id") or "")
+        if content is None:
+            continue
+        scan = scan_lines(content, terms, context_lines=context_lines, max_matches=max_matches)
+        if scan.match_count > 0:
+            line_rows.append(
+                {
+                    "title": row["title"],
+                    "permalink": row.get("permalink"),
+                    "file_path": row["file_path"],
+                    "external_id": row["external_id"],
+                    "project": row["project"],
+                    **asdict(scan),
+                }
+            )
+    # As in one project, line matching drops rows, so `total` is no longer exact.
+    return {**payload, "results": line_rows, "total_is_exact": False}
+
+
 def _line_row(note: SearchResult | EntityResolveResponse, scan: LiteralLineScan) -> dict[str, Any]:
     """A note's identity plus its matching-line windows."""
     return {
@@ -628,11 +682,16 @@ async def _search_one_note(
     *,
     context_lines: int,
     max_matches: int,
+    ignored: list[str],
     project: str | None,
     context: Context | None,
     output_format: OutputFormat,
 ) -> str | dict[str, Any]:
-    """grep on one note: its matching lines, with context."""
+    """grep on one note: its matching lines, with context.
+
+    `ignored` names the ranking and paging arguments the caller sent, which one note
+    has no use for; the result says they were ignored.
+    """
     async with open_project_target(
         identifier, project, context, kind="identifier", output_format=output_format
     ) as target:
@@ -655,11 +714,15 @@ async def _search_one_note(
     )
     payload = target.paths.search({"results": [_line_row(note, scan)]})
     if output_format == "json":
-        return payload["results"][0]
+        row = payload["results"][0]
+        return {**row, "ignored_arguments": ignored} if ignored else row
     # One note is one result: there is no next page.
-    return _format_results(
+    text = _format_results(
         payload, query, f"project '{target.project.name}'", next_call=None, ranked=False
     )
+    if ignored:
+        text += f"\n\nIgnored for a one-note search: {', '.join(ignored)}."
+    return text
 
 
 # --- Text output ---
