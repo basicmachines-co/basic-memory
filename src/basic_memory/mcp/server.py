@@ -221,7 +221,7 @@ async def lifespan(app: FastMCP):
 
 
 # A newly-connected model only sees the server `instructions` for free — everything else
-# (the ai_assistant_guide resource, tool descriptions) requires it to choose to fetch. Without
+# (the manual, tool descriptions) requires it to choose to fetch. Without
 # this, a client that connects to an empty knowledge base has nothing telling it what Basic
 # Memory is or that a first note is worth offering, and it stays idle. The framing is
 # offer-not-act on purpose: orient, then *offer* a first note, but never write one unprompted so
@@ -248,7 +248,7 @@ BASIC_MEMORY_INSTRUCTIONS = (
     'defaults to JSON. Use output_format="json" when consuming structured fields. Failures '
     "are tool errors, not empty successful results. Follow pagination and continuation fields. "
     'Call bm_man(page="bm-search(3)") for details, or read memory://man for the manual index. '
-    "Read memory://ai_assistant_guide for a fuller guide. With a web or fetch tool, fetch "
+    "With a web or fetch tool, fetch "
     "https://docs.basicmemory.com/llms.txt first, then only the relevant linked /raw/...md page."
 )
 
