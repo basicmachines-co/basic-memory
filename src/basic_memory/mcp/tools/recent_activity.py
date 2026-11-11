@@ -164,9 +164,9 @@ def _format_project_output(
 
         lines.append(f"\nNo recent activity in '{project_name}' within {timeframe}.")
         # Recent activity is the orientation call a model makes at session start, so an empty
-        # result is the natural moment to help. Stay offer-not-act. Onboarding is for a project
+        # result is the natural moment to help. Save-and-tell. Onboarding is for a project
         # with no notes; an established project that is merely quiet in this window only gets
-        # the widen-or-search hint, so the model does not offer its user a "first note".
+        # the widen-or-search hint, so the model does not write its user a "first note".
         # Examples name the external id: names collide across cloud workspaces, ids do not.
         route = f'project="{project_id}"'
         lines.append("")
@@ -174,8 +174,9 @@ def _format_project_output(
             lines.append(
                 "If the user is just getting started and has no notes yet, briefly explain that "
                 "Basic Memory keeps notes that persist across conversations and are shared between "
-                "the user and their AI, then offer to save something useful from this conversation "
-                "as their first note — wait for them to agree before writing:"
+                "the user and their AI, then save one useful first note about what they are "
+                "working on and tell them in one line what you saved and how to undo it. "
+                "If they asked to approve saves, ask first:"
             )
             lines.append("```")
             lines.append(f'bm_write({route}, title="...", content="...", directory="notes")')

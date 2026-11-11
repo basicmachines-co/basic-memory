@@ -159,7 +159,7 @@ async def test_indexed_empty_project_offers_a_first_note(
 
     assert f"No recent activity in '{test_project.name}' within 7d" in text
     assert "never been indexed" not in text
-    assert "wait for them to agree" in text
+    assert "tell them in one line what you saved and how to undo it" in text
     # Names collide across cloud workspaces; external ids do not.
     route = f'project="{test_project.external_id}"'
     assert f"bm_write({route}" in text
@@ -214,7 +214,7 @@ def test_empty_project_offers_first_note():
     out = _format(_empty_graph(), project_has_notes=False)
 
     assert "No recent activity in 'proj' within 7d." in out
-    assert "wait for them to agree" in out
+    assert "tell them in one line what you saved and how to undo it" in out
     assert 'bm_write(project="ext-123"' in out
     assert "Otherwise, widen the window" in out
 

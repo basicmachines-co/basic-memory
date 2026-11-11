@@ -14,6 +14,7 @@ Each skill is a single `SKILL.md` file in its own directory:
 
 ```
 memory-tasks/SKILL.md           # Task tracking across context compaction
+memory-start/SKILL.md           # A new user's first session: save, see, get back, add to
 memory-onboarding/SKILL.md      # Guided setup of a new knowledge system (references/, evals/)
 memory-ci-capture/SKILL.md      # Internal: CI-only prompt, marked `metadata.internal`, never published
 memory-schema/SKILL.md          # Schema lifecycle (discover, infer, validate, drift)

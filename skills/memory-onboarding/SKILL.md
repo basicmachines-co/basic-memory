@@ -1,6 +1,6 @@
 ---
 name: memory-onboarding
-description: "Help a new user design a Basic Memory knowledge system and set up their assistant to load it. Use when someone is getting started, has an empty or messy project, or wants context kept across sessions."
+description: "Design a full Basic Memory knowledge system with note types and folders, and set up the assistant to load it. Use when a user with a few notes wants structure or has a messy project."
 ---
 
 # Basic Memory Onboarding

@@ -238,6 +238,7 @@ These skills ship with the plugin — no installation needed:
 - **memory-reflect** — periodic consolidation of recent notes into durable memory
 - **memory-research** — research synthesis into durable notes
 - **memory-schema** — schema lifecycle (infer, create, validate, diff)
+- **memory-start** — a new user's first session: save one note, see it, get it back
 - **memory-tasks** — structured task tracking that survives context compaction
 
 ### Updating skills
