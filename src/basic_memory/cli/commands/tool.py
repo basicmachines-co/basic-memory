@@ -678,35 +678,84 @@ def recent(
     )
 
 
-@tool_app.command("schema")
-def schema(
-    command: Annotated[str, typer.Argument(help="validate, infer, or diff")],
+@tool_app.command("schema-validate")
+def schema_validate(
     note_type: Annotated[Optional[str], typer.Option(help="The note type to check")] = None,
-    identifier: Annotated[Optional[str], typer.Option(help="For validate: one note")] = None,
+    identifier: Annotated[Optional[str], typer.Option(help="One note instead of a type")] = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Validate notes against their schema (bm_schema_validate).
+
+    Examples:
+
+    bm tool schema-validate --note-type person
+    bm tool schema-validate --identifier people/ada.md
+    """
+    from basic_memory.mcp.tools import bm_schema_validate
+
+    run_tool(
+        bm_schema_validate,
+        note_type=note_type,
+        identifier=identifier,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("schema-infer")
+def schema_infer(
+    note_type: Annotated[str, typer.Option(help="The note type to infer from")],
     threshold: Annotated[
-        Optional[float], typer.Option(help="For infer: share of notes a field needs (0-1)")
+        Optional[float], typer.Option(help="Share of notes a field needs (0-1)")
     ] = None,
     project: ProjectOption = None,
     json_output: JsonOption = False,
     local: LocalOption = False,
     cloud: CloudOption = False,
 ) -> None:
-    """Validate notes against a schema, infer one, or show drift (bm_schema).
+    """Suggest a schema from a note type's notes (bm_schema_infer).
 
     Examples:
 
-    bm tool schema validate --note-type person
-    bm tool schema infer --note-type meeting --threshold 0.5
-    bm tool schema diff --note-type person
+    bm tool schema-infer --note-type meeting --threshold 0.5
     """
-    from basic_memory.mcp.tools import bm_schema
+    from basic_memory.mcp.tools import bm_schema_infer
 
     run_tool(
-        bm_schema,
-        command=command,
+        bm_schema_infer,
         note_type=note_type,
-        identifier=identifier,
         threshold=threshold,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("schema-diff")
+def schema_diff(
+    note_type: Annotated[str, typer.Option(help="The note type to compare")],
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Show drift between a note type's notes and its schema (bm_schema_diff).
+
+    Examples:
+
+    bm tool schema-diff --note-type person
+    """
+    from basic_memory.mcp.tools import bm_schema_diff
+
+    run_tool(
+        bm_schema_diff,
+        note_type=note_type,
         project=project,
         json_output=json_output,
         local=local,

@@ -265,7 +265,7 @@ is not an immediate guarantee that the running session has stopped capturing.
 5. **Optional continuity:** explain that `/bm-checkpoint` summarizes eligible
    public session content, not just a synthetic test marker, and can incur model
    charges. Obtain consent before asking the user to invoke it. Verify the saved
-   path by reading it. Use advertised `bm_schema(command="validate", identifier="<returned path>")` on that note when
+   path by reading it. Use advertised `bm_schema_validate(identifier="<returned path>")` on that note when
    available. For coding, check repository/root/branch/SHA metadata and a repository
    filter query; then verify recall after an approved reload. Do not compact a
    working session merely as a setup test. A tool unavailable behind a feature

@@ -1,6 +1,6 @@
-"""bm_schema: validate notes against their schemas, infer schemas, find drift.
+"""Schema tools: validate notes against their schemas, infer schemas, find drift.
 
-Each command calls the schema API through SchemaClient and renders the report as
+One tool per operation (#2030). Each calls the schema API through SchemaClient and renders the report as
 markdown, or returns it as JSON. "Nothing to report" is a NOT_FOUND refusal.
 """
 
@@ -25,7 +25,7 @@ from basic_memory.mcp.tool_params import (
 )
 from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
 
-type SchemaCommand = Literal["validate", "infer", "diff"]
+type SchemaOperation = Literal["validate", "infer", "diff"]
 
 
 # --- Rendering ---
@@ -188,7 +188,7 @@ def _nothing_to_report(output_format: OutputFormat, message: str, guidance: str)
     return refusal("NOT_FOUND", text, output_format=output_format)
 
 
-def _no_notes_guidance(note_type: str, command: SchemaCommand) -> str:
+def _no_notes_guidance(note_type: str, operation: SchemaOperation) -> str:
     """Build guidance string when no notes of a given type exist.
 
     Used by validate, infer and diff when the project has zero notes of the
@@ -196,7 +196,7 @@ def _no_notes_guidance(note_type: str, command: SchemaCommand) -> str:
     """
     return (
         f"# No Notes Found of Type '{note_type}'\n\n"
-        f"`bm_schema(command={command!r}, note_type={note_type!r})` found no notes "
+        f"`bm_schema_{operation}(note_type={note_type!r})` found no notes "
         f"with type '{note_type}' in the project.\n\n"
         f"## Next Steps\n\n"
         f"1. **Create notes of this type** — use `bm_write` with "
@@ -215,19 +215,19 @@ def _no_schemas_defined_guidance() -> str:
     """
     return (
         "# No Schemas Defined\n\n"
-        "`bm_schema(command='validate')` was called without `note_type` or `identifier`, which "
+        "`bm_schema_validate` was called without `note_type` or `identifier`, which "
         "validates every note type that has a schema — but this project has "
         "no schema notes yet, so there is nothing to validate.\n\n"
         "## Next Steps\n\n"
-        "1. **Infer a schema** — run `bm_schema(command='infer', note_type='<note_type>')` to analyze "
+        "1. **Infer a schema** — run `bm_schema_infer(note_type='<note_type>')` to analyze "
         "existing notes and get a suggested schema\n"
         "2. **Create a schema note** — write a note with `type: schema` and an "
         "`entity` field naming the note type it validates\n"
-        "3. **Re-run** — call `bm_schema(command='validate')` again once a schema exists\n"
+        "3. **Re-run** — call `bm_schema_validate` again once a schema exists\n"
     )
 
 
-def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) -> str:
+def _no_schema_guidance(note_type: str, operation: Literal["validate", "diff"]) -> str:
     """Build guidance string when no schema exists for a note type.
 
     Used by validate and diff to explain what happened
@@ -235,10 +235,10 @@ def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) ->
     """
     return (
         f"# No Schema Found for '{note_type}'\n\n"
-        f"`bm_schema(command={command!r}, note_type={note_type!r})` requires a schema "
+        f"`bm_schema_{operation}(note_type={note_type!r})` requires a schema "
         f"note to exist for type '{note_type}'.\n\n"
         f"## How to Create a Schema\n\n"
-        f"1. **Infer from existing notes** — run `bm_schema(command='infer', note_type={note_type!r})` to "
+        f"1. **Infer from existing notes** — run `bm_schema_infer(note_type={note_type!r})` to "
         f"analyze your notes and get a suggested schema\n"
         f"2. **Create a schema note** — call `bm_write(identifier='schemas/{note_type}.md', "
         f"content=..., project=...)` with this frontmatter at the start of `content`:\n\n"
@@ -259,8 +259,8 @@ def _no_schema_guidance(note_type: str, command: Literal["validate", "diff"]) ->
         f"- `field_name: type, description` — required field\n"
         f"- `field_name?: type, description` — optional field\n"
         f"- Supported types: `string`, `number`, `boolean`, `string[]`\n\n"
-        f"A note saved with `bm_write` is available to `bm_schema` at once.\n\n"
-        f"3. **Re-run** — call `bm_schema(command={command!r}, note_type={note_type!r}, "
+        f"A note saved with `bm_write` is available to the schema tools at once.\n\n"
+        f"3. **Re-run** — call `bm_schema_{operation}(note_type={note_type!r}, "
         f"project=...)` again\n"
     )
 
@@ -375,7 +375,7 @@ async def _infer(
             f"1. **Use a more specific type** — try `bm_search` with "
             f"`note_types` filter to see what types exist\n"
             f"2. **Lower the threshold** — "
-            f"`bm_schema(command='infer', note_type={note_type!r}, threshold=0.1)` to include "
+            f"`bm_schema_infer(note_type={note_type!r}, threshold=0.1)` to include "
             f"rarer fields\n"
             f"3. **Create typed notes** — use `bm_write` with a specific "
             f'`note_type` (e.g., "person", "meeting") to build consistent '
@@ -427,33 +427,42 @@ async def _diff(
 # --- Tool ---
 
 
+NoteType = Annotated[
+    str,
+    Field(
+        min_length=1,
+        validation_alias=AliasChoices("note_type", "type"),
+        description="The frontmatter `type:` to check.",
+    ),
+]
+
+SCHEMA_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+
+
 @mcp.tool(
-    name="bm_schema",
-    title="Note schemas",
+    name="bm_schema_validate",
+    title="Validate notes",
     description=(
-        "Basic Memory note schemas (Picoschema). `command`: validate notes against their "
-        "schema (one `note_type`, one note by `identifier`, or every type that has a "
-        "schema); infer a schema from the notes of a `note_type`; diff a `note_type`'s "
-        "notes against its schema to find drift. A schema is a note with type: schema "
-        "whose `entity` field names the note type it describes."
+        "Check Basic Memory notes against their Picoschema schema: one `note_type`, one "
+        "note by `identifier`, or, with neither, every note type that has a schema. A "
+        "schema is a note with type: schema whose `entity` field names the note type it "
+        "describes."
     ),
     tags={"schema"},
-    annotations={
-        "title": "Note schemas",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    annotations={"title": "Validate notes", **SCHEMA_ANNOTATIONS},
 )
-async def bm_schema(
-    command: Annotated[SchemaCommand, Field(description="What to do.")],
+async def bm_schema_validate(
     note_type: Annotated[
         str | None,
         Field(
             min_length=1,
             validation_alias=AliasChoices("note_type", "type"),
-            description="The frontmatter `type:` to check. Required for infer and diff.",
+            description="The frontmatter `type:` to check.",
         ),
     ] = None,
     identifier: Annotated[
@@ -461,23 +470,15 @@ async def bm_schema(
         Field(
             min_length=1,
             validation_alias=AliasChoices("identifier", "file_path"),
-            description="For validate: one note, instead of a whole note type.",
+            description="One note, instead of a whole note type.",
         ),
     ] = None,
-    threshold: Annotated[
-        float,
-        Field(
-            ge=0,
-            le=1,
-            description=("For infer: the share of notes a field must appear in to be suggested."),
-        ),
-    ] = 0.25,
     output_format: OutputFormat = "text",
     *,
     project: ProjectParam,
     context: Context | None = None,
-) -> ValidationReport | str | dict[str, Any]:
-    """Validate, infer or diff note schemas."""
+) -> str | dict[str, Any]:
+    """Validate notes against their schema."""
     # A note's own type decides its schema, so naming both would validate one and
     # label the report as the other.
     if note_type is not None and identifier is not None:
@@ -486,24 +487,57 @@ async def bm_schema(
             "Give `note_type` to validate a type, or `identifier` to validate one note.",
             output_format=output_format,
         )
-    selector = parse_project(project)
-    if command == "validate":
-        async with _schema_client(selector, context) as schemas:
-            return await _validate(schemas, note_type, identifier, output_format)
-    if identifier is not None:
-        raise refusal(
-            "INVALID_ARGUMENTS",
-            f"{command} works on a note type, not one note; give `note_type`.",
-            output_format=output_format,
-        )
-    if note_type is None:
-        raise refusal(
-            "INVALID_ARGUMENTS",
-            f"{command} needs `note_type`, the frontmatter type to check.",
-            try_instead="bm_find(filters={'type': ...}) to see which types exist",
-            output_format=output_format,
-        )
-    async with _schema_client(selector, context) as schemas:
-        if command == "infer":
-            return await _infer(schemas, note_type, threshold, output_format)
+    async with _schema_client(parse_project(project), context) as schemas:
+        return await _validate(schemas, note_type, identifier, output_format)
+
+
+@mcp.tool(
+    name="bm_schema_infer",
+    title="Infer schema",
+    description=(
+        "Suggest a Picoschema schema for a Basic Memory note type from the fields its "
+        "notes share. A field is suggested when at least `threshold` of the notes have it."
+    ),
+    tags={"schema"},
+    annotations={"title": "Infer schema", **SCHEMA_ANNOTATIONS},
+)
+async def bm_schema_infer(
+    note_type: NoteType,
+    threshold: Annotated[
+        float,
+        Field(
+            ge=0,
+            le=1,
+            description="The share of notes a field must appear in to be suggested.",
+        ),
+    ] = 0.25,
+    output_format: OutputFormat = "text",
+    *,
+    project: ProjectParam,
+    context: Context | None = None,
+) -> str | dict[str, Any]:
+    """Infer a schema from a note type's notes."""
+    async with _schema_client(parse_project(project), context) as schemas:
+        return await _infer(schemas, note_type, threshold, output_format)
+
+
+@mcp.tool(
+    name="bm_schema_diff",
+    title="Schema drift",
+    description=(
+        "Compare a Basic Memory note type's notes against its schema and report drift: "
+        "fields the notes added, fields they dropped, and cardinality changes."
+    ),
+    tags={"schema"},
+    annotations={"title": "Schema drift", **SCHEMA_ANNOTATIONS},
+)
+async def bm_schema_diff(
+    note_type: NoteType,
+    output_format: OutputFormat = "text",
+    *,
+    project: ProjectParam,
+    context: Context | None = None,
+) -> str | dict[str, Any]:
+    """Find drift between a note type's notes and its schema."""
+    async with _schema_client(parse_project(project), context) as schemas:
         return await _diff(schemas, note_type, output_format)

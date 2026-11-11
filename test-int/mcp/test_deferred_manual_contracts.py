@@ -5,6 +5,7 @@ use production scheduling and a real queue barrier to distinguish acceptance
 from materialization without replacing application code or guessing sleep times.
 """
 
+import re
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -338,9 +339,8 @@ async def test_deferred_notes_have_honest_graph_pages_read_budgets_and_schema_gu
         assert "Last paragraph." in "\n".join(contents)
 
         with pytest.raises(ToolError) as refused:
-            await client.call_tool(
-                "bm_schema", {"command": "validate", "project": test_project.name}
-            )
+            await client.call_tool("bm_schema_validate", {"project": test_project.name})
         guidance = str(refused.value)
-        assert "bm_schema(command='infer'" in guidance
-        assert "schema_infer(" not in guidance and "schema_validate" not in guidance
+        assert "bm_schema_infer(" in guidance
+        # The pre-1.0 names, without the bm_ prefix, must not come back.
+        assert re.search(r"(?<!bm_)schema_(?:infer|validate)", guidance) is None

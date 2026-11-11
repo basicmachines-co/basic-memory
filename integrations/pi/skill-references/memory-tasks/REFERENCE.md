@@ -98,7 +98,7 @@ What future-you needs to pick up this work. Include:
 )
 ```
 
-**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema(command="validate", project="<project>")`. Include queryable fields in both places for full coverage.
+**Why both frontmatter and observations?** Fields in `metadata` (stored as frontmatter) power `bm_search` with `filters`. Fields as observations (`- [status] active`) power `bm_schema_validate`. Include queryable fields in both places for full coverage.
 
 ### Key Principles
 
@@ -186,8 +186,8 @@ With BM's schema system, tasks are fully queryable:
 | `bm_search(note_types=["task"], filters={"assigned_to": "claude"}, project="<project>")` | My tasks |
 | `bm_search("blockers", note_types=["task"], project="<project>")` | Tasks with blockers |
 | `bm_search(note_types=["task"], time_kind="due", valid_overlaps="[2026-10-14,2026-10-21)", project="<project>")` | Tasks with a step due this week |
-| `bm_schema(command="validate", note_type="Task", project="<project>")` | Validate all tasks against schema |
-| `bm_schema(command="diff", note_type="Task", project="<project>")` | Detect drift between schema and actual task notes |
+| `bm_schema_validate(note_type="Task", project="<project>")` | Validate all tasks against schema |
+| `bm_schema_diff(note_type="Task", project="<project>")` | Detect drift between schema and actual task notes |
 
 ### Due Dates
 
@@ -208,4 +208,4 @@ also returns overdue items.
 - **Context > steps** — Steps tell you what to do; context tells you why and how
 - **Close finished tasks** — Don't leave completed work as `active`
 - **Link related tasks** — Use `parent_task [[X]]` or relations to connect related work
-- **Schema validation is your friend** — Run `bm_schema(command="validate", note_type="Task", project="<project>")` periodically to catch incomplete tasks
+- **Schema validation is your friend** — Run `bm_schema_validate(note_type="Task", project="<project>")` periodically to catch incomplete tasks

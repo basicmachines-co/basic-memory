@@ -21,7 +21,8 @@ Basic Memory Cloud still registers them. Section 3 documents each tool.
 
 `bm tool` mirrors the local note, search, project and schema tools: `read`, `write`, `edit`,
 `move`, `delete`, `list`, `find`, `search`, `context`, `project-list`, `project-create`,
-`recent` and `schema`, with flags named after the tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
+`recent`, `schema-validate`, `schema-infer` and `schema-diff`, with flags named after the
+tool's parameters. The rest have their own commands or none: [[bm-man(3)]] is
 `bm man`, [[bm-project-delete(3)]] is `bm project remove`, and the Cloud-only tools
 ([[bm-agent(3)]], the ChatGPT `search` and `fetch` adapters) have no `bm tool` command.
 
@@ -45,7 +46,7 @@ The guide's "Tool-by-tool change list" gives each tool's renamed arguments and r
 | `list_workspaces` | `bm_project_list` groups projects by workspace, so it omits a workspace with no projects; `bm cloud workspace list` in a shell lists every workspace |
 | `create_memory_project` | `bm_project_create(name=..., path=...)` |
 | `delete_project` | `bm_project_delete` (opt-in) |
-| `schema_validate`, `schema_infer`, `schema_diff` | `bm_schema(command="validate"/"infer"/"diff")` |
+| `schema_validate`, `schema_infer`, `schema_diff` | `bm_schema_validate`, `bm_schema_infer`, `bm_schema_diff` |
 | `move_note` | `bm_move` |
 | `delete_note` | `bm_delete` |
 | `man` | `bm_man` |
@@ -64,9 +65,13 @@ destructive hints. The 1.0 names are removed with no aliases.
 | `bm_project(command="list")` | `bm_project_list()` |
 | `bm_project(command="create", name=..., path=...)` | `bm_project_create(name=..., path=...)` |
 | `bm_project(command="recent", project=...)` | `bm_recent(project=...)` |
+| `bm_schema(command="validate", ...)` | `bm_schema_validate(...)` |
+| `bm_schema(command="infer", note_type=...)` | `bm_schema_infer(note_type=...)` |
+| `bm_schema(command="diff", note_type=...)` | `bm_schema_diff(note_type=...)` |
 | `bm tool project list` | `bm tool project-list` |
 | `bm tool project create --name N --path P` | `bm tool project-create --name N --path P` |
 | `bm tool project recent` | `bm tool recent` |
+| `bm tool schema validate/infer/diff --note-type T` | `bm tool schema-validate/schema-infer/schema-diff --note-type T` |
 
 ## BM TOOL COMMANDS
 
@@ -86,8 +91,8 @@ destructive hints. The 1.0 names are removed with no aliases.
 | `recent --timeframe D --type K --depth N` | `recent --since D --items K`; depth is fixed at 1 |
 | `list-projects`, `projects` | `project-list` |
 | `list-workspaces`, `workspaces` | `project-list` (omits workspaces with no projects), or `bm cloud workspace list` for every workspace |
-| `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema validate/infer/diff`; a positional `TYPE` becomes `--note-type TYPE` |
-| `validate path/note.md` | `schema validate --identifier path/note.md` |
+| `schema-validate`, `schema-infer`, `schema-diff`, `validate`, `infer`, `diff` | `schema-validate`, `schema-infer`, `schema-diff`; a positional `TYPE` becomes `--note-type TYPE` |
+| `validate path/note.md` | `schema-validate --identifier path/note.md` |
 | `--project-id UUID` | `--project UUID` |
 | `--plain` | removed; the default output is the tool's text result |
 | (new) | `move`, `list`, `find` |

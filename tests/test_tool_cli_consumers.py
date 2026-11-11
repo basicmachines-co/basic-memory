@@ -52,7 +52,9 @@ def test_benchmark_mcp_calls_use_registered_surface() -> None:
         "bm_project_create",
         "bm_recent",
         "bm_project_delete",
-        "bm_schema",
+        "bm_schema_validate",
+        "bm_schema_infer",
+        "bm_schema_diff",
         "bm_man",
     }
     failures: list[str] = []
