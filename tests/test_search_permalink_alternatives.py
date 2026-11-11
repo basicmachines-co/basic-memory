@@ -28,7 +28,7 @@ async def test_permalink_alternatives_partition_query_cache(field):
 
     @app.api_route("/identity", methods=["QUERY"])
     async def identity(request: Request, body: SearchQuery) -> str:
-        return await _request_identity(request)
+        return await _request_identity(request, excluded=frozenset())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         bodies = [
