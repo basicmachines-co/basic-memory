@@ -9,7 +9,7 @@ import typer
 from loguru import logger
 
 from basic_memory.cli.app import app
-from basic_memory.cli.auto_update import AutoUpdateStatus, run_auto_update
+from basic_memory.cli.auto_update import AutoUpdateResult, AutoUpdateStatus, run_auto_update
 from basic_memory.config import ConfigManager, init_mcp_logging
 
 
@@ -34,6 +34,21 @@ def is_loopback_host(host: str) -> bool:
         # Hostnames other than localhost can resolve to any interface, so treat
         # them as exposed rather than guessing what they resolve to.
         return False
+
+
+def log_background_update(result: AutoUpdateResult) -> None:
+    """Log what a background update at MCP startup did.
+
+    stdio MCP has no terminal to print to, so the MCP log is the only place a user
+    can find the outcome, including a major release that was announced instead of
+    installed (#2000).
+    """
+    if result.restart_recommended:
+        logger.info("A newer Basic Memory version was installed and will apply on next restart.")
+    elif result.status in (AutoUpdateStatus.UPDATE_AVAILABLE, AutoUpdateStatus.NOT_UPGRADED):
+        logger.info(result.message)
+    elif result.status == AutoUpdateStatus.FAILED and result.error:
+        logger.warning(f"MCP background auto-update failed: {result.error}")
 
 
 @app.command()
@@ -101,15 +116,7 @@ def mcp(
         logger.info(f"MCP server constrained to project: {project_name}")
 
     def _run_background_auto_update() -> None:
-        result = run_auto_update(force=False, check_only=False, silent=True)
-        if result.restart_recommended:
-            logger.info(
-                "A newer Basic Memory version was installed and will apply on next restart."
-            )
-        elif result.status == AutoUpdateStatus.NOT_UPGRADED:
-            logger.info(result.message)
-        elif result.status == AutoUpdateStatus.FAILED and result.error:
-            logger.warning(f"MCP background auto-update failed: {result.error}")
+        log_background_update(run_auto_update(force=False, check_only=False, silent=True))
 
     # Trigger: stdio transport corresponds to local user installs.
     # Why: server transports (HTTP/SSE) run in managed environments where

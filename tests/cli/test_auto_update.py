@@ -24,7 +24,9 @@ from basic_memory.cli.auto_update import (
     _preload_lazy_console_modules,
     print_update_status,
     detect_install_source,
+    is_major_upgrade,
     maybe_run_periodic_auto_update,
+    release_notes_url,
     run_auto_update,
 )
 from basic_memory.config import BasicMemoryConfig
@@ -91,7 +93,7 @@ def _result(
         checked=True,
         update_available=status in {AutoUpdateStatus.UPDATE_AVAILABLE, AutoUpdateStatus.UPDATED},
         updated=status == AutoUpdateStatus.UPDATED,
-        latest_version="9.9.9",
+        latest_version="1.9.9",
         message=message,
         error=error,
         restart_recommended=status == AutoUpdateStatus.UPDATED,
@@ -275,7 +277,7 @@ def test_failed_homebrew_check_falls_back_to_pypi(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     result = run_auto_update(
@@ -285,7 +287,7 @@ def test_failed_homebrew_check_falls_back_to_pypi(monkeypatch, tmp_path):
     )
 
     assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
-    assert result.latest_version == "9.9.9"
+    assert result.latest_version == "1.9.9"
     assert "brew upgrade basic-memory" in (result.message or "")
 
 
@@ -308,7 +310,7 @@ def test_failed_homebrew_check_does_not_auto_upgrade(monkeypatch, tmp_path):
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     result = run_auto_update(
@@ -318,7 +320,7 @@ def test_failed_homebrew_check_does_not_auto_upgrade(monkeypatch, tmp_path):
 
     assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
     assert result.updated is False
-    assert result.latest_version == "9.9.9"
+    assert result.latest_version == "1.9.9"
     assert ["brew", "upgrade", "basic-memory"] not in calls
     assert "untrusted tap" in (result.message or "")
     assert "brew upgrade basic-memory" in (result.message or "")
@@ -525,9 +527,9 @@ def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
-    calls = _fake_uv_tool(monkeypatch, installed=["1.0.0", "9.9.9"])
+    calls = _fake_uv_tool(monkeypatch, installed=["1.0.0", "1.9.9"])
 
     result = run_auto_update(
         config_manager=_config_manager(manager),
@@ -535,9 +537,9 @@ def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
     )
 
     assert result.status == AutoUpdateStatus.UPDATED
-    assert result.latest_version == "9.9.9"
+    assert result.latest_version == "1.9.9"
     assert result.restart_recommended is True
-    assert "updated to 9.9.9" in (result.message or "")
+    assert "updated to 1.9.9" in (result.message or "")
     upgrade = ["uv", "tool", "upgrade", "basic-memory", "--prerelease=allow"]
     assert [command for command in calls if command[0] == "uv"] == [upgrade]
     # The tool's own interpreter reports the version before and after the upgrade.
@@ -565,7 +567,7 @@ def test_unreadable_uv_tool_version_fails_the_update(monkeypatch, tmp_path):
     manager = StubConfigManager(_base_config(tmp_path))
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     def _broken_interpreter(command, **kwargs):
@@ -584,7 +586,7 @@ def test_unknown_manager_returns_manual_update_guidance(monkeypatch, tmp_path):
     manager = StubConfigManager(config)
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     result = run_auto_update(
@@ -618,11 +620,11 @@ def test_mcp_silent_mode_suppresses_subprocess_output(monkeypatch, tmp_path):
     manager = StubConfigManager(config)
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     upgrade_kwargs: list[dict[str, Any]] = []
-    versions = iter(["1.0.0", "9.9.9"])
+    versions = iter(["1.0.0", "1.9.9"])
 
     def _fake_run_subprocess(command, **kwargs):
         if command[0] == "uv":
@@ -649,7 +651,7 @@ def test_subprocess_oserror_is_non_fatal(monkeypatch, tmp_path):
     manager = StubConfigManager(config)
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_pypi_update_available",
-        lambda: (True, "9.9.9"),
+        lambda: (True, "1.9.9"),
     )
 
     def _raise_oserror(command, **kwargs):
@@ -718,7 +720,7 @@ def test_maybe_run_periodic_auto_update_prints_available(monkeypatch):
         "basic_memory.cli.auto_update.run_auto_update",
         lambda **kwargs: _result(
             AutoUpdateStatus.UPDATE_AVAILABLE,
-            message="Update available (latest: 9.9.9).",
+            message="Update available (latest: 1.9.9).",
         ),
     )
 
@@ -774,3 +776,46 @@ def test_is_interactive_session_handles_closed_stdio(monkeypatch):
     monkeypatch.setattr("basic_memory.cli.auto_update.sys.stdout", _BrokenStream())
 
     assert _is_interactive_session() is False
+
+
+# --- Major versions are announced, not installed in the background (#2000) ---
+
+
+def test_is_major_upgrade():
+    assert is_major_upgrade("1.0.0", "2.0.0")
+    assert is_major_upgrade("0.24.1", "1.0.0")
+    assert not is_major_upgrade("1.0.0", "1.9.9")
+    assert not is_major_upgrade("1.2.0b1", "1.2.0")
+
+
+def test_background_check_reports_a_major_release_without_installing(monkeypatch, tmp_path):
+    manager = StubConfigManager(_base_config(tmp_path))
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "2.0.0"),
+    )
+    calls = _fake_uv_tool(monkeypatch, installed=["1.0.0", "2.0.0"])
+
+    result = run_auto_update(config_manager=_config_manager(manager), executable=UV_TOOL_PYTHON)
+
+    assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
+    assert result.updated is False
+    assert calls == []
+    assert release_notes_url("2.0.0") in (result.message or "")
+    assert "`bm update`" in (result.message or "")
+
+
+def test_bm_update_installs_a_major_release(monkeypatch, tmp_path):
+    manager = StubConfigManager(_base_config(tmp_path))
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "2.0.0"),
+    )
+    _fake_uv_tool(monkeypatch, installed=["1.0.0", "2.0.0"])
+
+    result = run_auto_update(
+        force=True, config_manager=_config_manager(manager), executable=UV_TOOL_PYTHON
+    )
+
+    assert result.status == AutoUpdateStatus.UPDATED
+    assert "updated to 2.0.0" in (result.message or "")

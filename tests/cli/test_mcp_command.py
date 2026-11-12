@@ -11,9 +11,11 @@ import fastmcp
 import httpx
 import pytest
 from fastmcp.server.http import HostOriginGuardMiddleware
+from loguru import logger
 from typer.testing import CliRunner
 
 import basic_memory.cli.commands.mcp as mcp_mod
+from basic_memory.cli.auto_update import AutoUpdateResult, AutoUpdateStatus, InstallSource
 from basic_memory.cli.main import app as cli_app
 from basic_memory.mcp.server import mcp as live_mcp_server
 
@@ -142,3 +144,65 @@ def test_guard_installed_once_per_transport(transport: HttpTransport) -> None:
     app = live_mcp_server.http_app(transport=transport, host_origin_protection="auto")
 
     assert _guard_middleware_count(app.user_middleware) == 1
+
+
+# --- Background update at MCP startup (#2000) ---
+
+
+def _logged_messages(result: AutoUpdateResult) -> list[str]:
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(message.record["message"]))
+    try:
+        mcp_mod.log_background_update(result)
+    finally:
+        logger.remove(sink_id)
+    return messages
+
+
+def test_background_update_logs_a_major_release_announcement():
+    announcement = "Basic Memory 2.0.0 is a new major version, so it was not installed."
+    result = AutoUpdateResult(
+        status=AutoUpdateStatus.UPDATE_AVAILABLE,
+        source=InstallSource.UV_TOOL,
+        checked=True,
+        update_available=True,
+        updated=False,
+        latest_version="2.0.0",
+        message=announcement,
+    )
+
+    assert _logged_messages(result) == [announcement]
+
+
+def test_background_update_logs_install_and_failure_and_skips_up_to_date():
+    installed = AutoUpdateResult(
+        status=AutoUpdateStatus.UPDATED,
+        source=InstallSource.UV_TOOL,
+        checked=True,
+        update_available=True,
+        updated=True,
+        restart_recommended=True,
+    )
+    current = AutoUpdateResult(
+        status=AutoUpdateStatus.UP_TO_DATE,
+        source=InstallSource.UV_TOOL,
+        checked=True,
+        update_available=False,
+        updated=False,
+        message="Basic Memory is up to date (1.0.1).",
+    )
+
+    failed = AutoUpdateResult(
+        status=AutoUpdateStatus.FAILED,
+        source=InstallSource.UV_TOOL,
+        checked=True,
+        update_available=True,
+        updated=False,
+        error="uv exited 2",
+    )
+
+    assert _logged_messages(installed) == [
+        "A newer Basic Memory version was installed and will apply on next restart."
+    ]
+    assert _logged_messages(failed) == ["MCP background auto-update failed: uv exited 2"]
+    assert _logged_messages(current) == []

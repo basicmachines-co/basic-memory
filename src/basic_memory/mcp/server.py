@@ -20,6 +20,7 @@ from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, installed_container as installed_mcp_container
 from basic_memory.mcp.empty_results import EmptyListResultMiddleware
+from basic_memory.mcp.error_results import ToolErrorResultMiddleware
 from basic_memory.mcp.missing_project import MissingProjectMiddleware
 from basic_memory.read_cache import ReadCacheUnavailable
 from basic_memory.read_cache.redis import RedisReadCache
@@ -261,5 +262,7 @@ mcp = FastMCP(
     lifespan=lifespan,
 )
 mcp.add_middleware(MCPClientInfoMiddleware())
+# Outside MissingProjectMiddleware, so its refusals get structured content too.
+mcp.add_middleware(ToolErrorResultMiddleware())
 mcp.add_middleware(EmptyListResultMiddleware())
 mcp.add_middleware(MissingProjectMiddleware())
