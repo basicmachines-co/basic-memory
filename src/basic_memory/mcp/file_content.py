@@ -13,8 +13,9 @@ from httpx import Response
 from loguru import logger
 from PIL import Image as PILImage
 
-# GIF is excluded until Pillow can be upgraded: GHSA-74r2-7ff9-mjj2 burns CPU
-# inside Image.open(), before resizing or pixel-count limits can protect callers.
+# Only the formats bm_read displays are decoded. Each extra format is another
+# Pillow parser exposed to file bytes a user controls; GIF was the last one with
+# a live advisory (GHSA-74r2-7ff9-mjj2, fixed in Pillow 13).
 DISPLAYABLE_IMAGE_FORMATS = ("PNG", "JPEG", "WEBP")
 
 # Inline budget for one file in a tool result. Images are shrunk to fit; other
@@ -199,8 +200,8 @@ def classify_file_response(response: Response) -> FileContent:
         # The content type comes from the stored file, which whoever wrote the
         # file chose, and Pillow picks a decoder by sniffing the bytes. Decoding
         # only the formats we display keeps a crafted TIFF, EPS or PDF named
-        # .png away from Pillow's other parsers, which carry known memory-safety
-        # bugs we cannot upgrade past yet (fastembed pins pillow<13).
+        # .png away from Pillow's other parsers, which have a history of
+        # memory-safety advisories.
         try:
             image = PILImage.open(io.BytesIO(response.content), formats=DISPLAYABLE_IMAGE_FORMATS)
         except PILImage.UnidentifiedImageError:

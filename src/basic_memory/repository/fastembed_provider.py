@@ -106,7 +106,7 @@ class FastEmbedEmbeddingProvider:
 
         FastEmbed stores each model under ``<cache_dir>/models--<org>--<repo>`` where the
         repo is the model's HuggingFace source (e.g. ``BAAI/bge-small-en-v1.5`` resolves to
-        ``models--qdrant--bge-small-en-v1.5-onnx-q``). We resolve the source and the expected
+        ``models--Qdrant--bge-small-en-v1.5-onnx-Q``). We resolve the source and the expected
         model artifact filename from FastEmbed's own model description so corruption detection
         and deletion are scoped to exactly this model's tree — never the whole cache or
         unrelated models.
