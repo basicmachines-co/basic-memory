@@ -7,6 +7,27 @@ from pathlib import Path
 import pytest
 
 
+# ---- _find_binary ----
+
+
+def test_find_binary_prefers_the_path_match(bm, tmp_path):
+    # Named after a real CLI so a stale copy could exist in ~/.local/bin; the PATH
+    # match must still win (#1783).
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    on_path = bin_dir / "bm"
+    on_path.write_text("#!/bin/sh\n")
+    on_path.chmod(0o755)
+    assert bm._find_binary("bm", search_path=str(bin_dir)) == str(on_path)
+
+
+def test_find_binary_skips_a_non_executable_path_entry(bm, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "bm-hermes-missing").write_text("not executable")
+    assert bm._find_binary("bm-hermes-missing", search_path=str(bin_dir)) is None
+
+
 # ---- _truncate ----
 
 
