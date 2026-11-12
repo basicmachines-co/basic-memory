@@ -1,5 +1,8 @@
 """Only the two ways a search refresh loses to a concurrent refresh count as a lost race."""
 
+import subprocess
+import sys
+
 import pytest
 from asyncpg.exceptions import DeadlockDetectedError, UniqueViolationError
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -42,3 +45,15 @@ def test_a_search_index_primary_key_conflict_is_a_lost_race() -> None:
 )
 def test_every_other_failure_is_not_a_lost_race(error: BaseException) -> None:
     assert lost_search_refresh_race(error) is None
+
+
+def test_sqlite_startup_never_imports_the_postgres_driver() -> None:
+    """A SQLite install must start even when asyncpg's native extension cannot load (#2103)."""
+    probe = (
+        "import sys\n"
+        "import basic_memory.cli.main\n"
+        "import basic_memory.mcp.server\n"
+        "assert 'asyncpg' not in sys.modules, 'asyncpg imported at startup'\n"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
