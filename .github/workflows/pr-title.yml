@@ -14,11 +14,13 @@ jobs:
   main:
     runs-on: ubuntu-latest
     steps:
+      # Squash merges make the PR title the commit subject, so the type keeps
+      # main's history readable. The scope is free text: nothing reads it, and
+      # a fixed list only blocked PRs for areas it did not name yet.
       - uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Configure allowed types based on what we want in our changelog
           types: |
             feat
             fix
@@ -30,20 +32,4 @@ jobs:
             test
             build
             ci
-          # Require at least one from scope list (optional)
-          scopes: |
-            core
-            cli
-            api
-            mcp
-            sync
-            ui
-            ci
-            deps
-            installer
-            plugins
-            skills
-            integrations
-            benchmarks
-          # Allow breaking changes (needs "!" after type/scope)
-          requireScopeForBreakingChange: true
+          requireScope: false

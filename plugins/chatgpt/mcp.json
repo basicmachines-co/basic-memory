@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "basic-memory": {
+      "type": "streamable-http",
+      "url": "https://cloud.basicmemory.com/mcp"
+    }
+  },
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+}
