@@ -1004,3 +1004,113 @@ def test_workspace_resolution_error_prints_bracketed_name_verbatim(
         project_sync_command._require_personal_workspace("proj [x]", config)
 
     assert "Error resolving workspace for project 'proj [x]'" in _plain(capsys.readouterr().out)
+
+
+# --- Project names in any spelling (#2078) ---
+
+
+def _cloud_project_list_factory(*names: str):
+    """A client factory whose cloud lists the given projects; every other request 404s."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v2/projects/":
+            projects = [
+                {"id": index, "external_id": f"ext-{index}", "name": name, "path": name.lower()}
+                for index, name in enumerate(names, start=1)
+            ]
+            return httpx.Response(200, json={"projects": projects, "default_project": None})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    @asynccontextmanager
+    async def factory(workspace: str | None = None):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://cloud.test"
+        ) as client:
+            yield client
+
+    return factory
+
+
+@pytest.fixture
+def cloud_projects():
+    """Route get_client to a fake cloud for one test, then restore normal routing."""
+    from basic_memory.mcp import async_client
+
+    def install(*names: str) -> None:
+        async_client.set_client_factory(_cloud_project_list_factory(*names))
+
+    yield install
+    async_client._client_factory = None
+
+
+def _save_cloud_api_key(config_manager) -> None:
+    config = config_manager.load_config()
+    config.cloud_api_key = "bmc_test"
+    config_manager.save_config(config)
+
+
+def test_configured_project_name_matches_any_spelling(config_manager):
+    from basic_memory.cli.commands.cloud.project_sync import _configured_project_name
+
+    config = config_manager.load_config()
+    config.projects["Cesar"] = ProjectEntry(path="/tmp/cesar")
+
+    assert _configured_project_name("cesar", config) == "Cesar"
+    assert _configured_project_name("CESAR", config) == "Cesar"
+    assert _configured_project_name("someone-else", config) is None
+
+
+def test_require_local_sync_path_finds_the_entry_in_any_spelling(config_manager, tmp_path):
+    from basic_memory.cli.commands.cloud.project_sync import _require_local_sync_path
+
+    config = config_manager.load_config()
+    config.projects["Cesar"] = ProjectEntry(path=tmp_path.as_posix())
+
+    assert _require_local_sync_path("cesar", config) == tmp_path.as_posix()
+
+
+def test_sync_setup_saves_the_cloud_spelling_for_a_lowercase_name(
+    config_manager, cloud_projects, tmp_path
+):
+    """`sync-setup cesar` finds the cloud project `Cesar` and keys config by `Cesar`."""
+    _save_cloud_api_key(config_manager)
+    cloud_projects("Cesar")
+    local_dir = tmp_path / "cesar-notes"
+
+    result = runner.invoke(app, ["cloud", "sync-setup", "cesar", str(local_dir)])
+
+    assert result.exit_code == 0, result.output
+    config = config_manager.load_config()
+    assert config.projects["Cesar"].local_sync_path == local_dir.as_posix()
+    assert "cesar" not in config.projects
+    assert "bm cloud pull --name Cesar" in _plain(result.output)
+
+
+def test_sync_setup_updates_an_existing_entry_under_its_own_key(
+    config_manager, cloud_projects, tmp_path
+):
+    """An entry saved under another spelling is updated, not duplicated."""
+    _save_cloud_api_key(config_manager)
+    config = config_manager.load_config()
+    config.projects["cesar"] = ProjectEntry(path=(tmp_path / "old").as_posix())
+    config_manager.save_config(config)
+    cloud_projects("Cesar")
+    local_dir = tmp_path / "new"
+
+    result = runner.invoke(app, ["cloud", "sync-setup", "CESAR", str(local_dir)])
+
+    assert result.exit_code == 0, result.output
+    config = config_manager.load_config()
+    assert config.projects["cesar"].local_sync_path == local_dir.as_posix()
+    assert "Cesar" not in config.projects
+
+
+def test_sync_setup_still_rejects_an_unknown_project(config_manager, cloud_projects, tmp_path):
+    _save_cloud_api_key(config_manager)
+    cloud_projects("Cesar")
+
+    result = runner.invoke(app, ["cloud", "sync-setup", "maria", str(tmp_path / "maria")])
+
+    assert result.exit_code == 1
+    assert "Project 'maria' not found on cloud" in _plain(result.output)
+    assert "maria" not in config_manager.load_config().projects
