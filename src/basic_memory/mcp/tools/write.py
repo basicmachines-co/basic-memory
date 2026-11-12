@@ -70,8 +70,10 @@ class NotePlacement:
         "('notes/plan.md'), or `title` plus `directory`. With a path the file lands exactly "
         "there and the title comes from the content's frontmatter, then `title`, then the "
         "file name. An existing note is an error unless `overwrite=true`; pass "
-        "`expected_checksum` (from bm_read) to replace only the revision you read. To change "
-        "part of a note use bm_edit. Content may hold frontmatter, observations "
+        "`expected_checksum` (from bm_read) to replace only the revision you read. Overwrite "
+        "replaces the body; frontmatter keys the note already has are kept unless the new "
+        "content or arguments set them. To change part of a note use bm_edit. Content may "
+        "hold frontmatter, observations "
         "('- [category] fact #tag') and relations ('- relation_type [[Other Note]]')."
     ),
     tags={"notes"},
@@ -86,7 +88,12 @@ class NotePlacement:
 async def bm_write(
     content: Annotated[
         str,
-        Field(description="The note's Markdown. Saved as given; it may start with frontmatter."),
+        Field(
+            description=(
+                "The note's Markdown; it may start with frontmatter. On overwrite, frontmatter "
+                "keys the note already has are kept unless this content sets them."
+            )
+        ),
     ],
     identifier: Annotated[
         str | None,
@@ -135,7 +142,8 @@ async def bm_write(
         bool | None,
         Field(
             description=(
-                "Replace a note that already exists. Default: the "
+                "Replace the body of a note that already exists, keeping frontmatter keys "
+                "the new content does not set. Default: the "
                 "write_note_overwrite_default setting (false unless changed)."
             )
         ),

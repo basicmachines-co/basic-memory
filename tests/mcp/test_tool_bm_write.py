@@ -3,8 +3,10 @@
 These run the real ASGI stack through the shared `client` fixture.
 """
 
+from pathlib import Path
 from typing import Any
 
+import frontmatter
 import httpx
 import pytest
 from fastmcp import Client
@@ -13,7 +15,7 @@ from fastmcp.exceptions import ToolError
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.similar_notes import SimilarNote, similar_notes_query
-from basic_memory.mcp.tools import bm_read, bm_write
+from basic_memory.mcp.tools import bm_edit, bm_read, bm_write
 from basic_memory.mcp.tools import write as write_module
 from basic_memory.schemas.search import SimilarityFloor
 from basic_memory.schemas.v2.note_write import NoteLocked, NoteTargetMoved
@@ -150,6 +152,46 @@ async def test_overwrite_replaces_and_reports_the_checksum(client, test_project)
 
     assert replaced["action"] == "updated"
     assert replaced["checksum"] != created["checksum"]
+
+
+@pytest.mark.asyncio
+async def test_overwrite_replaces_the_body_and_keeps_frontmatter_it_does_not_set(
+    client, test_project
+):
+    # write_note overwrite is a partial writer: it replaces the body and merges the
+    # frontmatter, so a key the new content leaves out is kept (#1653).
+    await write_json(
+        identifier="notes/a.md",
+        content="---\ntitle: A\nstatus: draft\nowner: sam\ntags:\n- old\n---\n\nOne",
+        project=test_project.name,
+    )
+
+    await write_json(
+        identifier="notes/a.md",
+        content="---\nstatus: final\n---\n\nTwo",
+        tags=["new"],
+        metadata={"reviewed": True},
+        overwrite=True,
+        project=test_project.name,
+    )
+
+    note = frontmatter.loads((Path(test_project.path) / "notes/a.md").read_text())
+    assert note.content == "Two"
+    assert note["owner"] == "sam"  # left out of the new content, kept
+    assert note["status"] == "final"  # set by the new content
+    assert note["tags"] == ["new"]  # set by the argument
+    assert note["reviewed"] is True
+
+    # Removing a key is an edit of the frontmatter text, as the manual says.
+    await bm_edit(
+        identifier="notes/a.md",
+        command="find_replace",
+        find_text="owner: sam\n",
+        content="",
+        project=test_project.name,
+    )
+    edited = frontmatter.loads((Path(test_project.path) / "notes/a.md").read_text())
+    assert "owner" not in edited.metadata
 
 
 @pytest.mark.asyncio
