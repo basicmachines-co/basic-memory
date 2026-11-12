@@ -84,9 +84,19 @@ def test_builds_from_checked_in_configuration_without_existing_output(tmp_path: 
     subprocess.run([sys.executable, str(SCRIPT), "--output", str(output)], check=True)
     source = SCRIPT.parents[1] / "plugins/chatgpt"
     with zipfile.ZipFile(output) as archive:
-        for name in [".codex-plugin/plugin.json", ".mcp.json", "assets/app-icon.png"]:
+        for name in ["plugin.json", "mcp.json", "assets/app-icon.png"]:
             assert archive.read(name) == (source / name).read_bytes()
-        manifest = json.loads(archive.read(".codex-plugin/plugin.json"))
+        manifest = json.loads(archive.read("plugin.json"))
         assert manifest["name"] == "app-6a49590bf6348191a16c0b87ca6b01b4"
-        assert manifest["mcpServers"] == "./.mcp.json"
+        assert manifest["$schema"] == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+        assert not {"skills", "mcpServers", "apps", "interface"} & manifest.keys()
+        interface = manifest["extensions"]["com.openai"]["interface"]
+        assert interface["displayName"] == "Basic Memory Cloud"
+        assert len(interface["shortDescription"]) <= 30
+        connection = json.loads(archive.read("mcp.json"))
+        assert connection["mcpServers"]["basic-memory"] == {
+            "type": "streamable-http",
+            "url": "https://cloud.basicmemory.com/mcp",
+        }
+        assert ".app.json" not in archive.namelist()
         assert "skills/basic-memory/SKILL.md" in archive.namelist()
