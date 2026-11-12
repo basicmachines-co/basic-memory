@@ -15,6 +15,8 @@ import json
 import signal
 import threading
 
+import pytest
+
 from .conftest import project_listing
 
 
@@ -182,6 +184,53 @@ def test_initialize_does_not_resurrect_actor_detached_during_start(bm, monkeypat
     assert actor.shutdown_calls
     assert p._actor is None
     assert p._initialized is False
+
+
+def test_cleanup_on_the_restarting_thread_does_not_deadlock(bm, monkeypatch, tmp_path):
+    """SIGTERM runs shutdown() on the thread it interrupts.
+
+    That thread can be inside _restart(), holding the restart lock that shutdown()
+    also takes. shutdown() must still get through and stop the replacement.
+    """
+    p = _make_initializable_provider(bm, monkeypatch, tmp_path)
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
+    dead = TrackingActor.instances[0]
+    dead.alive = False
+
+    class SigtermDuringStartActor(TrackingActor):
+        def start(self, timeout: float = 25.0) -> None:
+            super().start(timeout)
+            p.shutdown()  # what the SIGTERM handler runs on this thread
+
+    monkeypatch.setattr(bm, "_BmMcpActor", SigtermDuringStartActor)
+    restarted: list[bool] = []
+    restarting = threading.Thread(target=lambda: restarted.append(p._restart(dead)), daemon=True)
+    restarting.start()
+    restarting.join(5)
+
+    if restarting.is_alive():
+        # Keep the plugin's exit cleanup away from the stuck provider, so the
+        # test run reports this failure instead of hanging at interpreter exit.
+        bm._all_providers.discard(p)
+        pytest.fail("shutdown() waited on a lock its own thread held")
+    assert restarted == [False]
+    replacement = TrackingActor.instances[1]
+    assert replacement.shutdown_calls
+    assert p._actor is None
+    assert p._initialized is False
+
+
+def test_a_provider_initialized_again_after_shutdown_restarts_normally(bm, monkeypatch, tmp_path):
+    """shutdown() stops restarts only until Hermes initializes the provider again."""
+    p = _make_initializable_provider(bm, monkeypatch, tmp_path)
+    p.initialize(session_id="one", hermes_home=str(tmp_path))
+    p.shutdown()
+    p.initialize(session_id="two", hermes_home=str(tmp_path))
+    second = TrackingActor.instances[1]
+    second.alive = False
+
+    assert p._restart(second) is True
+    assert p._actor is TrackingActor.instances[2]
 
 
 # ---- SIGTERM cleanup chain ----

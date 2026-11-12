@@ -1124,7 +1124,13 @@ class BasicMemoryProvider(MemoryProvider):
         # Serializes session-scoped capture state (note id, opener) between turn
         # capture, session-end summaries and session switches.
         self._state_lock = threading.RLock()
-        self._restart_lock = threading.Lock()
+        # Reentrant because shutdown() takes it too, and the SIGTERM handler runs
+        # shutdown() on whichever thread it interrupts, which can be the thread
+        # inside _restart() that already holds it.
+        self._restart_lock = threading.RLock()
+        # Set by shutdown() under _restart_lock and cleared by initialize(), so a
+        # provider that is shutting down never starts a replacement `bm mcp`.
+        self._closing: bool = False
         self._last_restart_at: float = 0.0
         self._failure_count: int = 0
         self._failure_pause_until: float = 0.0
@@ -1151,6 +1157,10 @@ class BasicMemoryProvider(MemoryProvider):
 
     # ---- Lifecycle ----
     def initialize(self, session_id: str, **kwargs: Any) -> None:
+        # Hermes may initialize a provider again after shutdown(); it restarts a
+        # dead `bm mcp` normally from then on. _restart() only calls this when
+        # the provider is not closing, so it cannot undo a shutdown in progress.
+        self._closing = False
         requested_session_id = session_id or ""
         self._hermes_home = kwargs.get("hermes_home") or os.path.expanduser("~/.hermes")
         # Hermes passes "cron", "subagent" or "flush" for non-conversational
@@ -1397,6 +1407,14 @@ class BasicMemoryProvider(MemoryProvider):
         return [bm, "mcp"]
 
     def shutdown(self) -> None:
+        # Trigger: another thread has a call in flight on this provider's actor.
+        # Why: stopping the actor below closes that call's connection, and _call()
+        #   reads that as a dead `bm mcp` and restarts it. The replacement lands
+        #   in self._actor after this method read it, and is dropped unstopped.
+        # Outcome: a restart already running finishes first, and its replacement
+        #   is the actor stopped below; _restart() refuses every later one.
+        with self._restart_lock:
+            self._closing = True
         if self._hermes_home:
             key = _home_key(self._hermes_home)
             with _registry_lock:
@@ -1437,6 +1455,12 @@ class BasicMemoryProvider(MemoryProvider):
 
     def _restart(self, dead: _BmMcpActor) -> bool:
         with self._restart_lock:
+            # Trigger: shutdown() has started on this provider.
+            # Why: the call most likely failed because shutdown() stopped the
+            #   actor, and nothing would ever stop a replacement started now.
+            # Outcome: no restart; _call() re-raises the call's original error.
+            if self._closing:
+                return False
             if self._actor is not dead:
                 return self._actor is not None and self._actor.is_alive()
             now = time.monotonic()
