@@ -21,6 +21,7 @@ from basic_memory.cli.markup import literal
 
 PACKAGE_NAME = "basic-memory"
 PYPI_JSON_URL = "https://pypi.org/pypi/basic-memory/json"
+RELEASES_URL = "https://github.com/basicmachines-co/basic-memory/releases"
 
 PYPI_TIMEOUT_SECONDS = 5
 BREW_OUTDATED_TIMEOUT_SECONDS = 60
@@ -222,6 +223,16 @@ def _check_pypi_update_available() -> tuple[bool, str]:
     return latest_version > current_version, latest
 
 
+def is_major_upgrade(current: str, latest: str) -> bool:
+    """Whether moving from ``current`` to ``latest`` crosses a major version."""
+    return Version(latest).major > Version(current).major
+
+
+def release_notes_url(version: str) -> str:
+    """Where the notes for a published release live."""
+    return f"{RELEASES_URL}/tag/v{version}"
+
+
 def _manual_update_hint(source: InstallSource) -> str:
     """Return manager-appropriate manual update instructions."""
     if source == InstallSource.UV_TOOL:
@@ -398,6 +409,30 @@ def run_auto_update(
                 message=(
                     f"Update available (latest: {latest_version or 'unknown'}). "
                     f"{_manual_update_hint(source)}"
+                ),
+            )
+
+        # Trigger: a background check (MCP startup, the periodic CLI check) found a
+        #   release with a new major version. `bm update` passes force and installs it.
+        # Why: a major release can remove tools and settings the user relies on (1.0
+        #   removed the legacy tool names), so it should not land unannounced (#2000).
+        # Outcome: report the release and its notes; the user installs it on purpose.
+        if (
+            not force
+            and latest_version is not None
+            and is_major_upgrade(basic_memory.__version__, latest_version)
+        ):
+            return AutoUpdateResult(
+                status=AutoUpdateStatus.UPDATE_AVAILABLE,
+                source=source,
+                checked=True,
+                update_available=True,
+                updated=False,
+                latest_version=latest_version,
+                message=(
+                    f"Basic Memory {latest_version} is a new major version, so it was not "
+                    f"installed automatically. Read what changed: "
+                    f"{release_notes_url(latest_version)} Then run `bm update` to install it."
                 ),
             )
 
