@@ -13,7 +13,15 @@ def _semantic_pr_action_inputs() -> dict[str, Any]:
     return action_step["with"]
 
 
-def test_pr_title_workflow_allows_ci_scope() -> None:
-    scopes = _semantic_pr_action_inputs()["scopes"].split()
+def test_pr_title_workflow_accepts_any_scope() -> None:
+    """A fixed scope list blocked PRs for new areas such as docs(man); nothing reads the scope."""
+    inputs = _semantic_pr_action_inputs()
 
-    assert "ci" in scopes
+    assert "scopes" not in inputs
+    assert inputs["requireScope"] is False
+
+
+def test_pr_title_workflow_still_checks_the_type() -> None:
+    types = _semantic_pr_action_inputs()["types"].split()
+
+    assert {"feat", "fix", "docs", "chore", "ci"} <= set(types)
