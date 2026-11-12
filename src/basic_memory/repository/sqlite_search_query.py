@@ -391,7 +391,6 @@ def compile_fts_filter(
         for idx, filt in enumerate(parsed_filters):
             path_param = f"meta_path_{idx}"
             extract_expr = None
-            use_tags_column = False
 
             if filt.path_parts == ["status"] and "frontmatter_status" in entity_columns:
                 extract_expr = "entity.frontmatter_status"
@@ -399,7 +398,6 @@ def compile_fts_filter(
                 extract_expr = "entity.frontmatter_type"
             elif filt.path_parts == ["tags"] and "tags_json" in entity_columns:
                 extract_expr = "entity.tags_json"
-                use_tags_column = True
 
             if extract_expr is None:
                 params[path_param] = build_sqlite_json_path(filt.path_parts)
@@ -433,6 +431,12 @@ def compile_fts_filter(
                 continue
 
             if filt.op == "contains":
+                # Membership walks the original metadata document, not tags_json.
+                # The generated column holds json_extract's result, which is plain
+                # text for a scalar such as `tags: ""`, and json_each() raises
+                # "malformed JSON" on it. json_each(doc, path) treats a scalar as
+                # one value and simply finds no match.
+                params[path_param] = build_sqlite_json_path(filt.path_parts)
                 tag_conditions: list[str] = []
                 for j, val in enumerate(filt.value):
                     value_param = f"meta_val_{idx}_{j}"
@@ -445,14 +449,10 @@ def compile_fts_filter(
                         param_prefix=value_param,
                         params=params,
                     )
-                    json_each_expr = (
-                        "json_each(entity.tags_json)"
-                        if use_tags_column
-                        else f"json_each(entity.entity_metadata, :{path_param})"
-                    )
                     tag_conditions.append(
                         "("
-                        f"EXISTS (SELECT 1 FROM {json_each_expr} WHERE value = :{value_param}) "
+                        "EXISTS (SELECT 1 FROM json_each(entity.entity_metadata, "
+                        f":{path_param}) WHERE value = :{value_param}) "
                         f"OR {like_condition}"
                         ")"
                     )

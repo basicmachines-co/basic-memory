@@ -578,6 +578,13 @@ async def test_sqlite_filters_use_the_generated_frontmatter_columns(
         "Generated Columns Untagged",
         {"status": "draft", "type": "note"},
     )
+    # tags_json holds plain text for a scalar tag value, which is not JSON.
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Generated Columns Empty Tag",
+        {"status": "draft", "type": "note", "tags": ""},
+    )
 
     assert {"tags_json", "frontmatter_status", "frontmatter_type"} <= (
         await search_repository._fts._entity_column_names()
@@ -587,6 +594,6 @@ async def test_sqlite_filters_use_the_generated_frontmatter_columns(
         return {r.id for r in await search_repository.search(metadata_filters=filters)}
 
     assert await matching({"status": "active"}) == {tagged.id}
-    assert await matching({"type": "note"}) == {untagged.id}
+    assert await matching({"type": "note", "tags": None}) == {untagged.id}
     assert await matching({"tags": ["security"]}) == {tagged.id}
     assert await matching({"tags": None}) == {untagged.id}
