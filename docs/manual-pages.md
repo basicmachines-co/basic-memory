@@ -12,7 +12,7 @@ files bundled in the package, so every install has the same manual: local, Cloud
   plus the Cloud-registered `bm_agent_list`, `bm_agent_run`, `bm_agent_get`, `bm_agent_runs`,
   `bm_agent_mark`, `bm_log`, `bm_open` and `bm_review` and the ChatGPT
   `search`/`fetch` adapters.
-- `src/basic_memory/man/man7/` — concepts an agent needs, such as `comark(7)` and `agents(7)`, and
+- `src/basic_memory/man/man7/` — concepts an agent needs, such as `comark(7)`, `agents(7)` and `setup(7)`, and
   `tools-migration(7)`, which maps pre-1.0 tools and `bm tool` commands to 1.0.
 - `src/basic_memory/man/bm.1` — the groff system page that `bm man install` copies for
   `man bm`. It is not a `bm man` page.
