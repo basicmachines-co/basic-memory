@@ -6,13 +6,16 @@ Runs on both backends via the parameterized search_repository fixture.
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.file_types import file_entity_metadata
 from basic_memory.models import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -532,3 +535,58 @@ async def test_contains_operator_matches_like_the_bare_list(search_repository, s
 
     results = await search_repository.search(metadata_filters={"tags": {"contains": "security"}})
     assert [r.title for r in results] == ["Tagged"]
+
+
+# --- Generated frontmatter columns on a migrated SQLite database (#2065) ---
+
+# The DDL migration d7e8f9a0b1c2 runs on SQLite. Test databases come from
+# create_all, which has no generated columns, so this test adds them the same way.
+GENERATED_FRONTMATTER_COLUMNS = (
+    "ALTER TABLE entity ADD COLUMN tags_json TEXT "
+    "GENERATED ALWAYS AS (json_extract(entity_metadata, '$.tags')) VIRTUAL",
+    "ALTER TABLE entity ADD COLUMN frontmatter_status TEXT "
+    "GENERATED ALWAYS AS (json_extract(entity_metadata, '$.status')) VIRTUAL",
+    "ALTER TABLE entity ADD COLUMN frontmatter_type TEXT "
+    "GENERATED ALWAYS AS (json_extract(entity_metadata, '$.type')) VIRTUAL",
+)
+
+
+@pytest.mark.asyncio
+async def test_sqlite_filters_use_the_generated_frontmatter_columns(
+    search_repository, session_maker
+):
+    """A migrated SQLite database answers status, type and tags from its generated columns.
+
+    PRAGMA table_info leaves generated columns out, so the columns were never found
+    and every filter fell back to json_extract. table_xinfo lists them.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("generated frontmatter columns exist only on SQLite")
+    async with db.scoped_session(session_maker) as session:
+        for statement in GENERATED_FRONTMATTER_COLUMNS:
+            await session.execute(text(statement))
+
+    tagged = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Generated Columns Tagged",
+        {"status": "active", "type": "spec", "tags": ["security", "auth"]},
+    )
+    untagged = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Generated Columns Untagged",
+        {"status": "draft", "type": "note"},
+    )
+
+    assert {"tags_json", "frontmatter_status", "frontmatter_type"} <= (
+        await search_repository._fts._entity_column_names()
+    )
+
+    async def matching(filters: dict[str, Any]) -> set[int]:
+        return {r.id for r in await search_repository.search(metadata_filters=filters)}
+
+    assert await matching({"status": "active"}) == {tagged.id}
+    assert await matching({"type": "note"}) == {untagged.id}
+    assert await matching({"tags": ["security"]}) == {tagged.id}
+    assert await matching({"tags": None}) == {untagged.id}

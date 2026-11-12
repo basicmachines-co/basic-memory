@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import VectorIndexScope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
@@ -39,3 +40,21 @@ async def test_missing_extension_support_is_a_dependency_error() -> None:
 
     with pytest.raises(SemanticDependenciesMissingError, match="extension loading"):
         await index._ensure_loaded(session)
+
+
+def test_knn_join_keeps_the_auxiliary_column_out_of_the_vec0_scan() -> None:
+    """SQLite before 3.38 pushes a plain join term on source_hash into the vec0 KNN.
+
+    vec0 then fails every vector search with "An illegal WHERE constraint was
+    provided on a vec0 auxiliary column in a KNN query" (#2065). The test suite's
+    SQLite is newer and never pushes the term down, so this pins the unary plus
+    that keeps it out of the scan.
+    """
+    index = SQLiteVecIndex(
+        MagicMock(),
+        VectorIndexScope(namespace="test", embedding_identity="test", dimensions=4),
+    )
+
+    sql = index._candidates([0.0, 0.0, 0.0, 1.0], {}, ProjectScope.single(1), None, vector_k=3)
+
+    assert "c.source_hash = +vector_matches.source_hash" in sql

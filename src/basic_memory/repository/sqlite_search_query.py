@@ -548,7 +548,8 @@ class SQLiteFts:
     async def _entity_column_names(self) -> frozenset[str]:
         if self._entity_columns is None:
             async with db.scoped_session(self._session_maker) as session:
-                result = await session.execute(text("PRAGMA table_info(entity)"))
+                # table_info omits generated columns; table_xinfo lists them.
+                result = await session.execute(text("PRAGMA table_xinfo(entity)"))
                 self._entity_columns = frozenset(row[1] for row in result.fetchall())
         return self._entity_columns
 

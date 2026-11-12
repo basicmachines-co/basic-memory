@@ -497,7 +497,10 @@ class SQLiteVecIndex:
             "c.source_row_id, vector_matches.distance "
             "FROM vector_matches "
             "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
-            "AND c.source_hash = vector_matches.source_hash "
+            # SQLite before 3.38 can push this join term into the vec0 scan despite
+            # MATERIALIZED, and vec0 rejects any constraint on an auxiliary column
+            # in a KNN query (#2065). The unary plus keeps the term out of the scan.
+            "AND c.source_hash = +vector_matches.source_hash "
             "WHERE c.vector_index = 'sqlite-vec' "
             "AND c.embedding_status = 'ready' "
             "AND c.embedding_model = :embedding_identity)"
