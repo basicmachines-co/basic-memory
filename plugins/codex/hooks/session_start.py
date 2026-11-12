@@ -6,6 +6,10 @@
 #     "fastmcp==4.1.3",
 # ]
 # [tool.uv]
+# # Compile the hook env at install. Hosts such as the Claude desktop app set
+# # PYTHONDONTWRITEBYTECODE=1, so Python never caches bytecode at import and every
+# # hook run would compile the whole import graph from source (#2101).
+# compile-bytecode = true
 # # The released Basic Memory runtime still pins the beta. Use the stable
 # # version tested by core until the next runtime release carries this pin.
 # override-dependencies = ["fastmcp==4.1.3"]
