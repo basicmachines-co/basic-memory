@@ -24,6 +24,7 @@ class RedisCacheHarness(Protocol):
     client: Redis
     prefix: str
 
+
 pytestmark = pytest.mark.redis
 
 
@@ -68,8 +69,7 @@ def _app(redis_cache: RedisCacheHarness, *, status_code: int) -> FastAPI:
 
 async def _entries(redis_cache: RedisCacheHarness) -> list[bytes]:
     return [
-        key
-        async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:entity:*")
+        key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:entity:*")
     ]
 
 

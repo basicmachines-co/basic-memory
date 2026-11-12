@@ -7,12 +7,12 @@ have entity IDs in URLs - they generate formatted prompts from queries.
 
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import APIRouter, HTTPException, status, Path
+from fastapi import APIRouter, Path
 from loguru import logger
 
 from basic_memory import db
 from basic_memory.api.v2.utils import to_graph_context, to_search_results
-from basic_memory.api.template_loader import template_loader
+from basic_memory.api import prompt_text
 from basic_memory.schemas.base import parse_timeframe
 from basic_memory.deps import (
     ContextServiceV2ExternalDep,
@@ -128,73 +128,62 @@ async def continue_conversation(
             "has_results": len(hierarchical_results) > 0,
         }
 
-    try:
-        # Render template
-        rendered_prompt = await template_loader.render(
-            "prompts/continue_conversation.hbs", template_context
-        )
+    rendered_prompt = prompt_text.continue_conversation_prompt(
+        template_context["topic"], request.timeframe, hierarchical_results_for_count
+    )
 
-        # Calculate metadata
-        # Count items of different types
-        observation_count = 0
-        relation_count = 0
-        entity_count = 0
+    # Calculate metadata
+    # Count items of different types
+    observation_count = 0
+    relation_count = 0
+    entity_count = 0
 
-        # For topic-based search
-        if request.topic:
-            for item in hierarchical_results_for_count:
-                if hasattr(item, "observations"):
-                    observation_count += len(item.observations) if item.observations else 0
+    # For topic-based search
+    if request.topic:
+        for item in hierarchical_results_for_count:
+            if hasattr(item, "observations"):
+                observation_count += len(item.observations) if item.observations else 0
 
-                if hasattr(item, "related_results"):
-                    for related in item.related_results or []:
-                        if hasattr(related, "type"):
-                            if related.type == "relation":
-                                relation_count += 1
-                            elif related.type == "entity":  # pragma: no cover
-                                entity_count += 1  # pragma: no cover
-        # For recent activity
-        else:
-            for item in hierarchical_results_for_count:
-                if hasattr(item, "observations"):
-                    observation_count += len(item.observations) if item.observations else 0
+            if hasattr(item, "related_results"):
+                for related in item.related_results or []:
+                    if hasattr(related, "type"):
+                        if related.type == "relation":
+                            relation_count += 1
+                        elif related.type == "entity":  # pragma: no cover
+                            entity_count += 1  # pragma: no cover
+    # For recent activity
+    else:
+        for item in hierarchical_results_for_count:
+            if hasattr(item, "observations"):
+                observation_count += len(item.observations) if item.observations else 0
 
-                if hasattr(item, "related_results"):
-                    for related in item.related_results or []:
-                        if hasattr(related, "type"):
-                            if related.type == "relation":
-                                relation_count += 1
-                            elif related.type == "entity":  # pragma: no cover
-                                entity_count += 1  # pragma: no cover
+            if hasattr(item, "related_results"):
+                for related in item.related_results or []:
+                    if hasattr(related, "type"):
+                        if related.type == "relation":
+                            relation_count += 1
+                        elif related.type == "entity":  # pragma: no cover
+                            entity_count += 1  # pragma: no cover
 
-        prompt_metadata = PromptMetadata(
-            query=request.topic,
-            timeframe=request.timeframe,
-            search_count=len(search_results) if request.topic else 0,
-            context_count=len(hierarchical_results_for_count),
-            observation_count=observation_count,
-            relation_count=relation_count,
-            total_items=(
-                len(hierarchical_results_for_count)
-                + observation_count
-                + relation_count
-                + entity_count
-            ),
-            search_limit=request.search_items_limit,
-            context_depth=request.depth,
-            related_limit=request.related_items_limit,
-            generated_at=datetime.now(timezone.utc).isoformat(),
-        )
+    prompt_metadata = PromptMetadata(
+        query=request.topic,
+        timeframe=request.timeframe,
+        search_count=len(search_results) if request.topic else 0,
+        context_count=len(hierarchical_results_for_count),
+        observation_count=observation_count,
+        relation_count=relation_count,
+        total_items=(
+            len(hierarchical_results_for_count) + observation_count + relation_count + entity_count
+        ),
+        search_limit=request.search_items_limit,
+        context_depth=request.depth,
+        related_limit=request.related_items_limit,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
 
-        return PromptResponse(
-            prompt=rendered_prompt, context=template_context, metadata=prompt_metadata
-        )
-    except Exception as e:
-        logger.error(f"Error rendering continue conversation template: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error rendering prompt template: {str(e)}",
-        )
+    return PromptResponse(
+        prompt=rendered_prompt, context=template_context, metadata=prompt_metadata
+    )
 
 
 @router.post("/search", response_model=PromptResponse)
@@ -240,30 +229,22 @@ async def search_prompt(
         "result_count": len(search_results),
     }
 
-    try:
-        # Render template
-        rendered_prompt = await template_loader.render("prompts/search.hbs", template_context)
+    rendered_prompt = prompt_text.search_prompt(request.query, request.timeframe, search_results)
 
-        prompt_metadata = PromptMetadata(
-            query=request.query,
-            timeframe=request.timeframe,
-            search_count=len(search_results),
-            context_count=len(search_results),
-            observation_count=0,
-            relation_count=0,
-            total_items=len(search_results),
-            search_limit=limit,
-            context_depth=0,
-            related_limit=0,
-            generated_at=datetime.now(timezone.utc).isoformat(),
-        )
+    prompt_metadata = PromptMetadata(
+        query=request.query,
+        timeframe=request.timeframe,
+        search_count=len(search_results),
+        context_count=len(search_results),
+        observation_count=0,
+        relation_count=0,
+        total_items=len(search_results),
+        search_limit=limit,
+        context_depth=0,
+        related_limit=0,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
 
-        return PromptResponse(
-            prompt=rendered_prompt, context=template_context, metadata=prompt_metadata
-        )
-    except Exception as e:
-        logger.error(f"Error rendering search template: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error rendering prompt template: {str(e)}",
-        )
+    return PromptResponse(
+        prompt=rendered_prompt, context=template_context, metadata=prompt_metadata
+    )

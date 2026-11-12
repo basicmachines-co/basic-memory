@@ -1,5 +1,5 @@
 # This prevents DEBUG logs from appearing on stdout during module-level
-# initialization (e.g., template_loader.TemplateLoader() logs at DEBUG level).
+# initialization (imports that log at DEBUG level).
 from loguru import logger
 
 logger.remove()

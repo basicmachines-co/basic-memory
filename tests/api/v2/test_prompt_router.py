@@ -160,37 +160,6 @@ async def test_search_prompt_no_results(
 
 
 @pytest.mark.asyncio
-async def test_error_handling(client: AsyncClient, monkeypatch, v2_project_url: str):
-    """Test error handling in v2 endpoints by breaking the template loader."""
-
-    # Patch the template loader to raise an exception
-    def mock_render(*args, **kwargs):
-        raise Exception("Template error")
-
-    # Apply the patch
-    monkeypatch.setattr("basic_memory.api.template_loader.TemplateLoader.render", mock_render)
-
-    # Test continue_conversation error handling
-    response = await client.post(
-        f"{v2_project_url}/prompt/continue-conversation",
-        json={"topic": "test error", "timeframe": "7d"},
-    )
-
-    assert response.status_code == 500
-    assert "detail" in response.json()
-    assert "Template error" in response.json()["detail"]
-
-    # Test search_prompt error handling
-    response = await client.post(
-        f"{v2_project_url}/prompt/search", json={"query": "test error", "timeframe": "7d"}
-    )
-
-    assert response.status_code == 500
-    assert "detail" in response.json()
-    assert "Template error" in response.json()["detail"]
-
-
-@pytest.mark.asyncio
 async def test_v2_prompt_endpoints_use_project_id_not_name(
     client: AsyncClient, test_project: Project
 ):
