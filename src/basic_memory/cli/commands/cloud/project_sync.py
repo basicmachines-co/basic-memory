@@ -105,6 +105,17 @@ def _require_cloud_credentials(config: BasicMemoryConfig) -> None:
     raise typer.Exit(1)
 
 
+def _configured_project_name(name: str, config: BasicMemoryConfig) -> str | None:
+    """Return the config key for a project, whatever spelling the user typed.
+
+    Cloud lookups match project names by permalink, so `cesar` finds a project named
+    `Cesar`. Config lookups must match the same way, or a command that found the
+    cloud project still misses its local entry (#2078).
+    """
+    permalink = generate_permalink(name)
+    return next((key for key in config.projects if generate_permalink(key) == permalink), None)
+
+
 async def _get_workspace_for_project(
     name: str,
     config: BasicMemoryConfig,
@@ -140,7 +151,8 @@ async def _get_workspace_for_project(
             f"{format_workspace_selection_choices(matches)}"
         )
 
-    entry = config.projects.get(name)
+    configured_name = _configured_project_name(name, config)
+    entry = config.projects[configured_name] if configured_name else None
     workspace_id = entry.workspace_id if entry and entry.workspace_id else config.default_workspace
     if workspace_id:
         workspace = next(
@@ -216,7 +228,8 @@ def _require_local_sync_path(name: str, config: BasicMemoryConfig) -> str:
     Both transports need this: the rclone path passes it to rclone, the WebDAV
     path walks it directly.
     """
-    sync_entry = config.projects.get(name)
+    configured_name = _configured_project_name(name, config)
+    sync_entry = config.projects[configured_name] if configured_name else None
     # Support both new (path) and legacy (local_sync_path) configs
     local_sync_path = (sync_entry.local_sync_path or sync_entry.path) if sync_entry else None
 
@@ -770,33 +783,33 @@ def setup_project_sync(
     config = config_manager.config
     _require_cloud_credentials(config)
 
-    async def _verify_project_exists():
-        """Verify the project exists on cloud by listing all projects."""
-        async with get_client(project_name=name) as client:
-            projects_list = await ProjectClient(client).list_projects()
-            project_names = [p.name for p in projects_list.projects]
-            if name not in project_names:
-                raise ValueError(f"Project '{name}' not found on cloud")
-            return True
-
     try:
-        # Verify project exists on cloud
+        # --- Resolve the cloud project ---
+        # Matched by permalink like push/pull, so any spelling of the name works; the
+        # cloud's own spelling is what config and the local project are keyed by.
         with force_routing(cloud=True):
-            run_with_cleanup(_verify_project_exists())
+            cloud_project = run_with_cleanup(_get_cloud_project(name))
+        if cloud_project is None:
+            raise ValueError(f"Project '{name}' not found on cloud")
+        # Trigger: config already has an entry for this project, in any spelling.
+        # Why: a second entry for the same project would split its settings.
+        # Outcome: the existing entry is updated under its key; otherwise the cloud
+        #   project's name becomes the key.
+        project_name = _configured_project_name(name, config) or cloud_project.name
 
         # Resolve and create local path
         resolved_path = Path(os.path.abspath(os.path.expanduser(local_path)))
         resolved_path.mkdir(parents=True, exist_ok=True)
 
         # Update project entry with sync path — path is always the local directory
-        entry = config.projects.get(name)
+        entry = config.projects.get(project_name)
         if entry:
             entry.path = resolved_path.as_posix()
             entry.local_sync_path = resolved_path.as_posix()
             entry.bisync_initialized = False
             entry.last_sync = None
         else:
-            config.projects[name] = ProjectEntry(
+            config.projects[project_name] = ProjectEntry(
                 path=resolved_path.as_posix(),
                 local_sync_path=resolved_path.as_posix(),
             )
@@ -805,7 +818,11 @@ def setup_project_sync(
         # Create the project in the local DB so the MCP server can immediately use it
         async def _create_local_project():
             async with get_client() as client:
-                data = {"name": name, "path": resolved_path.as_posix(), "set_default": False}
+                data = {
+                    "name": project_name,
+                    "path": resolved_path.as_posix(),
+                    "set_default": False,
+                }
                 return await ProjectClient(client).create_project(data)
 
         with force_routing(local=True):
@@ -814,18 +831,18 @@ def setup_project_sync(
             except Exception:
                 pass  # Project may already exist locally; reconcile on next startup
 
-        console.print(f"[green]Sync configured for project '{literal(name)}'[/green]")
+        console.print(f"[green]Sync configured for project '{literal(project_name)}'[/green]")
         console.print(f"\nLocal sync path: {literal(resolved_path)}")
         # Push/pull is the transfer workflow on every workspace.
         console.print("\nNext steps:")
         console.print(
-            f"  1. Preview a pull: {literal(shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run'))}"
+            f"  1. Preview a pull: {literal(shell_command('bm', 'cloud', 'pull', '--name', project_name, '--dry-run'))}"
         )
         console.print(
-            f"  2. Fetch from cloud: {literal(shell_command('bm', 'cloud', 'pull', '--name', name))}"
+            f"  2. Fetch from cloud: {literal(shell_command('bm', 'cloud', 'pull', '--name', project_name))}"
         )
         console.print(
-            f"  3. Upload local changes: {literal(shell_command('bm', 'cloud', 'push', '--name', name))}"
+            f"  3. Upload local changes: {literal(shell_command('bm', 'cloud', 'push', '--name', project_name))}"
         )
     except Exception as e:
         console.print(f"[red]Error configuring sync: {literal(str(e))}[/red]")
