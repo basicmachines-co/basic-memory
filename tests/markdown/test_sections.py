@@ -13,9 +13,11 @@ from basic_memory.markdown.sections import (
     LineRange,
     NoteSlice,
     NoteSliceError,
+    SectionSpan,
     TRUNCATION_MARKER_TEMPLATE,
     _frontmatter_line_count,
     _token_budget_line_count,
+    locate_section,
     parse_line_range,
     parse_section_selector,
     scan_sections,
@@ -238,6 +240,16 @@ def test_parse_section_selector_accepted_forms(selector, segments, duplicate_ind
     assert parsed.duplicate_index == duplicate_index
 
 
+def test_parse_section_selector_keeps_unsplit_literal_for_a_slash_heading():
+    parsed = parse_section_selector("## Plan/Pros / Cons[1]")
+
+    assert parsed is not None
+    assert parsed.literal == "Plan/Pros / Cons"
+    assert parsed.segments == ("Plan", "Pros", "Cons")
+    assert parsed.duplicate_index == 1
+    assert parsed.indexed
+
+
 @pytest.mark.parametrize("selector", ["", "   ", "A//B", "/Auth", "Auth/", "[2]", "A/ /B"])
 def test_parse_section_selector_rejects_malformed_forms(selector):
     assert parse_section_selector(selector) is None
@@ -410,6 +422,207 @@ def test_slice_unknown_section_in_heading_less_note():
 
     assert "(note has no headings)" in error.message
     assert " in note " not in error.message
+
+
+# --- slice_note_content: headings that contain "/" (#2079) ---
+
+_SLASH_DOC = dedent("""\
+    # Plan
+    ## Pros / Cons
+    both
+    ## Other
+    rest""")
+
+
+def test_slice_slash_heading_accepts_heading_text_and_listed_path():
+    for name in ("Pros / Cons", "Plan/Pros / Cons", "## Pros / Cons", "## Plan/Pros / Cons"):
+        selector = parse_section_selector(name)
+        assert selector is not None
+
+        sliced = _slice(_SLASH_DOC, section=selector, note_title="Plan")
+
+        assert sliced.content == "## Pros / Cons\nboth"
+        assert sliced.section == "Plan/Pros / Cons"
+        assert (sliced.start_line, sliced.end_line) == (2, 3)
+
+
+def test_slice_parent_child_path_still_works_beside_a_slash_heading():
+    selector = parse_section_selector("Plan/Other")
+    assert selector is not None
+
+    sliced = _slice(_SLASH_DOC, section=selector)
+
+    assert sliced.content == "## Other\nrest"
+    assert sliced.section == "Plan/Other"
+
+
+def test_slice_listed_section_names_round_trip_when_a_heading_contains_a_slash():
+    missing = parse_section_selector("Missing")
+    assert missing is not None
+
+    error = _slice_error(_SLASH_DOC, section=missing, note_title="Plan")
+
+    assert error.message == (
+        "Section 'Missing' not found in note 'Plan'. "
+        "Available sections: Plan, Plan/Pros / Cons, Plan/Other."
+    )
+    expected = {
+        "Plan": "# Plan\n## Pros / Cons\nboth\n## Other\nrest",
+        "Plan/Pros / Cons": "## Pros / Cons\nboth",
+        "Plan/Other": "## Other\nrest",
+    }
+    for name, content in expected.items():
+        selector = parse_section_selector(name)
+        assert selector is not None
+        assert _slice(_SLASH_DOC, section=selector).content == content
+
+
+def test_slice_slash_heading_duplicate_index_uses_the_listed_path():
+    doc = "# Plan\n## Pros / Cons\nfirst\n## Pros / Cons\nsecond"
+    selector = parse_section_selector("Plan/Pros / Cons[1]")
+    assert selector is not None
+
+    sliced = _slice(doc, section=selector)
+
+    assert sliced.content == "## Pros / Cons\nsecond"
+    assert sliced.section == "Plan/Pros / Cons[1]"
+
+
+def test_slice_heading_slash_without_spaces_matches_when_no_parent_child_path_does():
+    doc = "# Plan\n## Pros/Cons\nboth\n## Other\nrest"
+    for name in ("Pros/Cons", "Plan/Pros/Cons"):
+        selector = parse_section_selector(name)
+        assert selector is not None
+
+        sliced = _slice(doc, section=selector)
+
+        assert sliced.content == "## Pros/Cons\nboth"
+        assert sliced.section == "Plan/Pros/Cons"
+
+    other = parse_section_selector("Plan/Other")
+    assert other is not None
+    assert _slice(doc, section=other).content == "## Other\nrest"
+
+
+def test_slice_spaced_slash_heading_wins_over_the_split_parent_child_path():
+    """Spaces in the heading are the listed spelling; the split path drops them.
+
+    ``Plan/Pros / Cons`` is the slash heading. ``Plan/Pros/Cons`` stays the
+    parent/child path Plan > Pros > Cons.
+    """
+    doc = dedent("""\
+        # Plan
+        ## Pros / Cons
+        slash
+        ## Pros
+        ### Cons
+        nested""")
+    slash = parse_section_selector("Plan/Pros / Cons")
+    text = parse_section_selector("Pros / Cons")
+    nested = parse_section_selector("Plan/Pros/Cons")
+    assert slash is not None and text is not None and nested is not None
+
+    assert _slice(doc, section=slash).content == "## Pros / Cons\nslash"
+    assert _slice(doc, section=text).content == "## Pros / Cons\nslash"
+    assert _slice(doc, section=nested).content == "### Cons\nnested"
+
+
+def test_slice_identical_joined_path_keeps_the_parent_child_segmentation():
+    """A heading ``Pros/Cons`` and Plan > Pros > Cons join to the same spelling.
+
+    The parent/child selector keeps winning. The two paths are not told apart
+    by spaces, so the unsplit text is not a second match.
+    """
+    doc = dedent("""\
+        # Plan
+        ## Pros/Cons
+        slash
+        ## Pros
+        ### Cons
+        nested""")
+    selector = parse_section_selector("Plan/Pros/Cons")
+    assert selector is not None
+
+    sliced = _slice(doc, section=selector)
+
+    assert sliced.content == "### Cons\nnested"
+    assert sliced.section == "Plan/Pros/Cons"
+
+
+def test_slice_different_slash_segmentations_of_one_spelling_are_ambiguous():
+    doc = "# A/B\n## C\none\n# A\n## B/C\ntwo"
+    selector = parse_section_selector("A/B/C")
+    assert selector is not None
+
+    error = _slice_error(doc, section=selector)
+
+    assert error.message == (
+        "Section 'A/B/C' is ambiguous. It spells more than one heading path: A/B > C; A > B/C."
+    )
+    heading = parse_section_selector("B/C")
+    assert heading is not None
+    assert _slice(doc, section=heading).content == "## B/C\ntwo"
+
+
+def test_slice_exact_listed_path_wins_over_the_same_heading_text_nested():
+    doc = "# Pros / Cons\ntop\n# Plan\n## Pros / Cons\nnested"
+    top = parse_section_selector("Pros / Cons")
+    nested = parse_section_selector("Plan/Pros / Cons")
+    assert top is not None and nested is not None
+
+    assert _slice(doc, section=top).content == "# Pros / Cons\ntop"
+    assert _slice(doc, section=nested).content == "## Pros / Cons\nnested"
+
+
+def test_slice_spaced_separator_still_selects_the_parent_child_path():
+    doc = "# Auth\n## Decisions\npicked"
+    selector = parse_section_selector("Auth / Decisions")
+    assert selector is not None
+
+    sliced = _slice(doc, section=selector)
+
+    assert sliced.section == "Auth/Decisions"
+    assert sliced.content == "## Decisions\npicked"
+
+
+def test_slice_heading_styled_segments_still_select_a_parent_child_path():
+    doc = "# Auth\n## Decisions\npicked"
+    selector = parse_section_selector("# Auth / ### Decisions")
+    assert selector is not None
+
+    assert _slice(doc, section=selector).section == "Auth/Decisions"
+
+
+def test_slice_longer_parent_child_suffix_stays_ambiguous():
+    doc = "# Auth\n## Decisions\nshort\n# Root\n## Auth\n### Decisions\nlong"
+    selector = parse_section_selector("Auth/Decisions")
+    assert selector is not None
+
+    error = _slice_error(doc, section=selector)
+
+    assert "is ambiguous" in error.message
+    assert "Qualify it: Auth/Decisions, Root/Auth/Decisions." in error.message
+
+
+def test_slice_top_level_heading_does_not_hide_a_nested_heading_of_the_same_name():
+    doc = "# Decisions\ntop\n# Parent\n## Decisions\nnested"
+    selector = parse_section_selector("Decisions")
+    assert selector is not None
+
+    error = _slice_error(doc, section=selector)
+
+    assert "Qualify it: Decisions, Parent/Decisions." in error.message
+
+
+def test_locate_section_finds_a_slash_heading_by_its_listed_path():
+    selector = parse_section_selector("Plan/Pros / Cons")
+    assert selector is not None
+
+    located = locate_section(_SLASH_DOC, selector, note_title="Plan")
+
+    assert isinstance(located, SectionSpan)
+    assert located.heading == "Pros / Cons"
+    assert located.label == "Plan/Pros / Cons"
 
 
 def test_slice_by_section_after_stray_carriage_return_serves_the_heading():
