@@ -7,7 +7,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request
 
-from basic_memory.mcp.tools.utils import (
+from basic_memory.mcp.api_calls import (
     call_delete,
     call_get,
     call_patch,

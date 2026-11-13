@@ -198,7 +198,7 @@ async def resolve_project_parameter(
 
 async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:
     # Deferred import to avoid circular dependency with tools
-    from basic_memory.mcp.tools.utils import call_get
+    from basic_memory.mcp.api_calls import call_get
 
     response = await call_get(client, "/v2/projects/", headers=headers)
     project_list = ProjectList.model_validate(response.json())
@@ -393,7 +393,7 @@ async def get_available_workspaces(context: Optional[Context] = None) -> list[Wo
         build_discovery_timeout,
         get_cloud_control_plane_client,
     )
-    from basic_memory.mcp.tools.utils import call_get
+    from basic_memory.mcp.api_calls import call_get
 
     async with get_cloud_control_plane_client(timeout=build_discovery_timeout()) as client:
         response = await call_get(client, "/workspaces/")
@@ -746,7 +746,7 @@ async def get_active_project(
         has_context=context is not None,
     ):
         # Deferred import to avoid circular dependency with tools
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         cached_project = await _get_cached_active_project(context)
         if cached_project and _project_matches_identifier(cached_project, project):
@@ -926,7 +926,7 @@ async def resolve_project_and_path(
             from fastmcp.exceptions import ToolError
 
             try:
-                from basic_memory.mcp.tools.utils import call_query
+                from basic_memory.mcp.api_calls import call_query
 
                 response = await call_query(
                     client,

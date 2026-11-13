@@ -11,8 +11,8 @@ from httpx import AsyncClient, HTTPStatusError
 
 from basic_memory.telemetry import debug_span
 
-# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
-# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# call_* helpers live in basic_memory.mcp.api_calls; importing that at module
+# level loads fastmcp.exceptions and the mcp SDK during CLI startup,
 # so each method defers the import to call time instead (#886).
 from basic_memory.runtime.note_content_responses import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas.response import (
@@ -74,7 +74,7 @@ class KnowledgeClient:
         expected_checksum: str | None = None,
     ) -> WriteNoteResponse:
         """Write at an exact path and preserve the service's expected outcomes."""
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         with debug_span(
             "mcp.client.knowledge.write_note",
@@ -111,7 +111,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         with debug_span(
             "mcp.client.knowledge.create_entity",
@@ -146,7 +146,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_put
+        from basic_memory.mcp.api_calls import call_put
 
         with debug_span(
             "mcp.client.knowledge.update_entity",
@@ -188,7 +188,7 @@ class KnowledgeClient:
             ToolError: If the entity or requested section is not found or the
                 request fails
         """
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         params: dict[str, str | int] = {}
         if section is not None:
@@ -218,7 +218,7 @@ class KnowledgeClient:
         entity_ids: list[str],
     ) -> AcceptedNoteContentBatchResponse:
         """Get accepted Markdown for one bounded note batch."""
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         with debug_span(
             "mcp.client.knowledge.get_accepted_note_contents",
@@ -272,7 +272,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_patch
+        from basic_memory.mcp.api_calls import call_patch
 
         with debug_span(
             "mcp.client.knowledge.patch_entity",
@@ -306,7 +306,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the entity is not found or request fails
         """
-        from basic_memory.mcp.tools.utils import call_delete
+        from basic_memory.mcp.api_calls import call_delete
 
         with debug_span(
             "mcp.client.knowledge.delete_entity",
@@ -341,7 +341,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_put
+        from basic_memory.mcp.api_calls import call_put
 
         with debug_span(
             "mcp.client.knowledge.move_entity",
@@ -374,7 +374,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         with debug_span(
             "mcp.client.knowledge.move_directory",
@@ -406,7 +406,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         with debug_span(
             "mcp.client.knowledge.delete_directory",
@@ -437,7 +437,7 @@ class KnowledgeClient:
         Raises:
             ToolError: If the file does not exist on disk or indexing fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         with debug_span(
             "mcp.client.knowledge.index_file",
@@ -458,7 +458,7 @@ class KnowledgeClient:
 
     async def get_orphans(self) -> list[GraphNode]:
         """Get entities that have no incoming or outgoing relations."""
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         with debug_span(
             "mcp.client.knowledge.get_orphans",
@@ -483,7 +483,7 @@ class KnowledgeClient:
         strict: bool = False,
     ) -> dict[str, Any]:
         """Request the complete entity-resolution payload."""
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         with debug_span(
             "mcp.client.knowledge.resolve_entity",
@@ -535,7 +535,7 @@ class KnowledgeClient:
         """
         from fastmcp.exceptions import ToolError
 
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         try:
             response = await call_query(

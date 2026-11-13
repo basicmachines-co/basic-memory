@@ -34,7 +34,7 @@ def _stub_call_query(monkeypatch, payload: dict[str, Any]) -> None:
     async def mock_call_query(client, url, **kwargs):
         return mock_response
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+    monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
 
 @pytest.mark.parametrize("field", ["valid_at", "valid_overlaps", "time_kind"])
