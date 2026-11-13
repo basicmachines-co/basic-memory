@@ -427,30 +427,36 @@ def _clean_child_env(env: dict[str, str] | None = None) -> dict[str, str]:
     return {k: v for k, v in source.items() if k not in _PARENT_PYTHON_ENV_VARS}
 
 
+def _find_binary(name: str, search_path: str | None = None) -> str | None:
+    """Find an installed CLI: PATH first, then the usual install locations.
+
+    Trigger: every lookup of `bm` or `uv`.
+    Why: PATH is what the user's shell runs, so it must win. A stale uv-tool copy
+      in ~/.local/bin otherwise shadows the one the user upgraded (#1783).
+    Outcome: the fixed locations are used only when PATH has no match, as under a
+      launchd job whose PATH is the minimal system default.
+    """
+    found = which(name, path=search_path)
+    if found:
+        return found
+    for candidate in (
+        os.path.expanduser(f"~/.local/bin/{name}"),
+        f"/opt/homebrew/bin/{name}",
+        f"/usr/local/bin/{name}",
+    ):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _bm_binary_path() -> str | None:
     """Find the bm CLI without making network calls. Used by is_available()."""
-    candidates = [
-        os.path.expanduser("~/.local/bin/bm"),
-        "/opt/homebrew/bin/bm",
-        "/usr/local/bin/bm",
-    ]
-    for c in candidates:
-        if os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-    return which("bm")
+    return _find_binary("bm")
 
 
 def _uv_binary_path() -> str | None:
     """Find the uv CLI. Used to bootstrap-install basic-memory when bm is missing."""
-    candidates = [
-        os.path.expanduser("~/.local/bin/uv"),
-        "/opt/homebrew/bin/uv",
-        "/usr/local/bin/uv",
-    ]
-    for c in candidates:
-        if os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-    return which("uv")
+    return _find_binary("uv")
 
 
 def _install_bm_via_uv(timeout: float = 180.0) -> str | None:
