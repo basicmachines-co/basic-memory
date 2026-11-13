@@ -48,7 +48,8 @@ Restart MCP clients after upgrading so they load the new tool list.
 
 - **Skills over MCP.** The server serves the bundled `memory-*` skills as
   `skill://<name>/SKILL.md` resources and supports the MCP skills extension
-  (SEP-2640), so clients that support it can list and load them.
+  (SEP-2640), so clients that support it can list and load them. Built on FastMCP
+  4.2.0's skills provider (#2115).
 
 - **`memory-start` skill** for a new user's first session. The server instructions,
   skills router and assistant-setup routine now save notes by default; a user opts
