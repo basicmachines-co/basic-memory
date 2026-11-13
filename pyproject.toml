@@ -64,6 +64,10 @@ dependencies = [
 litellm = [
     "litellm>=1.91.5,<1.92.0",
 ]
+# Explicit opt-in: the official Voyage AI SDK for the `voyage` embedding and reranker providers.
+voyage = [
+    "voyageai>=0.6.0,<1",
+]
 milvus = [
     "pymilvus>=3.0.0,<4; sys_platform == 'win32'",
     "pymilvus[milvus-lite]>=3.0.0,<4; sys_platform != 'win32'",

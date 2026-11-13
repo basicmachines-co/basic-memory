@@ -438,6 +438,10 @@ export BASIC_MEMORY_RERANKER_MODEL=cohere/rerank-v3.5
 export COHERE_API_KEY=...
 ```
 
+Voyage AI rerankers (`rerank-3`, `rerank-3-lite`, `rerank-2.5`, `rerank-2.5-lite`) are
+available through the optional `basic-memory[voyage]` extra with
+`BASIC_MEMORY_RERANKER_PROVIDER=voyage` and an explicit `BASIC_MEMORY_RERANKER_MODEL`.
+
 The feature fails fast on invalid configuration and does not silently fall
 back to retrieval order when an enabled provider fails. See the
 [semantic search guide](docs/semantic-search.md#cross-encoder-reranking) for
