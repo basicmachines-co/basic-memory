@@ -19,6 +19,7 @@ import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
+from basic_memory.cli.commands.routing import force_routing
 from basic_memory.mcp import async_client, project_context
 from basic_memory.mcp.async_client import set_client_factory
 from basic_memory.mcp.project_context import set_workspace_provider
@@ -82,6 +83,7 @@ class FakeCloud:
     file_delete_status: FileDeleteStatus | None = "pending"
     returns_created_project: bool = True
     requests: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    client_timeouts: list[httpx.Timeout | None] = field(default_factory=list)
 
     def handle(self, tenant: str, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -129,7 +131,10 @@ class FakeCloud:
         raise AssertionError(f"Unexpected Cloud request: {request.method} {request.url}")
 
     @asynccontextmanager
-    async def client(self, workspace: str | None = None) -> AsyncIterator[httpx.AsyncClient]:
+    async def client(
+        self, workspace: str | None = None, timeout: httpx.Timeout | None = None
+    ) -> AsyncIterator[httpx.AsyncClient]:
+        self.client_timeouts.append(timeout)
         # No workspace means the connection's default workspace.
         tenant = workspace or next(w.tenant_id for w in self.workspaces if w.is_default)
         transport = httpx.MockTransport(lambda request: self.handle(tenant, request))
@@ -509,6 +514,39 @@ async def test_list_falls_back_to_local_projects_when_cloud_fails(stdio_with_clo
     assert isinstance(text, str)
     assert f"- {test_project.name} (local)" in text
     assert "cloud)" not in text
+
+
+@pytest.mark.asyncio
+async def test_list_discovers_cloud_projects_with_a_short_connect_timeout(
+    stdio_with_cloud, test_project
+):
+    """A slow cloud connect must not hold up a local project list for 10s (#1810)."""
+    cloud = stdio_with_cloud(
+        FakeCloud(projects={PERSONAL.tenant_id: [_project("notes", "notes-uuid")]})
+    )
+
+    text = await bm_project_list()
+
+    assert isinstance(text, str)
+    assert "- notes (cloud) [notes-uuid]" in text
+    assert cloud.client_timeouts == [async_client.build_discovery_timeout()] * 2
+    assert all(timeout and timeout.connect == 3.0 for timeout in cloud.client_timeouts)
+
+
+@pytest.mark.asyncio
+async def test_list_skips_cloud_when_routing_is_forced_local(stdio_with_cloud, test_project):
+    """Cloud is checked by default, and explicit local routing opts out (#1810)."""
+    cloud = stdio_with_cloud(
+        FakeCloud(projects={PERSONAL.tenant_id: [_project("notes", "notes-uuid")]})
+    )
+
+    with force_routing(local=True):
+        text = await bm_project_list()
+
+    assert isinstance(text, str)
+    assert f"- {test_project.name} (local)" in text
+    assert "notes" not in text
+    assert cloud.requests == []
 
 
 @pytest.mark.asyncio

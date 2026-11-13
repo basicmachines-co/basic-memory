@@ -94,6 +94,16 @@ def _request_headers(headers: HeaderTypes | None) -> HeaderTypes | None:
     return merged_headers
 
 
+def _request_label(url: URL | str) -> str:
+    """Name a request by the last segment of its path, for error messages.
+
+    Collection endpoints end in a slash (`/workspaces/`), so the last non-empty
+    segment is used; taking the text after the final slash printed `GET ''` (#1810).
+    """
+    segments = [segment for segment in URL(str(url)).path.split("/") if segment]
+    return segments[-1] if segments else "resource"
+
+
 def get_error_message(
     status_code: int, url: URL | str, method: str, msg: Optional[str] = None
 ) -> str:
@@ -107,11 +117,7 @@ def get_error_message(
     Returns:
         A user-friendly error message
     """
-    # Extract path from URL for cleaner error messages
-    if isinstance(url, str):
-        path = url.split("/")[-1]
-    else:
-        path = str(url).split("/")[-1] if url else "resource"
+    path = _request_label(url)
 
     # Client errors (400-499)
     if status_code == 400:
@@ -151,22 +157,28 @@ def _transport_error_message(exc: TransportError, url: URL | str, method: str) -
     which is how blank errors like "Error removing project:" reached users (#1034),
     so the message always names the exception type explicitly.
     """
-    # Extract path from URL for cleaner error messages
-    if isinstance(url, str):
-        path = url.split("/")[-1]
-    else:
-        path = str(url).split("/")[-1] if url else "resource"
+    path = _request_label(url)
 
     detail = str(exc).strip()
     described = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
 
     if isinstance(exc, TimeoutException):
-        return (
+        timed_out = (
             f"Request timed out ({described}): the server did not respond to "
-            f"{method} '{path}' in time. Long-running operations (such as deleting a "
-            f"large project) may still be completing server-side — check the result "
-            f"(e.g. `bm project list` for project deletes) before retrying."
+            f"{method} '{path}' in time."
         )
+        # Trigger: a DELETE timed out.
+        # Why: deleting a large project can outlast the read timeout and still finish
+        #   server-side, so retrying blindly may act on a project that is already gone.
+        #   Other requests carry no such hint; it confused a timed-out project list (#1810).
+        # Outcome: only DELETE messages tell the caller to check the result first.
+        if method == "DELETE":
+            return (
+                f"{timed_out} Long-running deletes (such as a large project) may still be "
+                f"completing server-side — check the result (e.g. `bm project list` for "
+                f"project deletes) before retrying."
+            )
+        return f"{timed_out} Check that the server is reachable, then retry."
     return (
         f"Connection failed ({described}): the {method} request to '{path}' did not "
         f"complete. Check that the server is reachable, then retry."

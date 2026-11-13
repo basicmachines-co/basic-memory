@@ -83,6 +83,23 @@ def _build_timeout() -> Timeout:
     )
 
 
+def build_discovery_timeout() -> Timeout:
+    """Timeout for cloud discovery: listing workspaces and their projects.
+
+    A local MCP server runs discovery whenever cloud credentials exist, and a project
+    list falls back to local projects when it fails. Under the standard 10s connect
+    budget, one slow connect stalled a local project list for 12.5s (#1810), so
+    discovery gives up on connecting sooner. Reads keep the standard budget: once
+    connected, a slow listing is still worth waiting for.
+    """
+    return Timeout(
+        connect=3.0,
+        read=30.0,
+        write=30.0,
+        pool=30.0,
+    )
+
+
 def _build_asgi_client(app: "FastAPI", timeout: Timeout) -> AsyncClient:
     """Create a local ASGI client for an already-prepared FastAPI app."""
     from basic_memory.workspace_context import workspace_permalink_headers
@@ -366,10 +383,11 @@ async def _cloud_client(
 @asynccontextmanager
 async def get_cloud_control_plane_client(
     workspace: Optional[str] = None,
+    timeout: Timeout | None = None,
 ) -> AsyncIterator[AsyncClient]:
     """Create a control-plane cloud client for endpoints outside /proxy."""
     config = ConfigManager().config
-    timeout = _build_timeout()
+    timeout = timeout or _build_timeout()
     token = await _resolve_cloud_token(config)
     headers = {"Authorization": f"Bearer {token}", "User-Agent": BASIC_MEMORY_USER_AGENT}
     if workspace:
@@ -404,6 +422,7 @@ def is_factory_mode() -> bool:
 @asynccontextmanager
 async def get_cloud_proxy_client(
     workspace: Optional[str] = None,
+    timeout: Timeout | None = None,
 ) -> AsyncIterator[AsyncClient]:
     """Create a cloud proxy client for project-level operations.
 
@@ -412,7 +431,7 @@ async def get_cloud_proxy_client(
     transport in stdio mode.
     """
     config = ConfigManager().config
-    timeout = _build_timeout()
+    timeout = timeout or _build_timeout()
     async with _cloud_client(config, timeout, workspace=workspace) as client:
         yield client
 

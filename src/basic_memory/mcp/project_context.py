@@ -389,10 +389,13 @@ async def get_available_workspaces(context: Optional[Context] = None) -> list[Wo
             )
         return workspaces
 
-    from basic_memory.mcp.async_client import get_cloud_control_plane_client
+    from basic_memory.mcp.async_client import (
+        build_discovery_timeout,
+        get_cloud_control_plane_client,
+    )
     from basic_memory.mcp.tools.utils import call_get
 
-    async with get_cloud_control_plane_client() as client:
+    async with get_cloud_control_plane_client(timeout=build_discovery_timeout()) as client:
         response = await call_get(client, "/workspaces/")
         workspace_list = WorkspaceListResponse.model_validate(response.json())
 
@@ -442,13 +445,20 @@ async def _fetch_workspace_project_entries(
     context: Optional[Context] = None,
 ) -> tuple[WorkspaceProjectEntry, ...]:
     """Fetch projects for one workspace and tag each project with workspace metadata."""
-    from basic_memory.mcp.async_client import get_client, get_cloud_proxy_client, is_factory_mode
+    from basic_memory.mcp.async_client import (
+        build_discovery_timeout,
+        get_client,
+        get_cloud_proxy_client,
+        is_factory_mode,
+    )
     from basic_memory.mcp.clients import ProjectClient
 
     client_context = (
         get_client(workspace=workspace.tenant_id)
         if is_factory_mode()
-        else get_cloud_proxy_client(workspace=workspace.tenant_id)
+        else get_cloud_proxy_client(
+            workspace=workspace.tenant_id, timeout=build_discovery_timeout()
+        )
     )
 
     async with client_context as client:

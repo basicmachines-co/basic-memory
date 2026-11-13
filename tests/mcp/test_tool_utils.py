@@ -271,8 +271,28 @@ async def test_transport_timeout_wrapped_in_tool_error(call_fn, method):
     assert "Request timed out" in message
     assert "ReadTimeout" in message
     assert f"{method} 'project-uuid'" in message
-    assert "may still be completing server-side" in message
-    assert "bm project list" in message
+    # Only a delete can still be finishing server-side; other timeouts say to retry (#1810).
+    if method == "DELETE":
+        assert "may still be completing server-side" in message
+        assert "bm project list" in message
+    else:
+        assert "may still be completing server-side" not in message
+        assert "Check that the server is reachable, then retry." in message
+
+
+@pytest.mark.asyncio
+async def test_transport_timeout_names_a_collection_endpoint():
+    """A path ending in a slash names its last segment, not an empty string (#1810)."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("", request=request)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        with pytest.raises(ToolError) as exc:
+            await call_get(client, "/workspaces/")
+
+    assert "GET 'workspaces'" in str(exc.value)
 
 
 @pytest.mark.asyncio
