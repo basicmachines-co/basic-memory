@@ -35,6 +35,10 @@ Writing over an existing note is an `ALREADY_EXISTS` error unless
 `overwrite=true`. Pass `expected_checksum` (from bm_read) to replace a note only
 if it is still the revision you read. To change part of a note, use bm_edit.
 
+Overwriting replaces the body and merges the frontmatter. A key the note already
+has is kept unless the new content's frontmatter, `tags`, `note_type` or
+`metadata` sets it. To remove a key, edit the note's frontmatter with bm_edit.
+
 Content may hold frontmatter, observations (`- [category] fact #tag`) and
 relations (`- relation_type [[Other Note]]`). Observations and relations are
 indexed after the write, so they show up in bm_context and bm_search moments
@@ -45,7 +49,7 @@ observations and relations with bm_context.
 
 ## PARAMETERS
 
-- **content** (string, required) — The note's Markdown. Saved as given; it may start with frontmatter.
+- **content** (string, required) — The note's Markdown; it may start with frontmatter. On overwrite, frontmatter keys the note already has are kept unless this content sets them.
 - **project** (string, required) — Required project name, 'workspace/project', or project external id. Discover projects with bm_project_list(). Paths are relative to this project; a qualified path must agree with it.
 - **identifier** (string | null, optional, default: None) — File path for the note, e.g. 'notes/plan.md'; '.md' is added when missing. '<project>/path' writes into another project. Use instead of title + directory.
 - **title** (string | null, optional, default: None) — Note title. With `directory`, it also names the file. With `identifier`, it is used when the content has no frontmatter title.
@@ -53,7 +57,7 @@ observations and relations with bm_context.
 - **note_type** (string, optional, default: "note") — Frontmatter `type:`. A `type:` in the content wins.
 - **tags** (array | string | null, optional, default: None) — Tags, as a list or 'a,b,c'.
 - **metadata** (object | null, optional, default: None) — Extra frontmatter fields, merged into the note's frontmatter.
-- **overwrite** (boolean | null, optional, default: None) — Replace a note that already exists. Default: the write_note_overwrite_default setting (false unless changed).
+- **overwrite** (boolean | null, optional, default: None) — Replace the body of a note that already exists, keeping frontmatter keys the new content does not set. Default: the write_note_overwrite_default setting (false unless changed).
 - **expected_checksum** (string | null, optional, default: None) — Replace the note only while it is still this revision (the checksum from bm_read). Implies overwrite=true.
 - **output_format** (optional, default: "text")
 
