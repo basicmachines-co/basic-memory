@@ -6,7 +6,7 @@ import pytest
 from httpx import HTTPStatusError, Request
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.utils import call_post
+from basic_memory.mcp.api_calls import call_post
 
 
 class _MockResponse:

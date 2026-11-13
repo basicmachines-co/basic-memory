@@ -55,7 +55,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_post", mock_call_post)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -89,7 +89,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_put", mock_call_put)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_put", mock_call_put)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -123,7 +123,7 @@ class TestKnowledgeClient:
             assert kwargs.get("params") is None
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_patch", mock_call_patch)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_patch", mock_call_patch)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -142,7 +142,7 @@ class TestKnowledgeClient:
             assert "/v2/projects/proj-123/knowledge/resolve" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -168,7 +168,7 @@ class TestKnowledgeClient:
             assert kwargs["json"] == {"identifier": "my-note", "strict": True}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
         client = KnowledgeClient(MagicMock(), "proj-123")
         result = await client.resolve_entity_response("my-note", strict=True)
@@ -198,7 +198,7 @@ class TestKnowledgeClient:
             assert kwargs.get("json") == {"file_path": "notes/disk-note.md"}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_post", mock_call_post)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -227,7 +227,7 @@ class TestKnowledgeClient:
             assert "/v2/projects/proj-123/knowledge/orphans" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = KnowledgeClient(mock_http, "proj-123")
@@ -265,7 +265,7 @@ class TestSearchClient:
             assert kwargs.get("params") == {"page": 1, "page_size": 10}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
         mock_http = MagicMock()
         client = SearchClient(mock_http, "proj-123")
@@ -298,7 +298,7 @@ class TestSearchClient:
         async def mock_call_query(client, url, **kwargs):
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
         client = SearchClient(MagicMock(), "proj-123")
         result = await client.search({"text": "query", "retrieval_mode": retrieval_mode})
@@ -323,7 +323,7 @@ class TestSearchClient:
         async def mock_call_query(client, url, **kwargs):
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", mock_call_query)
 
         client = SearchClient(MagicMock(), "proj-123")
         result = await client.search(
@@ -362,7 +362,7 @@ class TestMemoryClient:
             assert "/v2/projects/proj-123/memory/specs/search" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -390,7 +390,7 @@ class TestMemoryClient:
             assert params.get("depth") == 2
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -418,7 +418,7 @@ class TestMemoryClient:
             assert params.get("type") == "note,spec"
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = MemoryClient(mock_http, "proj-123")
@@ -468,7 +468,7 @@ class TestDirectoryClient:
             }
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = DirectoryClient(mock_http, "proj-123")
@@ -501,7 +501,7 @@ class TestDirectoryClient:
             assert "sort" not in kwargs["params"]
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         client = DirectoryClient(MagicMock(), "proj-123")
         await client.list()
@@ -529,7 +529,7 @@ class TestResourceClient:
             assert "/v2/projects/proj-123/resource/entity-123" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = ResourceClient(mock_http, "proj-123")
@@ -568,7 +568,7 @@ class TestProjectClient:
             assert "/v2/projects" in url
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_get", mock_call_get)
+        monkeypatch.setattr("basic_memory.mcp.api_calls.call_get", mock_call_get)
 
         mock_http = MagicMock()
         client = ProjectClient(mock_http)

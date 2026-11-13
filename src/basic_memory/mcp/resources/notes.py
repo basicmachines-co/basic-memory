@@ -19,7 +19,7 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.resources.man import manual_page
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_query
+from basic_memory.mcp.api_calls import call_get, call_query
 from basic_memory.utils import generate_permalink
 
 NOTE_TEMPLATE = "memory://{project}/{path*}"

@@ -12,8 +12,8 @@ import httpx
 import pytest
 from fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import utils as utils_module
-from basic_memory.mcp.tools.utils import (
+from basic_memory.mcp import api_calls as utils_module
+from basic_memory.mcp.api_calls import (
     call_delete,
     call_get,
     call_patch,

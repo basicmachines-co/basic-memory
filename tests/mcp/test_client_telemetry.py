@@ -13,7 +13,7 @@ from typing import Any
 
 knowledge_client_module = importlib.import_module("basic_memory.mcp.clients.knowledge")
 search_client_module = importlib.import_module("basic_memory.mcp.clients.search")
-utils_module = importlib.import_module("basic_memory.mcp.tools.utils")
+utils_module = importlib.import_module("basic_memory.mcp.api_calls")
 
 
 def _capture_spans():
