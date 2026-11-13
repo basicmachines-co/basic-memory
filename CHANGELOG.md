@@ -1,8 +1,32 @@
 # CHANGELOG
 
-## Unreleased
+## v1.1.0 (2026-11-12)
+
+Basic Memory 1.1 gives every MCP tool one operation: `bm_project` and `bm_schema` are
+split into separate tools. It also adds moves between projects, serves the bundled
+skills over MCP, and fixes a crash that stopped some Windows installs from starting.
+Restart MCP clients after upgrading so they load the new tool list.
 
 ### Breaking Changes
+
+- **`bm_project` is split into three tools.** `bm_project(command="list")` becomes
+  `bm_project_list`, `bm_project(command="create", ...)` becomes `bm_project_create`
+  (`name` and `path` required), and `bm_project(command="recent", ...)` becomes
+  `bm_recent` (`project` required). The old name is removed with no alias. `bm tool`
+  follows: `bm tool project-list`, `project-create`, `recent`. Chat clients choose and
+  fill single-purpose tools more reliably than one tool with a `command` argument
+  (#2030, #2068).
+
+- **`bm_schema` is split into three tools:** `bm_schema_validate`, `bm_schema_infer`
+  and `bm_schema_diff`. `bm_schema_infer` and `bm_schema_diff` require `note_type` and
+  no longer take `identifier`. `bm tool` has `schema-validate`, `schema-infer` and
+  `schema-diff`; `bm schema validate|infer|diff` keeps its shape (#2069).
+
+- **The `memory://ai_assistant_guide` resource is removed.** The server instructions
+  and the manual (`bm_man`, `memory://man`) cover the same ground (#2071).
+
+  `bm man tools-migration` lists every 1.0 call and its 1.1 replacement. Update MCP
+  allowlists, agent instructions and hooks that name `bm_project` or `bm_schema`.
 
 - **Note formatting is removed.** The `format_on_save`, `formatter_command`,
   `formatters` and `formatter_timeout` settings, their `BASIC_MEMORY_*` environment
@@ -13,6 +37,156 @@
   as an outside edit and the agent's next `expected_checksum` would conflict. Notes
   are now stored exactly as written. Old keys in `config.json` are ignored. To format
   notes, run your formatter from your editor, or over the project folder yourself.
+
+### Features
+
+- **Move notes and folders between projects.** `bm_move(...,
+  destination_project="research")` moves a note or a directory into another project.
+  The moved note is new in the target, with a new id and its own history; links are
+  not rewritten, and a note already at the destination is never replaced (#1842,
+  #2048).
+
+- **Skills over MCP.** The server serves the bundled `memory-*` skills as
+  `skill://<name>/SKILL.md` resources and supports the MCP skills extension
+  (SEP-2640), so clients that support it can list and load them.
+
+- **`memory-start` skill** for a new user's first session. The server instructions,
+  skills router and assistant-setup routine now save notes by default; a user opts
+  out with one sentence (#2081).
+
+- **`setup(7)` manual page** explains how to make an assistant use Basic Memory in
+  every chat without being asked (#2102).
+
+- **Semantic search freshness.** Search responses report how current semantic
+  results are (`semantic_index_current_as_of`), and the CLI identifies itself to
+  Cloud (#2056, #2064).
+
+- **Schemas read frontmatter.** A schema field is satisfied by a frontmatter key or
+  by an observation category, frontmatter first (#1973, #2047).
+
+### Bug Fixes
+
+- **#2103**: On Windows with Smart App Control on, `bm mcp` exited before it answered
+  `initialize`, because startup loaded the Postgres driver's unsigned native
+  extension even on SQLite installs. SQLite installs no longer import it (#2108).
+
+- **#2101**: The Claude desktop app sets `PYTHONDONTWRITEBYTECODE=1`, so the Claude
+  Code plugin's hook environment compiled about 2,200 modules on every SessionStart
+  and could exceed the hook's timeout. The plugin's hook environments now compile at
+  install, the SessionStart timeout is 45 s, and the SessionStart brief no longer
+  imports the MCP tool stack (#2109, #2113). Thanks @Jonny-boy9000 for the profile.
+  Reported upstream as anthropics/claude-code#109426.
+
+- **#2065**: On SQLite 3.37 (Ubuntu 22.04's system SQLite), every vector search
+  failed with "An illegal WHERE constraint was provided on a vec0 auxiliary column".
+  Vector search now works there, and a failed similar-notes probe no longer fails
+  `bm_write` after the note is saved (#2067, #2107).
+
+- **#1810**: Listing projects with Cloud credentials could stall for 10 s or more
+  when a Cloud connect was slow. Cloud discovery now gives up connecting after 3 s,
+  explicit local routing skips it, and timeout messages name the request
+  (`GET 'workspaces'`, not `GET ''`) (#2112).
+
+- **#1653**: `bm_write` overwrite replaces the body and keeps frontmatter keys the new
+  content does not set. The tool description and `bm-write(3)` now say so and explain
+  how to remove a key (#2111).
+
+- Tool errors now carry structured content that fits the tool's output schema, so
+  clients that validate output show the refusal instead of a schema error (#2098).
+
+- A tool call without a required `project` gets a refusal that says how to find one,
+  instead of a raw validation error (#1984, #1990).
+
+- `bm_search` answers requests whose extra arguments cannot change the result, such
+  as paging on a single `identifier`, and names the ignored arguments instead of
+  refusing. `projects: null` is accepted (#2027).
+
+- `bm_search` matches both a note's stored permalink and its project-relative form,
+  so explicit frontmatter permalinks are found.
+
+- `bm_read` selects section headings that contain a slash, such as `Pros / Cons`.
+  Thanks @duchangyi666 (#2087, #2095).
+
+- `bm_read` on a plain text file no longer says the line count includes frontmatter.
+
+- `bm_write`'s similar-notes advice asks the user before merging notes, instead of
+  spelling out an edit and delete. The `memory-ingest` skill says the same (#2011).
+
+- Cloud projects use Cloud's own similar-notes threshold, so short unrelated notes
+  are no longer suggested as duplicates.
+
+- `bm_move` is marked destructive, since a move between projects deletes the original.
+
+- `bm_project_list` shows local projects too when a project name is unknown (#1809,
+  #2054). `bm reindex -p` reports a mistyped project as not found instead of as a
+  Cloud project (#2029).
+
+- `bm_recent` offers first-note onboarding only for a project with no notes (#1986,
+  #1994).
+
+- `bm_schema_validate`'s "no schema found" guidance uses only MCP tools, so it works
+  for Cloud users (#1985, #1991). When several schemas cover a note type, the oldest
+  one is used consistently (#2014).
+
+- In a project with a top-level folder named like the project, notes in that folder
+  get their own permalinks and resolve to themselves, not to root notes (#2024, #2025,
+  #2026).
+
+- Moving a note onto a path that differs from another note only in case or Unicode
+  form is refused, as creating one already was (#2023).
+
+- On Postgres, a note with a very long `status` or `type` value can be indexed (#2060).
+  Numeric metadata filters skip non-numeric values instead of failing the query
+  (#2061). Multi-word prefix queries rank notes by the words typed (#1981).
+
+- A note edited and then moved no longer records a `created_at` later than its
+  `updated_at`.
+
+- A project created while the server runs is watched right away, and catching up a
+  new project no longer blocks file watching for the others.
+
+- The CLI writes UTF-8 on Windows, so `bm tool read` no longer crashes on non-ASCII
+  notes and the Claude Code brief no longer arrives garbled.
+
+- Auto-update no longer reports an upgrade when a pinned `uv tool` install stayed on
+  the same version.
+
+- `bm cloud sync-setup` matches a Cloud project name in any spelling, as pull and push
+  do (#2097).
+
+- Hermes integration: works with Hermes v0.22's provider contract (#2013), passes the
+  project named by a workspace-qualified identifier (#2015, #2017), runs the `bm` and
+  `uv` that `PATH` names (#1783, #2110), and no longer leaves a `bm mcp` process
+  running after a shutdown during startup or a call in flight (#1649, #2052, #2092).
+  Thanks @tonydzi.
+
+- OpenClaw integration: starts when its project already exists in another folder
+  (#1988, #1989) and shows the schema results the server actually returns (#1997,
+  #1998).
+
+### Performance
+
+- Hybrid search runs its full-text and vector legs at the same time and reads one
+  vector window (#2062). Vector rows are ranked in the database, which cuts the bytes
+  a vector or hybrid search reads by about 70% (#1746, #2074). Full-text search no
+  longer runs an exact `COUNT(*)` next to each page (#2063).
+
+- The read cache serves project resolves and every note resolve, and creates, moves
+  and deletes no longer retire every cached read in their project (#2075, #2076,
+  #2077).
+
+- Note writes check for conflicting file paths through indexed columns instead of
+  loading every path in the project (#2010, #2012). Script n-grams for search are
+  built without per-character scans (#2009).
+
+### Security
+
+- **Pillow 13.0.0** fixes the October and November advisories, including
+  GHSA-74r2-7ff9-mjj2. The minimums are now `pillow>=13.0.0` and `fastembed>=0.9.1`
+  (#1806, #2100).
+
+- **pybars3 is removed.** It is unmaintained and carries CVE-2026-119716. The two
+  prompt endpoints build their text in Python (#2044, #2096).
 
 ## v1.0.0 (2026-10-29)
 
