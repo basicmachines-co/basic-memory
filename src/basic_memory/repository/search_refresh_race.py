@@ -18,7 +18,6 @@ refresh. SQLite allows one writer at a time, so it never produces either error.
 
 from typing import Literal
 
-from asyncpg.exceptions import DeadlockDetectedError, UniqueViolationError
 from sqlalchemy.exc import DBAPIError
 
 type SearchRefreshRace = Literal["deadlock", "search_index_pkey"]
@@ -29,11 +28,14 @@ def lost_search_refresh_race(error: BaseException) -> SearchRefreshRace | None:
     if not isinstance(error, DBAPIError) or error.orig is None:
         return None
     # The asyncpg dialect raises its own adapted DBAPI error from the driver's error,
-    # so the Postgres error class and constraint name live on the cause.
+    # so the Postgres SQLSTATE and constraint name live on the cause. Matching on the
+    # SQLSTATE rather than on asyncpg's exception classes keeps this module from importing
+    # the driver: SQLite installs load it too, and asyncpg's native extension can fail to
+    # load there (#2103).
     match error.orig.__cause__:
-        case DeadlockDetectedError():
+        case object(sqlstate="40P01"):  # deadlock_detected
             return "deadlock"
-        case UniqueViolationError(constraint_name="search_index_pkey"):
+        case object(sqlstate="23505", constraint_name="search_index_pkey"):  # unique_violation
             return "search_index_pkey"
         case _:
             return None
