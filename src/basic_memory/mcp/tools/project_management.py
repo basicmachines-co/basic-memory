@@ -321,7 +321,7 @@ async def list_memory_projects(
     # Fetch cloud projects from every accessible workspace when credentials are available
     cloud_entries: tuple[WorkspaceProjectEntry, ...] = ()
     config = ConfigManager().config
-    if has_cloud_credentials(config):
+    if _may_discover_cloud(config):
         try:
             workspace_index = await ensure_workspace_project_index(context=context)
             cloud_entries = workspace_index.entries
@@ -348,6 +348,18 @@ async def list_memory_projects(
     return _format_project_list_text(merged)
 
 
+def _may_discover_cloud(config: BasicMemoryConfig) -> bool:
+    """Whether a local MCP server should ask the cloud for workspaces and projects.
+
+    Cloud is checked by default whenever credentials exist, so a logged-in user sees
+    cloud projects without extra setup. Explicit local routing
+    (BASIC_MEMORY_FORCE_LOCAL with BASIC_MEMORY_EXPLICIT_ROUTING, which HTTP transports
+    and `--local` set) opts out, so local-only tool calls never wait on the network.
+    """
+    forced_local = _explicit_routing() and _force_local_mode()
+    return has_cloud_credentials(config) and not forced_local
+
+
 def _format_constrained_text(constrained_project: str) -> str:
     """Format text output when the MCP server is constrained to a single project."""
     result = f"Project: {constrained_project}\n\n"
@@ -369,15 +381,12 @@ async def _resolve_workspace_routing(
     if workspace is None:
         return None
 
-    forced_local = _explicit_routing() and _force_local_mode()
     config = ConfigManager().config
     # Resolve whenever credentials make workspace discovery possible — not only
     # under explicit --cloud. A workspace selector implies cloud routing
     # (get_client routes it to the cloud proxy, #954), and the transport needs
     # the tenant id in X-Workspace-ID, not a slug or display name.
-    should_resolve_workspace = is_factory_mode() or (
-        has_cloud_credentials(config) and not forced_local
-    )
+    should_resolve_workspace = is_factory_mode() or _may_discover_cloud(config)
     if not should_resolve_workspace:
         return workspace
 
