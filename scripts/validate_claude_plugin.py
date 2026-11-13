@@ -177,6 +177,10 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
         )
         if overrides != [core_fastmcp_pin]:
             raise SystemExit(f"{script}: fastmcp override must match core pin {core_fastmcp_pin}")
+        # Hosts that set PYTHONDONTWRITEBYTECODE=1 never cache bytecode at import, so the
+        # hook env must be compiled at install or SessionStart outruns its timeout (#2101).
+        if not re.search(r"^# compile-bytecode = true$", text, re.MULTILINE):
+            raise SystemExit(f"{script}: [tool.uv] must set compile-bytecode = true")
 
     # --- Output style ---
     output_style = plugin_dir / "output-styles/basic-memory.md"

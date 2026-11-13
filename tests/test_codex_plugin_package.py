@@ -405,6 +405,23 @@ def test_codex_hook_fastmcp_pins_match_core_pyproject() -> None:
             r'^# override-dependencies = \["fastmcp==([^\"]+)"\]$', shim, re.MULTILINE
         )
         assert overrides == [core.group(1)], name
+        assert re.search(r"^# compile-bytecode = true$", shim, re.MULTILINE), name
+
+
+def test_claude_validator_requires_hook_bytecode_compilation(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    plugin_dir = tmp_path / "claude-code"
+    shutil.copytree(repo_root / "plugins/claude-code", plugin_dir)
+    script = plugin_dir / "hooks/session_start.py"
+    script.write_text(script.read_text().replace("# compile-bytecode = true\n", ""))
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts/validate_claude_plugin.py"), str(plugin_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "must set compile-bytecode = true" in result.stderr
 
 
 def test_claude_validator_rejects_stale_fastmcp_override(tmp_path: Path) -> None:
