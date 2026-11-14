@@ -57,6 +57,9 @@ from basic_memory.schemas.project_info import (
     ProjectStatusResponse,
 )
 from basic_memory.schemas.v2 import (
+    CursorAheadOfHeadResponse,
+    ProjectChange,
+    ProjectChangesResponse,
     ProjectIndexResponse,
     ProjectResolveRequest,
     ProjectResolveResponse,
@@ -343,6 +346,141 @@ router.add_api_route(
     include_in_schema=False,
     deprecated=True,
 )
+
+
+MAX_PROJECT_CHANGES_PAGE_SIZE = 1000
+DEFAULT_PROJECT_CHANGES_PAGE_SIZE = 200
+
+
+# No cached_read dependency: a cached page would hide changes accepted after it was
+# stored, and the whole point of this route is to show them.
+@router.get(
+    "/{project_id}/changes",
+    response_model=ProjectChangesResponse,
+    summary="List a project's accepted note changes after a journal position",
+    responses={
+        409: {
+            "model": CursorAheadOfHeadResponse,
+            "description": (
+                "after is greater than the project's head. The client's cursor came "
+                "from a journal that no longer exists, for example from before the "
+                "project database was restored from a backup. Discard the cursor, "
+                "reload the project from scratch, and continue from the head in this "
+                "response."
+            ),
+        },
+    },
+)
+async def list_project_changes(
+    session_maker: SessionMakerDep,
+    project_repository: ProjectRepositoryDep,
+    project_internal_id: ProjectExternalIdPathDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+    after: int = Query(
+        0,
+        ge=0,
+        description=(
+            "Return changes after this journal position. Pass 0 for the whole "
+            "journal, then next_after from the previous response."
+        ),
+    ),
+    limit: int = Query(
+        DEFAULT_PROJECT_CHANGES_PAGE_SIZE,
+        ge=1,
+        le=MAX_PROJECT_CHANGES_PAGE_SIZE,
+        description="The most changes to return in one page.",
+    ),
+) -> ProjectChangesResponse:
+    """Answer "what changed in this project since position N" in one call.
+
+    Each project keeps an ordered journal of accepted note changes. Every accepted
+    create, update, move or delete of a note takes the next position, so positions
+    start at 1 and increase by exactly one per change, with no gaps.
+
+    How to read it:
+
+    - `head` is the project's latest journal position when the request was read.
+      Every change at or below `head` is committed; later changes wait for the
+      next request.
+    - `changes` holds the changes with `after < position <= head`, in position
+      order, at most `limit` of them.
+    - `next_after` is the position of the last change returned, or `after` when
+      none are. It never exceeds `head`. Pass it as `after` on the next request.
+    - `has_more` is true while `next_after < head`. Keep reading until it is false.
+    - A request with `after` equal to `head` returns no changes.
+    - A request with `after` greater than `head` returns HTTP 409 with
+      `detail.code = "cursor_ahead_of_head"` and the current `detail.head`. That
+      happens when a cursor outlives the journal it came from, for example after
+      the project database is restored from a backup. Discard the cursor and
+      resync the project from scratch.
+
+    The journal records only note changes accepted through this API's note write
+    routes. It does not record yet:
+
+    - files written straight to storage instead of through the API, such as
+      WebDAV, sync tools and direct uploads;
+    - notes removed by deleting a whole folder;
+    - files that are not Markdown notes.
+
+    A client that must see those changes still needs a full reload.
+    """
+    logger.debug(
+        f"API v2 request: list_project_changes for project_id={project_id} "
+        f"after={after} limit={limit}"
+    )
+    # Read head first, then cap the rows at head. A writer claims a position by
+    # updating the project row and commits its journal row in the same transaction,
+    # so every position at or below a committed head is already visible. Rows
+    # committed after head was read wait for the next page, which keeps next_after
+    # from ever passing head.
+    async with db.scoped_session(session_maker) as session:
+        head = await project_repository.get_partition_position(session, project_internal_id)
+        if head is None:  # pragma: no cover - the path dependency just found the project
+            raise HTTPException(
+                status_code=404, detail=f"Project with external_id '{project_id}' not found."
+            )
+        if after > head:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "cursor_ahead_of_head", "head": head},
+            )
+
+        rows = await project_repository.list_accepted_note_changes(
+            session,
+            project_internal_id,
+            after_position=after,
+            through_position=head,
+            limit=limit,
+        )
+    # model_validate checks the stored operation string against the published set.
+    changes = [
+        ProjectChange.model_validate(
+            {
+                "position": row.partition_position,
+                "operation": row.operation,
+                "note_external_id": row.note_external_id,
+                "permalink": row.permalink,
+                "title": row.title,
+                "file_path": row.file_path,
+                "previous_file_path": row.previous_file_path,
+                "accepted_at": row.accepted_at,
+                "source": row.source,
+                "db_version": row.db_version,
+                "db_checksum": row.db_checksum,
+                "actor_kind": row.actor_kind,
+                "actor_name": row.actor_name,
+            }
+        )
+        for row in rows
+    ]
+    next_after = changes[-1].position if changes else after
+    return ProjectChangesResponse(
+        head=head,
+        after=after,
+        next_after=next_after,
+        has_more=next_after < head,
+        changes=changes,
+    )
 
 
 # QUERY only: resolution is a safe, cacheable read with a body (RFC 9110 draft), so

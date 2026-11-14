@@ -19,6 +19,12 @@ from basic_memory.schemas.v2.graph import (
     GraphResponse,
     OrphanEntitiesResponse,
 )
+from basic_memory.schemas.v2.project_changes import (
+    CursorAheadOfHeadDetail,
+    CursorAheadOfHeadResponse,
+    ProjectChange,
+    ProjectChangesResponse,
+)
 from basic_memory.schemas.v2.project_index import (
     ProjectIndexResponse,
     ProjectIndexStartedResponse,
@@ -42,4 +48,8 @@ __all__ = [
     "OrphanEntitiesResponse",
     "ProjectIndexResponse",
     "ProjectIndexStartedResponse",
+    "CursorAheadOfHeadDetail",
+    "CursorAheadOfHeadResponse",
+    "ProjectChange",
+    "ProjectChangesResponse",
 ]
