@@ -123,6 +123,7 @@ class DirectoryService:
                 content_type=file.content_type,
                 format=_stored_file_format(file),
                 updated_at=file.updated_at,
+                checksum=file.checksum,
             )
 
             # Add to parent directory's children

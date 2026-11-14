@@ -34,6 +34,8 @@ class DirectoryNode(BaseModel):
     # metadata at index time. None for notes, directories, and unrecognized types.
     format: Optional[str] = None
     updated_at: Optional[datetime] = None
+    # Content checksum of a file node (the note's entity checksum). Unset on directories.
+    checksum: Optional[str] = None
 
     @property
     def has_children(self) -> bool:

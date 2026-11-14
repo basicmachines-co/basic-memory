@@ -29,7 +29,9 @@ class ReadCacheOperation(StrEnum):
 
     directory_list = "directory_list"
     directory_structure = "directory_structure"
-    directory_tree = "directory_tree"
+    # The value carries a shape marker: tree entries now include each file's checksum,
+    # so entries stored under the earlier "directory_tree" key are never read back.
+    directory_tree = "directory_tree_v2"
     entity = "entity"
     link_resolve = "link_resolve"
     project_resolve = "project_resolve"
