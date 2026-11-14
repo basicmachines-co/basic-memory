@@ -1,7 +1,11 @@
 """Tests for V2 directory API routes (ID-based endpoints)."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
+
+from basic_memory import db
 
 from basic_memory.models import Project
 from basic_memory.schemas.directory import DirectoryListResponse, DirectoryNode
@@ -188,3 +192,38 @@ async def test_v2_directory_endpoints_use_project_id_not_name(
 
     # Should get validation error or 404 because name is not a valid integer
     assert response.status_code in [404, 422]
+
+
+@pytest.mark.asyncio
+async def test_directory_tree_route_returns_file_checksums_only(
+    client: AsyncClient,
+    test_graph,
+    entity_repository,
+    session_maker,
+    v2_project_url: str,
+):
+    """File nodes carry the entity checksum; directory nodes and /structure carry none."""
+    async with db.scoped_session(session_maker) as session:
+        entities = {e.file_path: e for e in await entity_repository.find_all(session)}
+
+    response = await client.get(f"{v2_project_url}/directory/tree")
+    assert response.status_code == 200
+
+    files: list[dict[str, Any]] = []
+
+    def walk(node: dict[str, Any]) -> None:
+        if node["type"] == "directory":
+            assert "checksum" not in node
+        else:
+            files.append(node)
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(response.json())
+    assert files
+    for node in files:
+        assert node["checksum"] == entities[node["file_path"]].checksum
+
+    structure = await client.get(f"{v2_project_url}/directory/structure")
+    assert structure.status_code == 200
+    assert "checksum" not in structure.text

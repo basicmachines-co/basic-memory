@@ -54,3 +54,23 @@ async def test_cached_read_without_read_cache_route_fails_fast() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         with pytest.raises(TypeError, match="route_class=ReadCacheRoute"):
             await client.get("/projects/p1/tree")
+
+
+def test_directory_tree_operation_is_keyed_apart_from_the_earlier_shape() -> None:
+    """Tree entries stored before file checksums were added are never read back."""
+    assert ReadCacheOperation.directory_tree.value != "directory_tree"
+    assert ReadCacheOperation.directory_tree.value.startswith("directory_tree")
+    # Every other operation keeps its original key.
+    assert {
+        op.value for op in ReadCacheOperation if op is not ReadCacheOperation.directory_tree
+    } == {
+        "directory_list",
+        "directory_structure",
+        "entity",
+        "link_resolve",
+        "project_resolve",
+        "recent_activity",
+        "resolve",
+        "resource",
+        "search",
+    }

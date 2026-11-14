@@ -483,3 +483,25 @@ async def test_directory_structure(directory_service: DirectoryService, test_gra
 
     # No file nodes should be present
     assert len(node_0.children) == 0
+
+
+@pytest.mark.asyncio
+async def test_directory_tree_file_nodes_carry_entity_checksum(
+    directory_service: DirectoryService,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_graph,
+):
+    tree = await directory_service.get_directory_tree()
+    async with db.scoped_session(session_maker) as session:
+        entities = {e.file_path: e for e in await entity_repository.find_all(session)}
+
+    folder = tree.children[0]
+    assert folder.type == "directory"
+    assert folder.checksum is None
+    assert tree.checksum is None
+
+    assert folder.children
+    for node in folder.children:
+        assert node.checksum is not None
+        assert node.checksum == entities[node.file_path].checksum
