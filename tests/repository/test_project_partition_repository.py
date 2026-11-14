@@ -231,3 +231,40 @@ async def test_project_partition_advance_rejects_missing_project(
     with pytest.raises(RuntimeError, match="project_id=999999"):
         async with db.scoped_session(session_maker) as session:
             await repository.advance_partition_position(session, 999999)
+
+
+@pytest.mark.asyncio
+async def test_list_accepted_note_changes_limit_keeps_lowest_positions(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+
+    async with db.scoped_session(session_maker) as session:
+        for _ in range(4):
+            position = await repository.advance_partition_position(session, test_project.id)
+            await repository.record_accepted_note_change(
+                session,
+                _accepted_change(test_project, partition_position=position, db_version=position),
+            )
+
+    async with db.scoped_session(session_maker) as session:
+        assert await repository.get_partition_position(session, test_project.id) == 4
+        first_page = await repository.list_accepted_note_changes(
+            session, test_project.id, after_position=0, through_position=4, limit=3
+        )
+        assert [change.partition_position for change in first_page] == [1, 2, 3]
+        second_page = await repository.list_accepted_note_changes(
+            session, test_project.id, after_position=3, through_position=4, limit=3
+        )
+        assert [change.partition_position for change in second_page] == [4]
+        unlimited = await repository.list_accepted_note_changes(session, test_project.id)
+        assert [change.partition_position for change in unlimited] == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_get_partition_position_is_none_for_missing_project(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with db.scoped_session(session_maker) as session:
+        assert await ProjectRepository().get_partition_position(session, 999999) is None

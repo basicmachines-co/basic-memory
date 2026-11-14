@@ -205,6 +205,19 @@ class ProjectRepository(Repository[Project]):
         session.add(persisted)
         await session.flush()
 
+    async def get_partition_position(
+        self,
+        session: AsyncSession,
+        project_id: int,
+    ) -> int | None:
+        """Read the project's latest committed journal position, or None if it is gone."""
+        position = (
+            await session.execute(
+                select(Project.partition_position).where(Project.id == project_id)
+            )
+        ).scalar_one_or_none()
+        return int(position) if position is not None else None
+
     async def list_accepted_note_changes(
         self,
         session: AsyncSession,
@@ -212,8 +225,13 @@ class ProjectRepository(Repository[Project]):
         *,
         after_position: int = 0,
         through_position: int | None = None,
+        limit: int | None = None,
     ) -> Sequence[AcceptedProjectNoteChange]:
-        """List one contiguous project evidence range in strict order."""
+        """List one contiguous project evidence range in strict order.
+
+        ``limit`` caps the rows returned, keeping the lowest positions, so a caller
+        can page through the range by passing the last position as ``after_position``.
+        """
         statement = select(AcceptedProjectNoteChange).where(
             AcceptedProjectNoteChange.project_id == project_id,
             AcceptedProjectNoteChange.partition_position > after_position,
@@ -222,9 +240,10 @@ class ProjectRepository(Repository[Project]):
             statement = statement.where(
                 AcceptedProjectNoteChange.partition_position <= through_position
             )
-        result = await session.execute(
-            statement.order_by(AcceptedProjectNoteChange.partition_position)
-        )
+        statement = statement.order_by(AcceptedProjectNoteChange.partition_position)
+        if limit is not None:
+            statement = statement.limit(limit)
+        result = await session.execute(statement)
         return tuple(result.scalars().all())
 
     async def mark_accepted_note_change_materialized(
