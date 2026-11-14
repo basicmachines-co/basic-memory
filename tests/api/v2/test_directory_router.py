@@ -1,5 +1,7 @@
 """Tests for V2 directory API routes (ID-based endpoints)."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 
@@ -207,9 +209,9 @@ async def test_directory_tree_route_returns_file_checksums_only(
     response = await client.get(f"{v2_project_url}/directory/tree")
     assert response.status_code == 200
 
-    files: list[dict] = []
+    files: list[dict[str, Any]] = []
 
-    def walk(node: dict) -> None:
+    def walk(node: dict[str, Any]) -> None:
         if node["type"] == "directory":
             assert "checksum" not in node
         else:
