@@ -1243,3 +1243,44 @@ async def test_run_directory_delete_settles_inline_cleanup_rows(
     assert [(row.file_path, row.materialized_at is not None) for row in rows] == [
         ("notes/a.md", True)
     ]
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_skips_journal_row_for_note_without_permalink(
+    session_maker,
+    test_project,
+) -> None:
+    """A legacy Markdown note with no permalink is deleted without a journal row.
+
+    Databases from before the disable_permalinks setting was removed can hold such
+    notes. No journal row ever named them, and raising would roll back the whole
+    folder delete, so the delete goes ahead and only the other notes are journaled.
+    """
+    async with db.scoped_session(session_maker) as session:
+        legacy = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/legacy.md"
+        )
+        legacy.permalink = None
+        legacy_id = legacy.id
+        await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/current.md"
+        )
+
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=FakeDirectoryFileDeleteEnqueuer(),
+        ),
+    )
+    result = await service.delete_directory(
+        project_external_id=test_project.external_id,
+        directory="notes",
+    )
+
+    assert sorted(result.deleted_files) == ["notes/current.md", "notes/legacy.md"]
+    async with db.scoped_session(session_maker) as session:
+        assert await session.get(Entity, legacy_id) is None
+    assert await _partition_head(session_maker, test_project.id) == 1
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.partition_position, row.file_path) for row in rows] == [(1, "notes/current.md")]
