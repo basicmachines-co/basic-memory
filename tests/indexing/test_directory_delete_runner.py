@@ -13,6 +13,7 @@ from sqlalchemy.sql.dml import Delete
 
 from basic_memory import db
 from basic_memory.indexing.directory_delete_runner import (
+    ACCEPTED_DIRECTORY_DELETE_SOURCE,
     DirectoryDeleteAcceptanceRequest,
     DirectoryDeleteAcceptedResult,
     DirectoryDeleteFileFailure,
@@ -26,7 +27,15 @@ from basic_memory.indexing.directory_delete_runner import (
     normalize_directory_delete_path,
     run_directory_delete,
 )
-from basic_memory.models import Entity, NoteContent, Relation
+from basic_memory.index.local_notes import LocalDirectoryFileDeleteEnqueuer
+from basic_memory.index.local_wiki_projection import inspect_local_wiki_projection
+from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project, Relation
+from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.services.directory_deletes import DirectoryDeleteService
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
@@ -83,6 +92,7 @@ class FakeDirectoryDeleteStore:
         session: AsyncSession,
         *,
         project_id: int,
+        project_external_id: str,
         directory: str,
         entity_ids: Sequence[int],
     ) -> DirectoryEntityDeleteResult:
@@ -126,6 +136,9 @@ class FakeExecuteResult:
     def scalars(self) -> FakeScalarResult:
         return FakeScalarResult(self.scalar_value, self.scalar_values)
 
+    def scalar_one_or_none(self) -> object | None:
+        return self.scalar_value
+
     def tuples(self) -> "FakeExecuteResult":
         return self
 
@@ -144,6 +157,24 @@ class FakeExecuteSession:
     async def execute(self, query: object, params: object | None = None) -> FakeExecuteResult:
         self.queries.append((query, params))
         return self.results.pop(0)
+
+
+def deleted_entity_row(
+    entity_id: int,
+    *,
+    file_path: str | None = None,
+    content_type: str = "text/markdown",
+) -> SimpleNamespace:
+    """One row of the guarded delete's RETURNING clause."""
+    path = file_path or f"notes/note-{entity_id}.md"
+    return SimpleNamespace(
+        id=entity_id,
+        external_id=f"note-external-{entity_id}",
+        permalink=path.removesuffix(".md"),
+        title=f"Note {entity_id}",
+        file_path=path,
+        content_type=content_type,
+    )
 
 
 def directory_snapshot(
@@ -474,11 +505,15 @@ async def test_repository_directory_delete_store_captures_relation_sources() -> 
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
-                FakeExecuteResult(scalar_values=[]),  # canonical lock check
+                FakeExecuteResult(rows=[]),  # canonical lock check
                 FakeExecuteResult(rows=[(101, 7, 42), (102, 8, 99)]),
-                FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
+                FakeExecuteResult(
+                    rows=[deleted_entity_row(7), deleted_entity_row(8)]
+                ),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
+                FakeExecuteResult(scalar_value=12),  # journal position claim
+                FakeExecuteResult(),  # journal insert
             ]
         ),
     )
@@ -487,14 +522,18 @@ async def test_repository_directory_delete_store_captures_relation_sources() -> 
     delete_result = await store.delete_directory_entities(
         session,
         project_id=3,
+        project_external_id="project-123",
         directory="notes",
         entity_ids=[7, 8],
     )
 
-    assert delete_result == DirectoryEntityDeleteResult(
-        deleted_entity_ids=frozenset({7, 8}),
-        relation_cleanup_entity_ids=frozenset({42, 99}),
-    )
+    assert delete_result.deleted_entity_ids == frozenset({7, 8})
+    assert delete_result.relation_cleanup_entity_ids == frozenset({42, 99})
+    # Head 12 after claiming two positions: the notes take 11 and 12 in path order.
+    assert {
+        entity_id: change.partition_position
+        for entity_id, change in delete_result.project_changes.items()
+    } == {7: 11, 8: 12}
 
 
 @pytest.mark.asyncio
@@ -542,11 +581,15 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                 ),
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7]),  # current directory members
-                FakeExecuteResult(scalar_values=[]),  # canonical lock check
+                FakeExecuteResult(rows=[]),  # canonical lock check
                 FakeExecuteResult(rows=[]),  # incoming relation snapshot
-                FakeExecuteResult(scalar_values=[7]),  # guarded entity delete
+                FakeExecuteResult(
+                    rows=[deleted_entity_row(7, file_path="notes/example.md")]
+                ),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
+                FakeExecuteResult(scalar_value=1),  # journal position claim
+                FakeExecuteResult(),  # journal insert
             ]
         ),
     )
@@ -565,6 +608,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
     delete_result = await store.delete_directory_entities(
         session,
         project_id=3,
+        project_external_id="project-123",
         directory="notes",
         entity_ids=[7],
     )
@@ -579,10 +623,33 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
             size=42,
         )
     ]
-    assert delete_result == DirectoryEntityDeleteResult(
-        deleted_entity_ids=frozenset({7}),
+    assert delete_result.deleted_entity_ids == frozenset({7})
+    assert delete_result.relation_cleanup_entity_ids == frozenset()
+    change = delete_result.project_changes[7]
+    assert (
+        change.project_id,
+        change.project_external_id,
+        change.partition_position,
+        change.note_external_id,
+        change.permalink,
+        change.title,
+        change.file_path,
+        change.operation,
+        change.source,
+        change.previous_file_path,
+    ) == (
+        3,
+        "project-123",
+        1,
+        "note-external-7",
+        "notes/example",
+        "Note 7",
+        "notes/example.md",
+        RuntimeProjectNoteOperation.deleted,
+        ACCEPTED_DIRECTORY_DELETE_SOURCE,
+        None,
     )
-    assert len(fake_session.queries) == 9
+    assert len(fake_session.queries) == 11
     assert "FOR UPDATE" not in str(fake_session.queries[1][0])
     assert "ORDER BY note_content.entity_id" in str(fake_session.queries[2][0])
     assert "entity.file_path LIKE" in str(fake_session.queries[3][0])
@@ -591,6 +658,10 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
     assert "entity.project_id" in guarded_entity_delete
     assert "entity.file_path LIKE" in guarded_entity_delete
     assert "NOT (EXISTS" in guarded_entity_delete
+    assert "RETURNING entity.id, entity.external_id" in guarded_entity_delete
+    # Journal writes come last, after search and vector cleanup.
+    assert "partition_position=(project.partition_position +" in str(fake_session.queries[9][0])
+    assert "INSERT INTO accepted_project_note_change" in str(fake_session.queries[10][0])
 
 
 @pytest.mark.asyncio
@@ -603,10 +674,14 @@ async def test_repository_directory_delete_store_clears_vectors_for_deleted_enti
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
-                FakeExecuteResult(scalar_values=[]),  # canonical lock check
+                FakeExecuteResult(rows=[]),  # canonical lock check
                 FakeExecuteResult(rows=[]),  # incoming relation snapshot
-                FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
+                FakeExecuteResult(
+                    rows=[deleted_entity_row(7), deleted_entity_row(8)]
+                ),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
+                FakeExecuteResult(scalar_value=2),  # journal position claim
+                FakeExecuteResult(),  # journal insert
             ]
         ),
     )
@@ -640,6 +715,7 @@ async def test_repository_directory_delete_store_clears_vectors_for_deleted_enti
     await store.delete_directory_entities(
         session,
         project_id=3,
+        project_external_id="project-123",
         directory="notes",
         entity_ids=[7, 8],
     )
@@ -707,11 +783,13 @@ async def test_repository_directory_delete_revalidates_membership_after_move_out
         delete_result = await store.delete_directory_entities(
             session,
             project_id=test_project.id,
+            project_external_id=test_project.external_id,
             directory="notes",
             entity_ids=[snapshot.entity_id for snapshot in snapshots],
         )
 
     assert delete_result == DirectoryEntityDeleteResult()
+    assert await _partition_head(session_maker, test_project.id) == 0
     async with db.scoped_session(session_maker) as session:
         moved_note = await session.get(Entity, moved_note_id)
         note_content = await session.get(NoteContent, moved_note_id)
@@ -805,12 +883,16 @@ async def test_repository_directory_delete_rejects_uncaptured_incoming_relation(
         delete_result = await store.delete_directory_entities(
             session,
             project_id=test_project.id,
+            project_external_id=test_project.external_id,
             directory="notes",
             entity_ids=[target_id],
         )
 
     assert relation_resolved is True
     assert delete_result == DirectoryEntityDeleteResult()
+    # A note the guarded delete leaves in place gets no journal row or position.
+    assert await _partition_head(session_maker, test_project.id) == 0
+    assert await _journal_rows(session_maker, test_project.id) == []
     async with db.scoped_session(session_maker) as session:
         target = await session.get(Entity, target_id)
         note_content = await session.get(NoteContent, target_id)
@@ -819,3 +901,486 @@ async def test_repository_directory_delete_rejects_uncaptured_incoming_relation(
     assert note_content is not None
     assert relation is not None
     assert relation.to_id == target_id
+
+
+async def _seed_directory_entity(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    file_path: str,
+    content_type: str = "text/markdown",
+    checksum: str | None = None,
+    db_version: int | None = 1,
+) -> Entity:
+    """Insert one entity, plus accepted note content for Markdown notes."""
+    now = datetime.now(tz=UTC)
+    is_markdown = content_type == "text/markdown"
+    entity = Entity(
+        project_id=project_id,
+        title=file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+        note_type="note" if is_markdown else "file",
+        permalink=file_path.removesuffix(".md") if is_markdown else None,
+        file_path=file_path,
+        content_type=content_type,
+        checksum=checksum,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(entity)
+    await session.flush()
+    if is_markdown and db_version is not None:
+        session.add(
+            NoteContent(
+                entity_id=entity.id,
+                project_id=project_id,
+                external_id=entity.external_id,
+                file_path=file_path,
+                markdown_content=f"# {entity.title}\n",
+                db_version=db_version,
+                db_checksum=f"db-checksum-{entity.id}-{db_version}",
+                file_write_status="synced",
+            )
+        )
+        await session.flush()
+    return entity
+
+
+async def _set_partition_head(session_maker, project_id: int, position: int) -> None:
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, project_id)
+        assert project is not None
+        project.partition_position = position
+
+
+async def _partition_head(session_maker, project_id: int) -> int:
+    async with db.scoped_session(session_maker) as session:
+        head = await ProjectRepository().get_partition_position(session, project_id)
+    assert head is not None
+    return head
+
+
+async def _journal_rows(session_maker, project_id: int) -> list[AcceptedProjectNoteChange]:
+    async with db.scoped_session(session_maker) as session:
+        return list(await ProjectRepository().list_accepted_note_changes(session, project_id))
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_journals_each_markdown_note_and_carries_rows_to_cleanup(
+    session_maker,
+    test_project,
+) -> None:
+    """A folder delete writes one `deleted` row per Markdown note it removes.
+
+    Rows sit at consecutive positions in file-path order, carry the note's last
+    accepted revision, skip non-Markdown files, and ride on each file's cleanup
+    request. A queued cleanup settles its own row, so none is settled here.
+    """
+    await _set_partition_head(session_maker, test_project.id, 5)
+    async with db.scoped_session(session_maker) as session:
+        # Inserted out of path order, so the test proves rows follow file paths.
+        second = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/b.md", db_version=4
+        )
+        first = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/a.md", db_version=2
+        )
+        image = await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="notes/diagram.png",
+            content_type="image/png",
+        )
+        outside = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="other/keep.md"
+        )
+        notes = {
+            first.id: (first.external_id, 2, f"db-checksum-{first.id}-2"),
+            second.id: (second.external_id, 4, f"db-checksum-{second.id}-4"),
+        }
+        image_id = image.id
+        outside_id = outside.id
+
+    enqueuer = FakeDirectoryFileDeleteEnqueuer()
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=enqueuer,
+        ),
+    )
+    result = await service.delete_directory(
+        project_external_id=test_project.external_id,
+        directory="notes",
+    )
+
+    assert sorted(result.deleted_files) == ["notes/a.md", "notes/b.md", "notes/diagram.png"]
+    assert await _partition_head(session_maker, test_project.id) == 7
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.partition_position, row.file_path) for row in rows] == [
+        (6, "notes/a.md"),
+        (7, "notes/b.md"),
+    ]
+    for row in rows:
+        external_id, db_version, db_checksum = notes[row.entity_id]
+        assert row.project_external_id == test_project.external_id
+        assert row.note_external_id == external_id
+        assert row.permalink == row.file_path.removesuffix(".md")
+        assert row.title == row.file_path.rsplit("/", 1)[-1].removesuffix(".md")
+        assert row.operation == RuntimeProjectNoteOperation.deleted.value
+        assert row.source == ACCEPTED_DIRECTORY_DELETE_SOURCE
+        assert row.previous_file_path is None
+        assert (row.db_version, row.db_checksum) == (db_version, db_checksum)
+        assert row.actor_kind is None
+        # Queued cleanup owns settlement; the service must not pre-empt it.
+        assert row.materialized_at is None
+    assert {row.entity_id for row in rows}.isdisjoint({image_id, outside_id})
+
+    project_change_by_path = {
+        request.file_path: request.project_change for request in enqueuer.requests
+    }
+    assert project_change_by_path["notes/diagram.png"] is None
+    for row in rows:
+        change = project_change_by_path[row.file_path]
+        assert change is not None
+        assert (change.partition_position, change.entity_id, change.source) == (
+            row.partition_position,
+            row.entity_id,
+            ACCEPTED_DIRECTORY_DELETE_SOURCE,
+        )
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_journal_rolls_back_with_failed_transaction(
+    session_maker,
+    test_project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure after the entity delete keeps the notes, the journal and the head unchanged."""
+    await _set_partition_head(session_maker, test_project.id, 3)
+    async with db.scoped_session(session_maker) as session:
+        note = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/a.md"
+        )
+        note_id = note.id
+
+    async def failing_record(self, session, changes) -> None:
+        raise RuntimeError("journal insert failed")
+
+    monkeypatch.setattr(ProjectRepository, "record_accepted_note_changes", failing_record)
+    enqueuer = FakeDirectoryFileDeleteEnqueuer()
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=enqueuer,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="journal insert failed"):
+        await service.delete_directory(
+            project_external_id=test_project.external_id,
+            directory="notes",
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        assert await session.get(Entity, note_id) is not None
+        assert await session.get(NoteContent, note_id) is not None
+    assert await _partition_head(session_maker, test_project.id) == 3
+    assert await _journal_rows(session_maker, test_project.id) == []
+    assert enqueuer.requests == []
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_claims_no_position_without_deleted_markdown(
+    session_maker,
+    test_project,
+) -> None:
+    """An empty folder, or one holding only non-Markdown files, leaves the journal alone."""
+    async with db.scoped_session(session_maker) as session:
+        await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="images/photo.png",
+            content_type="image/png",
+        )
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=FakeDirectoryFileDeleteEnqueuer(),
+        ),
+    )
+
+    empty = await service.delete_directory(
+        project_external_id=test_project.external_id,
+        directory="nothing-here",
+    )
+    images = await service.delete_directory(
+        project_external_id=test_project.external_id,
+        directory="images",
+    )
+
+    assert empty == DirectoryDeleteAcceptedResult.complete()
+    assert images.deleted_files == ("images/photo.png",)
+    assert await _partition_head(session_maker, test_project.id) == 0
+    assert await _journal_rows(session_maker, test_project.id) == []
+
+
+@pytest.mark.asyncio
+async def test_local_directory_delete_settles_every_row_whatever_the_cleanup_outcome(
+    session_maker,
+    test_project,
+    file_service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local cleanup runs inline, so the service settles each row itself.
+
+    Deleted, already-missing, changed-on-disk (skipped) and failed cleanups all
+    settle: the entity delete is final, and one unsettled row would defer every
+    later wiki projection for the project (GitHub #1625).
+    """
+    checksums: dict[str, str] = {}
+    for path in ("notes/deleted.md", "notes/changed.md", "notes/broken.md"):
+        await file_service.write_file(path, f"# {path}\n")
+        checksums[path] = await file_service.compute_checksum(path)
+    async with db.scoped_session(session_maker) as session:
+        await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="notes/deleted.md",
+            checksum=checksums["notes/deleted.md"],
+        )
+        await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="notes/missing.md",
+            checksum="checksum-of-a-file-that-is-gone",
+        )
+        await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="notes/changed.md",
+            checksum=checksums["notes/changed.md"],
+        )
+        await _seed_directory_entity(
+            session,
+            project_id=test_project.id,
+            file_path="notes/broken.md",
+            checksum=checksums["notes/broken.md"],
+        )
+    # Edited on disk after the last index pass, so the guarded cleanup skips it.
+    await file_service.write_file("notes/changed.md", "# edited elsewhere\n")
+
+    original_delete_file = file_service.delete_file
+
+    async def delete_file_failing_for_broken(path) -> None:
+        if str(path) == "notes/broken.md":
+            raise OSError("permission denied: notes/broken.md")
+        await original_delete_file(path)
+
+    monkeypatch.setattr(file_service, "delete_file", delete_file_failing_for_broken)
+
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=LocalDirectoryFileDeleteEnqueuer(file_service=file_service),
+        ),
+    )
+    result = await service.delete_directory(
+        project_external_id=test_project.external_id,
+        directory="notes",
+    )
+
+    assert {failure.file_path for failure in result.failed_files} == {
+        "notes/changed.md",
+        "notes/broken.md",
+    }
+    assert not await file_service.exists("notes/deleted.md")
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert sorted(row.file_path for row in rows) == [
+        "notes/broken.md",
+        "notes/changed.md",
+        "notes/deleted.md",
+        "notes/missing.md",
+    ]
+    assert [row.file_path for row in rows if row.materialized_at is None] == []
+
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    assert inspection.plan.result.pending_materialization == ()
+
+
+@pytest.mark.asyncio
+async def test_run_directory_delete_settles_inline_cleanup_rows(
+    session_maker,
+    test_project,
+) -> None:
+    """The single-session runner settles rows for cleanup that ran inline, like the service."""
+
+    class InlineMissingEnqueuer:
+        async def enqueue_directory_file_delete(
+            self,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> RuntimeFileDeleteResult:
+            return RuntimeFileDeleteResult.already_absent(
+                entity_id=request.entity_id,
+                file_path=request.file_path,
+            )
+
+    async with db.scoped_session(session_maker) as session:
+        await _seed_directory_entity(session, project_id=test_project.id, file_path="notes/a.md")
+    async with db.scoped_session(session_maker) as session:
+        result = await run_directory_delete(
+            session,
+            request=DirectoryDeleteAcceptanceRequest(
+                project_external_id=test_project.external_id,
+                directory="notes",
+            ),
+            runtime=DirectoryDeleteRuntime(
+                store=RepositoryDirectoryDeleteAcceptanceStore(),
+                file_delete_enqueuer=InlineMissingEnqueuer(),
+            ),
+        )
+
+    assert [change.file_path for change in result.project_changes_to_settle] == ["notes/a.md"]
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.file_path, row.materialized_at is not None) for row in rows] == [
+        ("notes/a.md", True)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_without_permalink_rolls_back_whole_delete(
+    session_maker,
+    test_project,
+) -> None:
+    """A Markdown note with no permalink cannot get a journal row, so nothing is deleted.
+
+    Every deleted Markdown note must be journaled. The delete fails before claiming a
+    position and rolls back, matching the single-note delete, instead of removing a
+    note that journal consumers would never see deleted.
+    """
+    await _set_partition_head(session_maker, test_project.id, 2)
+    async with db.scoped_session(session_maker) as session:
+        unnamed = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/unnamed.md"
+        )
+        unnamed.permalink = None
+        named = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/named.md"
+        )
+        entity_ids = (unnamed.id, named.id)
+
+    enqueuer = FakeDirectoryFileDeleteEnqueuer()
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=enqueuer,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="missing permalink"):
+        await service.delete_directory(
+            project_external_id=test_project.external_id,
+            directory="notes",
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        for entity_id in entity_ids:
+            assert await session.get(Entity, entity_id) is not None
+            assert await session.get(NoteContent, entity_id) is not None
+    assert await _partition_head(session_maker, test_project.id) == 2
+    assert await _journal_rows(session_maker, test_project.id) == []
+    assert enqueuer.requests == []
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_settles_rows_of_an_interrupted_folder_delete(
+    session_maker,
+    test_project,
+) -> None:
+    """Rows a cancelled folder delete never settled are settled at the next startup.
+
+    The delete committed before cleanup ran, so its rows are final. Without startup
+    recovery they would stay unsettled and defer every later wiki projection
+    (GitHub #1625); note_content is gone, so materialization recovery cannot see them.
+    """
+    import asyncio
+
+    from basic_memory.services.initialization import recover_project_materializations
+
+    class CancelledMidCleanupEnqueuer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def enqueue_directory_file_delete(
+            self,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> RuntimeFileDeleteResult:
+            self.calls += 1
+            if self.calls > 1:
+                raise asyncio.CancelledError
+            return RuntimeFileDeleteResult.already_absent(
+                entity_id=request.entity_id,
+                file_path=request.file_path,
+            )
+
+    async with db.scoped_session(session_maker) as session:
+        await _seed_directory_entity(session, project_id=test_project.id, file_path="notes/a.md")
+        await _seed_directory_entity(session, project_id=test_project.id, file_path="notes/b.md")
+        # A surviving note's unsettled row is not a delete, so recovery leaves it alone.
+        survivor = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="kept/c.md"
+        )
+        survivor_id = survivor.id
+        survivor_external_id = survivor.external_id
+
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=CancelledMidCleanupEnqueuer(),
+        ),
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await service.delete_directory(
+            project_external_id=test_project.external_id,
+            directory="notes",
+        )
+
+    repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        head = await repository.advance_partition_position(session, test_project.id)
+        await repository.record_accepted_note_change(
+            session,
+            RuntimeAcceptedProjectNoteChange(
+                project_id=test_project.id,
+                project_external_id=test_project.external_id,
+                partition_position=head,
+                entity_id=survivor_id,
+                note_external_id=survivor_external_id,
+                permalink="kept/c",
+                title="c",
+                operation=RuntimeProjectNoteOperation.updated,
+                file_path="kept/c.md",
+                accepted_at=datetime.now(tz=UTC),
+                source="api",
+                db_version=1,
+                db_checksum=f"db-checksum-{survivor_id}-1",
+            ),
+        )
+
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.file_path, row.materialized_at is None) for row in rows] == [
+        ("notes/a.md", True),
+        ("notes/b.md", True),
+        ("kept/c.md", True),
+    ]
+
+    await recover_project_materializations(test_project, session_maker)
+
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.file_path, row.materialized_at is None) for row in rows] == [
+        ("notes/a.md", False),
+        ("notes/b.md", False),
+        ("kept/c.md", True),
+    ]

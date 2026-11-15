@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -268,3 +269,202 @@ async def test_get_partition_position_is_none_for_missing_project(
 ) -> None:
     async with db.scoped_session(session_maker) as session:
         assert await ProjectRepository().get_partition_position(session, 999999) is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_partition_claim_returns_last_of_consecutive_positions(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+
+    async with db.scoped_session(session_maker) as session:
+        assert await repository.advance_partition_position(session, test_project.id) == 1
+        # Claims 2, 3 and 4 in one statement; the head is the last of them.
+        assert await repository.advance_partition_position_by(session, test_project.id, 3) == 4
+        assert await repository.advance_partition_position(session, test_project.id) == 5
+
+    async with db.scoped_session(session_maker) as session:
+        assert await repository.get_partition_position(session, test_project.id) == 5
+
+
+@pytest.mark.asyncio
+async def test_bulk_partition_claim_rejects_non_positive_count_and_missing_project(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+
+    async with db.scoped_session(session_maker) as session:
+        with pytest.raises(ValueError, match="must be positive"):
+            await repository.advance_partition_position_by(session, test_project.id, 0)
+        with pytest.raises(RuntimeError, match="project_id=999999"):
+            await repository.advance_partition_position_by(session, 999999, 2)
+        assert await repository.get_partition_position(session, test_project.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_record_persists_every_change_with_its_columns(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+    changes = [
+        _accepted_change(test_project, partition_position=1, entity_id=7),
+        _accepted_change(test_project, partition_position=2, entity_id=8, db_version=5),
+    ]
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.advance_partition_position_by(session, test_project.id, 2)
+        await repository.record_accepted_note_changes(session, changes)
+        # An empty batch is a no-op, not an empty INSERT.
+        await repository.record_accepted_note_changes(session, [])
+
+    async with db.scoped_session(session_maker) as session:
+        persisted = await repository.list_accepted_note_changes(session, test_project.id)
+
+    assert [
+        (
+            row.partition_position,
+            row.entity_id,
+            row.note_external_id,
+            row.operation,
+            row.db_version,
+            row.db_checksum,
+            row.accepted_at.tzinfo is not None,
+            row.materialized_at,
+        )
+        for row in persisted
+    ] == [
+        (1, 7, "note-7", "updated", 3, "accepted-checksum-3", True, None),
+        (2, 8, "note-8", "updated", 5, "accepted-checksum-5", True, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bulk_materialization_settles_targets_and_their_older_generations(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """Each target position settles itself and older rows of the same note only.
+
+    Rows of other notes, and newer rows of a target's note, stay unsettled.
+    """
+    repository = ProjectRepository()
+    # position -> note: 1 a, 2 b, 3 a, 4 c, 5 b
+    layout = ((1, 1), (2, 2), (3, 1), (4, 3), (5, 2))
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.advance_partition_position_by(session, test_project.id, len(layout))
+        await repository.record_accepted_note_changes(
+            session,
+            [
+                _accepted_change(
+                    test_project,
+                    partition_position=position,
+                    entity_id=entity_id,
+                    db_version=position,
+                )
+                for position, entity_id in layout
+            ],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        settled = await repository.mark_accepted_note_changes_materialized(
+            session,
+            test_project.id,
+            [3, 2, 3],
+            materialized_at=_ACCEPTED_AT,
+        )
+        # Nothing new to settle the second time.
+        assert (
+            await repository.mark_accepted_note_changes_materialized(
+                session,
+                test_project.id,
+                [3, 2],
+                materialized_at=_ACCEPTED_AT,
+            )
+            == 0
+        )
+        assert (
+            await repository.mark_accepted_note_changes_materialized(
+                session,
+                test_project.id,
+                [],
+                materialized_at=_ACCEPTED_AT,
+            )
+            == 0
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        changes = await repository.list_accepted_note_changes(session, test_project.id)
+
+    assert settled == 3
+    assert [change.materialized_at is not None for change in changes] == [
+        True,  # 1: older generation of note a (target 3)
+        True,  # 2: target
+        True,  # 3: target
+        False,  # 4: note c, not targeted
+        False,  # 5: newer generation of note b than target 2
+    ]
+
+
+@pytest.mark.asyncio
+async def test_settle_unmaterialized_deletes_retires_deleted_notes_only(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """Unsettled `deleted` rows settle with their note's older rows; other notes stay."""
+    repository = ProjectRepository()
+    # position -> (note, operation): 1 a updated, 2 b updated, 3 a deleted, 4 b updated
+    layout = (
+        (1, 1, RuntimeProjectNoteOperation.updated),
+        (2, 2, RuntimeProjectNoteOperation.updated),
+        (3, 1, RuntimeProjectNoteOperation.deleted),
+        (4, 2, RuntimeProjectNoteOperation.updated),
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.advance_partition_position_by(session, test_project.id, len(layout))
+        await repository.record_accepted_note_changes(
+            session,
+            [
+                replace(
+                    _accepted_change(
+                        test_project,
+                        partition_position=position,
+                        entity_id=entity_id,
+                        db_version=position,
+                    ),
+                    operation=operation,
+                )
+                for position, entity_id, operation in layout
+            ],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        settled = await repository.settle_unmaterialized_deletes(
+            session,
+            test_project.id,
+            materialized_at=_ACCEPTED_AT,
+        )
+        # Nothing is left to settle the second time.
+        assert (
+            await repository.settle_unmaterialized_deletes(
+                session,
+                test_project.id,
+                materialized_at=_ACCEPTED_AT,
+            )
+            == 0
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        changes = await repository.list_accepted_note_changes(session, test_project.id)
+
+    assert settled == 2
+    assert [change.materialized_at is not None for change in changes] == [
+        True,  # 1: older generation of the deleted note a
+        False,  # 2: note b, not deleted
+        True,  # 3: the delete
+        False,  # 4: note b, not deleted
+    ]

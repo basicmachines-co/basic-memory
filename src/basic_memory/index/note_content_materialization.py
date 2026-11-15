@@ -685,6 +685,30 @@ async def settle_local_project_change(
         )
 
 
+async def settle_interrupted_note_deletes(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+) -> int:
+    """Settle `deleted` journal rows that a lost local process never settled.
+
+    A local delete commits its journal row, runs the file cleanup inline, then
+    settles the row. A crash or cancellation between the commit and the settle
+    leaves the row unsettled, and the wiki projector defers on it forever (#1625).
+    recover_stuck_materializations cannot reach it, because note_content cascaded
+    away with the entity. Meant to run once per project at local startup: the local
+    runtime has no durable cleanup queue, so no other job will settle these rows.
+    The entity delete is final whatever happened to the file; a file left on disk
+    is re-indexed as a new note.
+    """
+    async with db.scoped_session(session_maker) as session:
+        return await ProjectRepository().settle_unmaterialized_deletes(
+            session,
+            project_id,
+            materialized_at=datetime.now(tz=UTC),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class LocalNoteContentMaterializationProvider:
     """Run accepted-note materialization inline for the local runtime."""

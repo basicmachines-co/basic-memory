@@ -18,6 +18,7 @@ from basic_memory.indexing.directory_delete_runner import (
     accept_directory_delete,
     finish_directory_delete_acceptance,
     normalize_directory_delete_path,
+    settle_directory_delete_project_changes,
 )
 from basic_memory.read_cache import (
     ReadCacheInvalidator,
@@ -104,6 +105,14 @@ class DirectoryDeleteService:
                 accepted=accepted,
                 enqueuer=self.runtime.file_delete_enqueuer,
             )
+
+            # Trigger: a file's cleanup ran inline (local) or could not be queued.
+            # Why: no queued job will settle its journal row, and one unsettled row
+            #   defers every later wiki projection for the project (GitHub #1625).
+            # Outcome: settle those rows now; queued cleanups (cloud) settle their own.
+            if result.project_changes_to_settle:
+                async with db.scoped_session(self.session_maker) as session:
+                    await settle_directory_delete_project_changes(session, result)
 
             # Trigger: notes outside the deleted directory linked into it.
             # Why: the delete cascaded their relation rows away, but those sources own
