@@ -6,13 +6,43 @@ from typing import Any, override, Optional, Sequence, Union
 
 
 from loguru import logger
-from sqlalchemy import Executable, inspect as sa_inspect, select, text, update
+from sqlalchemy import Executable, exists, insert, inspect as sa_inspect, select, text, update
 from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from basic_memory.models.project import AcceptedProjectNoteChange, Project
 from basic_memory.repository.repository import Repository
 from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
+
+# Bound each IN list well under SQLite's and Postgres's bind-parameter limits, so a
+# folder of thousands of notes settles in a few statements without hitting either.
+_SETTLE_POSITION_CHUNK_SIZE = 500
+
+
+def _accepted_note_change_values(change: RuntimeAcceptedProjectNoteChange) -> dict[str, Any]:
+    """Map runtime journal evidence onto accepted_project_note_change columns."""
+    return {
+        "project_id": change.project_id,
+        "project_external_id": change.project_external_id,
+        "partition_position": change.partition_position,
+        "entity_id": change.entity_id,
+        "note_external_id": change.note_external_id,
+        "permalink": change.permalink,
+        "title": change.title,
+        "operation": change.operation.value,
+        "file_path": change.file_path,
+        "previous_file_path": change.previous_file_path,
+        "accepted_at": change.accepted_at,
+        "source": change.source,
+        "db_version": change.db_version,
+        "db_checksum": change.db_checksum,
+        "actor_user_profile_id": (
+            str(change.actor_user_profile_id) if change.actor_user_profile_id is not None else None
+        ),
+        "actor_kind": change.actor_kind,
+        "actor_name": change.actor_name,
+    }
 
 
 async def _load_sqlite_vec_on_session(session) -> bool:
@@ -173,37 +203,52 @@ class ProjectRepository(Repository[Project]):
             raise RuntimeError(f"Project partition is missing for project_id={project_id}")
         return int(position)
 
+    async def advance_partition_position_by(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        count: int,
+    ) -> int:
+        """Atomically claim ``count`` consecutive positions and return the last one.
+
+        The claimed positions are ``head - count + 1`` through ``head``. One UPDATE
+        holds the project row lock once, however many changes a bulk mutation records.
+        """
+        if count < 1:
+            raise ValueError(f"Partition position claim count must be positive, got {count}")
+        statement = (
+            update(Project)
+            .where(Project.id == project_id)
+            .values(partition_position=Project.partition_position + count)
+            .returning(Project.partition_position)
+            .execution_options(synchronize_session=False)
+        )
+        position = (await session.execute(statement)).scalar_one_or_none()
+        if position is None:
+            raise RuntimeError(f"Project partition is missing for project_id={project_id}")
+        return int(position)
+
     async def record_accepted_note_change(
         self,
         session: AsyncSession,
         change: RuntimeAcceptedProjectNoteChange,
     ) -> None:
         """Persist replayable accepted evidence in the mutation transaction."""
-        persisted = AcceptedProjectNoteChange(
-            project_id=change.project_id,
-            project_external_id=change.project_external_id,
-            partition_position=change.partition_position,
-            entity_id=change.entity_id,
-            note_external_id=change.note_external_id,
-            permalink=change.permalink,
-            title=change.title,
-            operation=change.operation.value,
-            file_path=change.file_path,
-            previous_file_path=change.previous_file_path,
-            accepted_at=change.accepted_at,
-            source=change.source,
-            db_version=change.db_version,
-            db_checksum=change.db_checksum,
-            actor_user_profile_id=(
-                str(change.actor_user_profile_id)
-                if change.actor_user_profile_id is not None
-                else None
-            ),
-            actor_kind=change.actor_kind,
-            actor_name=change.actor_name,
-        )
-        session.add(persisted)
+        session.add(AcceptedProjectNoteChange(**_accepted_note_change_values(change)))
         await session.flush()
+
+    async def record_accepted_note_changes(
+        self,
+        session: AsyncSession,
+        changes: Sequence[RuntimeAcceptedProjectNoteChange],
+    ) -> None:
+        """Persist a batch of accepted evidence rows with one bulk insert."""
+        if not changes:
+            return
+        await session.execute(
+            insert(AcceptedProjectNoteChange),
+            [_accepted_note_change_values(change) for change in changes],
+        )
 
     async def get_partition_position(
         self,
@@ -282,6 +327,44 @@ class ProjectRepository(Repository[Project]):
             .execution_options(synchronize_session=False)
         )
         return bool((await session.execute(statement)).scalars().all())
+
+    async def mark_accepted_note_changes_materialized(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        partition_positions: Sequence[int],
+        *,
+        materialized_at: datetime,
+    ) -> int:
+        """Settle several journal positions at once; return how many rows were stamped.
+
+        Same rule as ``mark_accepted_note_change_materialized`` for each position:
+        the target row and every older unsettled row of the same note are retired.
+        """
+        unique_positions = sorted(set(partition_positions))
+        settled = 0
+        for start in range(0, len(unique_positions), _SETTLE_POSITION_CHUNK_SIZE):
+            chunk = unique_positions[start : start + _SETTLE_POSITION_CHUNK_SIZE]
+            target = aliased(AcceptedProjectNoteChange)
+            target_covers_row = exists().where(
+                target.project_id == project_id,
+                target.partition_position.in_(chunk),
+                target.note_external_id == AcceptedProjectNoteChange.note_external_id,
+                target.partition_position >= AcceptedProjectNoteChange.partition_position,
+            )
+            statement = (
+                update(AcceptedProjectNoteChange)
+                .where(
+                    AcceptedProjectNoteChange.project_id == project_id,
+                    AcceptedProjectNoteChange.materialized_at.is_(None),
+                    target_covers_row,
+                )
+                .values(materialized_at=materialized_at)
+                .returning(AcceptedProjectNoteChange.id)
+                .execution_options(synchronize_session=False)
+            )
+            settled += len((await session.execute(statement)).scalars().all())
+        return settled
 
     async def mark_note_changes_materialized_through_version(
         self,

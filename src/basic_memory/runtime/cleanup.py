@@ -153,13 +153,23 @@ class RuntimeDirectoryFileSnapshot:
     last_modified_at: float | None = None
     size: int | None = None
 
-    def to_pending_note_file_delete(self, *, project_id: ProjectId) -> RuntimePendingNoteFileDelete:
-        """Return the note-file cleanup work represented by this accepted snapshot."""
+    def to_pending_note_file_delete(
+        self,
+        *,
+        project_id: ProjectId,
+        project_change: RuntimeAcceptedProjectNoteChange | None = None,
+    ) -> RuntimePendingNoteFileDelete:
+        """Return the note-file cleanup work represented by this accepted snapshot.
+
+        ``project_change`` is the note's `deleted` journal row; the cleanup job that
+        receives it settles the row once the file work is done.
+        """
         return RuntimePendingNoteFileDelete(
             project_id=project_id,
             entity_id=self.entity_id,
             file_path=self.file_path,
             file_checksum=self.file_checksum,
+            project_change=project_change,
         )
 
 

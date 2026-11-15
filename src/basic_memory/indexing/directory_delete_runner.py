@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal, NotRequired, Protocol, TypedDict
 
@@ -16,6 +17,7 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import (
     lock_note_content_before_entity_mutation,
 )
@@ -27,11 +29,27 @@ from basic_memory.runtime.cleanup import (
     plan_directory_file_snapshot,
     plan_note_file_delete_job_request,
 )
-from basic_memory.runtime.storage import ProjectExternalId, ProjectId, RuntimeFilePath
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
+from basic_memory.runtime.storage import (
+    ProjectExternalId,
+    ProjectId,
+    RuntimeEntityId,
+    RuntimeFilePath,
+    RuntimeNoteChangeSource,
+    runtime_content_type_is_markdown,
+)
 from basic_memory.utils import valid_project_path_value
 
 type DirectoryDeleteFileStatus = Literal["complete", "pending", "failed"]
 type DirectoryFileLockCheck = Callable[[Sequence[RuntimeDirectoryFileSnapshot]], Awaitable[None]]
+type DirectoryDeleteProjectChanges = Mapping[RuntimeEntityId, RuntimeAcceptedProjectNoteChange]
+
+# Journal source for notes removed by a folder delete, so journal consumers can tell
+# them apart from single-note deletes ("delete_note").
+ACCEPTED_DIRECTORY_DELETE_SOURCE: RuntimeNoteChangeSource = "delete_directory"
 
 
 class DirectoryDeleteRejectKind(StrEnum):
@@ -91,6 +109,9 @@ class DirectoryDeleteAcceptance:
     # search_index relation rows go stale once the deleted rows disappear, so the
     # caller reindexes these sources to drop the dangling relation rows.
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
+    # One `deleted` journal row per removed Markdown note, keyed by entity id. Each
+    # rides on its file's cleanup request so the cleanup can settle it.
+    project_changes: DirectoryDeleteProjectChanges = field(default_factory=dict)
 
     @property
     def deleted_files(self) -> tuple[RuntimeFilePath, ...]:
@@ -103,6 +124,8 @@ class DirectoryEntityDeleteResult:
 
     deleted_entity_ids: frozenset[int] = frozenset()
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
+    # Journal rows written in the delete transaction, keyed by deleted entity id.
+    project_changes: DirectoryDeleteProjectChanges = field(default_factory=dict)
 
 
 class DirectoryDeleteAcceptanceStore(Protocol):
@@ -129,6 +152,7 @@ class DirectoryDeleteAcceptanceStore(Protocol):
         session: AsyncSession,
         *,
         project_id: ProjectId,
+        project_external_id: ProjectExternalId,
         directory: RuntimeFilePath,
         entity_ids: Sequence[int],
     ) -> DirectoryEntityDeleteResult:
@@ -136,6 +160,7 @@ class DirectoryDeleteAcceptanceStore(Protocol):
 
         Relation cleanup ids are entities OUTSIDE the deleted set whose relations
         pointed into it; their search rows need reindexing to drop dangling relations.
+        Each deleted Markdown note gets a `deleted` journal row in the same transaction.
         """
 
 
@@ -224,6 +249,7 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         session: AsyncSession,
         *,
         project_id: ProjectId,
+        project_external_id: ProjectExternalId,
         directory: RuntimeFilePath,
         entity_ids: Sequence[int],
     ) -> DirectoryEntityDeleteResult:
@@ -266,12 +292,19 @@ class RepositoryDirectoryDeleteAcceptanceStore:
 
         # A bulk delete must not bypass a note's lock or partially delete its siblings.
         # Read accepted Markdown under the existing mutation fence, before any deletes.
-        note_contents = await session.execute(
-            select(NoteContent.markdown_content).where(
-                NoteContent.entity_id.in_(current_directory_entity_ids)
+        # The same read keeps each note's last accepted revision for its journal row:
+        # note_content cascades away with the entity, so it cannot be read afterwards.
+        note_contents = (
+            await session.execute(
+                select(
+                    NoteContent.entity_id,
+                    NoteContent.markdown_content,
+                    NoteContent.db_version,
+                    NoteContent.db_checksum,
+                ).where(NoteContent.entity_id.in_(current_directory_entity_ids))
             )
-        )
-        if any(note_is_locked(content) for content in note_contents.scalars()):
+        ).all()
+        if any(note_is_locked(row.markdown_content) for row in note_contents):
             raise DirectoryDeleteRejected(
                 DirectoryDeleteRejection(
                     kind=DirectoryDeleteRejectKind.locked,
@@ -321,8 +354,19 @@ class RepositoryDirectoryDeleteAcceptanceStore:
             *membership_predicates,
             ~exists(uncaptured_incoming_relation.correlate(Entity)),
         )
-        deleted_entities = await session.execute(guarded_entity_delete.returning(Entity.id))
-        deleted_entity_ids = frozenset(int(entity_id) for entity_id in deleted_entities.scalars())
+        deleted_entities = (
+            await session.execute(
+                guarded_entity_delete.returning(
+                    Entity.id,
+                    Entity.external_id,
+                    Entity.permalink,
+                    Entity.title,
+                    Entity.file_path,
+                    Entity.content_type,
+                )
+            )
+        ).all()
+        deleted_entity_ids = frozenset(int(row.id) for row in deleted_entities)
         if not deleted_entity_ids:
             return DirectoryEntityDeleteResult()
         ordered_deleted_entity_ids = tuple(sorted(deleted_entity_ids))
@@ -355,10 +399,102 @@ class RepositoryDirectoryDeleteAcceptanceStore:
                 entity_ids=ordered_deleted_entity_ids,
                 external_vector_cleaner=self.external_vector_cleaner,
             )
+
+        # Journal last: claiming positions locks the project row, so keep that lock
+        # to the end of the transaction, as the single-note delete does.
+        project_changes = await record_directory_delete_project_changes(
+            session,
+            project_id=project_id,
+            project_external_id=project_external_id,
+            deleted_entities=deleted_entities,
+            note_revisions={
+                int(row.entity_id): (row.db_version, row.db_checksum) for row in note_contents
+            },
+        )
         return DirectoryEntityDeleteResult(
             deleted_entity_ids=deleted_entity_ids,
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+            project_changes=project_changes,
         )
+
+
+class DirectoryDeletedEntityRow(Protocol):
+    """Entity columns returned by the guarded directory delete."""
+
+    @property
+    def id(self) -> int: ...
+
+    @property
+    def external_id(self) -> str: ...
+
+    @property
+    def permalink(self) -> str | None: ...
+
+    @property
+    def title(self) -> str: ...
+
+    @property
+    def file_path(self) -> str: ...
+
+    @property
+    def content_type(self) -> str: ...
+
+
+async def record_directory_delete_project_changes(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    project_external_id: ProjectExternalId,
+    deleted_entities: Sequence[DirectoryDeletedEntityRow],
+    note_revisions: Mapping[int, tuple[int | None, str | None]],
+    project_repository: ProjectRepository | None = None,
+) -> dict[RuntimeEntityId, RuntimeAcceptedProjectNoteChange]:
+    """Write one `deleted` journal row per removed Markdown note, in the caller's transaction.
+
+    Non-Markdown files get no row, matching the single-note delete. Positions are
+    claimed in one statement and assigned in file-path order, so the batch occupies
+    consecutive positions and replays in a stable order.
+    """
+    markdown_entities = sorted(
+        (row for row in deleted_entities if runtime_content_type_is_markdown(row)),
+        key=lambda row: (row.file_path, int(row.id)),
+    )
+    if not markdown_entities:
+        return {}
+    for row in markdown_entities:
+        if row.permalink is None:
+            raise RuntimeError(f"Accepted note is missing permalink for entity_id={row.id}")
+
+    repository = project_repository or ProjectRepository()
+    head = await repository.advance_partition_position_by(
+        session,
+        project_id,
+        len(markdown_entities),
+    )
+    first_position = head - len(markdown_entities) + 1
+    accepted_at = datetime.now(tz=UTC)
+    changes: dict[RuntimeEntityId, RuntimeAcceptedProjectNoteChange] = {}
+    for offset, row in enumerate(markdown_entities):
+        entity_id = int(row.id)
+        db_version, db_checksum = note_revisions.get(entity_id, (None, None))
+        changes[entity_id] = RuntimeAcceptedProjectNoteChange(
+            project_id=project_id,
+            project_external_id=project_external_id,
+            partition_position=first_position + offset,
+            entity_id=entity_id,
+            note_external_id=str(row.external_id),
+            permalink=str(row.permalink),
+            title=str(row.title),
+            operation=RuntimeProjectNoteOperation.deleted,
+            file_path=str(row.file_path),
+            previous_file_path=None,
+            accepted_at=accepted_at,
+            source=ACCEPTED_DIRECTORY_DELETE_SOURCE,
+            db_version=int(db_version) if db_version is not None else None,
+            db_checksum=str(db_checksum) if db_checksum is not None else None,
+        )
+    await repository.record_accepted_note_changes(session, tuple(changes.values()))
+    return changes
 
 
 def normalize_directory_delete_path(directory: str) -> RuntimeFilePath:
@@ -419,6 +555,10 @@ class DirectoryDeleteAcceptedResult:
     # Surviving source entities whose relations pointed into the deleted directory;
     # the caller reindexes these to clear now-stale relation rows from search.
     relation_cleanup_entity_ids: frozenset[int] = frozenset()
+    # Journal rows no queued job will settle: the cleanup already ran inline (any
+    # outcome) or could not be queued. The caller settles them; see
+    # settle_directory_delete_project_changes.
+    project_changes_to_settle: tuple[RuntimeAcceptedProjectNoteChange, ...] = ()
 
     @classmethod
     def complete(cls) -> "DirectoryDeleteAcceptedResult":
@@ -432,6 +572,7 @@ class DirectoryDeleteAcceptedResult:
         deleted_files: Sequence[RuntimeFilePath],
         failed_files: Sequence[DirectoryDeleteFileFailure] = (),
         relation_cleanup_entity_ids: frozenset[int] = frozenset(),
+        project_changes_to_settle: Sequence[RuntimeAcceptedProjectNoteChange] = (),
     ) -> "DirectoryDeleteAcceptedResult":
         """Return the response after DB rows were deleted and cleanup was queued."""
         return cls(
@@ -439,6 +580,7 @@ class DirectoryDeleteAcceptedResult:
             file_delete_status="pending",
             failed_files=tuple(failed_files),
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+            project_changes_to_settle=tuple(project_changes_to_settle),
         )
 
     @classmethod
@@ -518,6 +660,9 @@ class DirectoryFileDeleteEnqueueOutcome:
 
     results: tuple[RuntimeFileDeleteResult, ...] = ()
     failures: tuple[DirectoryFileDeleteEnqueueFailure, ...] = ()
+    # Journal rows of files whose cleanup ran inline or failed to enqueue: no
+    # queued job exists to settle them.
+    project_changes_to_settle: tuple[RuntimeAcceptedProjectNoteChange, ...] = ()
 
 
 async def enqueue_directory_file_delete_jobs(
@@ -525,16 +670,21 @@ async def enqueue_directory_file_delete_jobs(
     project_id: ProjectId,
     files: Sequence[RuntimeDirectoryFileSnapshot],
     enqueuer: DirectoryFileDeleteEnqueuer,
+    project_changes: DirectoryDeleteProjectChanges | None = None,
 ) -> DirectoryFileDeleteEnqueueOutcome:
     """Queue guarded cleanup jobs for files accepted by a directory delete.
 
     Returns the inline cleanup results (local runtime); deferred/queued cleanups
     (cloud runtime) contribute nothing here. Per-file enqueue failures are collected
     rather than raised so one unqueueable file does not abort cleanup of the rest.
+    Each request carries its note's journal row, so a queued job can settle it.
     """
+    changes_by_entity = project_changes or {}
     results: list[RuntimeFileDeleteResult] = []
     failures: list[DirectoryFileDeleteEnqueueFailure] = []
+    changes_to_settle: list[RuntimeAcceptedProjectNoteChange] = []
     for file_snapshot in files:
+        project_change = changes_by_entity.get(file_snapshot.entity_id)
         # Trigger: one file's guarded delete/enqueue raises (unreadable file, queue down).
         # Why: the entity row is already deleted, so aborting the batch strands every
         #   remaining file on disk with its DB row gone; sync then resurrects them.
@@ -542,7 +692,10 @@ async def enqueue_directory_file_delete_jobs(
         try:
             result = await enqueuer.enqueue_directory_file_delete(
                 plan_note_file_delete_job_request(
-                    file_snapshot.to_pending_note_file_delete(project_id=project_id)
+                    file_snapshot.to_pending_note_file_delete(
+                        project_id=project_id,
+                        project_change=project_change,
+                    )
                 )
             )
         except DirectoryFileDeleteEnqueueError as exc:
@@ -552,12 +705,44 @@ async def enqueue_directory_file_delete_jobs(
                     reason=str(exc),
                 )
             )
+            if project_change is not None:
+                changes_to_settle.append(project_change)
             continue
         if result is not None:
             results.append(result)
+            if project_change is not None:
+                changes_to_settle.append(project_change)
     return DirectoryFileDeleteEnqueueOutcome(
         results=tuple(results),
         failures=tuple(failures),
+        project_changes_to_settle=tuple(changes_to_settle),
+    )
+
+
+async def settle_directory_delete_project_changes(
+    session: AsyncSession,
+    result: DirectoryDeleteAcceptedResult,
+    *,
+    project_repository: ProjectRepository | None = None,
+) -> None:
+    """Mark the journal rows that no queued cleanup job will settle as materialized.
+
+    The wiki projector defers while any replayed row is unsettled (GitHub #1625).
+    The entity delete is final whatever happened to the file: a file left on disk
+    by a skipped or failed cleanup is re-indexed later as a new note. Waiting on it
+    would stall projection for good, so every outcome settles.
+    """
+    changes = result.project_changes_to_settle
+    if not changes:
+        return
+    project_ids = {change.project_id for change in changes}
+    if len(project_ids) != 1:  # pragma: no cover
+        raise RuntimeError("Directory delete journal rows must belong to one project")
+    await (project_repository or ProjectRepository()).mark_accepted_note_changes_materialized(
+        session,
+        project_ids.pop(),
+        [change.partition_position for change in changes],
+        materialized_at=datetime.now(tz=UTC),
     )
 
 
@@ -606,6 +791,7 @@ async def accept_directory_delete(
     delete_result = await store.delete_directory_entities(
         session,
         project_id=project_id,
+        project_external_id=request.project_external_id,
         directory=directory,
         entity_ids=[snapshot.entity_id for snapshot in file_snapshots],
     )
@@ -618,6 +804,7 @@ async def accept_directory_delete(
         project_id=project_id,
         files=deleted_file_snapshots,
         relation_cleanup_entity_ids=delete_result.relation_cleanup_entity_ids,
+        project_changes=delete_result.project_changes,
     )
 
 
@@ -635,6 +822,7 @@ async def finish_directory_delete_acceptance(
         project_id=accepted.project_id,
         files=accepted.files,
         enqueuer=enqueuer,
+        project_changes=accepted.project_changes,
     )
 
     # Both a guarded skip (checksum changed) and an enqueue failure leave the file on
@@ -652,6 +840,7 @@ async def finish_directory_delete_acceptance(
         deleted_files=accepted.deleted_files,
         failed_files=failed_files,
         relation_cleanup_entity_ids=accepted.relation_cleanup_entity_ids,
+        project_changes_to_settle=outcome.project_changes_to_settle,
     )
 
 
@@ -668,8 +857,10 @@ async def run_directory_delete(
         store=runtime.store,
         check_file_locks=runtime.check_file_locks,
     )
-    return await finish_directory_delete_acceptance(
+    result = await finish_directory_delete_acceptance(
         request=request,
         accepted=accepted,
         enqueuer=runtime.file_delete_enqueuer,
     )
+    await settle_directory_delete_project_changes(session, result)
+    return result

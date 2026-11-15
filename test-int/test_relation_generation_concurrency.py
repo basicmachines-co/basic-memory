@@ -158,6 +158,7 @@ async def test_relation_publication_and_directory_delete_share_note_content_firs
                 await store.delete_directory_entities(
                     session,
                     project_id=test_project.id,
+                    project_external_id=test_project.external_id,
                     directory="directory-race",
                     entity_ids=[source_id, sibling_id],
                 )

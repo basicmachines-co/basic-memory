@@ -117,6 +117,7 @@ class FakeDirectoryDeleteStore:
         session: AsyncSession,
         *,
         project_id: int,
+        project_external_id: str,
         directory: str,
         entity_ids,
     ) -> DirectoryEntityDeleteResult:
@@ -1121,12 +1122,14 @@ async def test_directory_delete_service_refreshes_surviving_relation_sources(
             session: AsyncSession,
             *,
             project_id: int,
+            project_external_id: str,
             directory: str,
             entity_ids,
         ) -> DirectoryEntityDeleteResult:
             await super().delete_directory_entities(
                 session,
                 project_id=project_id,
+                project_external_id=project_external_id,
                 directory=directory,
                 entity_ids=entity_ids,
             )
