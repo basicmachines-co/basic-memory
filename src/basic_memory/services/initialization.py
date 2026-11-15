@@ -62,16 +62,38 @@ async def recover_project_materializations(
     between accepting the DB snapshot and writing the file leaves note_content
     stuck in writing/pending (a transient write error leaves it failed) and the
     source-of-truth file missing. A moved note can also synchronize its destination
-    before the in-memory source cleanup is lost. Runs once at startup, before the
-    initial index, so both durable states converge. Non-fatal: a recovery failure
-    must not block startup, so it is logged and startup continues.
+    before the in-memory source cleanup is lost. A delete's journal row can also be
+    left unsettled when the process exits between the delete's commit and its inline
+    file cleanup. Runs once at startup, before the initial index, so these durable
+    states converge. Non-fatal: a recovery failure must not block startup, so it is
+    logged and startup continues.
     """
     from basic_memory.index.note_content_materialization import (
         recover_move_vacates,
         recover_stuck_materializations,
+        settle_interrupted_note_deletes,
     )
     from basic_memory.read_cache import invalidate_cache
     from basic_memory.services.file_service import FileService
+
+    # Trigger: a delete committed but the process exited before it settled the row.
+    # Why: one unsettled row defers every later wiki projection (GitHub #1625), and
+    #   the local runtime has no queued cleanup job that would settle it later.
+    # Outcome: settle those rows; a failure here is logged and recovery continues.
+    try:
+        settled_deletes = await settle_interrupted_note_deletes(
+            session_maker=session_maker,
+            project_id=project.id,
+        )
+    except Exception as e:  # pragma: no cover - defensive startup guard
+        logger.error(f"Error settling interrupted deletes for project {project.name}: {e}")
+    else:
+        if settled_deletes:
+            logger.info(
+                "Settled interrupted note deletes on startup",
+                project=project.name,
+                settled_journal_rows=settled_deletes,
+            )
 
     # FileService needs only base_path to write the accepted markdown bytes;
     # the markdown_processor/app_config are unused on the materialization path.

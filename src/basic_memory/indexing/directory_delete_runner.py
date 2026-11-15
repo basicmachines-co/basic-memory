@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal, NotRequired, Protocol, TypedDict
 
-from loguru import logger
 from sqlalchemy import bindparam, delete, exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -460,17 +459,13 @@ async def record_directory_delete_project_changes(
     for row in deleted_entities:
         if not runtime_content_type_is_markdown(row):
             continue
-        # Trigger: a Markdown note with no permalink, left by the removed
-        #   disable_permalinks setting in databases that predate its removal.
-        # Why: a journal row needs a permalink, so the journal never recorded this
-        #   note as present; raising here would roll back the whole folder delete.
-        # Outcome: delete the note without a journal row, as it was never journaled.
+        # Trigger: a Markdown note with no permalink.
+        # Why: a journal row needs a permalink, and every deleted Markdown note must
+        #   get a row, or journal consumers keep treating that note as present.
+        # Outcome: fail before claiming any position. The caller's transaction rolls
+        #   back the whole folder delete, matching the single-note delete.
         if row.permalink is None:
-            logger.warning(
-                "Folder delete removed a Markdown note with no permalink; "
-                f"no journal row written: entity_id={row.id} file_path={row.file_path}"
-            )
-            continue
+            raise RuntimeError(f"Accepted note is missing permalink for entity_id={row.id}")
         markdown_entities.append(row)
     markdown_entities.sort(key=lambda row: (row.file_path, int(row.id)))
     if not markdown_entities:

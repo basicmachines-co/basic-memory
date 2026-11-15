@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -405,4 +406,65 @@ async def test_bulk_materialization_settles_targets_and_their_older_generations(
         True,  # 3: target
         False,  # 4: note c, not targeted
         False,  # 5: newer generation of note b than target 2
+    ]
+
+
+@pytest.mark.asyncio
+async def test_settle_unmaterialized_deletes_retires_deleted_notes_only(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """Unsettled `deleted` rows settle with their note's older rows; other notes stay."""
+    repository = ProjectRepository()
+    # position -> (note, operation): 1 a updated, 2 b updated, 3 a deleted, 4 b updated
+    layout = (
+        (1, 1, RuntimeProjectNoteOperation.updated),
+        (2, 2, RuntimeProjectNoteOperation.updated),
+        (3, 1, RuntimeProjectNoteOperation.deleted),
+        (4, 2, RuntimeProjectNoteOperation.updated),
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.advance_partition_position_by(session, test_project.id, len(layout))
+        await repository.record_accepted_note_changes(
+            session,
+            [
+                replace(
+                    _accepted_change(
+                        test_project,
+                        partition_position=position,
+                        entity_id=entity_id,
+                        db_version=position,
+                    ),
+                    operation=operation,
+                )
+                for position, entity_id, operation in layout
+            ],
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        settled = await repository.settle_unmaterialized_deletes(
+            session,
+            test_project.id,
+            materialized_at=_ACCEPTED_AT,
+        )
+        # Nothing is left to settle the second time.
+        assert (
+            await repository.settle_unmaterialized_deletes(
+                session,
+                test_project.id,
+                materialized_at=_ACCEPTED_AT,
+            )
+            == 0
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        changes = await repository.list_accepted_note_changes(session, test_project.id)
+
+    assert settled == 2
+    assert [change.materialized_at is not None for change in changes] == [
+        True,  # 1: older generation of the deleted note a
+        False,  # 2: note b, not deleted
+        True,  # 3: the delete
+        False,  # 4: note b, not deleted
     ]

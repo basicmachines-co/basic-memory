@@ -32,7 +32,10 @@ from basic_memory.index.local_wiki_projection import inspect_local_wiki_projecti
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project, Relation
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.directory_deletes import DirectoryDeleteService
-from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
@@ -1246,41 +1249,138 @@ async def test_run_directory_delete_settles_inline_cleanup_rows(
 
 
 @pytest.mark.asyncio
-async def test_directory_delete_skips_journal_row_for_note_without_permalink(
+async def test_directory_delete_without_permalink_rolls_back_whole_delete(
     session_maker,
     test_project,
 ) -> None:
-    """A legacy Markdown note with no permalink is deleted without a journal row.
+    """A Markdown note with no permalink cannot get a journal row, so nothing is deleted.
 
-    Databases from before the disable_permalinks setting was removed can hold such
-    notes. No journal row ever named them, and raising would roll back the whole
-    folder delete, so the delete goes ahead and only the other notes are journaled.
+    Every deleted Markdown note must be journaled. The delete fails before claiming a
+    position and rolls back, matching the single-note delete, instead of removing a
+    note that journal consumers would never see deleted.
     """
+    await _set_partition_head(session_maker, test_project.id, 2)
     async with db.scoped_session(session_maker) as session:
-        legacy = await _seed_directory_entity(
-            session, project_id=test_project.id, file_path="notes/legacy.md"
+        unnamed = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/unnamed.md"
         )
-        legacy.permalink = None
-        legacy_id = legacy.id
-        await _seed_directory_entity(
-            session, project_id=test_project.id, file_path="notes/current.md"
+        unnamed.permalink = None
+        named = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="notes/named.md"
         )
+        entity_ids = (unnamed.id, named.id)
+
+    enqueuer = FakeDirectoryFileDeleteEnqueuer()
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=enqueuer,
+        ),
+    )
+    with pytest.raises(RuntimeError, match="missing permalink"):
+        await service.delete_directory(
+            project_external_id=test_project.external_id,
+            directory="notes",
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        for entity_id in entity_ids:
+            assert await session.get(Entity, entity_id) is not None
+            assert await session.get(NoteContent, entity_id) is not None
+    assert await _partition_head(session_maker, test_project.id) == 2
+    assert await _journal_rows(session_maker, test_project.id) == []
+    assert enqueuer.requests == []
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_settles_rows_of_an_interrupted_folder_delete(
+    session_maker,
+    test_project,
+) -> None:
+    """Rows a cancelled folder delete never settled are settled at the next startup.
+
+    The delete committed before cleanup ran, so its rows are final. Without startup
+    recovery they would stay unsettled and defer every later wiki projection
+    (GitHub #1625); note_content is gone, so materialization recovery cannot see them.
+    """
+    import asyncio
+
+    from basic_memory.services.initialization import recover_project_materializations
+
+    class CancelledMidCleanupEnqueuer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def enqueue_directory_file_delete(
+            self,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> RuntimeFileDeleteResult:
+            self.calls += 1
+            if self.calls > 1:
+                raise asyncio.CancelledError
+            return RuntimeFileDeleteResult.already_absent(
+                entity_id=request.entity_id,
+                file_path=request.file_path,
+            )
+
+    async with db.scoped_session(session_maker) as session:
+        await _seed_directory_entity(session, project_id=test_project.id, file_path="notes/a.md")
+        await _seed_directory_entity(session, project_id=test_project.id, file_path="notes/b.md")
+        # A surviving note's unsettled row is not a delete, so recovery leaves it alone.
+        survivor = await _seed_directory_entity(
+            session, project_id=test_project.id, file_path="kept/c.md"
+        )
+        survivor_id = survivor.id
+        survivor_external_id = survivor.external_id
 
     service = DirectoryDeleteService(
         session_maker=session_maker,
         runtime=DirectoryDeleteRuntime(
             store=RepositoryDirectoryDeleteAcceptanceStore(),
-            file_delete_enqueuer=FakeDirectoryFileDeleteEnqueuer(),
+            file_delete_enqueuer=CancelledMidCleanupEnqueuer(),
         ),
     )
-    result = await service.delete_directory(
-        project_external_id=test_project.external_id,
-        directory="notes",
-    )
+    with pytest.raises(asyncio.CancelledError):
+        await service.delete_directory(
+            project_external_id=test_project.external_id,
+            directory="notes",
+        )
 
-    assert sorted(result.deleted_files) == ["notes/current.md", "notes/legacy.md"]
+    repository = ProjectRepository()
     async with db.scoped_session(session_maker) as session:
-        assert await session.get(Entity, legacy_id) is None
-    assert await _partition_head(session_maker, test_project.id) == 1
+        head = await repository.advance_partition_position(session, test_project.id)
+        await repository.record_accepted_note_change(
+            session,
+            RuntimeAcceptedProjectNoteChange(
+                project_id=test_project.id,
+                project_external_id=test_project.external_id,
+                partition_position=head,
+                entity_id=survivor_id,
+                note_external_id=survivor_external_id,
+                permalink="kept/c",
+                title="c",
+                operation=RuntimeProjectNoteOperation.updated,
+                file_path="kept/c.md",
+                accepted_at=datetime.now(tz=UTC),
+                source="api",
+                db_version=1,
+                db_checksum=f"db-checksum-{survivor_id}-1",
+            ),
+        )
+
     rows = await _journal_rows(session_maker, test_project.id)
-    assert [(row.partition_position, row.file_path) for row in rows] == [(1, "notes/current.md")]
+    assert [(row.file_path, row.materialized_at is None) for row in rows] == [
+        ("notes/a.md", True),
+        ("notes/b.md", True),
+        ("kept/c.md", True),
+    ]
+
+    await recover_project_materializations(test_project, session_maker)
+
+    rows = await _journal_rows(session_maker, test_project.id)
+    assert [(row.file_path, row.materialized_at is None) for row in rows] == [
+        ("notes/a.md", False),
+        ("notes/b.md", False),
+        ("kept/c.md", True),
+    ]

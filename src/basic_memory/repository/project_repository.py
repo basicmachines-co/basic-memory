@@ -13,7 +13,10 @@ from sqlalchemy.orm import aliased
 
 from basic_memory.models.project import AcceptedProjectNoteChange, Project
 from basic_memory.repository.repository import Repository
-from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 
 # Bound each IN list well under SQLite's and Postgres's bind-parameter limits, so a
 # folder of thousands of notes settles in a few statements without hitting either.
@@ -365,6 +368,41 @@ class ProjectRepository(Repository[Project]):
             )
             settled += len((await session.execute(statement)).scalars().all())
         return settled
+
+    async def settle_unmaterialized_deletes(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        *,
+        materialized_at: datetime,
+    ) -> int:
+        """Settle every unsettled `deleted` row of a project; return how many rows were stamped.
+
+        Each row is settled by the ``mark_accepted_note_change_materialized`` rule, so
+        older unsettled rows of the same deleted note are retired with it.
+        """
+        positions = (
+            (
+                await session.execute(
+                    select(AcceptedProjectNoteChange.partition_position).where(
+                        AcceptedProjectNoteChange.project_id == project_id,
+                        AcceptedProjectNoteChange.operation
+                        == RuntimeProjectNoteOperation.deleted.value,
+                        AcceptedProjectNoteChange.materialized_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not positions:
+            return 0
+        return await self.mark_accepted_note_changes_materialized(
+            session,
+            project_id,
+            positions,
+            materialized_at=materialized_at,
+        )
 
     async def mark_note_changes_materialized_through_version(
         self,
