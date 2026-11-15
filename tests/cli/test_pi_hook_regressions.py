@@ -21,7 +21,7 @@ def test_unmapped_pi_recall_never_queries_ambient_project(
         config = tmp_path / ".pi" / "basic-memory.json"
         config.parent.mkdir()
         config.write_text(json.dumps(settings), encoding="utf-8")
-    with patch("basic_memory.mcp.tools.bm_search", new_callable=AsyncMock) as search:
+    with patch("basic_memory.cli.commands.hook._search_notes", new_callable=AsyncMock) as search:
         result = runner.invoke(
             app,
             ["hook", "session-start", "--harness", "pi", "--project-dir", str(tmp_path)],
@@ -79,7 +79,7 @@ def test_pi_hook_brief_includes_checkpoint_excerpts(tmp_path: Path) -> None:
             },
         ]
     )
-    with patch("basic_memory.mcp.tools.bm_search", search):
+    with patch("basic_memory.cli.commands.hook._search_notes", search):
         result = runner.invoke(
             app,
             ["hook", "session-start", "--harness", "pi", "--project-dir", str(tmp_path)],

@@ -6,8 +6,8 @@ Encapsulates all /v2/projects/{project_id}/resource/* endpoints.
 from httpx import AsyncClient, Response
 
 from basic_memory.telemetry import debug_span
-# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
-# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# call_* helpers live in basic_memory.mcp.api_calls; importing that at module
+# level loads fastmcp.exceptions and the mcp SDK during CLI startup,
 # so each method defers the import to call time instead (#886).
 
 
@@ -51,7 +51,7 @@ class ResourceClient:
         Raises:
             ToolError: If the resource is not found or request fails
         """
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         with debug_span(
             "mcp.client.resource.read",

@@ -46,7 +46,7 @@ async def test_read_route_falls_back_when_project_prefix_is_hidden_by_scope(
         raise ToolError("This API key does not have access to this project")
 
     monkeypatch.setattr(
-        "basic_memory.mcp.tools.utils.call_query",
+        "basic_memory.mcp.api_calls.call_query",
         reject_directory_as_project,
     )
 
@@ -73,7 +73,7 @@ async def test_read_route_requires_an_authorized_cached_project(
     async def reject_project_route(*args: object, **kwargs: object) -> None:
         raise ToolError("This API key does not have access to this project")
 
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", reject_project_route)
+    monkeypatch.setattr("basic_memory.mcp.api_calls.call_query", reject_project_route)
 
     with pytest.raises(ToolError, match="does not have access"):
         await resolve_project_and_path(

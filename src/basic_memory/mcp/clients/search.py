@@ -11,8 +11,8 @@ from httpx import AsyncClient
 
 from basic_memory.telemetry import debug_span
 
-# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
-# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# call_* helpers live in basic_memory.mcp.api_calls; importing that at module
+# level loads fastmcp.exceptions and the mcp SDK during CLI startup,
 # so each method defers the import to call time instead (#886).
 from basic_memory.schemas.search import SearchResponse, SearchRetrievalMode
 
@@ -62,7 +62,7 @@ class ScopedSearchClient:
         page_size: int = 10,
     ) -> SearchResponse:
         """Search the named projects; results carry ``project_id`` and ``project_external_id``."""
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         with debug_span(
             "mcp.client.search.search_scope",
@@ -132,7 +132,7 @@ class SearchClient:
             ToolError: If the request fails
             ValueError: If a requested valid-time filter was not applied by the server
         """
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         with debug_span(
             "mcp.client.search.search",

@@ -460,7 +460,7 @@ async def test_run_inspect_chunks_uses_typed_client_and_project_route(monkeypatc
     response.json.return_value = expected.model_dump(mode="json")
     call_post = AsyncMock(return_value=response)
     monkeypatch.setattr(inspect_command, "get_project_client", fake_get_project_client)
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", call_post)
+    monkeypatch.setattr("basic_memory.mcp.api_calls.call_post", call_post)
 
     result = await inspect_command.run_inspect_chunks(
         "notes/retrieval-inspection",
@@ -727,7 +727,7 @@ async def test_run_inspect_query_uses_typed_client_and_project_route(monkeypatch
     response.json.return_value = expected.model_dump(mode="json")
     call_post = AsyncMock(return_value=response)
     monkeypatch.setattr(inspect_command, "get_project_client", fake_get_project_client)
-    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", call_post)
+    monkeypatch.setattr("basic_memory.mcp.api_calls.call_post", call_post)
 
     query = SearchQuery(text="auth retrieval", retrieval_mode=SearchRetrievalMode.HYBRID)
     result = await inspect_command.run_inspect_query(

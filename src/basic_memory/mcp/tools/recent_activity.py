@@ -14,7 +14,7 @@ from loguru import logger
 from basic_memory.mcp.index_readiness import project_index_required, project_index_status
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.tool_params import ItemKind, search_item_types
-from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.api_calls import call_get
 from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchItemType
 

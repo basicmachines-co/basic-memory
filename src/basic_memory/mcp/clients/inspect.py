@@ -21,7 +21,7 @@ class InspectClient:
 
     async def inspect_chunks(self, identifier: str) -> InspectChunksResponse:
         """Inspect one note's search rows and vector chunk manifest."""
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         request = InspectChunksRequest(identifier=identifier)
         with debug_span(
@@ -47,7 +47,7 @@ class InspectClient:
         offset: int,
     ) -> InspectQueryResponse:
         """Run one search and return its execution-native retrieval trace."""
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         request = InspectQueryRequest(query=query, limit=limit, offset=offset)
         with debug_span(

@@ -576,25 +576,59 @@ def _capture_envelope(
 # --- Structured queries for the session brief ---
 
 
-async def _query(project_ref: str | None, **search: Any) -> dict[str, Any] | None:
-    """One best-effort structured bm_search; any failure reads as 'no data'."""
-    # Deferred: importing basic_memory.mcp.tools loads the whole tool stack (#886).
-    from basic_memory.mcp.tools import bm_search
+async def _search_notes(
+    *,
+    project: str,
+    note_types: list[str],
+    filters: dict[str, Any] | None = None,
+    since: str | None = None,
+) -> dict[str, Any]:
+    """Search one project's notes by frontmatter, as bm_search does for these arguments.
 
-    # bm_search takes a project name or id; an unmapped directory reads the default.
+    The brief calls the project search API through its typed client instead of the
+    bm_search tool. Importing basic_memory.mcp.tools loads every tool, FastMCP's server
+    and the MCP server just to run a few filtered searches. Without cached bytecode that
+    import alone took about 9 s of a SessionStart that ran over its timeout (#2101).
+    """
+    # Deferred: the CLI imports this module for every command, and these pull in the
+    # routing and search client stack (#886).
+    from basic_memory.mcp.clients.search import SearchClient
+    from basic_memory.mcp.project_context import get_project_client
+    from basic_memory.mcp.tool_params import parse_project, routing_arguments
+    from basic_memory.schemas.base import validate_timeframe
+    from basic_memory.schemas.search import SearchItemType, SearchQuery
+
+    project_name, project_id = routing_arguments(parse_project(project))
+    search_query = SearchQuery(
+        note_types=note_types,
+        metadata_filters=filters,
+        after_date=validate_timeframe(since) if since else None,
+        # Note rows only, as bm_search defaults: observations and relations would
+        # otherwise fill the five slots with fragments of the same notes.
+        entity_types=[SearchItemType.ENTITY],
+    )
+    async with get_project_client(project_name, None, project_id=project_id) as (
+        client,
+        active_project,
+    ):
+        response = await SearchClient(client, active_project.external_id).search(
+            search_query.model_dump(), page=1, page_size=5
+        )
+    return response.model_dump(mode="json", exclude_none=True)
+
+
+async def _query(project_ref: str | None, **search: Any) -> dict[str, Any] | None:
+    """One best-effort structured search; any failure reads as 'no data'."""
+    # A project name or id; an unmapped directory reads the default project.
     project = project_ref or ConfigManager().config.default_project
     if project is None:
         return None
     try:
-        result = await asyncio.wait_for(
-            bm_search(page_size=5, output_format="json", project=project, context=None, **search),
-            timeout=QUERY_TIMEOUT_SECONDS,
+        return await asyncio.wait_for(
+            _search_notes(project=project, **search), timeout=QUERY_TIMEOUT_SECONDS
         )
     except Exception:
         return None
-    if not isinstance(result, dict):
-        return None
-    return result
 
 
 @dataclass

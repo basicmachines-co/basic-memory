@@ -7,8 +7,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
-# call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
-# level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
+# call_* helpers live in basic_memory.mcp.api_calls; importing that at module
+# level loads fastmcp.exceptions and the mcp SDK during CLI startup,
 # so each method defers the import to call time instead (#886).
 from basic_memory.schemas import ProjectIndexStatusResponse, ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
@@ -50,7 +50,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         response = await call_get(
             self.http_client,
@@ -70,7 +70,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         response = await call_post(
             self.http_client,
@@ -94,7 +94,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_delete
+        from basic_memory.mcp.api_calls import call_delete
 
         url = f"/v2/projects/{project_external_id}"
         if delete_notes:
@@ -117,7 +117,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_query
+        from basic_memory.mcp.api_calls import call_query
 
         response = await call_query(
             self.http_client,
@@ -138,7 +138,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_put
+        from basic_memory.mcp.api_calls import call_put
 
         response = await call_put(
             self.http_client,
@@ -161,7 +161,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_patch
+        from basic_memory.mcp.api_calls import call_patch
 
         response = await call_patch(
             self.http_client,
@@ -190,7 +190,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.api_calls import call_post
 
         url = f"/v2/projects/{project_external_id}/index"
         params = []
@@ -215,7 +215,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         response = await call_get(
             self.http_client,
@@ -225,7 +225,7 @@ class ProjectClient:
 
     async def get_doctor_report(self, project_external_id: str) -> ProjectDoctorReport:
         """Report a project's problems and their repairs without changing the project."""
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         response = await call_get(self.http_client, f"/v2/projects/{project_external_id}/doctor")
         return ProjectDoctorReport.model_validate(response.json())
@@ -242,7 +242,7 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_get
+        from basic_memory.mcp.api_calls import call_get
 
         response = await call_get(
             self.http_client,

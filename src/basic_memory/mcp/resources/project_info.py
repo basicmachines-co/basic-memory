@@ -8,7 +8,7 @@ from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.project_context_identifiers import canonicalize_project_name
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.api_calls import call_get
 from basic_memory.schemas import ProjectInfoResponse
 
 
