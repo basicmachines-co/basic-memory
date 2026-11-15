@@ -235,6 +235,23 @@ async def _add_temporal_assertions(corpus: Corpus, project_ids: list[int]) -> No
         await session.commit()
 
 
+class _Checkouts(list[object]):
+    """Pool checkouts seen on an engine: one per database session that ran a statement."""
+
+    def append_checkout(self, _dbapi_conn, _record, _proxy) -> None:
+        self.append(object())
+
+
+def _count_checkouts(engine: AsyncEngine) -> _Checkouts:
+    """Start counting connection checkouts; the caller removes the listener."""
+    checkouts = _Checkouts()
+    event.listen(engine.sync_engine, "checkout", checkouts.append_checkout)
+    return checkouts
+
+
+SERVER_TIMING = re.compile(r"^search;dur=\d+\.\d, hydrate;dur=\d+\.\d, freshness;dur=\d+\.\d$")
+
+
 # --- The reader over a scope ---
 
 
@@ -388,6 +405,30 @@ async def test_hydration_reads_only_projects_in_scope(corpus: Corpus) -> None:
         assert await service.project_external_ids(session, []) == {}
 
 
+@pytest.mark.asyncio
+async def test_entity_hydration_joins_a_session_the_caller_holds(corpus: Corpus) -> None:
+    """Passed a session, the read runs on it; without one, it opens its own as before."""
+    service = corpus.service(corpus.ids(1))
+    all_entity_ids = [entity.id for entity in corpus.entities]
+    checkouts = _count_checkouts(corpus.engine)
+
+    try:
+        on_its_own = await service.get_entities_by_id(all_entity_ids)
+        own_checkouts = len(checkouts)
+        async with db.scoped_session(corpus.session_maker) as session:
+            await session.execute(text("SELECT 1"))
+            held_checkouts = len(checkouts)
+            on_the_callers = await service.get_entities_by_id(all_entity_ids, session=session)
+            joined_checkouts = len(checkouts) - held_checkouts
+    finally:
+        event.remove(corpus.engine.sync_engine, "checkout", checkouts.append_checkout)
+
+    assert [entity.id for entity in on_its_own] == [corpus.entities[0].id]
+    assert [entity.id for entity in on_the_callers] == [corpus.entities[0].id]
+    assert own_checkouts == 1
+    assert joined_checkouts == 0
+
+
 # --- The route ---
 
 
@@ -428,6 +469,49 @@ async def test_filters_narrow_the_scope_and_results_carry_project_identity(
     assert not data["has_more"]
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["accept-query"] == "application/json"
+
+
+@pytest.mark.asyncio
+async def test_a_search_with_hits_uses_one_session_after_the_search(
+    corpus: Corpus, client: AsyncClient
+) -> None:
+    """The search has its own session; every read after it shares a second one."""
+    ids = corpus.ids(2)
+    # Notes behind their embeddings, so the freshness check runs both of its reads.
+    async with db.scoped_session(corpus.session_maker) as session:
+        await session.execute(text("UPDATE entity SET checksum = 'moved-on'"))
+    await _add_temporal_assertions(corpus, ids)
+    checkouts = _count_checkouts(corpus.engine)
+
+    try:
+        response = await client.request(
+            "QUERY",
+            "/v2/search/",
+            json={"project_ids": ids, "text": "nebula", "valid_at": "2026-09-14"},
+        )
+    finally:
+        event.remove(corpus.engine.sync_engine, "checkout", checkouts.append_checkout)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["results"]
+    assert payload["results"][0]["temporal"]
+    assert payload["semantic_index_current_as_of"] is not None
+    assert len(checkouts) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text_query, has_hits", [("nebula", True), ("absentword", False)])
+async def test_the_response_reports_each_steps_time(
+    corpus: Corpus, client: AsyncClient, text_query: str, has_hits: bool
+) -> None:
+    response = await client.request(
+        "QUERY", "/v2/search/", json={"project_ids": corpus.ids(2), "text": text_query}
+    )
+
+    assert response.status_code == 200, response.text
+    assert bool(response.json()["results"]) is has_hits
+    assert SERVER_TIMING.match(response.headers["server-timing"]), response.headers["server-timing"]
 
 
 @pytest.mark.asyncio

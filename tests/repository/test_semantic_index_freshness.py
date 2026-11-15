@@ -172,6 +172,43 @@ async def test_one_stuck_note_does_not_date_the_index_back(
 
 
 @pytest.mark.asyncio
+async def test_a_session_the_caller_holds_gives_the_same_answer(
+    entity_repository, search_service, session_maker, app_config, test_project
+):
+    """Passed a session, both reads run on it and the answer matches a call without one."""
+    newest_current_time = _local_time(10)
+    await _embedded_note(
+        entity_repository,
+        search_service,
+        session_maker,
+        test_project,
+        title="Current",
+        updated_at=newest_current_time,
+    )
+    held = await _embedded_note(
+        entity_repository,
+        search_service,
+        session_maker,
+        test_project,
+        title="Held",
+        updated_at=_local_time(5),
+    )
+    await _edit_without_embedding(session_maker, held, _local_time(1))
+    scope = ProjectScope.single(test_project.id)
+
+    on_its_own = await semantic_index_current_as_of(session_maker, app_config, scope)
+    async with db.scoped_session(session_maker) as session:
+        on_the_callers = await semantic_index_current_as_of(
+            session_maker, app_config, scope, session
+        )
+        # The caller still owns the session: it stays open for further reads.
+        assert (await session.execute(text("SELECT 1"))).scalar_one() == 1
+
+    assert on_its_own == newest_current_time
+    assert on_the_callers == newest_current_time
+
+
+@pytest.mark.asyncio
 async def test_a_note_never_embedded_is_behind(
     entity_repository, search_service, session_maker, app_config, test_project
 ):
