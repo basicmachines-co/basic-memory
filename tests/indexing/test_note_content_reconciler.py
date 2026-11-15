@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from basic_memory import file_utils
+from basic_memory import db, file_utils
 from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializationStatusUpdate,
     NoteContentMaterializedCurrent,
@@ -25,9 +25,18 @@ from basic_memory.indexing.note_content_reconciler import (
     note_content_repository_for_project,
     reconcile_note_content_for_entity,
 )
-from basic_memory.models import Entity
+from basic_memory.indexing.storage_note_changes import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
+    StorageNoteChangeJournal,
+)
+from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
 from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.note_content_repository import AcceptedNoteContentVersions
+from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 
 
 class FakeSession:
@@ -49,6 +58,30 @@ class FakeTransaction:
         return None
 
 
+class RecordingChangeJournal:
+    """Record each journal write the reconciler asks for, without a database."""
+
+    def __init__(self) -> None:
+        self.recorded: list[dict[str, object]] = []
+
+    async def record_storage_note_version(
+        self,
+        session: object,
+        *,
+        project_id: int,
+        entity_id: int,
+        first_version: bool,
+    ) -> None:
+        self.recorded.append(
+            {
+                "session": session,
+                "project_id": project_id,
+                "entity_id": entity_id,
+                "first_version": first_version,
+            }
+        )
+
+
 class FakeRepositorySession(FakeSession):
     async def __aenter__(self) -> FakeRepositorySession:
         return self
@@ -67,6 +100,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
     markdown_content = "# Repaired\n"
     observed_checksum = await file_utils.compute_checksum(markdown_content)
     existing_note_content = SimpleNamespace(
+        project_id=7,
         db_version=1,
         db_checksum="previous-file-checksum",
         file_version=1,
@@ -74,6 +108,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         file_write_status="synced",
         file_path="notes/repaired.md",
     )
+    journal = RecordingChangeJournal()
     repository = SimpleNamespace(
         get_by_entity_id=AsyncMock(side_effect=[None, existing_note_content]),
         create=AsyncMock(
@@ -106,6 +141,7 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
+            change_journal=journal,
         ).reconcile(
             entity=entity,
             markdown_content=markdown_content,
@@ -118,6 +154,10 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
     assert outcome.generation == 2
     assert session.rollback_count == 1
     assert repository.get_by_entity_id.await_count == 2
+    # The losing bootstrap journals nothing; only the promotion that follows does.
+    assert journal.recorded == [
+        {"session": session, "project_id": 7, "entity_id": 42, "first_version": False}
+    ]
     repository.update_state_fields.assert_awaited_once_with(
         session,
         42,
@@ -146,6 +186,7 @@ async def test_reconciler_does_not_bootstrap_reclassified_resource() -> None:
     )
     session = FakeSession()
     session.get.return_value = SimpleNamespace(is_markdown=False)
+    journal = RecordingChangeJournal()
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker: object):
@@ -159,6 +200,7 @@ async def test_reconciler_does_not_bootstrap_reclassified_resource() -> None:
         outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
+            change_journal=journal,
         ).reconcile(
             entity=cast(Entity, SimpleNamespace(id=42)),
             markdown_content="# Stale Markdown\n",
@@ -170,6 +212,7 @@ async def test_reconciler_does_not_bootstrap_reclassified_resource() -> None:
     repository.create.assert_not_awaited()
     assert outcome.status == "stale"
     assert outcome.generation is None
+    assert journal.recorded == []
 
 
 @pytest.mark.asyncio
@@ -200,6 +243,7 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
     )
     entity = cast(Entity, SimpleNamespace(id=42))
     session = FakeSession()
+    journal = RecordingChangeJournal()
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker: object):
@@ -214,6 +258,7 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
         outcome = await NoteContentReconciler(
             note_content_repository=cast(Any, repository),
             session_maker=cast(Any, object()),
+            change_journal=journal,
         ).reconcile(
             entity=entity,
             markdown_content=markdown_content,
@@ -227,6 +272,7 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
     assert repository.update_state_fields.await_count == 1
     _, kwargs = repository.update_state_fields.await_args
     assert kwargs["expected_db_version"] == 3
+    assert journal.recorded == []
 
 
 @pytest.mark.asyncio
@@ -597,3 +643,346 @@ async def test_reconcile_note_content_for_entity_skips_non_markdown_entities() -
     repository.find_by_id.assert_awaited_once_with(session, 42)
     file_reader.get_file.assert_not_awaited()
     reconciler.reconcile.assert_not_awaited()
+
+
+# --- Project change journal rows, against a real database ---
+
+ACCEPTED_AT = datetime(2026, 11, 15, 9, 0, tzinfo=UTC)
+OBSERVED_AT = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+
+
+async def _journal_rows(session_maker: Any, project: Project) -> list[AcceptedProjectNoteChange]:
+    async with db.scoped_session(session_maker) as session:
+        return list(await ProjectRepository().list_accepted_note_changes(session, project.id))
+
+
+async def _partition_head(session_maker: Any, project: Project) -> int:
+    async with db.scoped_session(session_maker) as session:
+        head = await ProjectRepository().get_partition_position(session, project.id)
+    assert head is not None
+    return head
+
+
+async def _stored_note_content(
+    session_maker: Any, project: Project, entity: Entity
+) -> NoteContent | None:
+    async with db.scoped_session(session_maker) as session:
+        return await NoteContentRepository(project_id=project.id).get_by_entity_id(
+            session, entity.id
+        )
+
+
+async def _store_note_content(
+    session_maker: Any,
+    project: Project,
+    entity: Entity,
+    *,
+    content: str,
+    db_version: int,
+    file_version: int | None = None,
+    file_content: str | None = None,
+    file_write_status: str = "synced",
+) -> None:
+    db_checksum = await file_utils.compute_checksum(content)
+    file_checksum = await file_utils.compute_checksum(file_content or content)
+    async with db.scoped_session(session_maker) as session:
+        await NoteContentRepository(project_id=project.id).create(
+            session,
+            NoteContent(
+                entity_id=entity.id,
+                markdown_content=content,
+                db_version=db_version,
+                db_checksum=db_checksum,
+                file_version=file_version if file_version is not None else db_version,
+                file_checksum=file_checksum,
+                file_write_status=file_write_status,
+                last_source="api",
+                updated_at=ACCEPTED_AT,
+                file_updated_at=ACCEPTED_AT,
+            ),
+        )
+
+
+def _reconciler(
+    session_maker: Any,
+    project: Project,
+    *,
+    change_journal: Any = None,
+) -> NoteContentReconciler:
+    return NoteContentReconciler(
+        note_content_repository=NoteContentRepository(project_id=project.id),
+        session_maker=session_maker,
+        change_journal=change_journal,
+    )
+
+
+class FailingAfterJournalWrite:
+    """Write the real journal row, then fail the transaction it belongs to."""
+
+    async def record_storage_note_version(self, session: Any, **kwargs: Any) -> None:
+        await StorageNoteChangeJournal().record_storage_note_version(session, **kwargs)
+        raise RuntimeError("simulated failure after the journal write")
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_journals_created_row_for_first_version(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    content = "# Created in storage\n"
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content=content,
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert outcome.status == "current"
+    assert outcome.generation == 1
+    stored = await _stored_note_content(session_maker, test_project, sample_entity)
+    assert stored is not None
+    [row] = await _journal_rows(session_maker, test_project)
+    assert (
+        row.partition_position,
+        row.operation,
+        row.entity_id,
+        row.note_external_id,
+        row.permalink,
+        row.title,
+        row.file_path,
+        row.previous_file_path,
+        row.db_version,
+        row.db_checksum,
+        row.source,
+        row.actor_kind,
+    ) == (
+        1,
+        "created",
+        sample_entity.id,
+        sample_entity.external_id,
+        sample_entity.permalink,
+        sample_entity.title,
+        sample_entity.file_path,
+        None,
+        stored.db_version,
+        stored.db_checksum,
+        ACCEPTED_STORAGE_CHANGE_SOURCE,
+        None,
+    )
+    assert row.materialized_at is not None
+    assert row.materialized_at == row.accepted_at
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_of_journaled_note_records_updated(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    """A lost and rebuilt note_content row never gives the note a second `created` row."""
+    repository = ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        position = await repository.advance_partition_position(session, test_project.id)
+        await repository.record_accepted_note_change(
+            session,
+            RuntimeAcceptedProjectNoteChange(
+                project_id=test_project.id,
+                project_external_id=test_project.external_id,
+                partition_position=position,
+                entity_id=sample_entity.id,
+                note_external_id=sample_entity.external_id,
+                permalink=str(sample_entity.permalink),
+                title=sample_entity.title,
+                operation=RuntimeProjectNoteOperation.created,
+                file_path=sample_entity.file_path,
+                accepted_at=ACCEPTED_AT,
+                source="api",
+                db_version=1,
+                db_checksum="api-checksum",
+            ),
+        )
+
+    await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# Rebuilt from storage\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert [row.operation for row in await _journal_rows(session_maker, test_project)] == [
+        "created",
+        "updated",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_promotion_journals_updated_row_with_new_version(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    await _store_note_content(
+        session_maker, test_project, sample_entity, content="# First\n", db_version=1
+    )
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# Edited in storage\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert outcome.status == "current"
+    assert outcome.generation == 2
+    stored = await _stored_note_content(session_maker, test_project, sample_entity)
+    assert stored is not None
+    [row] = await _journal_rows(session_maker, test_project)
+    assert (row.operation, row.db_version, row.db_checksum, row.source) == (
+        "updated",
+        2,
+        stored.db_checksum,
+        ACCEPTED_STORAGE_CHANGE_SOURCE,
+    )
+    assert stored.db_checksum == await file_utils.compute_checksum("# Edited in storage\n")
+    assert row.materialized_at == row.accepted_at
+
+
+@pytest.mark.asyncio
+async def test_file_already_in_sync_writes_no_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    await _store_note_content(
+        session_maker, test_project, sample_entity, content="# In sync\n", db_version=3
+    )
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# In sync\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert (outcome.status, outcome.generation) == ("current", 3)
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0
+
+
+@pytest.mark.asyncio
+async def test_older_materialized_file_writes_no_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    """Bytes of the previous file version update bookkeeping only."""
+    await _store_note_content(
+        session_maker,
+        test_project,
+        sample_entity,
+        content="# Accepted v4\n",
+        db_version=4,
+        file_version=3,
+        file_content="# Materialized v3\n",
+        file_write_status="pending",
+    )
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# Materialized v3\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert outcome.status == "deferred"
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0
+
+
+@pytest.mark.asyncio
+async def test_deferred_promotion_writes_no_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    """Unrelated bytes cannot become a version while an accepted write is still pending."""
+    await _store_note_content(
+        session_maker,
+        test_project,
+        sample_entity,
+        content="# Accepted v4\n",
+        db_version=4,
+        file_version=3,
+        file_content="# Materialized v3\n",
+        file_write_status="pending",
+    )
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# Unrelated storage bytes\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+    )
+
+    assert outcome.status == "deferred"
+    stored = await _stored_note_content(session_maker, test_project, sample_entity)
+    assert stored is not None
+    assert stored.db_version == 4
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0
+
+
+@pytest.mark.asyncio
+async def test_stale_anchor_writes_no_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    """A file read before an accepted write landed cannot claim a version or a row."""
+    await _store_note_content(
+        session_maker, test_project, sample_entity, content="# Accepted\n", db_version=2
+    )
+
+    outcome = await _reconciler(session_maker, test_project).reconcile(
+        entity=sample_entity,
+        markdown_content="# Read before the accepted write\n",
+        observed_at=OBSERVED_AT,
+        source="index",
+        anchor=NoteContentReconciliationAnchor(entity_id=sample_entity.id, state=None),
+    )
+
+    assert outcome.status == "stale"
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_bootstrap_transaction_keeps_neither_content_nor_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    with pytest.raises(RuntimeError, match="simulated failure after the journal write"):
+        await _reconciler(
+            session_maker, test_project, change_journal=FailingAfterJournalWrite()
+        ).reconcile(
+            entity=sample_entity,
+            markdown_content="# Never committed\n",
+            observed_at=OBSERVED_AT,
+            source="index",
+        )
+
+    assert await _stored_note_content(session_maker, test_project, sample_entity) is None
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_promotion_transaction_keeps_neither_version_nor_journal_row(
+    session_maker: Any, test_project: Project, sample_entity: Entity
+) -> None:
+    await _store_note_content(
+        session_maker, test_project, sample_entity, content="# First\n", db_version=1
+    )
+
+    with pytest.raises(RuntimeError, match="simulated failure after the journal write"):
+        await _reconciler(
+            session_maker, test_project, change_journal=FailingAfterJournalWrite()
+        ).reconcile(
+            entity=sample_entity,
+            markdown_content="# Never committed\n",
+            observed_at=OBSERVED_AT,
+            source="index",
+        )
+
+    stored = await _stored_note_content(session_maker, test_project, sample_entity)
+    assert stored is not None
+    assert (stored.db_version, stored.markdown_content) == (1, "# First\n")
+    assert await _journal_rows(session_maker, test_project) == []
+    assert await _partition_head(session_maker, test_project) == 0

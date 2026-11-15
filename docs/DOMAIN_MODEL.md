@@ -158,11 +158,16 @@ watermark those records advance.
 - The journal is note-scoped and project-partitioned today. A fuller event envelope (causation,
   correlation, depth, workspace scope) grows this record; it does not introduce a second journal
   beside it.
-- Scope today: only DB-first accepted note mutations reach the journal
-  (`accepted_note_mutation_runner`). File-first reconciliation — observed file indexing and
-  external delete handling — converges derived state without journal evidence yet. Journaling
-  those reconciliation paths is the intended direction; until it lands, journal consumers see
-  DB-first mutations only, and file-first changes surface through reindex and reconciliation.
+- Scope today: every accepted change to a Markdown note reaches the journal, in the transaction
+  that makes it. DB-first accepted note mutations record theirs in
+  `accepted_note_mutation_runner`, and folder deletes in `directory_delete_runner`. Changes that
+  arrive through storage (a file created, edited, moved or deleted in storage, then indexed)
+  record theirs in `storage_note_changes` with source `storage`: a note-content bootstrap
+  (`created`), a promotion of storage bytes to a new version (`updated`), and a project-index
+  move or delete (`moved`, `deleted`). Storage rows are written already settled, because the
+  change is already in storage. Reconciliation outcomes that accept no new content (a file
+  catching up to accepted content, a deferred or stale observation) write no row, and
+  non-Markdown files get no rows.
 
 ### Event Surfaces And Derivation
 
@@ -180,9 +185,7 @@ storage notifications / webhooks          ingress evidence
 ```
 
 - A projection may lag the journal and must be rebuildable from it plus canonical Markdown.
-- The diagram is the target architecture; two edges run ahead of the code today. Ingress:
-  reconciliation of external file changes does not yet advance the journal (see the journal's
-  scope bullet above), so the top edge holds only for DB-first accepted mutations. Activity:
+- The diagram is the target architecture; one edge runs ahead of the code today. Activity:
   the current recent-activity feed is built from search state (`ContextService.build_context`),
   not from journal reads — its edge names where that feed converges, not what it reads today.
 - Delivery events (webhook attempts, storage notifications, SSE publishes) prove delivery, not

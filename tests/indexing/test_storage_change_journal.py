@@ -1,0 +1,195 @@
+"""Storage-side note changes reach the project change journal.
+
+A note created, edited, renamed or deleted straight in storage (a local editor,
+WebDAV, an rclone bisync) reaches the database through the project index, not
+through the API. Each such change must still leave one row in the project change
+journal (accepted_project_note_change), written already materialized. Otherwise
+journal consumers such as the wiki projector and the project changes feed never
+hear about it, or wait on it forever.
+
+These tests drive the real local project indexer against files in a temporary
+project directory, with no API calls.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.index.local_project import LocalProjectIndexRunner
+from basic_memory.index.local_wiki_projection import (
+    LocalWikiState,
+    inspect_local_wiki_projection,
+)
+from basic_memory.indexing.storage_note_changes import ACCEPTED_STORAGE_CHANGE_SOURCE
+from basic_memory.models import AcceptedProjectNoteChange, NoteContent, Project
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.project_repository import ProjectRepository
+
+NOTE_PATH = "notes/storage-note.md"
+RENAMED_PATH = "archive/storage-note.md"
+
+
+def note_markdown(body: str) -> str:
+    # Complete frontmatter, so indexing never rewrites the file and every journal
+    # row below comes from the storage change the test made.
+    return (
+        "---\n"
+        "title: Storage Note\n"
+        "type: note\n"
+        "permalink: notes/storage-note\n"
+        "---\n"
+        "\n"
+        f"# Storage Note\n\n{body}\n"
+    )
+
+
+def write_note(project_root: Path, relative_path: str, body: str) -> None:
+    path = project_root / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Bytes, so the checksum is the same on every platform.
+    path.write_bytes(note_markdown(body).encode("utf-8"))
+
+
+async def index_project(
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+) -> None:
+    runner = LocalProjectIndexRunner(
+        project_repository=project_repository,
+        session_maker=session_maker,
+    )
+    await runner.index_project(project.id, force_full=True)
+
+
+async def journal_after(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    position: int,
+) -> list[AcceptedProjectNoteChange]:
+    async with db.scoped_session(session_maker) as session:
+        return list(
+            await ProjectRepository().list_accepted_note_changes(
+                session, project.id, after_position=position
+            )
+        )
+
+
+async def current_note_content(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    file_path: str,
+) -> NoteContent:
+    async with db.scoped_session(session_maker) as session:
+        entity = await EntityRepository(project_id=project.id).get_by_file_path(session, file_path)
+        assert entity is not None
+        note_content = await NoteContentRepository(project_id=project.id).get_by_entity_id(
+            session, entity.id
+        )
+    assert note_content is not None
+    return note_content
+
+
+@pytest.mark.asyncio
+async def test_storage_create_edit_and_delete_each_leave_one_journal_row(
+    config_home: Path,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    write_note(config_home, NOTE_PATH, "First version.")
+    await index_project(project_repository, session_maker, test_project)
+    created_content = await current_note_content(session_maker, test_project, NOTE_PATH)
+
+    write_note(config_home, NOTE_PATH, "Edited in storage.")
+    await index_project(project_repository, session_maker, test_project)
+    updated_content = await current_note_content(session_maker, test_project, NOTE_PATH)
+
+    (config_home / NOTE_PATH).unlink()
+    await index_project(project_repository, session_maker, test_project)
+
+    rows = await journal_after(session_maker, test_project, 0)
+    assert [row.operation for row in rows] == ["created", "updated", "deleted"]
+    assert [row.partition_position for row in rows] == sorted(
+        {row.partition_position for row in rows}
+    )
+    assert len({row.note_external_id for row in rows}) == 1
+    assert all(row.source == ACCEPTED_STORAGE_CHANGE_SOURCE for row in rows)
+    assert all(row.file_path == NOTE_PATH for row in rows)
+    assert all(row.materialized_at is not None for row in rows)
+    created, updated, _deleted = rows
+    assert (created.db_version, created.db_checksum) == (
+        created_content.db_version,
+        created_content.db_checksum,
+    )
+    assert (updated.db_version, updated.db_checksum) == (
+        updated_content.db_version,
+        updated_content.db_checksum,
+    )
+    assert (created.db_version, updated.db_version) == (1, 2)
+
+
+@pytest.mark.asyncio
+async def test_storage_rename_leaves_one_moved_row(
+    config_home: Path,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    write_note(config_home, NOTE_PATH, "Renamed without edits.")
+    await index_project(project_repository, session_maker, test_project)
+    [created] = await journal_after(session_maker, test_project, 0)
+
+    (config_home / RENAMED_PATH).parent.mkdir(parents=True)
+    (config_home / NOTE_PATH).rename(config_home / RENAMED_PATH)
+    await index_project(project_repository, session_maker, test_project)
+
+    [moved] = await journal_after(session_maker, test_project, created.partition_position)
+    assert (
+        moved.operation,
+        moved.note_external_id,
+        moved.file_path,
+        moved.previous_file_path,
+        moved.source,
+    ) == (
+        "moved",
+        created.note_external_id,
+        RENAMED_PATH,
+        NOTE_PATH,
+        ACCEPTED_STORAGE_CHANGE_SOURCE,
+    )
+    assert moved.materialized_at is not None
+
+
+@pytest.mark.asyncio
+async def test_wiki_projects_after_storage_only_changes(
+    config_home: Path,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """Storage rows are settled when written, so they never defer the wiki projector."""
+    write_note(config_home, NOTE_PATH, "First version.")
+    write_note(config_home, "notes/gone.md", "Deleted later.")
+    await index_project(project_repository, session_maker, test_project)
+    write_note(config_home, NOTE_PATH, "Edited in storage.")
+    (config_home / "notes/gone.md").unlink()
+    await index_project(project_repository, session_maker, test_project)
+    (config_home / RENAMED_PATH).parent.mkdir(parents=True)
+    (config_home / NOTE_PATH).rename(config_home / RENAMED_PATH)
+    await index_project(project_repository, session_maker, test_project)
+
+    rows = await journal_after(session_maker, test_project, 0)
+    assert {row.operation for row in rows} == {"created", "updated", "deleted", "moved"}
+    assert {row.source for row in rows} == {ACCEPTED_STORAGE_CHANGE_SOURCE}
+
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+    assert inspection.plan.result.pending_materialization == ()
+    assert inspection.state is not LocalWikiState.partial
+    assert inspection.plan.result.source_watermark == max(row.partition_position for row in rows)

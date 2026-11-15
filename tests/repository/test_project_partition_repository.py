@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import inspect, select
@@ -338,6 +338,43 @@ async def test_bulk_record_persists_every_change_with_its_columns(
     ] == [
         (1, 7, "note-7", "updated", 3, "accepted-checksum-3", True, None),
         (2, 8, "note-8", "updated", 5, "accepted-checksum-5", True, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_bulk_record_can_write_rows_already_materialized(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """A change that is already in storage is written settled, so no projector waits on it."""
+    repository = ProjectRepository()
+    materialized_at = datetime(2026, 8, 29, 20, 16, tzinfo=UTC)
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.advance_partition_position_by(session, test_project.id, 2)
+        await repository.record_accepted_note_changes(
+            session,
+            [
+                _accepted_change(test_project, partition_position=1, entity_id=7),
+                _accepted_change(test_project, partition_position=2, entity_id=8),
+            ],
+            materialized_at=materialized_at,
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        persisted = await repository.list_accepted_note_changes(session, test_project.id)
+
+    # SQLite drops the zone on write, so compare against the row's own accepted_at,
+    # which round-trips the same way, rather than against an absolute instant.
+    settled_after_acceptance: list[tuple[int, timedelta]] = []
+    for row in persisted:
+        assert row.materialized_at is not None
+        settled_after_acceptance.append(
+            (row.partition_position, row.materialized_at - row.accepted_at)
+        )
+    assert settled_after_acceptance == [
+        (1, materialized_at - _ACCEPTED_AT),
+        (2, materialized_at - _ACCEPTED_AT),
     ]
 
 

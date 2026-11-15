@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import override, Protocol
@@ -12,6 +12,12 @@ from sqlalchemy import RowMapping, bindparam, case, column, delete, select, tabl
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.indexing.storage_note_changes import (
+    StorageNoteChange,
+    StorageNoteIdentity,
+    load_storage_note_identities,
+    record_storage_note_changes,
+)
 from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.models.knowledge import file_path_conflict_columns
 from basic_memory.repository.accepted_note_vector_cleanup import (
@@ -22,6 +28,7 @@ from basic_memory.repository.relation_repository import (
     lock_note_content_before_entity_mutation,
 )
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
 from basic_memory.runtime.storage import ProjectExternalId, ProjectId
 
 
@@ -550,6 +557,11 @@ async def delete_project_index_entities(
     return relation_cleanup_entity_ids
 
 
+def _storage_note_path_order(note: StorageNoteIdentity) -> tuple[str, int]:
+    """Order a batch's journal rows by path, so a batch replays in a stable order."""
+    return (note.file_path, note.entity_id)
+
+
 @dataclass(frozen=True, slots=True)
 class _MoveReplacementScreen:
     """Move-batch rows that survive destination verification."""
@@ -808,6 +820,13 @@ class RepositoryProjectIndexMaintenanceStore:
             # --- Apply the batched replacement deletes and path/content updates ---
             relation_cleanup_entity_ids: frozenset[int] = frozenset()
             if updated_old_paths:
+                # A replaced destination's rows are gone after the delete, so read
+                # what its journal row names first.
+                replaced_notes = await load_storage_note_identities(
+                    session,
+                    project_id=self.project_id,
+                    entity_ids=replaced_entity_ids,
+                )
                 relation_cleanup_entity_ids = await delete_project_index_entities(
                     session,
                     project_id=self.project_id,
@@ -823,6 +842,14 @@ class RepositoryProjectIndexMaintenanceStore:
                         target_paths_by_entity_id=target_paths_by_entity_id,
                         content_updates_by_entity_id=content_plan.updates_by_entity_id,
                     ),
+                )
+                # Journal last: claiming positions locks the project row until commit.
+                await self._record_move_batch_changes(
+                    session,
+                    replaced_notes=replaced_notes.values(),
+                    previous_paths_by_entity_id={
+                        int(row["id"]): str(row["file_path"]) for row in target_rows
+                    },
                 )
 
         # --- Write planned file content after the commit ---
@@ -964,6 +991,39 @@ class RepositoryProjectIndexMaintenanceStore:
                     )
                 )
             )
+
+    async def _record_move_batch_changes(
+        self,
+        session: AsyncSession,
+        *,
+        replaced_notes: Iterable[StorageNoteIdentity],
+        previous_paths_by_entity_id: Mapping[int, str],
+    ) -> None:
+        """Journal one batch's storage moves, after its replacement deletes.
+
+        A replaced destination's `deleted` row comes first, so a consumer that
+        replays by path never sees the moved note leave a path it just took. Each
+        `moved` row is read after the path updates, so it carries the new path and
+        any permalink and checksum that content repair stamped.
+        """
+        moved_notes = await load_storage_note_identities(
+            session,
+            project_id=self.project_id,
+            entity_ids=previous_paths_by_entity_id.keys(),
+        )
+        changes = [
+            StorageNoteChange(note=note, operation=RuntimeProjectNoteOperation.deleted)
+            for note in sorted(replaced_notes, key=_storage_note_path_order)
+        ]
+        changes.extend(
+            StorageNoteChange(
+                note=note,
+                operation=RuntimeProjectNoteOperation.moved,
+                previous_file_path=previous_paths_by_entity_id[note.entity_id],
+            )
+            for note in sorted(moved_notes.values(), key=_storage_note_path_order)
+        )
+        await record_storage_note_changes(session, project_id=self.project_id, changes=changes)
 
     async def _write_moved_file_contents(self, content_plan: _MoveContentPlan) -> None:
         """Write planned frontmatter rewrites once the batch has committed.
@@ -1125,11 +1185,27 @@ class RepositoryProjectIndexMaintenanceStore:
                 candidate.entity.entity_id for candidate in deletable_candidates
             )
 
+            # The entity rows are gone after the delete, so read what each journal
+            # row names first. The rows locked above keep these values current.
+            deleted_notes = await load_storage_note_identities(
+                session,
+                project_id=self.project_id,
+                entity_ids=deleted_entity_ids,
+            )
             relation_cleanup_entity_ids = await delete_project_index_entities(
                 session,
                 project_id=self.project_id,
                 entity_ids=deleted_entity_ids,
                 external_vector_cleaner=self.external_vector_cleaner,
+            )
+            # Journal last: claiming positions locks the project row until commit.
+            await record_storage_note_changes(
+                session,
+                project_id=self.project_id,
+                changes=[
+                    StorageNoteChange(note=note, operation=RuntimeProjectNoteOperation.deleted)
+                    for note in sorted(deleted_notes.values(), key=_storage_note_path_order)
+                ],
             )
 
         return ProjectIndexDeleteBatchResult(

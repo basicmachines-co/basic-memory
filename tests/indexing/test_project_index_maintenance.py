@@ -5,13 +5,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import override, cast
+from typing import Any, override, cast
 
 import basic_memory.indexing.project_index_maintenance as project_index_maintenance_module
 import basic_memory.repository.accepted_note_vector_cleanup as accepted_note_vector_cleanup_module
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteBatch,
     ProjectIndexDeleteBatchPlan,
@@ -32,7 +34,11 @@ from basic_memory.indexing.project_index_maintenance import (
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
-from basic_memory.models import Entity
+from basic_memory.indexing.storage_note_changes import ACCEPTED_STORAGE_CHANGE_SOURCE
+from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.project_repository import ProjectRepository
 
 
 def _stub_move_store(
@@ -655,13 +661,16 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
         moved_entity_ids=frozenset({10}),
         missing_paths=("notes/b.md",),
     )
-    assert len(session.statements) == 6
+    assert len(session.statements) == 7
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
     assert "ORDER BY note_content.entity_id" in str(session.statements[2])
     assert "UPDATE entity" in str(session.statements[3])
     assert "UPDATE note_content" in str(session.statements[4])
     assert "UPDATE search_index" in str(session.statements[5])
+    # The moved note's journal identity is read after the path updates. This fake
+    # returns no rows, so nothing is journaled and no position is claimed.
+    assert "SELECT entity.id, entity.external_id" in str(session.statements[6])
 
 
 @pytest.mark.asyncio
@@ -729,6 +738,7 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
                 ]
             ),
             FakeProjectIndexResult(),  # complete move-set NoteContent fence
+            FakeProjectIndexResult(),  # replaced entity's journal identity
             FakeProjectIndexResult(),  # replacement-delete NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
@@ -765,18 +775,21 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
         replaced_entity_ids=frozenset({20}),
         relation_cleanup_entity_ids=frozenset({99}),
     )
-    assert len(session.statements) == 11
+    assert len(session.statements) == 13
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
     assert "ORDER BY note_content.entity_id" in str(session.statements[2])
-    assert "ORDER BY note_content.entity_id" in str(session.statements[3])
-    assert "SELECT DISTINCT relation.from_id" in str(session.statements[4])
-    assert "DELETE FROM search_index" in str(session.statements[5])
-    assert "sqlite_master" in str(session.statements[6])
-    assert "DELETE FROM entity" in str(session.statements[7])
-    assert "UPDATE entity" in str(session.statements[8])
-    assert "UPDATE note_content" in str(session.statements[9])
-    assert "UPDATE search_index" in str(session.statements[10])
+    # The replaced entity's journal identity is read before its row is deleted.
+    assert "SELECT entity.id, entity.external_id" in str(session.statements[3])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[4])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[5])
+    assert "DELETE FROM search_index" in str(session.statements[6])
+    assert "sqlite_master" in str(session.statements[7])
+    assert "DELETE FROM entity" in str(session.statements[8])
+    assert "UPDATE entity" in str(session.statements[9])
+    assert "UPDATE note_content" in str(session.statements[10])
+    assert "UPDATE search_index" in str(session.statements[11])
+    assert "SELECT entity.id, entity.external_id" in str(session.statements[12])
 
 
 @pytest.mark.asyncio
@@ -869,6 +882,7 @@ async def test_repository_project_index_maintenance_store_replaces_destination_w
                 ]
             ),
             FakeProjectIndexResult(),  # complete move-set NoteContent fence
+            FakeProjectIndexResult(),  # replaced entity's journal identity
             FakeProjectIndexResult(),  # replacement-delete NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
@@ -972,7 +986,7 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
         )
     ]
     assert content_updater.written == [(content_updater.seen_files[0], content_updater.updates[10])]
-    assert len(session.statements) == 7
+    assert len(session.statements) == 8
     assert "ORDER BY note_content.entity_id" in str(session.statements[2])
     assert "checksum" in str(session.statements[3])
     assert "permalink" in str(session.statements[3])
@@ -982,6 +996,7 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
     assert "UPDATE search_index" in str(session.statements[5])
     assert "search_index.type" in str(session.statements[6])
     assert "permalink" in str(session.statements[6])
+    assert "SELECT entity.id, entity.external_id" in str(session.statements[7])
 
 
 @dataclass(frozen=True, slots=True)
@@ -1399,6 +1414,7 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
                     storage_owned_delete_candidate_row(20, "notes/b.md"),
                 ]
             ),
+            FakeProjectIndexResult(),  # deleted entities' journal identities
             FakeProjectIndexResult(),  # delete helper NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
@@ -1435,16 +1451,19 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
         relation_cleanup_entity_ids=frozenset({99}),
         missing_paths=("notes/missing.md",),
     )
-    assert len(session.statements) == 9
+    assert len(session.statements) == 10
     assert "LEFT OUTER JOIN note_content" in str(session.statements[0])
     assert "ORDER BY note_content.entity_id" in str(session.statements[1])
     assert "FOR UPDATE" in str(session.statements[2])
     assert "LEFT OUTER JOIN note_content" in str(session.statements[3])
-    assert "ORDER BY note_content.entity_id" in str(session.statements[4])
-    assert "SELECT DISTINCT relation.from_id" in str(session.statements[5])
-    assert "DELETE FROM search_index" in str(session.statements[6])
-    assert "sqlite_master" in str(session.statements[7])
-    assert "DELETE FROM entity" in str(session.statements[8])
+    # The journal identities are read before the entity rows are deleted. This
+    # fake returns no rows, so nothing is journaled and no position is claimed.
+    assert "SELECT entity.id, entity.external_id" in str(session.statements[4])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[5])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[6])
+    assert "DELETE FROM search_index" in str(session.statements[7])
+    assert "sqlite_master" in str(session.statements[8])
+    assert "DELETE FROM entity" in str(session.statements[9])
 
 
 @pytest.mark.asyncio
@@ -1462,6 +1481,7 @@ async def test_repository_project_index_maintenance_store_deletes_vector_embeddi
             FakeProjectIndexResult(
                 mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
             ),
+            FakeProjectIndexResult(),  # deleted entity's journal identity
             FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
             FakeProjectIndexResult(),
@@ -1541,6 +1561,7 @@ async def test_repository_project_index_maintenance_store_skips_vector_cleanup_w
             FakeProjectIndexResult(
                 mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
             ),
+            FakeProjectIndexResult(),  # deleted entity's journal identity
             FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
             FakeProjectIndexResult(),
@@ -1578,3 +1599,258 @@ async def test_repository_project_index_maintenance_store_skips_vector_cleanup_w
     statements = [str(statement) for statement in session.statements]
     assert not any("DELETE FROM search_vector_chunks" in statement for statement in statements)
     assert not any("DELETE FROM search_vector_embeddings" in statement for statement in statements)
+
+
+# --- Project change journal rows for scan moves and deletes, against a real database ---
+
+JOURNAL_NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+
+
+async def _create_indexed_file(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    *,
+    file_path: str,
+    checksum: str = "file-checksum",
+    content_type: str = "text/markdown",
+    note_version: int | None = None,
+) -> Entity:
+    """Create one indexed file, with a synced note_content row when ``note_version`` is set."""
+    async with db.scoped_session(session_maker) as session:
+        entity = await EntityRepository(project_id=project.id).create(
+            session,
+            {
+                "project_id": project.id,
+                "title": file_path.rsplit("/", 1)[-1],
+                "note_type": "note",
+                "permalink": file_path.rsplit(".", 1)[0],
+                "file_path": file_path,
+                "checksum": checksum,
+                "content_type": content_type,
+                "created_at": JOURNAL_NOW,
+                "updated_at": JOURNAL_NOW,
+            },
+        )
+        if note_version is not None:
+            await NoteContentRepository(project_id=project.id).create(
+                session,
+                NoteContent(
+                    entity_id=entity.id,
+                    markdown_content="# Note\n",
+                    db_version=note_version,
+                    db_checksum=checksum,
+                    file_version=note_version,
+                    file_checksum=checksum,
+                    file_write_status="synced",
+                    last_source="index",
+                    updated_at=JOURNAL_NOW,
+                    file_updated_at=JOURNAL_NOW,
+                ),
+            )
+    return entity
+
+
+async def _journal(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+) -> list[AcceptedProjectNoteChange]:
+    async with db.scoped_session(session_maker) as session:
+        return list(await ProjectRepository().list_accepted_note_changes(session, project.id))
+
+
+async def _head(session_maker: async_sessionmaker[AsyncSession], project: Project) -> int:
+    async with db.scoped_session(session_maker) as session:
+        head = await ProjectRepository().get_partition_position(session, project.id)
+    assert head is not None
+    return head
+
+
+async def _entity_ids(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+) -> set[int]:
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(select(Entity.id).where(Entity.project_id == project.id))
+        return set(result.scalars())
+
+
+@pytest.mark.asyncio
+async def test_scan_move_journals_one_moved_row_per_markdown_note(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """A rename with unchanged content is one `moved` row: no `deleted`, no `created`."""
+    note = await _create_indexed_file(
+        session_maker, test_project, file_path="notes/a.md", note_version=3
+    )
+    await _create_indexed_file(
+        session_maker,
+        test_project,
+        file_path="assets/photo.png",
+        content_type="image/png",
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=test_project.id,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(
+                ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),
+                ProjectIndexMoveTarget("assets/photo.png", "media/photo.png"),
+            ),
+        )
+    )
+
+    assert result.updated_files == 2
+    [row] = await _journal(session_maker, test_project)
+    assert (
+        row.partition_position,
+        row.operation,
+        row.entity_id,
+        row.note_external_id,
+        row.file_path,
+        row.previous_file_path,
+        row.db_version,
+        row.db_checksum,
+        row.source,
+    ) == (
+        1,
+        "moved",
+        note.id,
+        note.external_id,
+        "archive/a.md",
+        "notes/a.md",
+        3,
+        "file-checksum",
+        ACCEPTED_STORAGE_CHANGE_SOURCE,
+    )
+    assert row.materialized_at == row.accepted_at
+
+
+@pytest.mark.asyncio
+async def test_scan_move_journals_replaced_destination_before_the_move(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """The entity a move replaces is journaled `deleted` first, then the note `moved` onto its path."""
+    moved = await _create_indexed_file(
+        session_maker, test_project, file_path="notes/a.md", note_version=1
+    )
+    replaced = await _create_indexed_file(
+        session_maker, test_project, file_path="archive/a.md", note_version=2
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=test_project.id,
+    )
+
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),),
+        )
+    )
+
+    assert result.replaced_entity_ids == frozenset({replaced.id})
+    assert [
+        (row.partition_position, row.operation, row.entity_id, row.file_path, row.db_version)
+        for row in await _journal(session_maker, test_project)
+    ] == [
+        (1, "deleted", replaced.id, "archive/a.md", 2),
+        (2, "moved", moved.id, "archive/a.md", 1),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scan_delete_journals_each_deleted_markdown_note(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    accepted = await _create_indexed_file(
+        session_maker, test_project, file_path="notes/b.md", note_version=4
+    )
+    storage_owned = await _create_indexed_file(session_maker, test_project, file_path="notes/a.md")
+    await _create_indexed_file(
+        session_maker,
+        test_project,
+        file_path="assets/photo.png",
+        content_type="image/png",
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=test_project.id,
+        delete_path_verifier=project_index_maintenance_module.TrustPlannedProjectIndexDeleteVerifier(),
+    )
+
+    result = await store.apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(
+            completed_batches=1,
+            paths=("notes/b.md", "assets/photo.png", "notes/a.md"),
+        )
+    )
+
+    assert result.deleted_entities == 3
+    rows = await _journal(session_maker, test_project)
+    # Path order, so a batch replays the same way every time.
+    assert [
+        (
+            row.partition_position,
+            row.operation,
+            row.entity_id,
+            row.file_path,
+            row.db_version,
+            row.db_checksum,
+            row.source,
+        )
+        for row in rows
+    ] == [
+        (1, "deleted", storage_owned.id, "notes/a.md", None, None, ACCEPTED_STORAGE_CHANGE_SOURCE),
+        (
+            2,
+            "deleted",
+            accepted.id,
+            "notes/b.md",
+            4,
+            "file-checksum",
+            ACCEPTED_STORAGE_CHANGE_SOURCE,
+        ),
+    ]
+    assert all(row.materialized_at == row.accepted_at for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_scan_delete_journal_rolls_back_with_failed_transaction(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure after the journal write keeps the entity, the journal and the head unchanged."""
+    note = await _create_indexed_file(
+        session_maker, test_project, file_path="notes/a.md", note_version=1
+    )
+    record_storage_note_changes = project_index_maintenance_module.record_storage_note_changes
+
+    async def record_then_fail(session: AsyncSession, **kwargs: Any) -> None:
+        await record_storage_note_changes(session, **kwargs)
+        raise RuntimeError("simulated failure after the journal write")
+
+    monkeypatch.setattr(
+        project_index_maintenance_module, "record_storage_note_changes", record_then_fail
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=test_project.id,
+        delete_path_verifier=project_index_maintenance_module.TrustPlannedProjectIndexDeleteVerifier(),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated failure after the journal write"):
+        await store.apply_project_index_delete_batch(
+            ProjectIndexDeleteBatch(completed_batches=1, paths=("notes/a.md",))
+        )
+
+    assert note.id in await _entity_ids(session_maker, test_project)
+    assert await _journal(session_maker, test_project) == []
+    assert await _head(session_maker, test_project) == 0

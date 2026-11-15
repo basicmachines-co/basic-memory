@@ -23,7 +23,11 @@ from basic_memory.runtime.project_partition import (
 _SETTLE_POSITION_CHUNK_SIZE = 500
 
 
-def _accepted_note_change_values(change: RuntimeAcceptedProjectNoteChange) -> dict[str, Any]:
+def _accepted_note_change_values(
+    change: RuntimeAcceptedProjectNoteChange,
+    *,
+    materialized_at: datetime | None = None,
+) -> dict[str, Any]:
     """Map runtime journal evidence onto accepted_project_note_change columns."""
     return {
         "project_id": change.project_id,
@@ -45,6 +49,7 @@ def _accepted_note_change_values(change: RuntimeAcceptedProjectNoteChange) -> di
         ),
         "actor_kind": change.actor_kind,
         "actor_name": change.actor_name,
+        "materialized_at": materialized_at,
     }
 
 
@@ -244,13 +249,23 @@ class ProjectRepository(Repository[Project]):
         self,
         session: AsyncSession,
         changes: Sequence[RuntimeAcceptedProjectNoteChange],
+        *,
+        materialized_at: datetime | None = None,
     ) -> None:
-        """Persist a batch of accepted evidence rows with one bulk insert."""
+        """Persist a batch of accepted evidence rows with one bulk insert.
+
+        ``materialized_at`` stays None for changes that have yet to reach storage.
+        A writer whose changes are already in storage passes the time it accepted
+        them, so the rows are settled from the start.
+        """
         if not changes:
             return
         await session.execute(
             insert(AcceptedProjectNoteChange),
-            [_accepted_note_change_values(change) for change in changes],
+            [
+                _accepted_note_change_values(change, materialized_at=materialized_at)
+                for change in changes
+            ],
         )
 
     async def get_partition_position(
