@@ -56,17 +56,21 @@ async def semantic_index_current_as_of(
     session_maker: async_sessionmaker[AsyncSession],
     app_config: BasicMemoryConfig,
     scope: ProjectScope,
+    session: AsyncSession | None = None,
 ) -> datetime | None:
     """Return the latest note change semantic search reflects for ``scope``, or None.
 
     None means every note's embeddings are current, or there is no semantic search to
     be current: a host that cannot load sqlite-vec runs keyword-only (#711), and an
     empty scope searched nothing.
+
+    A caller that already holds a session passes it, and both reads run on it instead
+    of on a session of their own.
     """
     if scope.is_empty or not semantic_runtime_available(app_config):
         return None
 
-    async with db.scoped_session(session_maker) as session:
+    async with db.scoped_session(session_maker, session) as session:
         oldest_behind = (await session.execute(oldest_behind_statement(scope))).scalar_one()
         # Trigger: no note is behind. Why: the common case, answered from the partial
         # index without touching current notes. Outcome: no freshness to report.

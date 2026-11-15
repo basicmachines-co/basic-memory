@@ -70,17 +70,25 @@ class ScopedSearchService:
 
     # --- Hydration, bounded by the scope ---
 
-    async def get_entities_by_id(self, ids: Sequence[int]) -> Sequence[Entity]:
+    async def get_entities_by_id(
+        self,
+        ids: Sequence[int],
+        *,
+        session: AsyncSession | None = None,
+    ) -> Sequence[Entity]:
         """The entities a page of hits refers to, read only from projects in scope.
 
         Only the fields result shaping reads are loaded. Ids reached through a scoped
         search already belong to the scope; the predicate keeps that true by
         construction rather than by trust.
+
+        A caller that already holds a session for the rest of a page's reads passes it,
+        and the read joins that session instead of checking out its own connection.
         """
         if not ids or self.scope.is_empty:
             return []
         entities: list[Entity] = []
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             for chunk in _chunks(list(ids)):
                 result = await session.scalars(
                     select(Entity)
