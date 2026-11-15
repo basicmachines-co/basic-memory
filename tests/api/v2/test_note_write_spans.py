@@ -1,8 +1,9 @@
 """Accepted note writes time each step of the accept path in its own span.
 
 A slow note save is diagnosed from these spans: each names one step (actor
-resolution, freshening the stored file, the accept transaction, its commit, the
-post-commit work and the read-cache invalidation), so a trace shows where the
+resolution, freshening the stored file, the read-cache scope, the accept
+transaction, its commit, the post-commit work and the read-cache invalidation),
+so a trace shows where the
 write spent its time instead of one unexplained block.
 """
 
@@ -47,8 +48,10 @@ def read_cache(app: FastAPI) -> RecordingReadCache:
     return cache
 
 
+CACHE_SCOPE_SPAN = "note write scopes read cache changes"
 # Steps every create, update and edit runs, whatever the runtime.
 SHARED_STEP_SPANS = {
+    CACHE_SCOPE_SPAN,
     "note write runs accept transaction",
     "note write applies accepted {mutation_kind}",
     "note write runs accepted mutation hook",
@@ -91,6 +94,14 @@ def _assert_accept_spans(
             assert span["context"]["trace_id"] == root_trace, span["name"]
             assert span["start_time"] >= root["start_time"], span["name"]
             assert span["end_time"] <= root["end_time"], span["name"]
+
+    # The read-cache scope span covers the scope's whole life: the transaction it
+    # wraps and the invalidation it runs on exit.
+    scope = next(span for span in spans if span["name"] == CACHE_SCOPE_SPAN)
+    for inner_name in ("note write runs accept transaction", "note write invalidates read cache"):
+        inner = next(span for span in spans if span["name"] == inner_name)
+        assert inner["start_time"] >= scope["start_time"], inner_name
+        assert inner["end_time"] <= scope["end_time"], inner_name
 
 
 @pytest.mark.asyncio
