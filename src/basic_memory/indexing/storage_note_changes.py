@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.project_partition import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
     RuntimeAcceptedProjectNoteChange,
     RuntimeProjectNoteOperation,
 )
@@ -35,16 +36,10 @@ from basic_memory.runtime.storage import (
     RuntimeContentType,
     RuntimeEntityId,
     RuntimeFilePath,
-    RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
     RuntimeNoteContentVersion,
     runtime_content_type_is_markdown,
 )
-
-# Journal source for changes observed in storage, so journal consumers can tell them
-# apart from API writes ("api", "mcp", ...) and API deletes ("delete_note",
-# "delete_directory").
-ACCEPTED_STORAGE_CHANGE_SOURCE: RuntimeNoteChangeSource = "storage"
 
 
 @dataclass(frozen=True, slots=True)

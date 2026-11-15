@@ -266,6 +266,18 @@ async def _execute_wiki_command(
         )
         if command == "rebuild" and not dry_run:
             await recover_project_materializations(project, session_maker)
+            # Trigger: files on disk that the project index has not seen yet.
+            # Why: indexing a note journals its storage change. Projecting before
+            #   that row exists would leave the generated logs one change behind
+            #   the journal, so status would report the fresh rebuild outdated.
+            # Outcome: plan from an index that already covers every file.
+            _require_successful_index(
+                await run_local_project_index_for_project(
+                    project,
+                    runtime_factory=LocalProjectIndexRuntimeFactory(),
+                    force_full=False,
+                )
+            )
         inspection = await inspect_local_wiki_projection(
             project,
             session_maker=session_maker,

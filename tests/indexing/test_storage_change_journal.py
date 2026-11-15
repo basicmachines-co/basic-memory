@@ -22,9 +22,10 @@ from basic_memory import db
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.index.local_wiki_projection import (
     LocalWikiState,
+    apply_local_wiki_projection,
     inspect_local_wiki_projection,
 )
-from basic_memory.indexing.storage_note_changes import ACCEPTED_STORAGE_CHANGE_SOURCE
+from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import AcceptedProjectNoteChange, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
@@ -34,17 +35,18 @@ NOTE_PATH = "notes/storage-note.md"
 RENAMED_PATH = "archive/storage-note.md"
 
 
-def note_markdown(body: str) -> str:
+def note_markdown(relative_path: str, body: str) -> str:
     # Complete frontmatter, so indexing never rewrites the file and every journal
     # row below comes from the storage change the test made.
+    permalink = relative_path.removesuffix(".md")
     return (
         "---\n"
-        "title: Storage Note\n"
+        f"title: {permalink.rsplit('/', 1)[-1]}\n"
         "type: note\n"
-        "permalink: notes/storage-note\n"
+        f"permalink: {permalink}\n"
         "---\n"
         "\n"
-        f"# Storage Note\n\n{body}\n"
+        f"# Note\n\n{body}\n"
     )
 
 
@@ -52,7 +54,7 @@ def write_note(project_root: Path, relative_path: str, body: str) -> None:
     path = project_root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     # Bytes, so the checksum is the same on every platform.
-    path.write_bytes(note_markdown(body).encode("utf-8"))
+    path.write_bytes(note_markdown(relative_path, body).encode("utf-8"))
 
 
 async def index_project(
@@ -193,3 +195,19 @@ async def test_wiki_projects_after_storage_only_changes(
     assert inspection.plan.result.pending_materialization == ()
     assert inspection.state is not LocalWikiState.partial
     assert inspection.plan.result.source_watermark == max(row.partition_position for row in rows)
+
+    # A local rebuild writes the generated files, then indexes them like any other
+    # storage change. Their journal rows are the projector's own output, so the
+    # projection must stay current instead of chasing its own writes.
+    await apply_local_wiki_projection(inspection, session_maker=session_maker)
+    await index_project(project_repository, session_maker, test_project)
+    generated_rows = await journal_after(
+        session_maker, test_project, max(row.partition_position for row in rows)
+    )
+    assert generated_rows
+    assert {Path(row.file_path).name for row in generated_rows} <= {"index.md", "log.md"}
+
+    after_rebuild = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+    assert after_rebuild.state is LocalWikiState.current
+    assert after_rebuild.plan.writes == ()

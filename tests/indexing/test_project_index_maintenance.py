@@ -34,7 +34,7 @@ from basic_memory.indexing.project_index_maintenance import (
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
-from basic_memory.indexing.storage_note_changes import ACCEPTED_STORAGE_CHANGE_SOURCE
+from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository

@@ -26,7 +26,6 @@ from basic_memory.indexing.note_content_reconciler import (
     reconcile_note_content_for_entity,
 )
 from basic_memory.indexing.storage_note_changes import (
-    ACCEPTED_STORAGE_CHANGE_SOURCE,
     StorageNoteChangeJournal,
 )
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
@@ -34,6 +33,7 @@ from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.note_content_repository import AcceptedNoteContentVersions
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.project_partition import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
     RuntimeAcceptedProjectNoteChange,
     RuntimeProjectNoteOperation,
 )

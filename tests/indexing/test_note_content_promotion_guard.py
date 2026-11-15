@@ -23,7 +23,7 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     local_promotion_confirmation_reader,
 )
-from basic_memory.indexing.storage_note_changes import ACCEPTED_STORAGE_CHANGE_SOURCE
+from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository

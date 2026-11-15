@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.storage_note_changes import (
-    ACCEPTED_STORAGE_CHANGE_SOURCE,
     StorageNoteChange,
     StorageNoteChangeJournal,
     StorageNoteIdentity,
@@ -26,6 +25,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.project_partition import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
     RuntimeAcceptedProjectNoteChange,
     RuntimeProjectNoteOperation,
 )
