@@ -8,9 +8,14 @@ module writes the matching row into the project change journal
 (the wiki projector, the OKF export, the project changes feed) then see storage
 changes in the same ordered record as API writes.
 
-Every row written here describes a change that is already in storage, so it is
-written with ``materialized_at`` set. A row left unsettled would defer every later
-wiki projection for the project.
+A row is settled (``materialized_at`` set) only when storage holds the bytes it
+describes. Almost every storage change is already in storage when its transaction
+commits, so its row is written settled. A move that also rewrites the note's
+permalink frontmatter is the exception: the database takes the planned bytes, and
+the file write runs only after the commit. That row starts unsettled, and the move
+settles it once the write lands. An unsettled row defers every later wiki
+projection for the project, so a row must never stay unsettled with nothing left
+to settle it.
 """
 
 from __future__ import annotations
@@ -21,8 +26,9 @@ from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory import db
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.project_partition import (
@@ -64,6 +70,10 @@ class StorageNoteChange:
     note: StorageNoteIdentity
     operation: RuntimeProjectNoteOperation
     previous_file_path: RuntimeFilePath | None = None
+    # True when the bytes this row names reach storage only after the transaction
+    # commits. The row starts unsettled, and the code that writes those bytes
+    # settles it with settle_stored_note_changes once storage holds them.
+    awaits_storage_write: bool = False
 
 
 async def load_storage_note_identities(
@@ -150,8 +160,17 @@ async def record_storage_note_changes(
     lock after its note_content and entity locks, and taking it earlier risks a
     deadlock on PostgreSQL against concurrent API writes.
 
-    Each row has ``source="storage"``, no actor, and ``materialized_at`` equal to its
-    ``accepted_at``. A batch with nothing to journal claims no position.
+    Each row has ``source="storage"`` and no actor. Its ``materialized_at`` equals
+    its ``accepted_at``, except for a change that awaits its storage write, whose
+    row starts unsettled. A batch with nothing to journal claims no position.
+
+    A settled `created`, `updated` or `deleted` row also settles older unsettled
+    rows of the same note, by the rule every journal settle follows: storage now
+    holds a newer version of the note, or the note is gone. This is how a move
+    whose frontmatter rewrite never reached storage stops deferring the wiki
+    projection: the next scan finds the file's real bytes and journals them. A
+    settled `moved` row settles nothing older. It shows only that the file moved,
+    not that an earlier API write to the note has reached storage.
     """
     journaled = [change for change in changes if _storage_note_is_journaled(change.note)]
     if not journaled:
@@ -183,8 +202,56 @@ async def record_storage_note_changes(
         )
         for offset, change in enumerate(journaled)
     )
-    await repository.record_accepted_note_changes(session, rows, materialized_at=accepted_at)
+    stored = tuple(
+        (row, change) for row, change in zip(rows, journaled) if not change.awaits_storage_write
+    )
+    await repository.record_accepted_note_changes(
+        session,
+        tuple(row for row, _ in stored),
+        materialized_at=accepted_at,
+    )
+    await repository.record_accepted_note_changes(
+        session,
+        tuple(row for row, change in zip(rows, journaled) if change.awaits_storage_write),
+    )
+    superseding_positions = [
+        row.partition_position
+        for row, change in stored
+        if change.operation is not RuntimeProjectNoteOperation.moved
+    ]
+    if superseding_positions:
+        await repository.mark_accepted_note_changes_materialized(
+            session,
+            project_id,
+            superseding_positions,
+            materialized_at=accepted_at,
+        )
     return rows
+
+
+async def settle_stored_note_changes(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    project_id: ProjectId,
+    partition_positions: Collection[int],
+    project_repository: ProjectRepository | None = None,
+) -> int:
+    """Settle journal rows whose bytes reached storage after their transaction committed.
+
+    Call this only once storage holds exactly the bytes each row names. Each row
+    settles by the shared journal rule, which also settles older unsettled rows of
+    the same note. Returns how many rows were stamped.
+    """
+    if not partition_positions:
+        return 0
+    repository = project_repository or ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        return await repository.mark_accepted_note_changes_materialized(
+            session,
+            project_id,
+            sorted(partition_positions),
+            materialized_at=datetime.now(tz=UTC),
+        )
 
 
 async def _note_is_in_journal(

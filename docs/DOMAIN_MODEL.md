@@ -164,10 +164,14 @@ watermark those records advance.
   arrive through storage (a file created, edited, moved or deleted in storage, then indexed)
   record theirs in `storage_note_changes` with source `storage`: a note-content bootstrap
   (`created`), a promotion of storage bytes to a new version (`updated`), and a project-index
-  move or delete (`moved`, `deleted`). Storage rows are written already settled, because the
-  change is already in storage. Reconciliation outcomes that accept no new content (a file
-  catching up to accepted content, a deferred or stale observation) write no row, and
-  non-Markdown files get no rows.
+  move or delete (`moved`, `deleted`). A storage row is settled only once storage holds the
+  bytes it names. Most storage changes are already in storage, so their rows are written
+  settled. A move that rewrites the note's permalink frontmatter writes the file after its
+  transaction commits, so its row starts unsettled and settles when that write lands. If the
+  write never lands, the next scan journals the file's real bytes, and that settled row
+  settles the move's row. Reconciliation outcomes that accept no new content (a file catching
+  up to accepted content, a deferred or stale observation) write no row, and non-Markdown files
+  get no rows.
 
 ### Event Surfaces And Derivation
 

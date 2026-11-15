@@ -34,6 +34,16 @@ from basic_memory.indexing.project_index_maintenance import (
     run_project_index_delete_batches,
     run_project_index_move_batches,
 )
+from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.indexing.wiki_projector import (
+    WIKI_PROJECTOR_VERSION,
+    WikiChangeOperation,
+    WikiProjectionReason,
+    WikiProjectionRequest,
+    WikiProjectionSnapshot,
+    WikiSourceChange,
+    plan_wiki_projection,
+)
 from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
@@ -289,17 +299,20 @@ class RecordingMoveContentUpdater:
         return self.updates.get(moved_file.entity_id)
 
     fail_writes: bool = False
+    # Checksum a write reports as stored, by entity id; the planned checksum otherwise.
+    stored_checksums: dict[int, str] = field(default_factory=dict)
 
     async def write_moved_file_content(
         self,
         moved_file: project_index_maintenance_module.ProjectIndexMovedFile,
         content_update: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate,
-    ) -> None:
+    ) -> str:
         if self.fail_writes:
             raise RuntimeError("simulated write failure")
         if self.events is not None:
             self.events.append("write")
         self.written.append((moved_file, content_update))
+        return self.stored_checksums.get(moved_file.entity_id, content_update.checksum)
 
 
 @dataclass(slots=True)
@@ -1854,3 +1867,215 @@ async def test_scan_delete_journal_rolls_back_with_failed_transaction(
     assert note.id in await _entity_ids(session_maker, test_project)
     assert await _journal(session_maker, test_project) == []
     assert await _head(session_maker, test_project) == 0
+
+
+# --- A move that rewrites frontmatter settles its journal row only once the write lands ---
+
+PLANNED_REWRITE = project_index_maintenance_module.ProjectIndexMovedFileContentUpdate(
+    permalink="archive/a",
+    checksum="rewritten-checksum",
+    markdown_content="---\npermalink: archive/a\n---\n\n# Note\n",
+)
+
+
+@dataclass(slots=True)
+class JournalObservingMoveContentUpdater:
+    """Plan one frontmatter rewrite, and record the journal as each post-commit write sees it."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project: Project
+    rewritten_entity_id: int
+    fail_writes: bool = False
+    stored_checksum: str | None = None
+    # (file_path, materialized) of every journal row, read when a write starts.
+    journal_during_write: list[list[tuple[str, bool]]] = field(default_factory=list)
+
+    async def plan_moved_file_content(
+        self,
+        session: AsyncSession,
+        moved_file: project_index_maintenance_module.ProjectIndexMovedFile,
+    ) -> project_index_maintenance_module.ProjectIndexMovedFileContentUpdate | None:
+        del session
+        if moved_file.entity_id != self.rewritten_entity_id:
+            return None
+        return PLANNED_REWRITE
+
+    async def write_moved_file_content(
+        self,
+        moved_file: project_index_maintenance_module.ProjectIndexMovedFile,
+        content_update: project_index_maintenance_module.ProjectIndexMovedFileContentUpdate,
+    ) -> str:
+        del moved_file
+        self.journal_during_write.append(
+            [
+                (row.file_path, row.materialized_at is not None)
+                for row in await _journal(self.session_maker, self.project)
+            ]
+        )
+        if self.fail_writes:
+            raise OSError("simulated disk full")
+        return self.stored_checksum or content_update.checksum
+
+
+def _projector_pending_positions(rows: Sequence[AcceptedProjectNoteChange]) -> tuple[int, ...]:
+    """Plan a full wiki rebuild over these journal rows; return the positions it waits on."""
+    head = max(row.partition_position for row in rows)
+    snapshot = WikiProjectionSnapshot(
+        project_id="project",
+        project_name="Project",
+        source_partition_position=head,
+        current_output_watermark=0,
+        source_accepted_at=max(row.accepted_at for row in rows),
+        notes=(),
+        changes=tuple(
+            WikiSourceChange(
+                partition_position=row.partition_position,
+                operation=WikiChangeOperation(row.operation),
+                path=row.file_path,
+                permalink=row.permalink,
+                previous_path=row.previous_file_path,
+                title=row.title,
+                accepted_at=row.accepted_at,
+                materialized=row.materialized_at is not None,
+                source=row.source,
+            )
+            for row in rows
+        ),
+    )
+    request = WikiProjectionRequest(
+        project_id="project",
+        through_partition_position=head,
+        projector_version=WIKI_PROJECTOR_VERSION,
+        reason=WikiProjectionReason.manual_rebuild,
+    )
+    return plan_wiki_projection(request, snapshot).result.pending_materialization
+
+
+async def _move_with_rewrite(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    **updater_options: Any,
+) -> tuple[Entity, Entity, JournalObservingMoveContentUpdater]:
+    """Move two notes in one batch; only notes/a.md gets a planned frontmatter rewrite."""
+    rewritten = await _create_indexed_file(
+        session_maker, project, file_path="notes/a.md", note_version=3
+    )
+    unchanged = await _create_indexed_file(
+        session_maker, project, file_path="notes/b.md", note_version=1
+    )
+    updater = JournalObservingMoveContentUpdater(
+        session_maker=session_maker,
+        project=project,
+        rewritten_entity_id=rewritten.id,
+        **updater_options,
+    )
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=project.id,
+        move_content_updater=updater,
+    )
+    result = await store.apply_project_index_move_batch(
+        ProjectIndexMoveBatch(
+            completed_batches=1,
+            targets=(
+                ProjectIndexMoveTarget("notes/a.md", "archive/a.md"),
+                ProjectIndexMoveTarget("notes/b.md", "archive/b.md"),
+            ),
+        )
+    )
+    assert result.updated_files == 2
+    return rewritten, unchanged, updater
+
+
+@pytest.mark.asyncio
+async def test_scan_move_settles_a_rewritten_note_row_only_after_its_write(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """The rewritten note's row is unsettled while its bytes are written, then settled."""
+    rewritten, unchanged, updater = await _move_with_rewrite(session_maker, test_project)
+
+    # During the post-commit write, only the move with unchanged content was settled.
+    assert updater.journal_during_write == [[("archive/a.md", False), ("archive/b.md", True)]]
+    rows = await _journal(session_maker, test_project)
+    assert [
+        (row.operation, row.entity_id, row.permalink, row.db_checksum, row.materialized_at is None)
+        for row in rows
+    ] == [
+        ("moved", rewritten.id, "archive/a", "rewritten-checksum", False),
+        ("moved", unchanged.id, "notes/b", "file-checksum", False),
+    ]
+    assert _projector_pending_positions(rows) == ()
+
+
+@pytest.mark.asyncio
+async def test_scan_move_keeps_a_rewritten_note_row_unsettled_when_its_write_fails(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """A failed rewrite never reports its checksum as materialized; the next scan settles it."""
+    rewritten, _, _ = await _move_with_rewrite(session_maker, test_project, fail_writes=True)
+
+    rows = await _journal(session_maker, test_project)
+    [moved_row] = [row for row in rows if row.entity_id == rewritten.id]
+    assert (moved_row.db_checksum, moved_row.materialized_at) == ("rewritten-checksum", None)
+    assert _projector_pending_positions(rows) == (moved_row.partition_position,)
+
+    # The next scan reads the file's real bytes, which never received the rewrite,
+    # and accepts them as a new version. That settled row settles the move too.
+    async with db.scoped_session(session_maker) as session:
+        entity = await session.get(Entity, rewritten.id)
+    assert entity is not None
+    result = await NoteContentReconciler(
+        note_content_repository=NoteContentRepository(project_id=test_project.id),
+        session_maker=session_maker,
+    ).reconcile(entity=entity, markdown_content="# Note\n", observed_at=None, source="index")
+
+    assert (result.status, result.generation) == ("current", 4)
+    rows = await _journal(session_maker, test_project)
+    assert [(row.operation, row.entity_id, row.db_version) for row in rows][-1] == (
+        "updated",
+        rewritten.id,
+        4,
+    )
+    assert all(row.materialized_at is not None for row in rows)
+    assert _projector_pending_positions(rows) == ()
+
+
+@pytest.mark.asyncio
+async def test_scan_move_keeps_a_rewritten_note_row_unsettled_when_storage_holds_other_bytes(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """A write that stores different bytes than planned, such as CRLF newlines, settles nothing."""
+    rewritten, _, _ = await _move_with_rewrite(
+        session_maker, test_project, stored_checksum="crlf-checksum"
+    )
+
+    [moved_row] = [
+        row for row in await _journal(session_maker, test_project) if row.entity_id == rewritten.id
+    ]
+    assert moved_row.materialized_at is None
+
+
+@pytest.mark.asyncio
+async def test_scan_move_logs_a_failed_settle_and_keeps_the_committed_move(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A database failure while settling is logged; the move stays committed and its row unsettled."""
+
+    async def fail_settle(*args: Any, **kwargs: Any) -> int:
+        del args, kwargs
+        raise RuntimeError("simulated database failure")
+
+    monkeypatch.setattr(project_index_maintenance_module, "settle_stored_note_changes", fail_settle)
+
+    rewritten, _, updater = await _move_with_rewrite(session_maker, test_project)
+
+    assert len(updater.journal_during_write) == 1
+    [moved_row] = [
+        row for row in await _journal(session_maker, test_project) if row.entity_id == rewritten.id
+    ]
+    assert (moved_row.file_path, moved_row.materialized_at) == ("archive/a.md", None)

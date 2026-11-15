@@ -19,6 +19,7 @@ from basic_memory.indexing.storage_note_changes import (
     StorageNoteIdentity,
     load_storage_note_identities,
     record_storage_note_changes,
+    settle_stored_note_changes,
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
@@ -311,6 +312,150 @@ async def test_identity_loader_reads_nothing_for_no_entities_or_vanished_entitie
             )
             == {}
         )
+
+
+# --- Rows whose bytes reach storage after the commit ---
+
+
+async def record_storage_rows(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    *changes: tuple[Entity, RuntimeProjectNoteOperation, bool],
+) -> tuple[RuntimeAcceptedProjectNoteChange, ...]:
+    """Journal (entity, operation, awaits_storage_write) storage changes in one transaction.
+
+    A move names a previous path under ``old/``.
+    """
+    async with db.scoped_session(session_maker) as session:
+        notes = await load_storage_note_identities(
+            session,
+            project_id=project.id,
+            entity_ids=[entity.id for entity, _, _ in changes],
+        )
+        return await record_storage_note_changes(
+            session,
+            project_id=project.id,
+            changes=[
+                StorageNoteChange(
+                    note=notes[entity.id],
+                    operation=operation,
+                    previous_file_path=(
+                        f"old/{entity.file_path}"
+                        if operation is RuntimeProjectNoteOperation.moved
+                        else None
+                    ),
+                    awaits_storage_write=awaits_storage_write,
+                )
+                for entity, operation, awaits_storage_write in changes
+            ],
+        )
+
+
+async def settled_positions(
+    session_maker: async_sessionmaker[AsyncSession], project: Project
+) -> list[tuple[int, bool]]:
+    return [
+        (row.partition_position, row.materialized_at is not None)
+        for row in await journal_rows(session_maker, project)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_writer_leaves_a_row_unsettled_while_its_bytes_await_a_storage_write(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    waiting = await create_entity(
+        session_maker, test_project, file_path="notes/a.md", permalink="notes/a"
+    )
+    stored = await create_entity(
+        session_maker, test_project, file_path="notes/b.md", permalink="notes/b"
+    )
+
+    written = await record_storage_rows(
+        session_maker,
+        test_project,
+        (waiting, RuntimeProjectNoteOperation.moved, True),
+        (stored, RuntimeProjectNoteOperation.moved, False),
+    )
+
+    assert [(row.partition_position, row.entity_id) for row in written] == [
+        (1, waiting.id),
+        (2, stored.id),
+    ]
+    assert await settled_positions(session_maker, test_project) == [(1, False), (2, True)]
+
+    # Once storage holds the bytes, the writer of those bytes settles the row.
+    assert (
+        await settle_stored_note_changes(
+            session_maker, project_id=test_project.id, partition_positions=()
+        )
+        == 0
+    )
+    assert (
+        await settle_stored_note_changes(
+            session_maker, project_id=test_project.id, partition_positions=(1,)
+        )
+        == 1
+    )
+    assert await settled_positions(session_maker, test_project) == [(1, True), (2, True)]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        RuntimeProjectNoteOperation.created,
+        RuntimeProjectNoteOperation.updated,
+        RuntimeProjectNoteOperation.deleted,
+    ],
+)
+@pytest.mark.asyncio
+async def test_settled_storage_version_or_delete_settles_older_rows_of_the_same_note(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+    operation: RuntimeProjectNoteOperation,
+) -> None:
+    """A newer settled row of a note settles its older unsettled rows; other notes keep theirs."""
+    note = await create_entity(
+        session_maker, test_project, file_path="notes/a.md", permalink="notes/a"
+    )
+    other = await create_entity(
+        session_maker, test_project, file_path="notes/b.md", permalink="notes/b"
+    )
+    await record_storage_rows(
+        session_maker,
+        test_project,
+        (note, RuntimeProjectNoteOperation.moved, True),
+        (other, RuntimeProjectNoteOperation.moved, True),
+    )
+    await record_api_row(session_maker, test_project, note, RuntimeProjectNoteOperation.updated)
+
+    await record_storage_rows(session_maker, test_project, (note, operation, False))
+
+    assert await settled_positions(session_maker, test_project) == [
+        (1, True),
+        (2, False),
+        (3, True),
+        (4, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_settled_storage_move_leaves_older_rows_of_the_note_unsettled(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """A move shows that a file moved, not that an earlier API write reached storage."""
+    note = await create_entity(
+        session_maker, test_project, file_path="notes/a.md", permalink="notes/a"
+    )
+    await record_api_row(session_maker, test_project, note, RuntimeProjectNoteOperation.updated)
+
+    await record_storage_rows(
+        session_maker, test_project, (note, RuntimeProjectNoteOperation.moved, False)
+    )
+
+    assert await settled_positions(session_maker, test_project) == [(1, False), (2, True)]
 
 
 # --- Versions accepted by note-content reconciliation ---
