@@ -22,6 +22,11 @@ from basic_memory.runtime.storage import (
 
 type ProjectPartitionPosition = int
 
+# Journal source for a note change that arrived through storage (a local editor,
+# WebDAV, an rclone bisync, a direct upload) and reached the database through the
+# index, not through an API write.
+ACCEPTED_STORAGE_CHANGE_SOURCE: RuntimeNoteChangeSource = "storage"
+
 
 class RuntimeProjectNoteOperation(StrEnum):
     """Accepted note operation recorded for project-wide consumers."""

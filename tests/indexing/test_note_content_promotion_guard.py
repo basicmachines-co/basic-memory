@@ -23,6 +23,7 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
     local_promotion_confirmation_reader,
 )
+from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -124,6 +125,16 @@ async def store_synced_note_content(
                 file_updated_at=ACCEPTED_AT,
             ),
         )
+
+
+async def journal_rows(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+) -> list[tuple[str, int | None, str]]:
+    """Return each journal row as (operation, db_version, source), in position order."""
+    async with db.scoped_session(session_maker) as session:
+        rows = await ProjectRepository().list_accepted_note_changes(session, project.id)
+    return [(row.operation, row.db_version, row.source) for row in rows]
 
 
 async def load_note_content(
@@ -248,7 +259,7 @@ async def test_note_without_accepted_history_promotes_as_before(
     test_project: Project,
     sample_entity: Entity,
 ) -> None:
-    """Notes only ever edited on disk have no journal rows, so nothing changes for them."""
+    """A note with no journal history promotes, and that version becomes its first row."""
     await store_synced_note_content(
         session_maker, test_project, sample_entity, db_version=1, content=FIRST_ACCEPTED
     )
@@ -263,6 +274,9 @@ async def test_note_without_accepted_history_promotes_as_before(
     assert record["extra"]["matched_accepted_db_version"] is None
     assert record["extra"]["newest_accepted_db_version"] is None
     assert record["extra"]["rollback_guard"] == "not_superseded"
+    assert await journal_rows(session_maker, test_project) == [
+        ("updated", 2, ACCEPTED_STORAGE_CHANGE_SOURCE)
+    ]
 
 
 # --- Promotions of superseded bytes ---
@@ -304,6 +318,10 @@ async def test_superseded_checksum_defers_without_authoritative_reader(
     assert extra["observed_at"] == OBSERVED_AT.isoformat()
     assert extra["source"] == "index"
     assert extra["rollback_guard"] == "no_authoritative_reader"
+    assert await journal_rows(session_maker, test_project) == [
+        ("updated", 1, "api"),
+        ("updated", 2, "api"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -333,6 +351,7 @@ async def test_superseded_checksum_defers_when_authoritative_read_disagrees(
     [record] = records
     assert record["level"].name == "WARNING"
     assert record["extra"]["rollback_guard"] == "storage_disagrees"
+    assert [row[2] for row in await journal_rows(session_maker, test_project)] == ["api", "api"]
 
 
 @pytest.mark.asyncio
@@ -392,6 +411,51 @@ async def test_superseded_checksum_promotes_when_authoritative_read_confirms(
     assert record["extra"]["new_db_version"] == 3
     assert record["extra"]["matched_accepted_db_version"] == 1
     assert record["extra"]["rollback_guard"] == "confirmed_by_storage"
+
+
+# --- Storage versions count as accepted history ---
+
+
+@pytest.mark.asyncio
+async def test_stale_read_of_api_version_after_journaled_storage_edit_defers(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+    sample_entity: Entity,
+) -> None:
+    """A storage edit's journal row makes the API version it replaced superseded.
+
+    Before storage versions were journaled, the newest accepted version in the
+    history was the API's version 2. A stale object-storage read of those bytes
+    after a storage edit matched the newest version, so it promoted and rolled
+    the note back.
+    """
+    await record_accepted_versions(
+        session_maker, test_project, sample_entity, [FIRST_ACCEPTED, SECOND_ACCEPTED]
+    )
+    await store_synced_note_content(
+        session_maker, test_project, sample_entity, db_version=2, content=SECOND_ACCEPTED
+    )
+    storage_edit, _ = await reconcile_observed(
+        session_maker, test_project, sample_entity, PROMOTED_EDIT
+    )
+    assert storage_edit.generation == 3
+
+    stale_read, records = await reconcile_observed(
+        session_maker, test_project, sample_entity, SECOND_ACCEPTED
+    )
+
+    assert stale_read.status == "deferred"
+    stored = await load_note_content(session_maker, test_project, sample_entity)
+    assert (stored.db_version, stored.markdown_content) == (3, PROMOTED_EDIT)
+    [record] = records
+    assert record["extra"]["matched_accepted_db_version"] == 2
+    assert record["extra"]["newest_accepted_db_version"] == 3
+    assert record["extra"]["rollback_guard"] == "no_authoritative_reader"
+    assert await journal_rows(session_maker, test_project) == [
+        ("updated", 1, "api"),
+        ("updated", 2, "api"),
+        ("updated", 3, ACCEPTED_STORAGE_CHANGE_SOURCE),
+    ]
 
 
 # --- Local filesystem keeps today's behaviour ---

@@ -52,7 +52,11 @@ class ProjectChange(BaseModel):
         description="When the change was accepted, as a timezone-aware timestamp.",
     )
     source: str = Field(
-        description="The write path that accepted the change, such as create_note or delete_note.",
+        description=(
+            "The write path that accepted the change, such as create_note or "
+            "delete_note, or storage for a change made straight in storage and "
+            "picked up by the project index."
+        ),
     )
     db_version: int | None = Field(
         default=None,

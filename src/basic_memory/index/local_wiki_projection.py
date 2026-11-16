@@ -31,6 +31,7 @@ from basic_memory.indexing.wiki_projector import (
     WikiReservedDocument,
     WikiSourceChange,
     WikiSourceNote,
+    is_projector_change,
     plan_wiki_projection,
 )
 from basic_memory.markdown import EntityParser
@@ -116,7 +117,7 @@ async def inspect_local_wiki_projection(
     plan = plan_wiki_projection(
         WikiProjectionRequest(
             project_id=project.external_id,
-            through_partition_position=project.partition_position,
+            through_partition_position=snapshot.source_partition_position,
             projector_version=WIKI_PROJECTOR_VERSION,
             reason=WikiProjectionReason.manual_rebuild,
         ),
@@ -345,7 +346,7 @@ async def _load_local_wiki_snapshot(
                 .order_by(AcceptedProjectNoteChange.partition_position)
             )
         ).scalars()
-        changes = tuple(
+        journal_changes = tuple(
             WikiSourceChange(
                 partition_position=change.partition_position,
                 operation=WikiChangeOperation(change.operation),
@@ -360,12 +361,24 @@ async def _load_local_wiki_snapshot(
             for change in change_rows
         )
 
+    # Trigger: a local rebuild writes index.md and log.md straight into the project
+    #   folder, and indexing them journals one storage row per generated file.
+    # Why: those rows are the projector's own output. Counting them would advance the
+    #   source watermark and acceptance time rendered into every generated file, so
+    #   each rebuild would leave the projection outdated for the next one.
+    # Outcome: the local snapshot ends at the last source change.
+    changes = tuple(
+        change
+        for change in journal_changes
+        if not is_projector_change(source=change.source, path=change.path)
+    )
+    source_partition_position = max((change.partition_position for change in changes), default=0)
     accepted_at = [change.accepted_at for change in changes]
     source_accepted_at = max((*accepted_at, ensure_timezone_aware(project.created_at)))
     return WikiProjectionSnapshot(
         project_id=project.external_id,
         project_name=project.name,
-        source_partition_position=project.partition_position,
+        source_partition_position=source_partition_position,
         # Local runs have no durable projection ledger. Full rebuilds compare
         # complete rendered bytes, so zero is the honest replay starting point.
         current_output_watermark=0,

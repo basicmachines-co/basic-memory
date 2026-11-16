@@ -1,0 +1,323 @@
+"""Journal rows for note changes that arrive through storage instead of the API.
+
+A note can change straight in storage: a WebDAV write, an rclone bisync, a direct
+upload, or a local editor. The index pipeline turns each such change into a database
+change: a new note_content version, a moved entity path, or a deleted entity. This
+module writes the matching row into the project change journal
+(``accepted_project_note_change``) inside that same transaction. Journal consumers
+(the wiki projector, the OKF export, the project changes feed) then see storage
+changes in the same ordered record as API writes.
+
+A row is settled (``materialized_at`` set) only when storage holds the bytes it
+describes. Almost every storage change is already in storage when its transaction
+commits, so its row is written settled. A move that also rewrites the note's
+permalink frontmatter is the exception: the database takes the planned bytes, and
+the file write runs only after the commit. That row starts unsettled, and the move
+settles it once the write lands. An unsettled row defers every later wiki
+projection for the project, so a row must never stay unsettled with nothing left
+to settle it.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.models import AcceptedProjectNoteChange, Entity, NoteContent, Project
+from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.runtime.project_partition import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
+from basic_memory.runtime.storage import (
+    NoteExternalId,
+    ProjectId,
+    RuntimeContentType,
+    RuntimeEntityId,
+    RuntimeFilePath,
+    RuntimeNoteContentChecksum,
+    RuntimeNoteContentVersion,
+    runtime_content_type_is_markdown,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class StorageNoteIdentity:
+    """What a journal row names about one note, read inside the change's transaction."""
+
+    entity_id: RuntimeEntityId
+    note_external_id: NoteExternalId
+    permalink: str | None
+    title: str
+    file_path: RuntimeFilePath
+    content_type: RuntimeContentType
+    # The note's accepted revision, or None for a file with no note_content row.
+    db_version: RuntimeNoteContentVersion | None
+    db_checksum: RuntimeNoteContentChecksum | None
+
+
+@dataclass(frozen=True, slots=True)
+class StorageNoteChange:
+    """One storage change waiting for its journal position."""
+
+    note: StorageNoteIdentity
+    operation: RuntimeProjectNoteOperation
+    previous_file_path: RuntimeFilePath | None = None
+    # True when the bytes this row names reach storage only after the transaction
+    # commits. The row starts unsettled, and the code that writes those bytes
+    # settles it with settle_stored_note_changes once storage holds them.
+    awaits_storage_write: bool = False
+
+
+async def load_storage_note_identities(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_ids: Collection[RuntimeEntityId],
+) -> dict[RuntimeEntityId, StorageNoteIdentity]:
+    """Read the journal identity and accepted revision of each entity that still exists.
+
+    A delete must call this before its DELETE runs: the entity row and its cascaded
+    note_content row are gone afterwards.
+    """
+    if not entity_ids:
+        return {}
+    result = await session.execute(
+        select(
+            Entity.id,
+            Entity.external_id,
+            Entity.permalink,
+            Entity.title,
+            Entity.file_path,
+            Entity.content_type,
+            NoteContent.db_version,
+            NoteContent.db_checksum,
+        )
+        .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+        .where(
+            Entity.project_id == project_id,
+            Entity.id.in_(sorted(set(entity_ids))),
+        )
+    )
+    identities: dict[RuntimeEntityId, StorageNoteIdentity] = {}
+    for row in result.mappings().all():
+        entity_id = int(row["id"])
+        permalink = row["permalink"]
+        db_version = row["db_version"]
+        db_checksum = row["db_checksum"]
+        identities[entity_id] = StorageNoteIdentity(
+            entity_id=entity_id,
+            note_external_id=str(row["external_id"]),
+            permalink=str(permalink) if permalink is not None else None,
+            title=str(row["title"]),
+            file_path=str(row["file_path"]),
+            content_type=str(row["content_type"]),
+            db_version=int(db_version) if db_version is not None else None,
+            db_checksum=str(db_checksum) if db_checksum is not None else None,
+        )
+    return identities
+
+
+def _storage_note_is_journaled(note: StorageNoteIdentity) -> bool:
+    """Return whether a storage change to this note gets a journal row."""
+    # Non-Markdown files get no row, matching what the API journals.
+    if not runtime_content_type_is_markdown(note):
+        return False
+    # Trigger: a Markdown note with no permalink. Databases from before permalinks
+    #   became mandatory can still hold them, and a journal row needs one.
+    # Why: the change is already in storage, so refusing it cannot undo it. Raising
+    #   would roll back the index transaction and fail the same file on every later
+    #   scan, which stalls indexing for the project.
+    # Outcome: the database change goes ahead without a journal row, with a warning.
+    if note.permalink is None:
+        logger.warning(
+            "Storage change to a note without a permalink gets no journal row",
+            entity_id=note.entity_id,
+            file_path=note.file_path,
+        )
+        return False
+    return True
+
+
+async def record_storage_note_changes(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    changes: Sequence[StorageNoteChange],
+    project_repository: ProjectRepository | None = None,
+) -> tuple[RuntimeAcceptedProjectNoteChange, ...]:
+    """Write one journal row per journaled change, at consecutive positions in ``changes`` order.
+
+    Call this as the last database write of the change's transaction. Claiming
+    positions locks the project row until commit. Every journal writer takes that
+    lock after its note_content and entity locks, and taking it earlier risks a
+    deadlock on PostgreSQL against concurrent API writes.
+
+    Each row has ``source="storage"`` and no actor. Its ``materialized_at`` equals
+    its ``accepted_at``, except for a change that awaits its storage write, whose
+    row starts unsettled. A batch with nothing to journal claims no position.
+
+    A settled `created`, `updated` or `deleted` row also settles older unsettled
+    rows of the same note, by the rule every journal settle follows: storage now
+    holds a newer version of the note, or the note is gone. This is how a move
+    whose frontmatter rewrite never reached storage stops deferring the wiki
+    projection: the next scan finds the file's real bytes and journals them. A
+    settled `moved` row settles nothing older. It shows only that the file moved,
+    not that an earlier API write to the note has reached storage.
+    """
+    journaled = [change for change in changes if _storage_note_is_journaled(change.note)]
+    if not journaled:
+        return ()
+
+    repository = project_repository or ProjectRepository()
+    project_external_id = (
+        await session.execute(select(Project.external_id).where(Project.id == project_id))
+    ).scalar_one()
+    head = await repository.advance_partition_position_by(session, project_id, len(journaled))
+    first_position = head - len(journaled) + 1
+    accepted_at = datetime.now(tz=UTC)
+    rows = tuple(
+        RuntimeAcceptedProjectNoteChange(
+            project_id=project_id,
+            project_external_id=str(project_external_id),
+            partition_position=first_position + offset,
+            entity_id=change.note.entity_id,
+            note_external_id=change.note.note_external_id,
+            permalink=str(change.note.permalink),
+            title=change.note.title,
+            operation=change.operation,
+            file_path=change.note.file_path,
+            previous_file_path=change.previous_file_path,
+            accepted_at=accepted_at,
+            source=ACCEPTED_STORAGE_CHANGE_SOURCE,
+            db_version=change.note.db_version,
+            db_checksum=change.note.db_checksum,
+        )
+        for offset, change in enumerate(journaled)
+    )
+    stored = tuple(
+        (row, change) for row, change in zip(rows, journaled) if not change.awaits_storage_write
+    )
+    await repository.record_accepted_note_changes(
+        session,
+        tuple(row for row, _ in stored),
+        materialized_at=accepted_at,
+    )
+    await repository.record_accepted_note_changes(
+        session,
+        tuple(row for row, change in zip(rows, journaled) if change.awaits_storage_write),
+    )
+    superseding_positions = [
+        row.partition_position
+        for row, change in stored
+        if change.operation is not RuntimeProjectNoteOperation.moved
+    ]
+    if superseding_positions:
+        await repository.mark_accepted_note_changes_materialized(
+            session,
+            project_id,
+            superseding_positions,
+            materialized_at=accepted_at,
+        )
+    return rows
+
+
+async def settle_stored_note_changes(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    project_id: ProjectId,
+    partition_positions: Collection[int],
+    project_repository: ProjectRepository | None = None,
+) -> int:
+    """Settle journal rows whose bytes reached storage after their transaction committed.
+
+    Call this only once storage holds exactly the bytes each row names. Each row
+    settles by the shared journal rule, which also settles older unsettled rows of
+    the same note. Returns how many rows were stamped.
+    """
+    if not partition_positions:
+        return 0
+    repository = project_repository or ProjectRepository()
+    async with db.scoped_session(session_maker) as session:
+        return await repository.mark_accepted_note_changes_materialized(
+            session,
+            project_id,
+            sorted(partition_positions),
+            materialized_at=datetime.now(tz=UTC),
+        )
+
+
+async def _note_is_in_journal(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    note_external_id: NoteExternalId,
+) -> bool:
+    """Return whether the journal already holds this note and its last row is not a delete."""
+    latest_operation = (
+        await session.execute(
+            select(AcceptedProjectNoteChange.operation)
+            .where(
+                AcceptedProjectNoteChange.project_id == project_id,
+                AcceptedProjectNoteChange.note_external_id == note_external_id,
+            )
+            .order_by(AcceptedProjectNoteChange.partition_position.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return latest_operation not in (None, RuntimeProjectNoteOperation.deleted.value)
+
+
+@dataclass(frozen=True, slots=True)
+class StorageNoteChangeJournal:
+    """Journal the note_content versions that note-content reconciliation accepts from storage."""
+
+    project_repository: ProjectRepository = field(default_factory=ProjectRepository)
+
+    async def record_storage_note_version(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: ProjectId,
+        entity_id: RuntimeEntityId,
+        first_version: bool,
+    ) -> RuntimeAcceptedProjectNoteChange | None:
+        """Write the journal row for the note_content version this transaction just accepted.
+
+        ``first_version`` is True when the transaction created the note's first
+        note_content row. That records ``created``, unless the journal already holds
+        the note: a note_content row that was lost and rebuilt records ``updated``, so
+        one note never has two live ``created`` rows. Every later version records
+        ``updated``. The row carries the db_version and db_checksum now in note_content.
+        """
+        notes = await load_storage_note_identities(
+            session,
+            project_id=project_id,
+            entity_ids=(entity_id,),
+        )
+        note = notes.get(entity_id)
+        if note is None:
+            raise RuntimeError(
+                f"Storage-accepted note_content has no entity row for entity_id={entity_id}"
+            )
+        operation = RuntimeProjectNoteOperation.updated
+        if first_version and not await _note_is_in_journal(
+            session,
+            project_id=project_id,
+            note_external_id=note.note_external_id,
+        ):
+            operation = RuntimeProjectNoteOperation.created
+        rows = await record_storage_note_changes(
+            session,
+            project_id=project_id,
+            changes=(StorageNoteChange(note=note, operation=operation),),
+            project_repository=self.project_repository,
+        )
+        return rows[0] if rows else None

@@ -33,6 +33,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     bootstrap_note_content_plan,
     plan_existing_note_content_reconciliation,
 )
+from basic_memory.indexing.storage_note_changes import StorageNoteChangeJournal
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.note_content_repository import AcceptedNoteContentVersions
@@ -40,6 +41,7 @@ from basic_memory.runtime.note_file_guards import (
     RuntimeFileChecksumReader,
     read_runtime_file_checksum,
 )
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeFilePath
 
 type NoteContentUpdatePlan = (
@@ -90,6 +92,20 @@ class NoteContentStore(NoteContentStateUpdateStore, Protocol):
         checksum: NoteContentChecksum,
     ) -> AcceptedNoteContentVersions:
         """Locate one checksum in the note's accepted-change history."""
+
+
+class NoteContentChangeJournal(Protocol):
+    """Journal capability for note_content versions accepted from storage."""
+
+    async def record_storage_note_version(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: ProjectId,
+        entity_id: RuntimeEntityId,
+        first_version: bool,
+    ) -> RuntimeAcceptedProjectNoteChange | None:
+        """Write the journal row for the version this transaction just accepted."""
 
 
 class NoteContentReconcileEntitySource(Protocol):
@@ -407,7 +423,13 @@ async def apply_note_content_update_plan(
 
 
 class NoteContentReconciler:
-    """Keep note_content aligned with one observed markdown file version."""
+    """Keep note_content aligned with one observed markdown file version.
+
+    A reconcile that accepts new content (a bootstrap of the note's first version,
+    or a promotion of storage bytes to a new version) also writes the matching
+    project change journal row in the same transaction. Outcomes that accept no new
+    content write no row.
+    """
 
     def __init__(
         self,
@@ -415,12 +437,16 @@ class NoteContentReconciler:
         note_content_repository: NoteContentStore,
         session_maker: async_sessionmaker[AsyncSession],
         promotion_confirmation_reader: RuntimeFileChecksumReader | None = None,
+        change_journal: NoteContentChangeJournal | None = None,
     ) -> None:
         self._note_content_repository = note_content_repository
         self._session_maker = session_maker
         # Authoritative storage re-read for promotions of superseded bytes. None
         # means storage reads cannot be trusted to confirm them, so they defer.
         self._promotion_confirmation_reader = promotion_confirmation_reader
+        # Every version accepted from storage gets a project change journal row in
+        # the same transaction, as API writes do.
+        self._change_journal = change_journal or StorageNoteChangeJournal()
 
     async def capture_anchor(self, entity_id: int | None) -> NoteContentReconciliationAnchor:
         """Capture the accepted state before storage bytes enter the index pipeline."""
@@ -499,7 +525,6 @@ class NoteContentReconciler:
                         session,
                         note_content_from_bootstrap(entity.id, bootstrap),
                     )
-                    return NoteContentReconciliationResult.current(bootstrap.db_version)
                 except IntegrityError:
                     # Concurrent repair/index workers can both observe a missing row before
                     # one wins the insert. Reload the winner and let normal reconciliation
@@ -520,6 +545,16 @@ class NoteContentReconciler:
                             entity.id,
                         )
                         return NoteContentReconciliationResult.stale()
+                else:
+                    # Journal only once the insert has succeeded, so the
+                    # IntegrityError rollback above never leaves a claimed position.
+                    await self._change_journal.record_storage_note_version(
+                        session,
+                        project_id=locked_entity.project_id,
+                        entity_id=entity.id,
+                        first_version=True,
+                    )
+                    return NoteContentReconciliationResult.current(bootstrap.db_version)
 
             # The plan is computed from the row read above; guard the write on
             # that db_version so a concurrent accepted API mutation that advanced
@@ -542,8 +577,8 @@ class NoteContentReconciler:
                 return NoteContentReconciliationResult.deferred()
 
             # Trigger: the planner wants the observed bytes to become a new accepted version.
-            # Why: a promotion records no accepted_project_note_change row and no live
-            #   update, so a stale storage read here would silently roll the note back.
+            # Why: a stale storage read here would silently roll the note back, and the
+            #   promotion would journal that rollback as the note's newest change.
             # Outcome: superseded bytes need authoritative confirmation or they defer;
             #   every applied or refused promotion leaves a structured log record.
             applied_promotion_record: NoteContentPromotionRecord | None = None
@@ -601,6 +636,15 @@ class NoteContentReconciler:
 
             if applied_promotion_record is not None:
                 log_note_content_promotion(applied_promotion_record)
+                # Journal last: the version-guarded write above already holds this
+                # note's note_content row, which every journal writer locks before
+                # the project row.
+                await self._change_journal.record_storage_note_version(
+                    session,
+                    project_id=note_content.project_id,
+                    entity_id=entity.id,
+                    first_version=False,
+                )
 
             if isinstance(plan, NoteContentFileObserved):
                 # The observed bytes describe an older materialized file while DB content is

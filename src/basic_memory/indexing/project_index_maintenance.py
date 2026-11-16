@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import override, Protocol
@@ -12,6 +12,13 @@ from sqlalchemy import RowMapping, bindparam, case, column, delete, select, tabl
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.indexing.storage_note_changes import (
+    StorageNoteChange,
+    StorageNoteIdentity,
+    load_storage_note_identities,
+    record_storage_note_changes,
+    settle_stored_note_changes,
+)
 from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.models.knowledge import file_path_conflict_columns
 from basic_memory.repository.accepted_note_vector_cleanup import (
@@ -22,6 +29,7 @@ from basic_memory.repository.relation_repository import (
     lock_note_content_before_entity_mutation,
 )
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
 from basic_memory.runtime.storage import ProjectExternalId, ProjectId
 
 
@@ -288,7 +296,9 @@ class ProjectIndexMoveContentUpdater(Protocol):
         self,
         moved_file: ProjectIndexMovedFile,
         content_update: ProjectIndexMovedFileContentUpdate,
-    ) -> None: ...
+    ) -> str:
+        """Write the planned bytes and return the checksum of what storage now holds."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -550,6 +560,11 @@ async def delete_project_index_entities(
     return relation_cleanup_entity_ids
 
 
+def _storage_note_path_order(note: StorageNoteIdentity) -> tuple[str, int]:
+    """Order a batch's journal rows by path, so a batch replays in a stable order."""
+    return (note.file_path, note.entity_id)
+
+
 @dataclass(frozen=True, slots=True)
 class _MoveReplacementScreen:
     """Move-batch rows that survive destination verification."""
@@ -807,7 +822,15 @@ class RepositoryProjectIndexMaintenanceStore:
 
             # --- Apply the batched replacement deletes and path/content updates ---
             relation_cleanup_entity_ids: frozenset[int] = frozenset()
+            awaiting_write_positions: dict[int, int] = {}
             if updated_old_paths:
+                # A replaced destination's rows are gone after the delete, so read
+                # what its journal row names first.
+                replaced_notes = await load_storage_note_identities(
+                    session,
+                    project_id=self.project_id,
+                    entity_ids=replaced_entity_ids,
+                )
                 relation_cleanup_entity_ids = await delete_project_index_entities(
                     session,
                     project_id=self.project_id,
@@ -824,9 +847,25 @@ class RepositoryProjectIndexMaintenanceStore:
                         content_updates_by_entity_id=content_plan.updates_by_entity_id,
                     ),
                 )
+                # Journal last: claiming positions locks the project row until commit.
+                awaiting_write_positions = await self._record_move_batch_changes(
+                    session,
+                    replaced_notes=replaced_notes.values(),
+                    previous_paths_by_entity_id={
+                        int(row["id"]): str(row["file_path"]) for row in target_rows
+                    },
+                    rewritten_entity_ids=content_plan.updates_by_entity_id.keys(),
+                )
 
         # --- Write planned file content after the commit ---
-        await self._write_moved_file_contents(content_plan)
+        stored_entity_ids = await self._write_moved_file_contents(content_plan)
+        await self._settle_stored_move_rows(
+            [
+                position
+                for entity_id, position in awaiting_write_positions.items()
+                if entity_id in stored_entity_ids
+            ]
+        )
 
         # --- Report per-path outcomes ---
         missing_paths = tuple(
@@ -965,7 +1004,54 @@ class RepositoryProjectIndexMaintenanceStore:
                 )
             )
 
-    async def _write_moved_file_contents(self, content_plan: _MoveContentPlan) -> None:
+    async def _record_move_batch_changes(
+        self,
+        session: AsyncSession,
+        *,
+        replaced_notes: Iterable[StorageNoteIdentity],
+        previous_paths_by_entity_id: Mapping[int, str],
+        rewritten_entity_ids: Collection[int],
+    ) -> dict[int, int]:
+        """Journal one batch's storage moves, after its replacement deletes.
+
+        A replaced destination's `deleted` row comes first, so a consumer that
+        replays by path never sees the moved note leave a path it just took. Each
+        `moved` row is read after the path updates, so it carries the new path and
+        any permalink and checksum that content repair stamped.
+
+        A moved note whose frontmatter rewrite is planned names bytes that reach
+        storage only after the commit, so its row starts unsettled. Returns the
+        journal position of each such row, keyed by entity id.
+        """
+        moved_notes = await load_storage_note_identities(
+            session,
+            project_id=self.project_id,
+            entity_ids=previous_paths_by_entity_id.keys(),
+        )
+        changes = [
+            StorageNoteChange(note=note, operation=RuntimeProjectNoteOperation.deleted)
+            for note in sorted(replaced_notes, key=_storage_note_path_order)
+        ]
+        changes.extend(
+            StorageNoteChange(
+                note=note,
+                operation=RuntimeProjectNoteOperation.moved,
+                previous_file_path=previous_paths_by_entity_id[note.entity_id],
+                awaits_storage_write=note.entity_id in rewritten_entity_ids,
+            )
+            for note in sorted(moved_notes.values(), key=_storage_note_path_order)
+        )
+        rows = await record_storage_note_changes(
+            session, project_id=self.project_id, changes=changes
+        )
+        return {
+            row.entity_id: row.partition_position
+            for row in rows
+            if row.operation is RuntimeProjectNoteOperation.moved
+            and row.entity_id in rewritten_entity_ids
+        }
+
+    async def _write_moved_file_contents(self, content_plan: _MoveContentPlan) -> frozenset[int]:
         """Write planned frontmatter rewrites once the batch has committed.
 
         Trigger: the batch committed with entity/note_content rows stamped from
@@ -976,21 +1062,70 @@ class RepositoryProjectIndexMaintenanceStore:
         Outcome: writes happen only after a successful commit; a failed write
         leaves the file with a checksum that no longer matches its rows, which
         the next scan reconciles as a modified file.
+
+        Returns the entity ids whose file now holds exactly the planned bytes.
         """
         if self.move_content_updater is None:
-            return
+            return frozenset()
+        stored_entity_ids: set[int] = set()
         for entity_id, content_update in content_plan.updates_by_entity_id.items():
+            moved_file = content_plan.moved_files_by_entity_id[entity_id]
             try:
-                await self.move_content_updater.write_moved_file_content(
-                    content_plan.moved_files_by_entity_id[entity_id],
+                stored_checksum = await self.move_content_updater.write_moved_file_content(
+                    moved_file,
                     content_update,
                 )
             except Exception as write_error:
                 logger.error(
                     "Failed to write moved file content after move batch commit",
-                    path=content_plan.moved_files_by_entity_id[entity_id].new_path,
+                    path=moved_file.new_path,
                     error=str(write_error),
                 )
+                continue
+            # Trigger: the write stored different bytes than planned, as a
+            #   platform newline translation would.
+            # Why: the moved row names the planned checksum, so settling it would
+            #   claim storage holds bytes it does not.
+            # Outcome: the row stays unsettled; the next scan indexes the stored
+            #   bytes as a new version, and that row settles this one.
+            if stored_checksum != content_update.checksum:
+                logger.warning(
+                    "Moved file content differs from the planned rewrite after move batch commit",
+                    path=moved_file.new_path,
+                    planned_checksum=content_update.checksum,
+                    stored_checksum=stored_checksum,
+                )
+                continue
+            stored_entity_ids.add(entity_id)
+        return frozenset(stored_entity_ids)
+
+    async def _settle_stored_move_rows(self, partition_positions: Sequence[int]) -> None:
+        """Settle the moved rows whose frontmatter rewrite reached storage.
+
+        Trigger: a rewrite landed after its batch committed with the row unsettled.
+        Why: the row now describes bytes in storage, and while it stays unsettled
+          it defers every later wiki projection for the project.
+        Outcome: the rows settle in one short transaction. A failure is logged and
+          the committed move still succeeds, as a failed write does. The row then
+          waits for the next storage change to the note, whose settled row settles
+          it; the local API write path has the same window between its file write
+          and its settle.
+        """
+        if not partition_positions:
+            return
+        try:
+            await settle_stored_note_changes(
+                self.session_maker,
+                project_id=self.project_id,
+                partition_positions=partition_positions,
+            )
+        except Exception as settle_error:
+            logger.error(
+                "Failed to settle moved note journal rows after their file writes",
+                project_id=self.project_id,
+                partition_positions=list(partition_positions),
+                error=str(settle_error),
+            )
 
     async def apply_project_index_delete_batch(
         self,
@@ -1125,11 +1260,27 @@ class RepositoryProjectIndexMaintenanceStore:
                 candidate.entity.entity_id for candidate in deletable_candidates
             )
 
+            # The entity rows are gone after the delete, so read what each journal
+            # row names first. The rows locked above keep these values current.
+            deleted_notes = await load_storage_note_identities(
+                session,
+                project_id=self.project_id,
+                entity_ids=deleted_entity_ids,
+            )
             relation_cleanup_entity_ids = await delete_project_index_entities(
                 session,
                 project_id=self.project_id,
                 entity_ids=deleted_entity_ids,
                 external_vector_cleaner=self.external_vector_cleaner,
+            )
+            # Journal last: claiming positions locks the project row until commit.
+            await record_storage_note_changes(
+                session,
+                project_id=self.project_id,
+                changes=[
+                    StorageNoteChange(note=note, operation=RuntimeProjectNoteOperation.deleted)
+                    for note in sorted(deleted_notes.values(), key=_storage_note_path_order)
+                ],
             )
 
         return ProjectIndexDeleteBatchResult(

@@ -14,7 +14,10 @@ import unicodedata
 
 from basic_memory.utils import portable_path_key
 from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
-from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+from basic_memory.runtime.project_partition import (
+    ACCEPTED_STORAGE_CHANGE_SOURCE,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 OKF_VERSION = "0.2"
@@ -316,7 +319,7 @@ def _plan_wiki_projection(
                 change
                 for change in snapshot.changes
                 if change.partition_position <= request.through_partition_position
-                and not _is_projector_change(change)
+                and not is_projector_change(source=change.source, path=change.path)
             ),
             key=lambda change: change.partition_position,
         )
@@ -356,7 +359,7 @@ def _plan_wiki_projection(
         request.reason == WikiProjectionReason.accepted_note
         and not new_changes
         and any(
-            _is_projector_change(change)
+            is_projector_change(source=change.source, path=change.path)
             and change.partition_position > snapshot.current_output_watermark
             for change in snapshot.changes
         )
@@ -789,10 +792,22 @@ def _render_document(
     return ("\n".join(frontmatter).rstrip() + "\n").encode("utf-8")
 
 
-def _is_projector_change(change: WikiSourceChange) -> bool:
+def is_projector_change(*, source: str, path: str) -> bool:
+    """Return whether a journal row records a generated index.md or log.md, not a source note.
+
+    Cloud publishes generated documents through the accepted write path under the
+    projector's own source. A local rebuild writes them straight into the project
+    folder and indexes them, so they come back as storage changes. Counting either
+    as a source change would put the projector's output into its own input: each
+    rebuild would journal new rows and change the next plan. A reserved file that a
+    person wrote stays covered, because reserved documents come from the file scan.
+
+    Every reader that separates note history from generated output uses this one
+    rule: the planner here, the local Wiki snapshot, and the OKF export's log.
+    """
     return (
-        change.source == WIKI_PROJECTOR_SOURCE
-        and PurePosixPath(change.path).name.lower() in RESERVED_WIKI_FILENAMES
+        source in (WIKI_PROJECTOR_SOURCE, ACCEPTED_STORAGE_CHANGE_SOURCE)
+        and PurePosixPath(path).name.lower() in RESERVED_WIKI_FILENAMES
     )
 
 

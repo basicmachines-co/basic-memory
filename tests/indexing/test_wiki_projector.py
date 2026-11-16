@@ -886,6 +886,59 @@ def test_projector_only_advance_repairs_missing_projection_document() -> None:
     assert "Updated [[index|Project 88]]" not in plan.writes[0].content.decode()
 
 
+def test_storage_change_to_a_source_note_projects_without_deferral() -> None:
+    """Storage rows are written settled, so a run whose only new row is one still projects."""
+    snapshot = _snapshot()
+    storage_change = replace(snapshot.changes[0], source="storage")
+
+    plan = plan_wiki_projection(_request(), replace(snapshot, changes=(storage_change,)))
+
+    assert plan.result.pending_materialization == ()
+    assert plan.result.output_watermark == 3
+    guides_log = next(write for write in plan.writes if write.path == "guides/log.md")
+    assert "Updated [[guides/setup|Setup]]" in guides_log.content.decode()
+
+
+def test_storage_rows_for_locally_written_projection_documents_are_not_source_changes() -> None:
+    """A local rebuild writes index.md and log.md, and indexing journals them as storage rows.
+
+    Those rows are the projector's own output coming back. Counted as source changes,
+    they would claim the generated documents' identities and change the next plan.
+    """
+    rebuild = _request(reason=WikiProjectionReason.manual_rebuild, scopes=())
+    initial_snapshot = _snapshot()
+    initial = plan_wiki_projection(rebuild, initial_snapshot)
+    written_back = tuple(
+        WikiSourceChange(
+            partition_position=4 + offset,
+            operation=WikiChangeOperation.created,
+            path=write.path,
+            permalink=write.path.removesuffix(".md"),
+            title="Written Back",
+            accepted_at=ACCEPTED_AT,
+            materialized=True,
+            source="storage",
+        )
+        for offset, write in enumerate(initial.writes)
+    )
+    head = 3 + len(written_back)
+    snapshot = replace(
+        initial_snapshot,
+        source_partition_position=head,
+        changes=(*initial_snapshot.changes, *written_back),
+        reserved_documents=tuple(_reserved(write.path, write.content) for write in initial.writes),
+    )
+
+    plan = plan_wiki_projection(replace(rebuild, through_partition_position=head), snapshot)
+
+    assert plan.result.identity_collisions == ()
+    assert plan.result.conflicts == ()
+    # A rebuild at the new watermark rewrites only projection metadata: no log
+    # lists a generated document as a change.
+    assert plan.writes
+    assert all(b"Written Back" not in write.content for write in plan.writes)
+
+
 def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
     changed_note = WikiSourceNote(
         path="secret/note.md",

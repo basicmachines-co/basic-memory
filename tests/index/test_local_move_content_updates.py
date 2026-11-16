@@ -152,6 +152,9 @@ async def test_plan_moved_file_content_plans_without_writing_then_write_persists
     # Planning left the file untouched.
     assert file_path.read_text(encoding="utf-8") == original_content
 
-    await updater.write_moved_file_content(moved_file, content_update)
+    stored_checksum = await updater.write_moved_file_content(moved_file, content_update)
 
     assert file_path.read_text(encoding="utf-8") == content_update.markdown_content
+    # The write reports the checksum of the stored bytes. On Windows they carry CRLF
+    # newlines and differ from the plan, so compare against the file itself.
+    assert stored_checksum == await compute_checksum(file_path.read_bytes())

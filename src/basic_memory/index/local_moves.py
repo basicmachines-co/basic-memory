@@ -158,8 +158,10 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
         self,
         moved_file: ProjectIndexMovedFile,
         content_update: ProjectIndexMovedFileContentUpdate,
-    ) -> None:
-        await self.file_service.write_file(moved_file.new_path, content_update.markdown_content)
+    ) -> str:
+        return await self.file_service.write_file(
+            moved_file.new_path, content_update.markdown_content
+        )
 
 
 @dataclass(frozen=True, slots=True)
