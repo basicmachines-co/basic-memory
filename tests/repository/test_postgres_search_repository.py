@@ -285,9 +285,12 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     indexed = compile_fts_filter(
         repo.scope, PreparedSearchQuery(search_text="coffee"), allow_relaxed=True
     )
-    assert "FROM search_index AS candidate_parent" in indexed.from_clause
-    assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed.from_clause
-    assert "querytree(to_tsquery('english', :text))" in indexed.from_clause
+    # One word takes the GIN operand path: parent and chunk index scans, no per-row
+    # chunk lookups.
+    assert "bool_or(operand = 0) AS operand_0" in indexed.from_clause
+    assert "FROM search_index_fts_chunks WHERE" in indexed.from_clause
+    assert "querytree(to_tsquery('english', :text)) = 'T'" in indexed.from_clause
+    assert "operand_chunk" not in indexed.from_clause
     assert indexed.params["text_candidate"] == "coffee:*"
 
     filtered = compile_fts_filter(
