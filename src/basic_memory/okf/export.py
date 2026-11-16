@@ -16,6 +16,7 @@ async def recorded_history(
 ) -> tuple[RecordedChange, ...]:
     """Read available journal evidence without indexing or repairing source files."""
     from basic_memory import db
+    from basic_memory.indexing.wiki_projector import is_projector_change
     from basic_memory.models.project import Project
     from basic_memory.repository.project_repository import ProjectRepository
     from basic_memory.utils import ensure_timezone_aware
@@ -65,6 +66,11 @@ async def recorded_history(
         changes = await repository.list_accepted_note_changes(
             session, project_id, through_position=partition_position
         )
+        # Generated index.md and log.md pages are projector output, not note history.
+        # Cloud journals them under the projector's source; a local rebuild writes
+        # them to disk and the index journals them as storage changes. Share the
+        # projector's own rule so the exported log lists the same changes the
+        # Wiki log does, and snapshot_files already leaves those pages out.
         return tuple(
             RecordedChange(
                 change.partition_position,
@@ -73,7 +79,7 @@ async def recorded_history(
                 ensure_timezone_aware(change.accepted_at),
             )
             for change in changes
-            if change.source != "wiki_projector"
+            if not is_projector_change(source=change.source, path=change.file_path)
         )
 
 

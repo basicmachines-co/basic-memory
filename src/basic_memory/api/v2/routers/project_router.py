@@ -414,15 +414,24 @@ async def list_project_changes(
       the project database is restored from a backup. Discard the cursor and
       resync the project from scratch.
 
-    The journal records only note changes accepted through this API's note write
-    routes. It does not record yet:
+    The journal records changes to Markdown notes, however they arrive. `source`
+    says how:
 
-    - files written straight to storage instead of through the API, such as
-      WebDAV, sync tools and direct uploads;
-    - notes removed by deleting a whole folder;
-    - files that are not Markdown notes.
+    - A write through this API's note routes carries the route's name, such as
+      `create_note` or `delete_note`.
+    - Each note removed by deleting a whole folder is a `deleted` change with
+      source `delete_directory`.
+    - A note created, edited, renamed or deleted straight in storage (WebDAV,
+      sync tools, direct uploads, a local editor) carries source `storage`. It
+      appears when the project index picks the change up, not when the file is
+      written. A rename that keeps the note's content is one `moved` change.
+      A rename that also changes the content is a `deleted` change for the old
+      path and a `created` change for the new one.
+    - Generated Wiki pages (`index.md` and `log.md`) appear too: with source
+      `wiki_projector`, or `storage` when a local rebuild wrote them to disk.
 
-    A client that must see those changes still needs a full reload.
+    Files that are not Markdown notes, such as images and PDFs, are not recorded
+    yet. A client that must see those still needs a full reload.
     """
     logger.debug(
         f"API v2 request: list_project_changes for project_id={project_id} "

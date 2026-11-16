@@ -1,21 +1,26 @@
 """The project change journal route: GET /v2/projects/{project_id}/changes.
 
 Each accepted note write takes the next position in the project's journal. These
-tests drive real writes through the API and read them back through the route.
+tests drive real writes, through the API or straight into storage, and read them
+back through the route.
 """
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.api.v2.routers.project_router import router as project_router
+from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.models import Project
 from basic_memory.read_cache.routes import _ReadThrough
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas.v2 import ProjectChangesResponse
 
 
@@ -279,3 +284,49 @@ def test_changes_openapi_describes_cursor_rules(app: FastAPI) -> None:
     for phrase in ("head", "next_after", "has_more", "cursor_ahead_of_head", "Markdown"):
         assert phrase in description
     assert "409" in operation["responses"]
+
+
+@pytest.mark.asyncio
+async def test_changes_lists_a_note_written_straight_to_storage(
+    client: AsyncClient,
+    v2_project_url: str,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    # A file written to the project folder with no API call, as WebDAV, a sync
+    # tool or a local editor would, reaches the journal once the index runs.
+    note = Path(test_project.path) / "notes" / "from-storage.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_bytes(
+        b"---\ntitle: from-storage\ntype: note\npermalink: notes/from-storage\n---\n\n# Note\n"
+    )
+    await LocalProjectIndexRunner(
+        project_repository=project_repository, session_maker=session_maker
+    ).index_project(test_project.id, force_full=True)
+
+    page = await _changes(client, v2_project_url)
+
+    [change] = page.changes
+    assert (change.operation, change.file_path, change.source) == (
+        "created",
+        "notes/from-storage.md",
+        "storage",
+    )
+    assert change.db_version == 1
+    assert change.actor_kind is None
+
+
+def test_changes_openapi_describes_storage_changes(app: FastAPI) -> None:
+    """The published contract says storage changes are recorded, and how to recognize them."""
+    schema = app.openapi()
+    # The description keeps the docstring's line wrapping; compare words, not layout.
+    description = " ".join(
+        schema["paths"]["/v2/projects/{project_id}/changes"]["get"]["description"].split()
+    )
+
+    assert "carries source `storage`" in description
+    assert "source `delete_directory`" in description
+    assert "not when the file is written" in description
+    source_field = schema["components"]["schemas"]["ProjectChange"]["properties"]["source"]
+    assert "storage" in source_field["description"]

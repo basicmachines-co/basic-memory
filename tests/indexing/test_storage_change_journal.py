@@ -19,12 +19,15 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.index.local_wiki_projection import (
     LocalWikiState,
     apply_local_wiki_projection,
     inspect_local_wiki_projection,
 )
+from basic_memory.okf.export import recorded_history
+from basic_memory.okf.render import ExportSnapshot, render_bundle
 from basic_memory.runtime.project_partition import ACCEPTED_STORAGE_CHANGE_SOURCE
 from basic_memory.models import AcceptedProjectNoteChange, NoteContent, Project
 from basic_memory.repository.entity_repository import EntityRepository
@@ -211,3 +214,48 @@ async def test_wiki_projects_after_storage_only_changes(
 
     assert after_rebuild.state is LocalWikiState.current
     assert after_rebuild.plan.writes == ()
+
+
+@pytest.mark.asyncio
+async def test_okf_history_keeps_storage_edits_and_omits_generated_wiki_pages(
+    app_config: BasicMemoryConfig,
+    config_home: Path,
+    project_repository: ProjectRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    """The exported log lists notes edited in storage, never the pages a local rebuild wrote.
+
+    A local rebuild writes index.md and log.md to disk, and indexing journals them as
+    storage rows. The OKF export must treat them as projector output, as the wiki
+    planner does, or its log presents generated pages as note history.
+    """
+    write_note(config_home, NOTE_PATH, "First version.")
+    await index_project(project_repository, session_maker, test_project)
+    write_note(config_home, NOTE_PATH, "Edited in storage.")
+    await index_project(project_repository, session_maker, test_project)
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    await apply_local_wiki_projection(inspection, session_maker=session_maker)
+    await index_project(project_repository, session_maker, test_project)
+
+    rows = await journal_after(session_maker, test_project, 0)
+    generated = [row for row in rows if Path(row.file_path).name in {"index.md", "log.md"}]
+    assert generated
+    assert {row.source for row in generated} == {ACCEPTED_STORAGE_CHANGE_SOURCE}
+
+    history = await recorded_history(app_config, test_project.name, config_home.resolve())
+
+    assert [(change.operation, change.path) for change in history] == [
+        ("created", NOTE_PATH),
+        ("updated", NOTE_PATH),
+    ]
+    [log] = [
+        file
+        for file in render_bundle(ExportSnapshot(test_project.name, (), history))
+        if file.path == "log.md"
+    ]
+    entries = [line for line in log.content.decode("utf-8").splitlines() if line.startswith("- ")]
+    assert entries == [
+        f"- updated: [{NOTE_PATH}](/{NOTE_PATH})",
+        f"- created: [{NOTE_PATH}](/{NOTE_PATH})",
+    ]

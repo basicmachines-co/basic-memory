@@ -172,6 +172,11 @@ watermark those records advance.
   settles the move's row. Reconciliation outcomes that accept no new content (a file catching
   up to accepted content, a deferred or stale observation) write no row, and non-Markdown files
   get no rows.
+- Generated Wiki pages are journaled too. Cloud accepts its generated `index.md` and `log.md`
+  under source `wiki_projector`. A local rebuild writes them to disk, so indexing journals them
+  under source `storage`. Consumers that present note history (the Wiki planner, the local Wiki
+  snapshot, the OKF export's log) leave both out through one rule, `is_projector_change` in
+  `indexing/wiki_projector.py`.
 
 ### Event Surfaces And Derivation
 

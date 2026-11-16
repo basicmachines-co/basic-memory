@@ -227,6 +227,58 @@ async def test_journal_materialization_and_identity(app_config, test_project, en
 
 
 @pytest.mark.asyncio
+async def test_history_keeps_note_edits_and_omits_generated_wiki_pages(
+    app_config, test_project, engine_factory
+):
+    """Generated index.md and log.md rows are projector output, whichever writer journaled them.
+
+    Cloud journals generated pages under the projector's own source. A local rebuild
+    writes them to disk, and the index journals them as storage changes. Neither is
+    note history, while a note edited straight in storage is.
+    """
+    _, session_maker = engine_factory
+    root = Path(test_project.path).resolve()
+    accepted_at = datetime(2026, 9, 14, tzinfo=UTC)
+    rows = [
+        ("storage", "created", "guides/start.md"),
+        ("storage", "created", "index.md"),
+        ("storage", "created", "guides/log.md"),
+        ("storage", "updated", "guides/start.md"),
+        ("wiki_projector", "updated", "log.md"),
+        ("storage", "moved", "archive/start.md"),
+    ]
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(type(test_project), test_project.id)
+        assert project is not None
+        project.partition_position = len(rows)
+        for position, (source, operation, file_path) in enumerate(rows, start=1):
+            session.add(
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=position,
+                    entity_id=position,
+                    note_external_id=f"note-{position}",
+                    permalink=file_path.removesuffix(".md"),
+                    title=Path(file_path).stem,
+                    operation=operation,
+                    file_path=file_path,
+                    accepted_at=accepted_at,
+                    source=source,
+                    materialized_at=accepted_at,
+                )
+            )
+
+    history = await recorded_history(app_config, test_project.name, root)
+
+    assert [(change.position, change.operation, change.path) for change in history] == [
+        (1, "created", "guides/start.md"),
+        (4, "updated", "guides/start.md"),
+        (6, "moved", "archive/start.md"),
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("partial_journal", [False, True])
 async def test_pre_journal_database_exports_without_migration(
     source_config, tmp_path, monkeypatch, partial_journal

@@ -367,7 +367,11 @@ async def _load_local_wiki_snapshot(
     #   source watermark and acceptance time rendered into every generated file, so
     #   each rebuild would leave the projection outdated for the next one.
     # Outcome: the local snapshot ends at the last source change.
-    changes = tuple(change for change in journal_changes if not is_projector_change(change))
+    changes = tuple(
+        change
+        for change in journal_changes
+        if not is_projector_change(source=change.source, path=change.path)
+    )
     source_partition_position = max((change.partition_position for change in changes), default=0)
     accepted_at = [change.accepted_at for change in changes]
     source_accepted_at = max((*accepted_at, ensure_timezone_aware(project.created_at)))
