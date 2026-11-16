@@ -584,15 +584,20 @@ def compile_fts_filter(
             if candidate_operands:
                 params["text_candidate"] = " | ".join(candidate_operands)
                 from_clause = _word_candidate_from_clause(scope, params)
-            # Multi-word queries otherwise detoast the same candidate's chunks once
-            # per operand, again for ranking, and again for count. Collect presence
-            # from GIN instead. Single-word and mixed-script queries keep their
-            # existing candidate path and parent short-circuit behavior.
+            # Trigger: a word query with 1 to 128 operands and no script grams.
+            # Why: the single-vector path tests each candidate with a correlated
+            #   EXISTS into the chunk table per operand, and repeats that expression
+            #   in the filter and twice in the score. Even a one-word query paid for
+            #   three chunk probes per candidate row, and for planning them.
+            # Outcome: operand presence comes from GIN scans of the parent and chunk
+            #   indexes, and the query-sized vector is built once per row inside the
+            #   fenced subquery. It tests the same columns with the same operands, so
+            #   matches and scores are unchanged.
             # Each indexed operand adds a projected column and two UNION branches.
             # Bound query width well below PostgreSQL's 1664-column limit; longer
-            # pasted queries retain the existing single-vector candidate path.
+            # pasted queries and mixed-script queries keep the single-vector path.
             if (
-                1 < len(candidate_operands) <= _MAX_INDEXED_OPERANDS
+                1 <= len(candidate_operands) <= _MAX_INDEXED_OPERANDS
                 and not script_query.gram_phrases
             ):
                 from_clause = _word_operand_from_clause(scope, params, list(candidate_operands))
@@ -925,13 +930,20 @@ class PostgresFts:
             else snippet_length_columns("search_index")
         )
 
+        # Trigger: rows tie on score, for example every row of a negated query.
+        # Why: an entity, an observation and a relation can share one numeric id, and
+        #   rows from two projects can share an id and type, so id alone left their
+        #   order to the plan. A different plan could reorder them, and OFFSET pages
+        #   could repeat or skip a row.
+        # Outcome: the full search_index key (id, type, project_id) ends the sort,
+        #   so tied rows always come back in one order.
         sql = f"""
             SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
             ORDER BY {compiled.leading_order_by}score DESC {compiled.order_by_clause},
-                search_index.id ASC
+                search_index.id ASC, search_index.type ASC, search_index.project_id ASC
             LIMIT :limit
             OFFSET :offset
         """
