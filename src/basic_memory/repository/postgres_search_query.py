@@ -930,13 +930,20 @@ class PostgresFts:
             else snippet_length_columns("search_index")
         )
 
+        # Trigger: rows tie on score, for example every row of a negated query.
+        # Why: an entity, an observation and a relation can share one numeric id, and
+        #   rows from two projects can share an id and type, so id alone left their
+        #   order to the plan. A different plan could reorder them, and OFFSET pages
+        #   could repeat or skip a row.
+        # Outcome: the full search_index key (id, type, project_id) ends the sort,
+        #   so tied rows always come back in one order.
         sql = f"""
             SELECT{_result_columns(text_columns)},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
             ORDER BY {compiled.leading_order_by}score DESC {compiled.order_by_clause},
-                search_index.id ASC
+                search_index.id ASC, search_index.type ASC, search_index.project_id ASC
             LIMIT :limit
             OFFSET :offset
         """

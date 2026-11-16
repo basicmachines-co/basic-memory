@@ -263,3 +263,54 @@ async def test_one_word_ranking_keeps_order_and_scores(
     rows = await fts.search(ranking_scope, prepared, limit=100, offset=0)
     assert [row.id for row in rows] == [row_id for row_id, _ in expected]
     assert [row.score for row in rows] == pytest.approx([score for _, score in expected], abs=1e-6)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["NOT coffee", "NOT coffee kettle", "kettle"])
+async def test_tied_scores_sort_by_full_row_key(
+    db_backend, session_maker, test_project, project_repository, query: str
+) -> None:
+    """Rows that tie on score and id still come back in one order, page after page.
+
+    Every row here scores the same for each query: a negated query scores 0, and every
+    title is the same plain "kettle". An entity, an observation and a relation share
+    id 7 in both projects, so only type and project can order them. They are inserted
+    in reverse key order, so a sort on id alone would tend to return them as stored.
+    """
+    if db_backend != "postgres":
+        pytest.skip("Requires PostgreSQL")
+    async with db.scoped_session(session_maker) as session:
+        other = await project_repository.create(
+            session, {"name": "tie-other", "path": "/tmp/tie-other", "is_active": True}
+        )
+        first, second = sorted([test_project.id, other.id])
+        stored = [
+            (row_id, row_type, project_id)
+            for row_id in (8, 7)
+            for row_type in ("relation", "observation", "entity")
+            for project_id in (second, first)
+        ]
+        for row_id, row_type, project_id in stored:
+            await session.execute(
+                text("""
+                    INSERT INTO search_index(
+                        id, project_id, type, title, entity_id, created_at, updated_at
+                    ) VALUES (:id, :project, :type, 'kettle', :id, now(), now())
+                """),
+                {"id": row_id, "project": project_id, "type": row_type},
+            )
+    scope = ProjectScope.of([first, second])
+    fts = PostgresFts(session_maker)
+    prepared = PreparedSearchQuery(search_text=query)
+
+    rows = await fts.search(scope, prepared, limit=100, offset=0)
+    assert [(row.id, row.type, row.project_id) for row in rows] == sorted(stored)
+    assert len({row.score for row in rows}) == 1
+
+    # Pages of a tied result must neither repeat nor skip a row.
+    paged = [
+        row
+        for offset in range(0, len(stored), 5)
+        for row in await fts.search(scope, prepared, limit=5, offset=offset)
+    ]
+    assert [(row.id, row.type, row.project_id) for row in paged] == sorted(stored)
