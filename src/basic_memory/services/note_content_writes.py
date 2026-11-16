@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
+from types import TracebackType
 from typing import Literal, Protocol, assert_never
 from uuid import UUID
 
+import logfire
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -165,13 +167,43 @@ def accepted_note_mutation_actor(
     )
 
 
+class _TimedCommit[T]:
+    """Time a transaction context's commit in its own span.
+
+    A transaction context commits when its block exits cleanly and rolls back
+    when the block raises. Only the clean exit is a commit, so only it is timed;
+    a rollback exits exactly as before.
+    """
+
+    def __init__(self, transaction: AbstractAsyncContextManager[T]) -> None:
+        self._transaction = transaction
+
+    async def __aenter__(self) -> T:
+        return await self._transaction.__aenter__()
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        if exc_type is not None:
+            return await self._transaction.__aexit__(exc_type, exc, traceback)
+        with logfire.span("note write commits accepted transaction"):
+            return await self._transaction.__aexit__(None, None, None)
+
+
 @asynccontextmanager
 async def accepted_note_transaction(
     session_maker: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[AsyncSession]:
-    """Open one DB transaction for an accepted note mutation."""
+    """Open one DB transaction for an accepted note mutation.
+
+    The commit is timed in its own span, so a slow commit can be told apart
+    from the mutation work done before it.
+    """
     async with session_maker() as session:
-        async with session.begin():
+        async with _TimedCommit(session.begin()):
             yield session
 
 
@@ -269,13 +301,23 @@ class NoteContentMutationService:
         cache_change: ReadCacheChangeRecorder,
     ) -> AcceptedNoteChange:
         """Run post-commit derived work, record what it made stale, expose the response."""
+        with logfire.span("note write finishes accepted mutation"):
+            return await self._finish_mutation_steps(result, cache_change)
+
+    async def _finish_mutation_steps(
+        self,
+        result: AcceptedNoteMutationResult,
+        cache_change: ReadCacheChangeRecorder,
+    ) -> AcceptedNoteChange:
+        """The post-commit steps `_finish_mutation` times as one span."""
         if result.search_row is not None:
             try:
-                await refresh_accepted_note_search_index(
-                    self.session_maker,
-                    row=result.search_row,
-                    repositories=self.mutation_dependencies.write_repositories,
-                )
+                with logfire.span("note write refreshes search index"):
+                    await refresh_accepted_note_search_index(
+                        self.session_maker,
+                        row=result.search_row,
+                        repositories=self.mutation_dependencies.write_repositories,
+                    )
             except Exception:
                 # Trigger: the hot search refresh fails after accepted content committed.
                 # Why: the row is derived state, rewritten by the note's materialization
@@ -288,7 +330,10 @@ class NoteContentMutationService:
                     result.search_row.entity_id,
                 )
         try:
-            detached_note_ids = await self._publish_relation_generation(result.relation_publication)
+            with logfire.span("note write publishes relations"):
+                detached_note_ids = await self._publish_relation_generation(
+                    result.relation_publication
+                )
         except Exception:
             # Publication may have rewritten some links before failing, and which
             # notes it reached is unknown.
@@ -305,12 +350,14 @@ class NoteContentMutationService:
                 publication.generation if publication is not None else None,
             )
         else:
+            with logfire.span("note write reads linked notes"):
+                linked_note_ids = await self._linked_note_ids(result)
             cache_change.record(
                 accepted_note_read_cache_change(
                     result.change.project_change,
                     identity_changed=result.identity_changed,
                     detached_note_ids=detached_note_ids,
-                    linked_note_ids=await self._linked_note_ids(result),
+                    linked_note_ids=linked_note_ids,
                 )
             )
         return result.change
@@ -359,19 +406,24 @@ class NoteContentMutationService:
             yield recorder
         except AcceptedNoteMutationRejected:
             # A rejection commits nothing of its own.
-            await finish_read_cache_invalidation(read_cache, project_external_id, freshened)
+            with logfire.span("note write invalidates read cache"):
+                await finish_read_cache_invalidation(read_cache, project_external_id, freshened)
             raise
         except BaseException:
             # Transaction exit can raise after its commit reached the database, and
             # nothing describes that commit, so retire the whole project.
-            await finish_project_read_cache_invalidation(read_cache, project_external_id)
+            with logfire.span("note write invalidates read cache"):
+                await finish_project_read_cache_invalidation(read_cache, project_external_id)
             raise
         change = recorder.change
         if change.is_empty:
             # Every accepted mutation records itself in _finish_mutation; one that did
             # not is a gap in this service, and must not leave older reads visible.
             change = ReadCacheChange.whole_project()
-        await finish_read_cache_invalidation(read_cache, project_external_id, change | freshened)
+        with logfire.span("note write invalidates read cache"):
+            await finish_read_cache_invalidation(
+                read_cache, project_external_id, change | freshened
+            )
 
     def _resolve_actor(
         self,
@@ -390,10 +442,11 @@ class NoteContentMutationService:
         )
         if self.actor_resolver is None:
             return requested
-        return self.actor_resolver.resolve_mutation_actor(
-            mutation_kind=mutation_kind,
-            requested=requested,
-        )
+        with logfire.span("note write resolves actor"):
+            return self.actor_resolver.resolve_mutation_actor(
+                mutation_kind=mutation_kind,
+                requested=requested,
+            )
 
     async def freshen_existing_note_content(
         self,
@@ -406,10 +459,11 @@ class NoteContentMutationService:
             return ReadCacheChange()
 
         try:
-            return await self.content_freshener.freshen_note_content(
-                project_external_id=project_external_id,
-                entity_external_id=entity_external_id,
-            )
+            with logfire.span("note write freshens existing note content"):
+                return await self.content_freshener.freshen_note_content(
+                    project_external_id=project_external_id,
+                    entity_external_id=entity_external_id,
+                )
         except BaseException:
             # Freshening can commit entity and note-content state before a later
             # indexing follow-up raises. Invalidate before propagating so those
@@ -674,6 +728,15 @@ class NoteContentMutationService:
                 kind = "update"
             case _:
                 assert_never(request)
+        with logfire.span("note write accepts {mutation_kind}", mutation_kind=kind):
+            return await self._accept_write_steps(request, kind)
+
+    async def _accept_write_steps(
+        self,
+        request: AcceptedNoteCreateMutation | AcceptedNoteUpdateMutation,
+        kind: NoteContentMutationKind,
+    ) -> AcceptedNoteChange:
+        """The steps `_accept_write` times, each in its own span."""
         actor = self._resolve_actor(
             kind,
             user_profile_id=request.actor.user_profile_id,
@@ -697,34 +760,40 @@ class NoteContentMutationService:
                 project_external_id=request.project_external_id,
                 entity_external_id=request.entity_external_id,
             )
-        async with self._mutation_cache_scope(
-            request.project_external_id,
-            freshened=freshened,
-        ) as cache_change:
-            async with accepted_note_transaction(self.session_maker) as session:
-                match request:
-                    case AcceptedNoteCreateMutation():
-                        result = await run_accepted_note_create(
-                            session,
-                            request=request,
-                            dependencies=self.mutation_dependencies,
-                        )
-                    case AcceptedNoteUpdateMutation():
-                        result = await run_accepted_note_update(
-                            session,
-                            request=request,
-                            dependencies=self.mutation_dependencies,
-                        )
-                    case _:
-                        assert_never(request)
-                await self.on_accepted_mutation(
-                    session,
-                    project_external_id=request.project_external_id,
-                    change=result.change,
-                    mutation_kind=kind,
-                    source=actor.source,
-                )
-            return await self._finish_mutation(result, cache_change)
+        with logfire.span("note write scopes read cache changes"):
+            async with self._mutation_cache_scope(
+                request.project_external_id,
+                freshened=freshened,
+            ) as cache_change:
+                with logfire.span("note write runs accept transaction"):
+                    async with accepted_note_transaction(self.session_maker) as session:
+                        with logfire.span(
+                            "note write applies accepted {mutation_kind}", mutation_kind=kind
+                        ):
+                            match request:
+                                case AcceptedNoteCreateMutation():
+                                    result = await run_accepted_note_create(
+                                        session,
+                                        request=request,
+                                        dependencies=self.mutation_dependencies,
+                                    )
+                                case AcceptedNoteUpdateMutation():
+                                    result = await run_accepted_note_update(
+                                        session,
+                                        request=request,
+                                        dependencies=self.mutation_dependencies,
+                                    )
+                                case _:
+                                    assert_never(request)
+                        with logfire.span("note write runs accepted mutation hook"):
+                            await self.on_accepted_mutation(
+                                session,
+                                project_external_id=request.project_external_id,
+                                change=result.change,
+                                mutation_kind=kind,
+                                source=actor.source,
+                            )
+                return await self._finish_mutation(result, cache_change)
 
     async def edit_note(
         self,
@@ -752,6 +821,31 @@ class NoteContentMutationService:
         lost compare-and-set to the same structured 409, so every guarded
         refusal comes from one place.
         """
+        with logfire.span("note write accepts {mutation_kind}", mutation_kind="edit"):
+            return await self._edit_note_steps(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+                data=data,
+                user_profile_id=user_profile_id,
+                source=source,
+                base_checksum=base_checksum,
+                actor_kind=actor_kind,
+                actor_name=actor_name,
+            )
+
+    async def _edit_note_steps(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        data: EditEntityRequest,
+        user_profile_id: UUID | None,
+        source: str,
+        base_checksum: str | None,
+        actor_kind: str | None,
+        actor_name: str | None,
+    ) -> AcceptedNoteChange:
+        """The steps `edit_note` times, each in its own span."""
         actor_context = self._resolve_actor(
             "edit",
             user_profile_id=user_profile_id,
@@ -764,36 +858,42 @@ class NoteContentMutationService:
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
-            async with self._mutation_cache_scope(
-                project_external_id,
-                freshened=freshened,
-            ) as cache_change:
-                async with accepted_note_transaction(self.session_maker) as session:
-                    result = await run_accepted_note_edit(
-                        session,
-                        request=AcceptedNoteEditMutation(
-                            project_external_id=project_external_id,
-                            entity_external_id=entity_external_id,
-                            data=data,
-                            actor=accepted_note_mutation_actor(
-                                user_profile_id=actor_context.user_profile_id,
-                                actor_kind=actor_context.actor_kind,
-                                actor_name=actor_context.actor_name,
-                                author=actor_context.author,
-                            ),
-                            source=actor_context.source,
-                            base_checksum=base_checksum,
-                        ),
-                        dependencies=self.mutation_dependencies,
-                    )
-                    await self.on_accepted_mutation(
-                        session,
-                        project_external_id=project_external_id,
-                        change=result.change,
-                        mutation_kind="edit",
-                        source=actor_context.source,
-                    )
-                accepted = await self._finish_mutation(result, cache_change)
+            with logfire.span("note write scopes read cache changes"):
+                async with self._mutation_cache_scope(
+                    project_external_id,
+                    freshened=freshened,
+                ) as cache_change:
+                    with logfire.span("note write runs accept transaction"):
+                        async with accepted_note_transaction(self.session_maker) as session:
+                            with logfire.span(
+                                "note write applies accepted {mutation_kind}", mutation_kind="edit"
+                            ):
+                                result = await run_accepted_note_edit(
+                                    session,
+                                    request=AcceptedNoteEditMutation(
+                                        project_external_id=project_external_id,
+                                        entity_external_id=entity_external_id,
+                                        data=data,
+                                        actor=accepted_note_mutation_actor(
+                                            user_profile_id=actor_context.user_profile_id,
+                                            actor_kind=actor_context.actor_kind,
+                                            actor_name=actor_context.actor_name,
+                                            author=actor_context.author,
+                                        ),
+                                        source=actor_context.source,
+                                        base_checksum=base_checksum,
+                                    ),
+                                    dependencies=self.mutation_dependencies,
+                                )
+                            with logfire.span("note write runs accepted mutation hook"):
+                                await self.on_accepted_mutation(
+                                    session,
+                                    project_external_id=project_external_id,
+                                    change=result.change,
+                                    mutation_kind="edit",
+                                    source=actor_context.source,
+                                )
+                    accepted = await self._finish_mutation(result, cache_change)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
         return accepted
