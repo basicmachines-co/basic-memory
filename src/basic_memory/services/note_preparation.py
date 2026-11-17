@@ -22,6 +22,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import (
     ParseError,
+    add_frontmatter_field,
     dump_frontmatter,
     has_frontmatter,
     parse_frontmatter,
@@ -1025,8 +1026,11 @@ async def prepare_edit_entity_content(
         )
     post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
     if post.metadata.get("permalink") != permalink:
-        post.metadata["permalink"] = permalink
-        markdown_content = dump_frontmatter(post)
+        if "permalink" in post.metadata:
+            post.metadata["permalink"] = permalink
+            markdown_content = dump_frontmatter(post)
+        else:
+            markdown_content = add_frontmatter_field(markdown_content, "permalink", permalink)
     reconciliation = reconcile_prepared_edit_title_from_h1(
         original_markdown=current_content,
         markdown_content=markdown_content,
@@ -1081,8 +1085,11 @@ async def prepare_move_entity_content(
     if entity_markdown.frontmatter_state != "malformed":
         post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
         if post.metadata.get("permalink") != permalink:
-            post.metadata["permalink"] = permalink
-            markdown_content = dump_frontmatter(post)
+            if "permalink" in post.metadata:
+                post.metadata["permalink"] = permalink
+                markdown_content = dump_frontmatter(post)
+            else:
+                markdown_content = add_frontmatter_field(markdown_content, "permalink", permalink)
             entity_markdown = await dependencies.entity_parser.parse_markdown_content(
                 file_path=file_path,
                 content=markdown_content,
