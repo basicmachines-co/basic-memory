@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Self
 
+from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_WIKI_PROJECTOR
+
 type NoteContentChecksum = str
 type NoteContentSource = str
 type NoteContentReconciliationStatus = Literal["current", "stale", "deferred"]
@@ -67,6 +69,7 @@ class NoteContentState:
     file_version: int | None = None
     file_checksum: NoteContentChecksum | None = None
     file_write_status: NoteContentWriteStatus = "synced"
+    last_source: NoteContentSource | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +257,24 @@ def bootstrap_note_content_plan(*, observed: ObservedNoteContent) -> NoteContent
     )
 
 
+def projector_note_never_reached_storage(current: NoteContentState) -> bool:
+    """Return whether the accepted note is generated projector output not yet in storage.
+
+    Trigger: the wiki projector accepted this note (for example the index.md and
+      log.md it seeds into a new project or folder), and no accepted version of the
+      note has ever been written to storage (``file_version`` is null).
+    Why: the generated note is a placeholder. A client that writes straight to
+      storage, such as an upload into a project it has just created, can put the
+      user's own file at that path before the queued write runs. That write then
+      refuses to overwrite the user's file, the row never reaches synced state, and
+      without this rule every observation of the user's file would defer forever.
+    Outcome: the observed file may replace the generated note. Once any version has
+      reached storage, the ordinary stable-state rule applies again, so a stale
+      storage read cannot roll back content that was written.
+    """
+    return current.last_source == NOTE_SOURCE_WIKI_PROJECTOR and current.file_version is None
+
+
 def plan_existing_note_content_reconciliation(
     *,
     current: NoteContentState,
@@ -264,7 +285,8 @@ def plan_existing_note_content_reconciliation(
     The same rule must apply everywhere:
     - observed checksum == DB checksum: the file now matches accepted DB content
     - observed checksum == previous file checksum while versions differ: DB stays ahead
-    - an unrelated observation can advance DB only from fully synchronized state
+    - an unrelated observation can advance DB only from fully synchronized state,
+      or over a generated projector note that has never been written to storage
     - otherwise: defer until the accepted DB/file lineage is stable
 
     A promotion plan is not yet safe to apply: the reconciler must still check it
@@ -299,7 +321,7 @@ def plan_existing_note_content_reconciliation(
         and current.file_version == current.db_version
         and current.file_checksum == current.db_checksum
     )
-    if not file_state_is_stable:
+    if not file_state_is_stable and not projector_note_never_reached_storage(current):
         return NoteContentReconciliationDeferred()
 
     next_version = max(current.db_version, current.file_version or 0) + 1

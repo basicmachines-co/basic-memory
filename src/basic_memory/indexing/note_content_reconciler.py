@@ -317,6 +317,7 @@ def note_content_state_from_model(note_content: NoteContent) -> NoteContentState
         if note_content.file_checksum is not None
         else None,
         file_write_status=note_content_write_status(note_content.file_write_status),
+        last_source=str(note_content.last_source) if note_content.last_source is not None else None,
     )
 
 

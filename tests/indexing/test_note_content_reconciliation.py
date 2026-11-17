@@ -18,6 +18,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentReconciliationDeferred,
     NoteContentReconciliationResult,
     NoteContentState,
+    NoteContentWriteStatus,
     ObservedNoteContent,
     bootstrap_note_content_plan,
     plan_existing_note_content_reconciliation,
@@ -144,6 +145,88 @@ def test_plan_promotes_external_file_change_from_synced_state() -> None:
         last_materialization_error=None,
         last_materialization_attempt_at=None,
     )
+
+
+@pytest.mark.parametrize(
+    ("file_write_status", "file_checksum"),
+    [
+        # The generated note is still queued for its first write to storage.
+        ("pending", None),
+        # Its first write found the observed file already in storage and refused.
+        ("external_change_detected", "observed-checksum"),
+    ],
+)
+def test_plan_promotes_observed_file_over_projector_note_that_never_reached_storage(
+    file_write_status: NoteContentWriteStatus,
+    file_checksum: str | None,
+) -> None:
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
+            db_version=1,
+            db_checksum="generated-index-checksum",
+            file_version=None,
+            file_checksum=file_checksum,
+            file_write_status=file_write_status,
+            last_source="wiki_projector",
+        ),
+        observed=_observed("observed-checksum"),
+    )
+
+    assert plan == NoteContentPromoted(
+        markdown_content="# Observed\n",
+        db_version=2,
+        db_checksum="observed-checksum",
+        file_version=2,
+        file_checksum="observed-checksum",
+        file_write_status="synced",
+        last_source="index",
+        updated_at=datetime(2026, 6, 18, 12, 30, tzinfo=UTC),
+        file_updated_at=datetime(2026, 6, 18, 12, 30, tzinfo=UTC),
+        last_materialization_error=None,
+        last_materialization_attempt_at=None,
+    )
+
+
+@pytest.mark.parametrize("last_source", ["api", "mcp", "index", None])
+@pytest.mark.parametrize("file_write_status", ["pending", "external_change_detected"])
+def test_plan_defers_observed_file_over_unwritten_note_from_other_sources(
+    last_source: str | None,
+    file_write_status: NoteContentWriteStatus,
+) -> None:
+    """Only a generated projector note yields to storage before its first write."""
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
+            db_version=1,
+            db_checksum="accepted-checksum",
+            file_version=None,
+            file_checksum=None,
+            file_write_status=file_write_status,
+            last_source=last_source,
+        ),
+        observed=_observed("observed-checksum"),
+    )
+
+    assert plan == NoteContentReconciliationDeferred()
+
+
+@pytest.mark.parametrize("file_write_status", ["pending", "external_change_detected"])
+def test_plan_defers_observed_file_over_projector_note_already_in_storage(
+    file_write_status: NoteContentWriteStatus,
+) -> None:
+    """A projector note that reached storage keeps the ordinary stable-state rule."""
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
+            db_version=3,
+            db_checksum="regenerated-index-checksum",
+            file_version=2,
+            file_checksum="previous-index-checksum",
+            file_write_status=file_write_status,
+            last_source="wiki_projector",
+        ),
+        observed=_observed("observed-checksum"),
+    )
+
+    assert plan == NoteContentReconciliationDeferred()
 
 
 @pytest.mark.parametrize(
