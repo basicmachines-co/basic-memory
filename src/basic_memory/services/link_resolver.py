@@ -2,6 +2,7 @@
 
 import uuid as uuid_mod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Tuple, Dict
 
 from loguru import logger
@@ -22,6 +23,7 @@ from basic_memory.utils import (
     build_permalink_resolution_candidates,
     generate_permalink,
     normalize_project_reference,
+    permalink_comes_from_file_name,
 )
 from basic_memory.workspace_context import (
     workspace_slug_for_canonical_permalinks,
@@ -498,35 +500,6 @@ class LinkResolver:
         # duplicate-title guard below (#1148).
         exact_identifier = normalize_project_reference(clean_text).strip("/")
 
-        # 0. A `.md` path under a top-level folder named like the project (`cabinet/plan.md`
-        # in project `cabinet`) is the folder note's exact file path. The generated permalink
-        # candidates below read the same text as project-qualified and reach a root `plan.md`
-        # instead, because its local permalink is `cabinet/plan` (#2024). Elsewhere the usual
-        # permalink-first order stands, as the bulk resolver and OKF export expect. A stored
-        # permalink equal to the identifier verbatim still wins, since a custom frontmatter
-        # permalink may itself look like a file name.
-        project_slug = generate_permalink(project_permalink) if project_permalink else None
-        if (
-            project_slug
-            and clean_text.casefold().endswith(".md")
-            and generate_permalink(clean_text).startswith(f"{project_slug}/")
-        ):
-            verbatim_permalink = await entity_repository.get_by_permalink(
-                session,
-                normalize_project_reference(clean_text).strip("/"),
-                load_relations=load_relations,
-            )
-            if verbatim_permalink:
-                return verbatim_permalink
-            exact_file = await entity_repository.get_by_file_path(
-                session,
-                clean_text,
-                load_relations=load_relations,
-            )
-            if exact_file:
-                logger.debug(f"Found exact file path match: {exact_file.file_path}")
-                return exact_file
-
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
             entity = await entity_repository.get_by_permalink(
@@ -538,6 +511,19 @@ class LinkResolver:
                 # The slugified form of a shared title must not silently win for a destructive op;
                 # only the caller's exact (verbatim) permalink candidate may bypass the guard.
                 if strict_ambiguous_title and candidate_permalink != exact_identifier:
+                    break
+                # A `.md` file path whose slug is another note's permalink only by collision
+                # leaves the permalink step, so the title and file-path steps below decide.
+                if candidate_permalink != exact_identifier and await self._is_slug_collision(
+                    session=session,
+                    entity_repository=entity_repository,
+                    identifier=clean_text,
+                    candidate_permalink=candidate_permalink,
+                    holder=entity,
+                    project_permalink=project_permalink,
+                    include_project=include_project,
+                    workspace_permalink=workspace_permalink,
+                ):
                     break
                 logger.debug(f"Found exact permalink match: {entity.permalink}")
                 return entity
@@ -639,6 +625,44 @@ class LinkResolver:
 
         # if we couldn't find anything then return None
         return None
+
+    async def _is_slug_collision(
+        self,
+        *,
+        session: AsyncSession,
+        entity_repository: EntityRepository,
+        identifier: str,
+        candidate_permalink: str,
+        holder: Entity,
+        project_permalink: Optional[str],
+        include_project: bool,
+        workspace_permalink: Optional[str],
+    ) -> bool:
+        """Whether a permalink match for a `.md` path is another file's name slugging alike.
+
+        Two files can slug alike: `notes/Foo Bar.md` and `notes/foo-bar.md`, or a root
+        `plan.md` (local permalink `cabinet/plan`) and the folder note `cabinet/plan.md` in
+        project `cabinet` (#2024). When `identifier` is a stored file path and `holder` holds the
+        slug only because of its own file name, the caller named the other file. A permalink
+        `holder` declared in frontmatter is a claim instead, and keeps winning (#2024 review).
+        BulkLinkResolver applies the same rule, so links index to the note a read returns.
+        """
+        if not identifier.casefold().endswith(".md"):
+            return False
+        if holder.file_path == Path(identifier).as_posix():
+            return False
+        if not permalink_comes_from_file_name(
+            candidate_permalink,
+            holder.file_path,
+            project_permalink,
+            include_project=include_project,
+            workspace_permalink=workspace_permalink,
+        ):
+            return False
+        exact_file = await entity_repository.get_by_file_path(
+            session, identifier, load_relations=False
+        )
+        return exact_file is not None
 
     async def _search_best_match(
         self,

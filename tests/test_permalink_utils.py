@@ -1,9 +1,12 @@
 """Tests for canonical permalink utility helpers."""
 
+import pytest
+
 from basic_memory.utils import (
     build_permalink_resolution_candidates,
     own_project_remainder,
     build_qualified_permalink_reference,
+    permalink_comes_from_file_name,
 )
 
 
@@ -149,3 +152,63 @@ def test_own_project_remainder_strips_every_routing_spelling():
     assert own_project_remainder("other/x", "main") is None
     assert own_project_remainder("main/", "main") is None
     assert own_project_remainder("main/x", None) is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"include_project": True},
+        {"include_project": False},
+        {"include_project": True, "workspace_permalink": "personal"},
+        {"include_project": False, "workspace_permalink": "personal"},
+    ],
+)
+def test_dotted_markdown_name_keeps_its_inner_extension_in_every_candidate(kwargs):
+    """`Claude.ai.md` slugs to `claude.ai`; `.ai` must not be stripped a second time.
+
+    `mimetypes` knows `.ai`, so slugging the slug again gives `entities/claude`, the
+    permalink of the sibling `entities/Claude.md`.
+    """
+    candidates = build_permalink_resolution_candidates(
+        "entities/Claude.ai.md", "prospectus", **kwargs
+    )
+
+    assert "entities/claude.ai" in candidates
+    for candidate in candidates:
+        assert not candidate.endswith("entities/claude"), candidate
+    if kwargs["include_project"] or "workspace_permalink" in kwargs:
+        assert "prospectus/entities/claude.ai" in candidates
+    if "workspace_permalink" in kwargs:
+        assert "personal/prospectus/entities/claude.ai" in candidates
+
+
+def test_dotted_markdown_name_under_a_folder_named_like_the_project():
+    """The literal folder reading keeps the inner extension too (#2024)."""
+    candidates = build_permalink_resolution_candidates(
+        "prospectus/entities/Claude.ai.md", "prospectus", include_project=True
+    )
+
+    assert "prospectus/prospectus/entities/claude.ai" in candidates
+    assert "prospectus/entities/claude.ai" in candidates
+    for candidate in candidates:
+        assert not candidate.endswith("entities/claude"), candidate
+
+
+@pytest.mark.parametrize("include_project", [True, False])
+def test_permalink_comes_from_file_name_tells_collisions_from_claims(include_project):
+    prefix = "main/" if include_project else ""
+    # A file whose name slugs to the permalink holds it by its own name.
+    assert permalink_comes_from_file_name(
+        f"{prefix}notes/foo-bar", "notes/foo-bar.md", "main", include_project=include_project
+    )
+    assert permalink_comes_from_file_name(
+        f"{prefix}notes/foo-bar", "notes/Foo Bar.md", "main", include_project=include_project
+    )
+    # A permalink declared in frontmatter is not derived from the file name.
+    assert not permalink_comes_from_file_name(
+        f"{prefix}notes/foo-bar", "owner.md", "main", include_project=include_project
+    )
+    # The inner extension of a dotted name is part of the name.
+    assert not permalink_comes_from_file_name(
+        f"{prefix}entities/claude", "entities/Claude.ai.md", "main", include_project=include_project
+    )

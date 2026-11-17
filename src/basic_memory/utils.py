@@ -478,6 +478,11 @@ def build_permalink_resolution_candidates(
     if not normalized_project:
         return candidates
 
+    # The qualifying helpers below slug their input themselves, so they get `exact_path`,
+    # never `normalized_path`. Slugging twice is not safe: `generate_permalink` drops any
+    # extension `mimetypes` knows, so `entities/claude.ai` (the slug of
+    # `entities/Claude.ai.md`) would lose `.ai` and name the sibling `entities/claude`.
+
     # Trigger: the path starts with the project slug (`cabinet/plan` in project `cabinet`).
     # Why: that can be a real top-level folder named like the project, whose notes carry
     #   `cabinet/cabinet/plan` (#2024). The qualified reading below would drop the folder
@@ -491,12 +496,12 @@ def build_permalink_resolution_candidates(
             add_candidate(
                 build_file_path_permalink(
                     normalized_project,
-                    normalized_path,
+                    exact_path,
                     workspace_permalink=normalized_workspace,
                 )
             )
         if include_project:
-            add_candidate(build_file_path_permalink(normalized_project, normalized_path))
+            add_candidate(build_file_path_permalink(normalized_project, exact_path))
 
     workspace_project_prefix = (
         f"{normalized_workspace}/{normalized_project}" if normalized_workspace else None
@@ -506,7 +511,7 @@ def build_permalink_resolution_candidates(
         add_candidate(
             build_canonical_permalink(
                 normalized_project,
-                normalized_path,
+                exact_path,
                 include_project=include_project,
                 workspace_permalink=normalized_workspace,
             )
@@ -526,7 +531,7 @@ def build_permalink_resolution_candidates(
         add_candidate(
             build_canonical_permalink(
                 normalized_project,
-                normalized_path,
+                exact_path,
                 include_project=True,
             )
         )
@@ -535,7 +540,7 @@ def build_permalink_resolution_candidates(
         add_candidate(
             build_canonical_permalink(
                 normalized_project,
-                normalized_path,
+                exact_path,
                 include_project=True,
             )
         )
@@ -551,6 +556,29 @@ def build_permalink_resolution_candidates(
         add_remainder(normalized_project)
 
     return candidates
+
+
+def permalink_comes_from_file_name(
+    permalink: str,
+    file_path: str,
+    project_permalink: Optional[str],
+    include_project: bool = True,
+    *,
+    workspace_permalink: Optional[str] = None,
+) -> bool:
+    """Return whether a note at `file_path` holds `permalink` because of its own file name.
+
+    Two files can slug alike (`notes/Foo Bar.md` and `notes/foo-bar.md`), so a permalink
+    derived from one file's path can belong to the other. That is a collision, not a claim:
+    a lookup by exact file path should still reach the file it names. A permalink a note
+    declares in frontmatter (`owner.md` declaring `foo`) is a claim, and keeps winning.
+    """
+    return permalink in build_permalink_resolution_candidates(
+        file_path,
+        project_permalink,
+        include_project=include_project,
+        workspace_permalink=workspace_permalink,
+    )
 
 
 def setup_logging(

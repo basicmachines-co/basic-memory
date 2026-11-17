@@ -19,6 +19,7 @@ from basic_memory.utils import (
     generate_permalink,
     own_project_remainder,
     normalize_project_reference,
+    permalink_comes_from_file_name,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
 
@@ -185,6 +186,16 @@ class ProjectEntityIdentityIndex:
                 continue
             if ambiguous_title and candidate_permalink != exact_identifier:
                 break
+            # Same rule as LinkResolver: a `.md` file path whose slug is another note's
+            # permalink only by collision leaves the permalink step to the title and path steps.
+            if candidate_permalink != exact_identifier and self._is_slug_collision(
+                identifier,
+                candidate_permalink,
+                entity,
+                include_project_permalinks=include_project_permalinks,
+                workspace_permalink=workspace_permalink,
+            ):
+                break
             return StrictProjectLinkMatch(entity)
 
         if len(title_matches) == 1:
@@ -210,6 +221,35 @@ class ProjectEntityIdentityIndex:
                 return StrictProjectLinkMatch(alias_match)
 
         return StrictProjectLinkMatch(entity=None, ambiguous=ambiguous_title)
+
+    def _is_slug_collision(
+        self,
+        identifier: str,
+        candidate_permalink: str,
+        holder: Entity,
+        *,
+        include_project_permalinks: bool,
+        workspace_permalink: str | None,
+    ) -> bool:
+        """Whether a permalink match for a `.md` path is another file's name slugging alike.
+
+        See `LinkResolver._is_slug_collision`: the caller named a stored file, and `holder`
+        holds the slug only because of its own file name, not by a frontmatter claim.
+        """
+        if not identifier.casefold().endswith(".md"):
+            return False
+        exact_path = Path(identifier).as_posix()
+        return (
+            holder.file_path != exact_path
+            and exact_path in self.by_file_path
+            and permalink_comes_from_file_name(
+                candidate_permalink,
+                holder.file_path,
+                self.project.permalink,
+                include_project=include_project_permalinks,
+                workspace_permalink=workspace_permalink,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
