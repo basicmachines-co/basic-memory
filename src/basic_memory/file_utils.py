@@ -437,7 +437,7 @@ def add_frontmatter_field(content: str, field: str, value: Any) -> str:
 
     lines = content.splitlines(keepends=True)
     start = 0
-    while lines[start].strip() == "":
+    while strip_bom(lines[start]).strip() == "":
         start += 1
     closing_index = next(
         index
@@ -447,14 +447,27 @@ def add_frontmatter_field(content: str, field: str, value: Any) -> str:
     newline = "\r\n" if lines[start].endswith("\r\n") else "\n"
     if lines[start].endswith("\r"):
         newline = "\r"
-    serialized = yaml.dump(
-        {field: value},
-        sort_keys=False,
-        allow_unicode=True,
-        default_flow_style=False,
-        Dumper=SimpleSafeDumper,
-    )
-    lines.insert(closing_index, serialized.replace("\n", newline))
+    yaml_block = "".join(lines[start + 1 : closing_index])
+    if yaml_block.strip().startswith("{"):
+        # A block entry cannot follow a completed top-level flow mapping.
+        # Rebuild that mapping while leaving the fences and body bytes untouched.
+        serialized = yaml.dump(
+            {**metadata, field: value},
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+            Dumper=SimpleSafeDumper,
+        )
+        lines[start + 1 : closing_index] = [serialized.replace("\n", newline)]
+    else:
+        serialized = yaml.dump(
+            {field: value},
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+            Dumper=SimpleSafeDumper,
+        )
+        lines.insert(closing_index, serialized.replace("\n", newline))
     return "".join(lines)
 
 

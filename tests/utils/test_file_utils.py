@@ -426,6 +426,26 @@ def test_add_frontmatter_field_creates_frontmatter_when_absent():
     assert result == "---\npermalink: rp/note\n---\n\nBody without frontmatter\n"
 
 
+@pytest.mark.parametrize("yaml_mapping", ["{title: Foo}", "{}"])
+def test_add_frontmatter_field_keeps_top_level_flow_mappings_valid(yaml_mapping):
+    content = f"---\n{yaml_mapping}\n---\n\nBody\n"
+
+    result = add_frontmatter_field(content, "permalink", "rp/note")
+
+    assert parse_frontmatter(result)["permalink"] == "rp/note"
+    assert result.endswith("\n\nBody\n")
+
+
+def test_add_frontmatter_field_handles_bom_before_a_blank_line():
+    content = "\ufeff\n---\ntitle: Test\n---\n\nBody\n"
+
+    result = add_frontmatter_field(content, "permalink", "rp/note")
+
+    assert result.startswith("\ufeff\n---\n")
+    assert parse_frontmatter(result)["permalink"] == "rp/note"
+    assert result.endswith("\n\nBody\n")
+
+
 def test_remove_frontmatter_keeps_a_fenced_block_that_is_not_a_yaml_mapping():
     """A letterhead between horizontal rules, a bare scalar, or a list is body, not
     frontmatter; no frontmatter reader accepts it, so search must not lose it (#1451)."""
