@@ -441,6 +441,49 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
         return f"---\n{yaml_str}---\n"
 
 
+def add_frontmatter_field(content: str, field: str, value: Any) -> str:
+    """Add an absent field without reformatting existing metadata or the note body.
+
+    Args:
+        content: Markdown content, with or without frontmatter.
+        field: Metadata key that is not already present.
+        value: Value to serialize for the new field.
+
+    Returns:
+        The original Markdown with only the new field inserted before the closing fence.
+    """
+    if not has_frontmatter(content):
+        post = frontmatter.Post(content)
+        post.metadata[field] = value
+        return dump_frontmatter(post)
+
+    metadata = parse_frontmatter(content)
+    if field in metadata:
+        raise ValueError(f"Frontmatter field already exists: {field}")
+
+    lines = content.splitlines(keepends=True)
+    start = 0
+    while lines[start].strip() == "":
+        start += 1
+    closing_index = next(
+        index
+        for index in range(start + 1, len(lines))
+        if _FENCE_RE.match(lines[index].rstrip("\r\n"))
+    )
+    newline = "\r\n" if lines[start].endswith("\r\n") else "\n"
+    if lines[start].endswith("\r"):
+        newline = "\r"
+    serialized = yaml.dump(
+        {field: value},
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        Dumper=SimpleSafeDumper,
+    )
+    lines.insert(closing_index, serialized.replace("\n", newline))
+    return "".join(lines)
+
+
 def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     """
     Sanitize string to be safe for use as a note title

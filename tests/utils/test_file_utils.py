@@ -16,6 +16,7 @@ from basic_memory.file_utils import (
     FileError,
     FileWriteError,
     ParseError,
+    add_frontmatter_field,
     compute_checksum,
     file_created_timestamp,
     has_frontmatter,
@@ -384,6 +385,45 @@ def test_remove_frontmatter_strip_false_preserves_body_exactly():
 def test_remove_frontmatter_strip_false_without_frontmatter_returns_content_unchanged():
     text = "  leading spaces and trailing newline\n"
     assert remove_frontmatter(text, strip=False) == text
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("trailing_newline", ["", "\n"])
+def test_add_frontmatter_field_preserves_existing_formatting(newline, trailing_newline):
+    original = (
+        newline.join(
+            [
+                "---",
+                'title: "Decision: keep original quotes"',
+                "tags: [decision, memory, obsidian]",
+                'aliases: ["Alias one"]',
+                "---",
+                "",
+                "Text.",
+            ]
+        )
+        + trailing_newline
+    )
+    expected = original.replace(
+        f"{newline}---{newline}{newline}Text.",
+        f"{newline}permalink: rp/note{newline}---{newline}{newline}Text.",
+    )
+
+    result = add_frontmatter_field(original, "permalink", "rp/note")
+
+    assert result == expected
+    assert parse_frontmatter(result)["permalink"] == "rp/note"
+
+
+def test_add_frontmatter_field_rejects_an_existing_key():
+    content = "---\npermalink: existing\n---\n\nBody\n"
+    with pytest.raises(ValueError, match="permalink"):
+        add_frontmatter_field(content, "permalink", "replacement")
+
+
+def test_add_frontmatter_field_creates_frontmatter_when_absent():
+    result = add_frontmatter_field("Body without frontmatter\n", "permalink", "rp/note")
+    assert result == "---\npermalink: rp/note\n---\n\nBody without frontmatter\n"
 
 
 def test_remove_frontmatter_keeps_a_fenced_block_that_is_not_a_yaml_mapping():
