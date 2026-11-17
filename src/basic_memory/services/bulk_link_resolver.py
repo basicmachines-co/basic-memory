@@ -180,25 +180,21 @@ class ProjectEntityIdentityIndex:
         ambiguous_title = len(title_matches) > 1
         exact_identifier = normalize_project_reference(identifier).strip("/")
 
-        # An identifier ending in `.md` that is a stored file path names exactly one note.
-        # It wins over a permalink candidate that only collides with it (another file whose
-        # name slugs alike), but not over a verbatim permalink or one another note declared.
-        # LinkResolver applies the same rule, so links index to the note a read returns.
-        if identifier.casefold().endswith(".md") and exact_identifier not in self.by_permalink:
-            exact_file = self.by_file_path.get(Path(identifier).as_posix())
-            if exact_file is not None and not self._permalink_claimed_by_another_note(
-                exact_file,
-                permalink_candidates,
-                include_project_permalinks=include_project_permalinks,
-                workspace_permalink=workspace_permalink,
-            ):
-                return StrictProjectLinkMatch(exact_file)
-
         for candidate_permalink in permalink_candidates:
             entity = self.by_permalink.get(candidate_permalink)
             if entity is None:
                 continue
             if ambiguous_title and candidate_permalink != exact_identifier:
+                break
+            # Same rule as LinkResolver: a `.md` file path whose slug is another note's
+            # permalink only by collision leaves the permalink step to the title and path steps.
+            if candidate_permalink != exact_identifier and self._is_slug_collision(
+                identifier,
+                candidate_permalink,
+                entity,
+                include_project_permalinks=include_project_permalinks,
+                workspace_permalink=workspace_permalink,
+            ):
                 break
             return StrictProjectLinkMatch(entity)
 
@@ -226,27 +222,34 @@ class ProjectEntityIdentityIndex:
 
         return StrictProjectLinkMatch(entity=None, ambiguous=ambiguous_title)
 
-    def _permalink_claimed_by_another_note(
+    def _is_slug_collision(
         self,
-        exact_file: Entity,
-        permalink_candidates: Sequence[str],
+        identifier: str,
+        candidate_permalink: str,
+        holder: Entity,
         *,
         include_project_permalinks: bool,
         workspace_permalink: str | None,
     ) -> bool:
-        """Whether the first matching permalink candidate belongs to a note that claimed it."""
-        for candidate_permalink in permalink_candidates:
-            holder = self.by_permalink.get(candidate_permalink)
-            if holder is None:
-                continue
-            return holder.id != exact_file.id and not permalink_comes_from_file_name(
+        """Whether a permalink match for a `.md` path is another file's name slugging alike.
+
+        See `LinkResolver._is_slug_collision`: the caller named a stored file, and `holder`
+        holds the slug only because of its own file name, not by a frontmatter claim.
+        """
+        if not identifier.casefold().endswith(".md"):
+            return False
+        exact_path = Path(identifier).as_posix()
+        return (
+            holder.file_path != exact_path
+            and exact_path in self.by_file_path
+            and permalink_comes_from_file_name(
                 candidate_permalink,
                 holder.file_path,
                 self.project.permalink,
                 include_project=include_project_permalinks,
                 workspace_permalink=workspace_permalink,
             )
-        return False
+        )
 
 
 @dataclass(frozen=True, slots=True)
