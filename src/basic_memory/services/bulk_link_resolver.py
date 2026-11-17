@@ -19,6 +19,7 @@ from basic_memory.utils import (
     generate_permalink,
     own_project_remainder,
     normalize_project_reference,
+    permalink_comes_from_file_name,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
 
@@ -179,6 +180,20 @@ class ProjectEntityIdentityIndex:
         ambiguous_title = len(title_matches) > 1
         exact_identifier = normalize_project_reference(identifier).strip("/")
 
+        # An identifier ending in `.md` that is a stored file path names exactly one note.
+        # It wins over a permalink candidate that only collides with it (another file whose
+        # name slugs alike), but not over a verbatim permalink or one another note declared.
+        # LinkResolver applies the same rule, so links index to the note a read returns.
+        if identifier.casefold().endswith(".md") and exact_identifier not in self.by_permalink:
+            exact_file = self.by_file_path.get(Path(identifier).as_posix())
+            if exact_file is not None and not self._permalink_claimed_by_another_note(
+                exact_file,
+                permalink_candidates,
+                include_project_permalinks=include_project_permalinks,
+                workspace_permalink=workspace_permalink,
+            ):
+                return StrictProjectLinkMatch(exact_file)
+
         for candidate_permalink in permalink_candidates:
             entity = self.by_permalink.get(candidate_permalink)
             if entity is None:
@@ -210,6 +225,28 @@ class ProjectEntityIdentityIndex:
                 return StrictProjectLinkMatch(alias_match)
 
         return StrictProjectLinkMatch(entity=None, ambiguous=ambiguous_title)
+
+    def _permalink_claimed_by_another_note(
+        self,
+        exact_file: Entity,
+        permalink_candidates: Sequence[str],
+        *,
+        include_project_permalinks: bool,
+        workspace_permalink: str | None,
+    ) -> bool:
+        """Whether the first matching permalink candidate belongs to a note that claimed it."""
+        for candidate_permalink in permalink_candidates:
+            holder = self.by_permalink.get(candidate_permalink)
+            if holder is None:
+                continue
+            return holder.id != exact_file.id and not permalink_comes_from_file_name(
+                candidate_permalink,
+                holder.file_path,
+                self.project.permalink,
+                include_project=include_project_permalinks,
+                workspace_permalink=workspace_permalink,
+            )
+        return False
 
 
 @dataclass(frozen=True, slots=True)

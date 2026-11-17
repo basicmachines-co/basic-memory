@@ -1366,3 +1366,118 @@ async def test_workspace_qualified_title_resolves_exactly(link_resolver, project
     assert note_path_readings(f"{project_prefix}/", project_permalink=project_prefix) == (
         f"{project_prefix}/",
     )
+
+
+async def _add_note(entity_repository, session_maker, file_path: str, permalink: str):
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repository.add(
+            session,
+            EntityModel(
+                title=file_path.rsplit("/", 1)[-1].removesuffix(".md"),
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                permalink=permalink,
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_project", [True, False])
+@pytest.mark.parametrize("workspace_slug", [None, "team-paul"])
+async def test_dotted_note_name_resolves_by_exact_path_not_to_its_sibling(
+    entity_repository,
+    search_service,
+    session_maker,
+    app_config,
+    test_project,
+    include_project,
+    workspace_slug,
+):
+    """`entities/X.ai.md` must reach itself, not its sibling `entities/X.md`.
+
+    `.ai` is an extension `mimetypes` knows. Slugging the path twice dropped it, so the
+    qualified candidate was `entities/x`, the sibling's permalink, and a read, edit, move
+    or delete by path acted on the wrong note.
+    """
+    from basic_memory.workspace_context import workspace_permalink_context
+    from basic_memory.utils import build_file_path_permalink
+
+    config = app_config.model_copy(update={"permalinks_include_project": include_project})
+    resolver = LinkResolver(entity_repository, search_service, session_maker, config)
+    scope = workspace_permalink_context(workspace_slug, "organization" if workspace_slug else None)
+
+    def permalink(path: str) -> str:
+        return build_file_path_permalink(
+            test_project.permalink,
+            path,
+            include_project=include_project,
+            workspace_permalink=workspace_slug,
+        )
+
+    plain = await _add_note(
+        entity_repository, session_maker, "entities/X.md", permalink("entities/X.md")
+    )
+    dotted = await _add_note(
+        entity_repository, session_maker, "entities/X.ai.md", permalink("entities/X.ai.md")
+    )
+    assert dotted.permalink.endswith("entities/x.ai")
+
+    with scope:
+        for note in (plain, dotted):
+            for strict in (True, False):
+                entity = await resolver.resolve_entity(note.file_path, strict=strict)
+                assert entity is not None, (note.file_path, strict)
+                assert entity.id == note.id, (note.file_path, strict, entity.file_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("base_owner", ["notes/Foo Bar.md", "notes/foo-bar.md"])
+async def test_files_whose_names_slug_alike_resolve_by_exact_path(
+    entity_repository, session_maker, link_resolver, test_project, base_owner
+):
+    """`notes/Foo Bar.md` and `notes/foo-bar.md` share a slug; each path reaches its own file.
+
+    Whichever was indexed first owns the base permalink and the other gets `-1`. The slug
+    of the other file's path is then the first one's permalink, which used to win.
+    """
+    paths = ["notes/Foo Bar.md", "notes/foo-bar.md"]
+    other = next(path for path in paths if path != base_owner)
+    notes = {
+        base_owner: await _add_note(
+            entity_repository, session_maker, base_owner, f"{test_project.permalink}/notes/foo-bar"
+        ),
+        other: await _add_note(
+            entity_repository, session_maker, other, f"{test_project.permalink}/notes/foo-bar-1"
+        ),
+    }
+
+    for path, note in notes.items():
+        for strict in (True, False):
+            entity = await link_resolver.resolve_entity(path, strict=strict)
+            assert entity is not None, (path, strict)
+            assert entity.id == note.id, (path, strict, entity.file_path)
+            linked = await link_resolver.resolve_link(path, strict=strict)
+            assert linked is not None and linked.id == note.id, (path, strict)
+
+
+@pytest.mark.asyncio
+async def test_declared_permalink_still_beats_a_file_whose_name_slugs_to_it(
+    entity_repository, session_maker, link_resolver, test_project
+):
+    """A frontmatter permalink is a claim on the identifier, unlike a slug collision (#2024 review)."""
+    file_note = await _add_note(
+        entity_repository, session_maker, "notes/Foo Bar.md", f"{test_project.permalink}/notes/x"
+    )
+    owner = await _add_note(
+        entity_repository, session_maker, "owner.md", f"{test_project.permalink}/notes/foo-bar"
+    )
+
+    for strict in (True, False):
+        entity = await link_resolver.resolve_entity("notes/Foo Bar.md", strict=strict)
+        assert entity is not None and entity.id == owner.id, strict
+    assert file_note.permalink != owner.permalink

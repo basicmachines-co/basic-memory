@@ -509,3 +509,66 @@ async def test_bulk_resolution_strips_workspace_and_project_prefixes(
 
     resolved = results[RelationTargetRequest(link_text)]
     assert resolved is not None and resolved.id == image.id
+
+
+@pytest.mark.asyncio
+async def test_bulk_resolution_matches_regular_for_markdown_paths_that_slug_alike(
+    entity_repository: EntityRepository,
+    search_service,
+    session_maker,
+    app_config: BasicMemoryConfig,
+    test_project: Project,
+) -> None:
+    """Links to a `.md` path index to the note a read of that path returns.
+
+    Covers a dotted name beside its stem (`X.ai.md`, `X.md`), two files whose names slug
+    alike (`Foo Bar.md`, `foo-bar.md`), and a permalink another note declared, which still wins.
+    """
+    now = datetime.now(timezone.utc)
+    rows = {
+        "entities/X.md": "entities/x",
+        "entities/X.ai.md": "entities/x.ai",
+        "notes/foo-bar.md": "notes/foo-bar",
+        "notes/Foo Bar.md": "notes/foo-bar-1",
+        "claimed/Taken.md": "claimed/taken-file",
+        "owner.md": "claimed/taken",
+    }
+    entities = {
+        path: Entity(
+            title=path.rsplit("/", 1)[-1].removesuffix(".md"),
+            note_type="note",
+            content_type="text/markdown",
+            file_path=path,
+            permalink=note_permalink(test_project, permalink, app_config),
+            created_at=now,
+            updated_at=now,
+            project_id=test_project.id,
+        )
+        for path, permalink in rows.items()
+    }
+    async with db.scoped_session(session_maker) as session:
+        for entity in entities.values():
+            await entity_repository.add(session, entity)
+
+    regular_resolver = LinkResolver(entity_repository, search_service, session_maker, app_config)
+    bulk_resolver = BulkLinkResolver(entity_repository, app_config)
+    expected = {
+        "entities/X.md": entities["entities/X.md"],
+        "entities/X.ai.md": entities["entities/X.ai.md"],
+        "notes/foo-bar.md": entities["notes/foo-bar.md"],
+        "notes/Foo Bar.md": entities["notes/Foo Bar.md"],
+        "claimed/Taken.md": entities["owner.md"],
+    }
+
+    async with db.scoped_session(session_maker) as session:
+        bulk_results = await bulk_resolver.resolve_relation_targets(
+            [RelationTargetRequest(link_text) for link_text in expected],
+            session=session,
+        )
+        for link_text, entity in expected.items():
+            regular_result = await regular_resolver.resolve_link(
+                link_text, strict=True, load_relations=False, session=session
+            )
+            bulk_result = bulk_results[RelationTargetRequest(link_text)]
+            assert regular_result is not None and regular_result.id == entity.id, link_text
+            assert bulk_result is not None and bulk_result.id == entity.id, link_text

@@ -22,6 +22,7 @@ from basic_memory.utils import (
     build_permalink_resolution_candidates,
     generate_permalink,
     normalize_project_reference,
+    permalink_comes_from_file_name,
 )
 from basic_memory.workspace_context import (
     workspace_slug_for_canonical_permalinks,
@@ -498,22 +499,18 @@ class LinkResolver:
         # duplicate-title guard below (#1148).
         exact_identifier = normalize_project_reference(clean_text).strip("/")
 
-        # 0. A `.md` path under a top-level folder named like the project (`cabinet/plan.md`
-        # in project `cabinet`) is the folder note's exact file path. The generated permalink
-        # candidates below read the same text as project-qualified and reach a root `plan.md`
-        # instead, because its local permalink is `cabinet/plan` (#2024). Elsewhere the usual
-        # permalink-first order stands, as the bulk resolver and OKF export expect. A stored
-        # permalink equal to the identifier verbatim still wins, since a custom frontmatter
-        # permalink may itself look like a file name.
-        project_slug = generate_permalink(project_permalink) if project_permalink else None
-        if (
-            project_slug
-            and clean_text.casefold().endswith(".md")
-            and generate_permalink(clean_text).startswith(f"{project_slug}/")
-        ):
+        # 0. An identifier ending in `.md` that is a stored file path names exactly one note.
+        # The permalink candidates below are slugs of that text, and a slug can belong to a
+        # different note whose file name slugs alike: `notes/Foo Bar.md` and
+        # `notes/foo-bar.md`, or a root `plan.md` whose local permalink `cabinet/plan` is the
+        # slug of the folder note `cabinet/plan.md` in project `cabinet` (#2024). The exact file
+        # wins over such a collision. Two claims still beat it, as the bulk resolver and the
+        # OKF export also treat them: a stored permalink equal to the identifier verbatim, and a
+        # permalink another note declared in frontmatter, since either may look like a file name.
+        if clean_text.casefold().endswith(".md"):
             verbatim_permalink = await entity_repository.get_by_permalink(
                 session,
-                normalize_project_reference(clean_text).strip("/"),
+                exact_identifier,
                 load_relations=load_relations,
             )
             if verbatim_permalink:
@@ -523,7 +520,15 @@ class LinkResolver:
                 clean_text,
                 load_relations=load_relations,
             )
-            if exact_file:
+            if exact_file and not await self._permalink_claimed_by_another_note(
+                session=session,
+                entity_repository=entity_repository,
+                exact_file=exact_file,
+                permalink_candidates=permalink_candidates,
+                project_permalink=project_permalink,
+                include_project=include_project,
+                workspace_permalink=workspace_permalink,
+            ):
                 logger.debug(f"Found exact file path match: {exact_file.file_path}")
                 return exact_file
 
@@ -639,6 +644,40 @@ class LinkResolver:
 
         # if we couldn't find anything then return None
         return None
+
+    async def _permalink_claimed_by_another_note(
+        self,
+        *,
+        session: AsyncSession,
+        entity_repository: EntityRepository,
+        exact_file: Entity,
+        permalink_candidates: list[str],
+        project_permalink: Optional[str],
+        include_project: bool,
+        workspace_permalink: Optional[str],
+    ) -> bool:
+        """Whether the first permalink candidate that matches belongs to a note that claimed it.
+
+        Permalink lookup would return the first matching candidate's note. That note claimed
+        the identifier when it is not `exact_file` and its permalink does not come from its own
+        file name (a frontmatter permalink); otherwise the match is a slug collision.
+        """
+        for candidate_permalink in permalink_candidates:
+            holder = await entity_repository.get_by_permalink(
+                session,
+                candidate_permalink,
+                load_relations=False,
+            )
+            if holder is None:
+                continue
+            return holder.id != exact_file.id and not permalink_comes_from_file_name(
+                candidate_permalink,
+                holder.file_path,
+                project_permalink,
+                include_project=include_project,
+                workspace_permalink=workspace_permalink,
+            )
+        return False
 
     async def _search_best_match(
         self,
