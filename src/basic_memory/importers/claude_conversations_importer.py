@@ -7,7 +7,7 @@ from typing import override, Any, Dict, List, Optional
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.importers.base import Importer
 from basic_memory.schemas.importer import ChatImportResult
-from basic_memory.importers.utils import clean_filename, format_timestamp
+from basic_memory.importers.utils import clean_filename, conversation_filename, format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,14 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
 
     @override
     async def import_data(
-        self, source_data, destination_folder: str, **kwargs: Any
+        self, source_data, destination_folder: str, *, use_source_ids: bool = False, **kwargs: Any
     ) -> ChatImportResult:
         """Import conversations from Claude JSON export.
 
         Args:
             source_data: Path to the Claude conversations.json file.
             destination_folder: Destination folder within the project.
+            use_source_ids: Name notes by source conversation ID for repeatable imports.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -61,10 +62,13 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
                     chat["created_at"].replace("Z", "+00:00")
                 ).strftime("%Y%m%d")
                 clean_title = clean_filename(chat_name)
-                relative_path = (
-                    f"{destination_folder}/{date_prefix}-{clean_title}"
-                    if destination_folder
+                filename = (
+                    conversation_filename("claude", chat.get("uuid"))
+                    if use_source_ids
                     else f"{date_prefix}-{clean_title}"
+                )
+                relative_path = (
+                    f"{destination_folder}/{filename}" if destination_folder else filename
                 )
                 permalink, file_path = self.build_import_paths(relative_path)
 
@@ -76,6 +80,9 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
                     modified_at=chat["updated_at"],
                     permalink=permalink,
                 )
+
+                if use_source_ids:
+                    entity.frontmatter.metadata["source_conversation_id"] = chat["uuid"]
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)

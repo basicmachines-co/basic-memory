@@ -7,7 +7,7 @@ from typing import override, Any, Dict, List, Optional, Set
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.importers.base import Importer
 from basic_memory.schemas.importer import ChatImportResult
-from basic_memory.importers.utils import clean_filename, format_timestamp
+from basic_memory.importers.utils import clean_filename, conversation_filename, format_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +36,14 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
     @override
     async def import_data(
-        self, source_data, destination_folder: str, **kwargs: Any
+        self, source_data, destination_folder: str, *, use_source_ids: bool = False, **kwargs: Any
     ) -> ChatImportResult:
         """Import conversations from ChatGPT JSON export.
 
         Args:
             source_data: Parsed conversations from the ChatGPT conversations.json export.
             destination_folder: Destination folder within the project.
+            use_source_ids: Name notes by source conversation ID for repeatable imports.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -63,15 +64,22 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
                 title = self._resolve_title(chat)
                 clean_title = clean_filename(title)
-                relative_path = (
-                    f"{destination_folder}/{date_prefix}-{clean_title}"
-                    if destination_folder
+                source_id = chat.get("conversation_id") or chat.get("id")
+                filename = (
+                    conversation_filename("chatgpt", source_id)
+                    if use_source_ids
                     else f"{date_prefix}-{clean_title}"
+                )
+                relative_path = (
+                    f"{destination_folder}/{filename}" if destination_folder else filename
                 )
                 permalink, file_path = self.build_import_paths(relative_path)
 
                 # Convert to entity
                 entity = self._format_chat_content(chat, title, permalink, created_at, modified_at)
+
+                if use_source_ids:
+                    entity.frontmatter.metadata["source_conversation_id"] = source_id
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)

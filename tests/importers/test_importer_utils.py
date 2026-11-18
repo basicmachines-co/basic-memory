@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+import pytest
+
 from basic_memory.importers.utils import clean_filename, format_timestamp
 
 
@@ -58,3 +60,21 @@ def test_format_timestamp():
 
     # Test with non-timestamp object
     assert format_timestamp(None) == "None"
+
+
+@pytest.mark.parametrize("source_id", [None, ""])
+def test_conversation_filename_requires_source_id(source_id):
+    from basic_memory.importers.utils import conversation_filename
+
+    with pytest.raises(ValueError, match="conversation ID"):
+        conversation_filename("claude", source_id)
+
+
+def test_conversation_filename_keeps_opaque_ids_inside_one_filename():
+    from basic_memory.importers.utils import conversation_filename
+
+    first = conversation_filename("claude", "../project:notes/chat")
+    assert "/" not in first
+    assert ":" not in first
+    assert first != conversation_filename("chatgpt", "../project:notes/chat")
+    assert first != conversation_filename("claude", "../project:notes/Chat")

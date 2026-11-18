@@ -46,6 +46,12 @@ def import_chatgpt(
     folder: Annotated[
         str, typer.Option(help="The folder to place the files in.")
     ] = "conversations",
+    use_source_ids: Annotated[
+        bool,
+        typer.Option(
+            help="Use stable source-ID filenames so repeated titles stay separate and renamed chats update the same note."
+        ),
+    ] = False,
 ):
     """Import chat conversations from ChatGPT JSON format.
 
@@ -80,7 +86,9 @@ def import_chatgpt(
         )
         with conversations_json.open("r", encoding="utf-8") as file:
             json_data = json.load(file)
-            result = run_with_cleanup(importer.import_data(json_data, folder))
+            result = run_with_cleanup(
+                importer.import_data(json_data, folder, use_source_ids=use_source_ids)
+            )
 
         if not result.success:  # pragma: no cover
             typer.echo(f"Error during import: {result.error_message}", err=True)

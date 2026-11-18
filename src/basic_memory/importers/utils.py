@@ -1,5 +1,6 @@
 """Utility functions for import services."""
 
+import hashlib
 import re
 from datetime import datetime
 from typing import Any
@@ -60,3 +61,11 @@ def format_timestamp(timestamp: Any) -> str:  # pragma: no cover
 
     # Return as is if we can't format it
     return str(parsed_timestamp)  # pragma: no cover
+
+
+def conversation_filename(source: str, source_id: str | None) -> str:
+    """Return a portable, stable filename for one source conversation."""
+    if not isinstance(source_id, str) or not source_id:
+        raise ValueError("Source-ID filenames require a conversation ID in every conversation")
+    digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+    return f"{source}-{digest}"

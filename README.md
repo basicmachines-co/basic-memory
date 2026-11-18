@@ -598,6 +598,13 @@ basic-memory import chatgpt
 basic-memory import memory-json
 ```
 
+For repeated exports, add `--use-source-ids` to either conversation import command.
+It names each note with the provider and a SHA-256 digest of the conversation ID.
+Chats with the same title stay separate, and later exports update the same note
+even when its title changes. The original ID is saved as `source_conversation_id`
+in frontmatter. Every conversation must have a source ID. Choose a fresh import
+folder when switching an existing archive to this filename scheme.
+
 Routing flags (`--local` / `--cloud`) force a target when you're in mixed
 mode. Full CLI reference in the
 [docs](https://docs.basicmemory.com/reference/cli-reference?utm_source=github&utm_medium=referral&utm_campaign=readme).
