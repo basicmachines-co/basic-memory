@@ -794,6 +794,23 @@ async def get_active_project(
         return active_project
 
 
+async def _active_project_for_workspace_entry(
+    client: AsyncClient,
+    entry: WorkspaceProjectEntry,
+    context: Optional[Context] = None,
+) -> ProjectItem:
+    """Validate a workspace-index project on its cloud route, by external id.
+
+    The bare name is ambiguous across routes and workspaces; the external id is
+    not. A cached project counts only when its external id is the entry's, so a
+    same-named project cached earlier in the session is never reused.
+    """
+    cached_project = await _get_cached_active_project(context)
+    if cached_project is not None and cached_project.external_id == entry.project.external_id:
+        return cached_project
+    return await get_active_project(client, entry.project.external_id, context)
+
+
 async def resolve_project_and_path(
     client: AsyncClient,
     identifier: str,
@@ -2103,11 +2120,30 @@ async def get_project_client(
                 else nullcontext()
             )
             with permalink_context:
-                async with get_client(
-                    project_name=project_for_api,
-                    workspace=workspace_id,
-                ) as client:
-                    active_project = await get_active_project(client, project_for_api, context)
+                if resolved_entry is None:
+                    async with get_client(
+                        project_name=project_for_api,
+                        workspace=workspace_id,
+                    ) as client:
+                        active_project = await get_active_project(client, project_for_api, context)
+                        yield client, active_project
+                    return
+
+                # Trigger: the workspace index resolved a qualified name
+                #   (<workspace>/<project>) or a cloud external id to one cloud
+                #   project.
+                # Why: get_client consults per-project mode before the workspace
+                #   selector, and that mode is keyed by bare name. Passing the bare
+                #   name sent the request to a same-named local project and
+                #   dropped the workspace, so reads and writes hit the wrong
+                #   project without any error.
+                # Outcome: route by the resolved workspace alone, and validate by
+                #   external id so a same-named project on another route, or in
+                #   the session cache, cannot stand in for it.
+                async with get_client(workspace=workspace_id) as client:
+                    active_project = await _active_project_for_workspace_entry(
+                        client, resolved_entry, context
+                    )
                     yield client, active_project
         return
 

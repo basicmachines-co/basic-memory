@@ -1671,7 +1671,7 @@ async def test_get_project_client_routes_duplicate_project_through_workspace_slu
     async with get_project_client(project="team-paul/main") as (_client, active_project):
         assert active_project.external_id == "team-main-id"
 
-    assert seen == {"project_name": "main", "workspace": "team-tenant"}
+    assert seen == {"project_name": None, "workspace": "team-tenant"}
 
 
 @pytest.mark.asyncio
@@ -2071,13 +2071,14 @@ async def test_get_project_client_with_cloud_project_id_routes_to_workspace_with
     @asynccontextmanager
     async def fake_get_client(project_name=None, workspace=None):
         get_client_calls.append({"project_name": project_name, "workspace": workspace})
-        yield object()
+        yield workspace or "local"
 
     async def fake_get_active_project(client, project, context=None, headers=None):
         validated_projects.append(project)
-        if project == cloud_uuid:
+        # The local app does not know the cloud project; its own workspace does.
+        if client == "local":
             raise ToolError("project not found")
-        return _project(project, id=cloud_project.id, external_id=cloud_project.external_id)
+        return cloud_project
 
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
     monkeypatch.setattr(project_context, "has_cloud_credentials", lambda _config: True)
@@ -2092,9 +2093,9 @@ async def test_get_project_client_with_cloud_project_id_routes_to_workspace_with
 
     assert get_client_calls == [
         {"project_name": None, "workspace": None},
-        {"project_name": "main", "workspace": "personal-tenant"},
+        {"project_name": None, "workspace": "personal-tenant"},
     ]
-    assert validated_projects == [cloud_uuid, "main"]
+    assert validated_projects == [cloud_uuid, cloud_uuid]
 
 
 @pytest.mark.asyncio
@@ -2137,7 +2138,7 @@ async def test_get_project_client_clears_stale_cached_project_for_workspace_rout
 
     @asynccontextmanager
     async def fake_get_client(project_name=None, workspace=None):
-        assert project_name == "main"
+        assert project_name is None
         assert workspace == "personal-tenant"
         yield object()
 
@@ -3383,7 +3384,7 @@ class TestGetProjectClientRoutingOrder:
             yield object()
 
         async def fake_get_active_project(client, project_name, context=None, headers=None):
-            assert project_name == "Cloud Proj"
+            assert project_name == "cloud-project-id"
             return ProjectItem(
                 id=project.id,
                 external_id=project.external_id,
@@ -3404,7 +3405,7 @@ class TestGetProjectClientRoutingOrder:
         async with get_project_client(project="cloud-proj") as (_client, active_project):
             assert active_project.external_id == "cloud-project-id"
 
-        assert seen == {"project_name": "Cloud Proj", "workspace": "acme-tenant"}
+        assert seen == {"project_name": None, "workspace": "acme-tenant"}
 
     @pytest.mark.asyncio
     async def test_cloud_only_project_routes_to_cloud(self, config_manager, monkeypatch):
@@ -3468,7 +3469,7 @@ class TestGetProjectClientRoutingOrder:
         async with get_project_client(project="cloud-only-proj") as (_client, active_project):
             assert active_project.external_id == "cloud-only-id"
 
-        assert seen == {"project_name": "Cloud Only Proj", "workspace": "personal-tenant"}
+        assert seen == {"project_name": None, "workspace": "personal-tenant"}
 
     @pytest.mark.asyncio
     async def test_factory_mode_uses_workspace_index_without_control_plane(
@@ -3519,7 +3520,7 @@ class TestGetProjectClientRoutingOrder:
             return WorkspaceProjectEntry(workspace=workspace, project=project)
 
         async def fake_get_active_project(client, project_name, context=None, headers=None):
-            assert project_name == "Cloud Proj"
+            assert project_name == "factory-project-id"
             return ProjectItem(
                 id=project.id,
                 external_id=project.external_id,
