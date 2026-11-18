@@ -151,6 +151,7 @@ jobs:
           uv run pytest
           tests/cli/test_wiki_command.py
           tests/indexing/test_note_content_promotion_guard.py
+          tests/indexing/test_storage_change_journal.py
           tests/mcp/test_tool_bm_delete.py
           tests/mcp/test_tool_bm_project.py
           tests/mcp/test_tool_bm_project_cloud.py

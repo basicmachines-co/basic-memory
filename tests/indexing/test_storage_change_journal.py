@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.index.local_project import LocalProjectIndexRunner
 from basic_memory.index.local_wiki_projection import (
     LocalWikiState,
@@ -141,11 +141,22 @@ async def test_storage_create_edit_and_delete_each_leave_one_journal_row(
 
 @pytest.mark.asyncio
 async def test_storage_rename_leaves_one_moved_row(
+    app_config: BasicMemoryConfig,
+    config_manager: ConfigManager,
     config_home: Path,
     project_repository: ProjectRepository,
     session_maker: async_sessionmaker[AsyncSession],
     test_project: Project,
 ) -> None:
+    # Keep the file's bytes exactly as the rename left them. With
+    # update_permalinks_on_move on, indexing also rewrites the moved note's
+    # permalink frontmatter, so the rename is no longer content-neutral: on
+    # Windows the rewrite is stored with CRLF line endings, and the same index
+    # run promotes those bytes as a new version. The rewrite path is covered in
+    # test_project_index_maintenance.py.
+    app_config.update_permalinks_on_move = False
+    config_manager.save_config(app_config)
+
     write_note(config_home, NOTE_PATH, "Renamed without edits.")
     await index_project(project_repository, session_maker, test_project)
     [created] = await journal_after(session_maker, test_project, 0)
@@ -168,6 +179,7 @@ async def test_storage_rename_leaves_one_moved_row(
         NOTE_PATH,
         ACCEPTED_STORAGE_CHANGE_SOURCE,
     )
+    assert (moved.db_version, moved.db_checksum) == (created.db_version, created.db_checksum)
     assert moved.materialized_at is not None
 
 
