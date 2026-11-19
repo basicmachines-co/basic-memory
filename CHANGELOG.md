@@ -30,6 +30,13 @@
   one named. The confirmation prompt now names the workspace. A name that matches no
   cloud project deletes nothing and exits with an error. Removing a local project by
   its bare name is unchanged.
+- **A file path like `entities/Claude.ai.md` reaches that note, not its sibling
+  `entities/Claude.md`.** `bm_read`, `bm_edit`, `bm_move` and `bm_delete` addressed by
+  such a path used to act on the sibling without any error, whenever the extra
+  extension (`.ai`, `.js`, `.py`, `.txt` and others) is one Python's `mimetypes` knows
+  (#2127). Hosts with the Redis read cache also stop serving note and link resolve
+  answers stored by the earlier resolver: those reads are keyed afresh, so the first
+  resolve after upgrading misses the cache. Other cached reads keep their entries.
 
 ## v1.0.0 (2026-10-29)
 

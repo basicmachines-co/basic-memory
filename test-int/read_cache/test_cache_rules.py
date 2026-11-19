@@ -8,6 +8,7 @@ reports whether a response came from the cache.
 from __future__ import annotations
 
 import importlib
+import json
 from collections.abc import Generator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,7 +39,7 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository import EntityRepository
-from basic_memory.read_cache.contract import ReadCacheUnavailable
+from basic_memory.read_cache.contract import ReadCacheOperation, ReadCacheUnavailable
 from basic_memory.read_cache.policy import READ_CACHE_MAX_PAYLOAD_BYTES
 from basic_memory.read_cache.redis import RedisReadCache, create_redis_read_cache_client
 from basic_memory.services.note_content_writes import NoteContentMutationService
@@ -883,7 +884,75 @@ async def test_a_link_resolved_into_another_project_is_never_stored(
     assert first.status_code == 200, first.text
     assert second.json()["external_id"] == other_note["external_id"]
     assert _status(second) != "HIT"
-    assert await _stored_entries(cached_app.cache, "link_resolve") == set()
+    assert await _stored_entries(cached_app.cache, ReadCacheOperation.link_resolve) == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "operation", "earlier_operation"),
+    [
+        ("knowledge/resolve", ReadCacheOperation.resolve, "resolve"),
+        ("knowledge/links/resolve", ReadCacheOperation.link_resolve, "link_resolve"),
+    ],
+)
+async def test_a_resolve_answer_cached_by_the_earlier_resolver_is_never_served(
+    cached_app: CachedApp,
+    client: AsyncClient,
+    project_url: str,
+    route: str,
+    operation: ReadCacheOperation,
+    earlier_operation: str,
+) -> None:
+    """Rule: a deploy that changes which note an identifier names must not serve the
+    answers the earlier resolver cached, which nothing else retires for a week.
+
+    The earlier resolver answered "rules/Claude.ai.md" with its sibling
+    "rules/Claude.md", and that answer sits in Redis under the earlier operation key.
+    """
+    sibling = await _create(client, project_url, "Claude")
+    dotted = await _create(client, project_url, "Claude.ai")
+    assert (sibling["file_path"], dotted["file_path"]) == ("rules/Claude.md", "rules/Claude.ai.md")
+    url = f"{project_url}/{route}"
+    body = {"identifier": dotted["file_path"], "strict": True}
+
+    # Fill both answers, then find the key the dotted path's answer is stored under.
+    assert (
+        _status(await _query(client, url, {**body, "identifier": sibling["file_path"]})) == "MISS"
+    )
+    assert _status(await _query(client, url, body)) == "MISS"
+
+    async def stored(key: bytes) -> bytes:
+        entry = await cached_app.cache.client.get(key)
+        assert isinstance(entry, bytes)
+        return entry
+
+    entries = {
+        json.loads(json.loads(await stored(key))["body"])["file_path"]: key
+        for key in await _stored_entries(cached_app.cache, operation)
+    }
+    assert entries.keys() == {sibling["file_path"], dotted["file_path"]}
+    dotted_key = entries[dotted["file_path"]]
+    sibling_entry = await stored(entries[sibling["file_path"]])
+
+    # Control: the sibling's answer planted under the live key is served, so the
+    # planted entry is one the route would read.
+    await cached_app.cache.client.set(dotted_key, sibling_entry)
+    planted = await _query(client, url, body)
+    assert (_status(planted), planted.json()["file_path"]) == ("HIT", sibling["file_path"])
+
+    # The same entry under the earlier operation's key, where the earlier resolver
+    # stored it, is never read: the route answers from the database.
+    earlier_key = dotted_key.replace(
+        f":{operation.value}:".encode(), f":{earlier_operation}:".encode()
+    )
+    assert earlier_key != dotted_key
+    await cached_app.cache.client.rename(dotted_key, earlier_key)
+    answered = await _query(client, url, body)
+
+    assert answered.status_code == 200, answered.text
+    assert _status(answered) == "MISS"
+    assert answered.json()["external_id"] == dotted["external_id"]
+    assert answered.json()["file_path"] == dotted["file_path"]
 
 
 @pytest.mark.asyncio
