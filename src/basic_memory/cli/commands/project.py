@@ -1184,6 +1184,10 @@ def remove_project(
     are asked to confirm first; pass --yes to skip the prompt in scripts. A
     local sync directory is kept unless you pass --delete-local-files.
 
+    Name a cloud project in a specific workspace as <workspace>/<project>, or by
+    its external id. That removes the project in the named workspace only, even
+    when a local project or another workspace has the same name.
+
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
@@ -1208,6 +1212,30 @@ def remove_project(
     # actually takes, not just the flag.
     cloud_routed = not local and (cloud or config.get_project_mode(route_name) == ProjectMode.CLOUD)
 
+    # Trigger: no local entry, and the name is a cloud external id or is shaped
+    #   <workspace>/<project>.
+    # Why: the request otherwise went to the default workspace, and the server
+    #   drops the workspace segment of a qualified name, so the delete removed
+    #   the same-named project in whichever workspace it reached — after a
+    #   prompt that named a different one.
+    # Outcome: the workspace index picks the one project the name means before
+    #   the prompt; the delete goes to that project's workspace by its external
+    #   id. A name the index cannot find deletes nothing.
+    cloud_target = None
+    if entry is None and not local and _names_one_cloud_project(name):
+        try:
+            with force_routing(local=local, cloud=cloud):
+                cloud_target = run_with_cleanup(_resolve_cloud_project_for_remove(name))
+        except Exception as e:
+            # str() of httpx transport errors is often empty (#1034) — never print a blank error.
+            console.print(
+                f"[red]Error: cloud project '{literal(name)}' was not found. "
+                f"{literal(str(e) or repr(e))}[/red]"
+            )
+            console.print("[yellow]Nothing was deleted.[/yellow]")
+            raise typer.Exit(1)
+        cloud_routed = True
+
     # Trigger: --delete-local-files on a delete that goes to the local API.
     # Why: the flag names the local copy of a cloud project; on a local project
     #   it would silently overlap --delete-notes, so the intent is unclear.
@@ -1231,8 +1259,15 @@ def remove_project(
     # Outcome: explain what will be deleted and what is kept, then require a
     #   yes unless --yes was passed. Declining exits without deleting anything.
     if cloud_routed:
+        if cloud_target is not None:
+            prompt_target = (
+                f"cloud project '{cloud_target.project.name}' "
+                f"in workspace '{cloud_target.workspace.slug}'"
+            )
+        else:
+            prompt_target = f"cloud project '{name}'"
         console.print(
-            f"[yellow]Removing cloud project '{literal(name)}' permanently deletes all of its files "
+            f"[yellow]Removing {literal(prompt_target)} permanently deletes all of its files "
             "in cloud storage. They can be recovered only from a cloud snapshot "
             "(`bm cloud snapshot list`).[/yellow]"
         )
@@ -1243,7 +1278,7 @@ def remove_project(
             )
         elif local_path_config:
             console.print(f"The local sync directory {literal(local_path_config)} will be kept.")
-        if not yes and not typer.confirm(f"Delete cloud project '{name}' and its cloud files?"):
+        if not yes and not typer.confirm(f"Delete {prompt_target} and its cloud files?"):
             console.print("[yellow]Remove cancelled - nothing deleted[/yellow]")
             raise typer.Exit(0)
 
@@ -1252,6 +1287,15 @@ def remove_project(
     request_delete_notes = True if cloud_routed else delete_notes
 
     async def _remove_project():
+        if cloud_target is not None:
+            # No project name: get_client's per-project routing is keyed by bare
+            # name and could pick a same-named local project. The workspace
+            # selector alone routes to the resolved project's tenant.
+            async with get_client(workspace=cloud_target.workspace.tenant_id) as client:
+                return await ProjectClient(client).delete_project(
+                    cloud_target.project.external_id, delete_notes=request_delete_notes
+                )
+
         # Resolve workspace so cloud-only projects auto-route without --cloud
         ws = None
         if entry and entry.workspace_id:
@@ -1330,6 +1374,29 @@ def remove_project(
         # str() of httpx transport errors is often empty (#1034) — never print a blank error.
         console.print(f"[red]Error removing project: {literal(str(e) or repr(e))}[/red]")
         raise typer.Exit(1)
+
+
+def _names_one_cloud_project(name: str) -> bool:
+    """Whether a remove argument is a cloud external id or a <workspace>/<project> name."""
+    from uuid import UUID
+
+    from basic_memory.mcp.project_context_identifiers import split_qualified_project_identifier
+
+    try:
+        UUID(name)
+    except ValueError:
+        workspace, _ = split_qualified_project_identifier(name)
+        return workspace is not None
+    return True
+
+
+async def _resolve_cloud_project_for_remove(name: str):
+    """Find the one cloud project a qualified name or external id means, or raise."""
+    # Deferred: project_context pulls the MCP runtime, which must not load at CLI
+    # import time (#886).
+    from basic_memory.mcp.project_context import resolve_workspace_project_identifier
+
+    return await resolve_workspace_project_identifier(name)
 
 
 def _cloud_file_delete_message(

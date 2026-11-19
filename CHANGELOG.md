@@ -14,6 +14,23 @@
   are now stored exactly as written. Old keys in `config.json` are ignored. To format
   notes, run your formatter from your editor, or over the project folder yourself.
 
+### Bug Fixes
+
+- **A workspace-qualified project or a cloud external ID now reaches that cloud
+  project, even when a local project has the same name.** `--project <workspace>/<name>`
+  or a cloud project's external ID, in a `bm_*` MCP tool or a `bm tool` command, used to
+  read and write the same-named local project without any error. It now goes to the
+  named workspace. Without cloud credentials it fails with the "no cloud credentials"
+  error instead of reading the local project. A bare name still means the local project
+  when one is in config. If you passed `<workspace>/<name>` and relied on reaching the
+  local project, pass the bare name instead.
+- **`bm project remove <workspace>/<name>` (or an external ID) deletes only that
+  workspace's project.** It used to send the delete to the default workspace, which
+  could delete a same-named project, and its cloud files, in a workspace other than the
+  one named. The confirmation prompt now names the workspace. A name that matches no
+  cloud project deletes nothing and exits with an error. Removing a local project by
+  its bare name is unchanged.
+
 ## v1.0.0 (2026-10-29)
 
 Basic Memory 1.0 is a clean-house release. The MCP server exposes only the `bm_*`
