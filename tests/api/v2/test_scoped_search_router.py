@@ -712,3 +712,32 @@ async def test_results_name_their_project_when_the_caller_knows_it() -> None:
 
     assert (named[0].project_id, named[0].project_external_id) == (7, "project-7")
     assert (unnamed[0].project_id, unnamed[0].project_external_id) == (7, None)
+
+
+@pytest.mark.asyncio
+async def test_a_one_word_text_search_turns_seqscan_off_once_and_never_restores_it(
+    corpus: Corpus,
+) -> None:
+    """The search runs on a session of its own, so it only turns sequential scans off."""
+    if corpus.config.database_backend != DatabaseBackend.POSTGRES:
+        pytest.skip("sequential-scan steering is Postgres only")
+    service = corpus.service(corpus.ids(2))
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    event.listen(corpus.engine.sync_engine, "before_cursor_execute", record)
+    try:
+        rows = await service.search(
+            SearchQuery(text="nebula", retrieval_mode=SearchRetrievalMode.FTS),
+            limit=100,
+            offset=0,
+        )
+    finally:
+        event.remove(corpus.engine.sync_engine, "before_cursor_execute", record)
+
+    assert rows
+    assert [sql for sql in statements if "enable_seqscan" in sql] == [
+        "SELECT set_config('enable_seqscan', 'off', true)"
+    ]

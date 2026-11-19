@@ -860,6 +860,7 @@ async def execute_fts_statement(
     *,
     prefer_index_scans: bool,
     use_savepoint: bool,
+    restore_planner_setting: bool,
 ) -> Sequence[Row[Any]]:
     """Run one FTS statement and fetch its rows, steering text candidates to GIN (#1791).
 
@@ -870,21 +871,26 @@ async def execute_fts_statement(
       a 95k-chunk project. A GIN bitmap reads only matching rows and never detoasts;
       it won at every selectivity measured, even with all chunks matching (921
       buffers against 481k).
-    Outcome: sequential scans are off for this statement only. Inside a savepoint the
-      prior value is restored before the savepoint is released, and a rolled-back
-      savepoint reverts it on its own, so a caller's session plans normally afterwards.
-      Without a savepoint the session is FTS's own, and the setting ends with its
-      transaction.
+    Outcome: sequential scans are off for this statement only. On a caller's session
+      (``restore_planner_setting``) the prior value is read first and restored after the
+      statement, before any savepoint is released, so the caller's later statements plan
+      normally; a rolled-back savepoint reverts the setting on its own. On a session FTS
+      opened for this search nothing runs after the statement, so the read and the
+      restore are skipped and the setting ends with that session's transaction.
     """
 
     async def run() -> Sequence[Row[Any]]:
         if not prefer_index_scans:
             return (await session.execute(text(statement), params)).fetchall()
-        previous = (
-            await session.execute(text("SELECT current_setting('enable_seqscan')"))
-        ).scalar_one()
+        previous = None
+        if restore_planner_setting:
+            previous = (
+                await session.execute(text("SELECT current_setting('enable_seqscan')"))
+            ).scalar_one()
         await session.execute(text("SELECT set_config('enable_seqscan', 'off', true)"))
         rows = (await session.execute(text(statement), params)).fetchall()
+        if not restore_planner_setting:
+            return rows
         await session.execute(
             text("SELECT set_config('enable_seqscan', :previous, true)"),
             {"previous": previous},
@@ -963,6 +969,7 @@ class PostgresFts:
                 query_params,
                 prefer_index_scans=compiled.prefer_index_scans,
                 use_savepoint=use_savepoint,
+                restore_planner_setting=session is not None,
             )
 
         async def run_search(active_session: AsyncSession):
