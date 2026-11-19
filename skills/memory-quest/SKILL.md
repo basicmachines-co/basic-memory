@@ -81,7 +81,12 @@ With approval, call `bm_write` once:
 
 Pass the code and guidance in `metadata`, never inside `content`. They must arrive as frontmatter fields for the cloud to recognize the write.
 
-If `bm_write` reports that the note already exists, leave that note untouched. In a shared project it can be a teammate's Memory Master note, and a teammate's note carries the same `type: memory_master` and `memory_quest_code` markers as an earlier attempt of your own, so you cannot tell them apart. The cloud verifies the code in the frontmatter, not the note's path. Call `bm_write` again with the same arguments and `title` set to `Memory Master (<today's date as YYYY-MM-DD>)`. If that title exists too, add ` 2`, then ` 3`, and so on until a write succeeds. Never pass `overwrite: true`.
+If `bm_write` reports that the note already exists, read it with `bm_read`, using the exact path from the refusal and the same `project`, `output_format: "json"` and `include_frontmatter: true`. In a shared project it can be a teammate's Memory Master note, and a teammate's note carries the same `type: memory_master` and `memory_quest_code` markers as an earlier attempt of the user's own, so only the user can tell them apart. Tell the user who created it, from the `created_by` field in its frontmatter, and when, if the read result shows it. Ask whether it is their own earlier Memory Quest attempt.
+
+- **The user confirms it's theirs**, and its frontmatter has `type: memory_master` and a `memory_quest_code`: call `bm_write` again with the read result's `file_path` as `identifier` instead of `title` + `directory`, `overwrite: true`, and `expected_checksum` set to its checksum. If the note changed after you read it, the write fails instead of discarding the newer version: read it again and ask again.
+- **Otherwise** (the user says it isn't theirs or isn't sure, or the note is anything else): leave it untouched. Call `bm_write` again with the same arguments and `title` set to `Memory Master (<today's date as YYYY-MM-DD>)`. If that title exists too, add ` 2`, then ` 3`, and so on until a write succeeds.
+
+Never pass `overwrite: true` without the user's confirmation. The cloud verifies the code in the frontmatter, not the note's path, so a dated title completes the mission just as well.
 
 ### 6. Tell the user what happens next
 
@@ -133,7 +138,7 @@ Your assistant now starts from what you already know: it checks Basic Memory for
 
 ## Guidelines
 
-- **One write, with approval.** Never write the note before step 4, and never write a second note to retry. Overwrite the same one.
+- **One write, with approval.** Never write the note before step 4. Replace an existing Memory Master note only after the user confirms it is their own earlier attempt; otherwise save under a dated title as step 5 describes. Never overwrite a note the user hasn't confirmed.
 - **Report guidance honestly.** Only send `memory_quest_guidance: "active"` after step 2 passes.
 - **Don't invent outcomes.** You can't observe the award. Point the user to Memory Quest instead of announcing success.
 - **Keep the code in metadata.** A code in the note body verifies nothing.
