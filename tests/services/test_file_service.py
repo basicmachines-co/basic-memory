@@ -203,6 +203,31 @@ async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
 
 
 @pytest.mark.asyncio
+async def test_update_frontmatter_adds_missing_field_without_reformatting_note(
+    tmp_path: Path, file_service: FileService
+):
+    test_path = tmp_path / "note.md"
+    original_content = (
+        "---\n"
+        'title: "Decision: a long title that goes past eighty characters so the YAML dumper wraps it"\n'
+        "tags: [decision, memory, obsidian]\n"
+        'aliases: ["Alias one"]\n'
+        "---\n\n"
+        "# Body\n\n"
+        "Text.\n"
+    )
+    test_path.write_text(original_content, encoding="utf-8")
+
+    result = await file_service.update_frontmatter_with_result(test_path, {"permalink": "rp/note"})
+
+    expected_content = original_content.replace(
+        'aliases: ["Alias one"]\n', 'aliases: ["Alias one"]\npermalink: rp/note\n'
+    )
+    assert result.content == expected_content
+    assert result.checksum == await file_service.compute_checksum(test_path)
+
+
+@pytest.mark.asyncio
 async def test_update_frontmatter_rejects_malformed_yaml_without_changing_file(
     tmp_path: Path, file_service: FileService
 ):

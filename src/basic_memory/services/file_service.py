@@ -497,7 +497,7 @@ class FileService:
     ) -> FrontmatterUpdateResult:
         """Update frontmatter and return the exact final written markdown content.
 
-        Only modifies the frontmatter section, leaving all content untouched.
+        Adding absent fields preserves existing frontmatter formatting and body content.
         Creates frontmatter section if none exists.
         Returns both checksum and final content so callers do not need a reread.
 
@@ -524,7 +524,8 @@ class FileService:
 
             # Parse current frontmatter with proper error handling for malformed YAML
             current_fm = {}
-            if file_utils.has_frontmatter(content):
+            frontmatter_present = file_utils.has_frontmatter(content)
+            if frontmatter_present:
                 try:
                     current_fm = file_utils.parse_frontmatter(content)
                 except ParseError as e:
@@ -535,16 +536,27 @@ class FileService:
                     raise FileOperationError(
                         f"Refusing to update malformed frontmatter in {full_path}: {e}"
                     ) from e
-                content = file_utils.remove_frontmatter(content)
 
-            # Update frontmatter
-            new_fm = {**current_fm, **updates}
-
-            # Write new file with updated frontmatter
-            yaml_fm = yaml.dump(
-                new_fm, Dumper=SimpleSafeDumper, sort_keys=False, allow_unicode=True
-            )
-            final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
+            # Trigger: every update is a new field in an existing frontmatter block.
+            # Why: dumping the mapping reformats user metadata and stripping the body
+            # loses trailing newlines.
+            # Outcome: insert only the requested fields and preserve every other byte.
+            if (
+                updates
+                and frontmatter_present
+                and all(field not in current_fm for field in updates)
+            ):
+                final_content = content
+                for field, value in updates.items():
+                    final_content = file_utils.add_frontmatter_field(final_content, field, value)
+            else:
+                if frontmatter_present:
+                    content = file_utils.remove_frontmatter(content)
+                new_fm = {**current_fm, **updates}
+                yaml_fm = yaml.dump(
+                    new_fm, Dumper=SimpleSafeDumper, sort_keys=False, allow_unicode=True
+                )
+                final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 
             logger.debug(
                 "Updating frontmatter", path=str(full_path), update_keys=list(updates.keys())
