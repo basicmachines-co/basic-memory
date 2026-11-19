@@ -81,7 +81,7 @@ With approval, call `bm_write` once:
 
 Pass the code and guidance in `metadata`, never inside `content`. They must arrive as frontmatter fields for the cloud to recognize the write.
 
-If `bm_write` reports that the note already exists, read it with `bm_read`, using the exact path from the refusal and the same `project`, `output_format: "json"` and `include_frontmatter: true`. The frontmatter is where an earlier attempt's markers live, and the JSON includes the note's `checksum`. Only an earlier Memory Quest attempt — a note whose frontmatter has `type: memory_master` and a `memory_quest_code` field — may be replaced. Say so, then call `bm_write` again using the read result's `file_path` as `identifier` instead of `title` + `directory`, `overwrite: true`, and `expected_checksum` set to that checksum. If the note changed after you read it, the write fails instead of discarding the newer version. Read it again and repeat the check. If the existing note is anything else, don't overwrite it: tell the user what's there, and either save under a different title, such as `Memory Master (Memory Quest)`, or let them choose.
+If `bm_write` reports that the note already exists, leave that note untouched. In a shared project it can be a teammate's Memory Master note, and a teammate's note carries the same `type: memory_master` and `memory_quest_code` markers as an earlier attempt of your own, so you cannot tell them apart. The cloud verifies the code in the frontmatter, not the note's path. Call `bm_write` again with the same arguments and `title` set to `Memory Master (<today's date as YYYY-MM-DD>)`. If that title exists too, add ` 2`, then ` 3`, and so on until a write succeeds. Never pass `overwrite: true`.
 
 ### 6. Tell the user what happens next
 
