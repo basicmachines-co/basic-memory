@@ -13,8 +13,7 @@ in ``basic_memory/data/skills``, and tests/test_skills_dist.py pins it.
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
-from fastmcp.server.providers.skills import SkillsDirectoryProvider
-from fastmcp.skills.extension import SkillsExtension
+from fastmcp.skills.provider import SkillsDirectoryProvider
 
 from basic_memory.mcp.server import mcp
 
@@ -45,8 +44,7 @@ def distributed_skills_root() -> Path:
     return root
 
 
-# experimental_skills switches the provider to SEP-2640 semantics: strict manifests
-# and byte-preserving reads, which skills/get digests depend on.
-skills_provider = SkillsDirectoryProvider(roots=distributed_skills_root(), experimental_skills=True)
+# The provider validates every SKILL.md at construction, so a malformed skill fails
+# the server at import, and it registers the Skills extension (skills/list) itself.
+skills_provider = SkillsDirectoryProvider(distributed_skills_root())
 mcp.add_provider(skills_provider)
-mcp.add_extension(SkillsExtension(providers=[skills_provider]))
