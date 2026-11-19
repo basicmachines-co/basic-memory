@@ -2165,9 +2165,7 @@ async def test_postgres_fts_on_a_callers_session_reads_and_restores_seqscan(
         stop()
 
     assert setting == "off"
-    seqscan = [
-        sql for sql in statements if "enable_seqscan" in sql and sql.startswith("SELECT")
-    ]
+    seqscan = [sql for sql in statements if "enable_seqscan" in sql and sql.startswith("SELECT")]
     assert len(seqscan) == 3
     assert "current_setting('enable_seqscan')" in seqscan[0]
     assert seqscan[1] == "SELECT set_config('enable_seqscan', 'off', true)"
