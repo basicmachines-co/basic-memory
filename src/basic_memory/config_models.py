@@ -169,6 +169,14 @@ class ProjectEntry(BaseModel):
         default=None,
         description="Timestamp of last successful sync operation",
     )
+    # Off by default: an agent can write any note, so serving a project's notes as
+    # skills is a trust decision the user makes per project.
+    serve_skills: bool = Field(
+        default=False,
+        description=(
+            "Serve this project's `type: skill` notes as MCP skills. Set by 'bm project skills'."
+        ),
+    )
 
 
 class BasicMemoryConfig(BaseSettings):
