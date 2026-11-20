@@ -132,3 +132,41 @@ async def test_skill_notes_are_read_across_every_search_page(app, test_project) 
     notes = await project_skill_notes(test_project.name, page_size=1)
 
     assert sorted(note.title for note in notes) == ["First", "Second"]
+
+
+@pytest.mark.asyncio
+async def test_pinned_server_never_serves_an_untrusted_project_as_a_trusted_one(
+    app, test_project, second_project, config_manager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # test-project is trusted, second-project is not; the server is pinned to
+    # second-project, so routing would hand second-project's notes to any read.
+    _serve_skills(config_manager, test_project.name)
+    await _write_skill(
+        test_project.name, "Trusted", {"name": "trusted", "description": "Trusted skill."}
+    )
+    await _write_skill(
+        second_project.name, "Untrusted", {"name": "untrusted", "description": "Not trusted."}
+    )
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", second_project.name)
+
+    async with Client(mcp, extensions=[SkillsClientExtension()]) as client:
+        listed = {str(skill.uri) for skill in await client.list_skills()}
+    assert not any("trusted" in uri for uri in listed)
+
+    # A direct read refuses rather than mislabel the pinned project's notes.
+    with pytest.raises(ValueError, match="resolved to project 'second-project'"):
+        await project_skill_notes(test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_pinned_server_serves_its_own_trusted_project(
+    app, test_project, second_project, config_manager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve_skills(config_manager, test_project.name)
+    await _write_skill(
+        test_project.name, "Trusted", {"name": "trusted", "description": "Trusted skill."}
+    )
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
+
+    async with Client(mcp, extensions=[SkillsClientExtension()]) as client:
+        assert await _note_skill_uris(client) == {"skill://test-project/trusted/SKILL.md"}

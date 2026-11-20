@@ -14,6 +14,7 @@ can write any note, so turning notes into instructions other agents follow is th
 user's call, not the note author's.
 """
 
+import os
 from collections import Counter
 from dataclasses import dataclass
 from typing import override
@@ -45,12 +46,27 @@ class SkillNote:
 def skill_projects() -> list[str]:
     """The configured projects whose skill notes the user has chosen to serve."""
     config = ConfigManager().config
-    return [name for name, entry in config.projects.items() if entry.serve_skills]
+    trusted = [name for name, entry in config.projects.items() if entry.serve_skills]
+    # Trigger: BASIC_MEMORY_MCP_PROJECT pins this server to one project.
+    # Why: routing sends every project argument to the pinned project, so reading
+    #   any other trusted project would return the pinned project's notes.
+    # Outcome: serve the pinned project's skills only, and only if it is trusted.
+    constrained = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained:
+        pinned = generate_permalink(constrained)
+        return [name for name in trusted if generate_permalink(name) == pinned]
+    return trusted
 
 
 async def project_skill_notes(project: str, *, page_size: int = MAX_PAGE_SIZE) -> list[SkillNote]:
     """Every `type: skill` note in one project, with its accepted markdown."""
     async with get_project_client(project) as (client, active_project):
+        # Trust was granted to `project`; never serve notes from wherever routing
+        # landed instead, under that project's skill URIs.
+        if generate_permalink(active_project.name) != generate_permalink(project):
+            raise ValueError(
+                f"Skill notes for {project!r} resolved to project {active_project.name!r}"
+            )
         search = SearchClient(client, active_project.external_id)
         query = SearchQuery(
             note_types=[SKILL_NOTE_TYPE], entity_types=[SearchItemType.ENTITY]
