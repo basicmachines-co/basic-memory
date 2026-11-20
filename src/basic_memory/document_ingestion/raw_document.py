@@ -395,6 +395,15 @@ def build_raw_document_artifacts(
     )
 
 
+def raw_ingestion_run_title(source_file_path: str) -> str:
+    """Name a run note after the file it extracted, not its run id.
+
+    The run id still names the note's file. Run notes written before this keep
+    their run-id title.
+    """
+    return f"Extraction of {PurePosixPath(source_file_path).name}"
+
+
 def build_raw_ingestion_run_markdown(
     artifacts: RawDocumentArtifacts,
     *,
@@ -411,7 +420,7 @@ def build_raw_ingestion_run_markdown(
     )
     run = DocumentIngestionRunMarkdownV1(
         frontmatter=DocumentIngestionRunFrontmatterV1(
-            title=str(artifacts.run_id),
+            title=raw_ingestion_run_title(artifacts.source.file_path),
             source=artifacts.source,
             extraction=artifacts.extraction,
             ingestion=DocumentIngestionRunStateV1(

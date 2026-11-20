@@ -208,6 +208,8 @@ def test_large_extraction_keeps_the_page_map_on_the_run_note_only() -> None:
     # Before the move, this sidecar carried about 23 KB of per-page offsets.
     assert frontmatter_bytes(built.document_markdown) < 2_000
     run = parse_document_ingestion_run_markdown(run_markdown)
+    # Readers see the source file's name, not the run id.
+    assert run.frontmatter.title == "Extraction of report.pdf"
     assert run.frontmatter.extraction is not None
     assert run.frontmatter.extraction.page_map is not None
     assert len(run.frontmatter.extraction.page_map.pages) == 424
