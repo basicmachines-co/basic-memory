@@ -15,7 +15,10 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
-from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
+from basic_memory.repository.postgres_fts_chunks import (
+    slice_postgres_fts_chunk_json_batches,
+    split_postgres_fts_chunks,
+)
 from basic_memory.repository.script_ngrams import build_script_ngrams
 
 type SearchIndexSqlValue = str | int | datetime | None
@@ -218,11 +221,13 @@ class AcceptedNoteSearchRepository:
                 "search_index_type": row.item_type,
             },
         )
-        chunks = await asyncio.to_thread(accepted_note_fts_chunk_params, row)
-        if chunks:
+        chunk_batches = await asyncio.to_thread(
+            lambda: slice_postgres_fts_chunk_json_batches(accepted_note_fts_chunk_params(row))
+        )
+        for chunks_json in chunk_batches:
             await session.execute(
                 INSERT_ACCEPTED_NOTE_FTS_CHUNKS_SQL,
-                {"project_id": row.project_id, "chunks": json.dumps(chunks)},
+                {"project_id": row.project_id, "chunks": chunks_json},
             )
 
     async def delete_entity(

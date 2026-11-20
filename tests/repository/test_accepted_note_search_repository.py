@@ -256,3 +256,104 @@ async def test_postgres_refresh_entity_replaces_cascaded_permalink_chunks(
     results = await search_repository.search("适者生存")
 
     assert [result.id for result in results] == [45]
+
+
+@pytest.mark.asyncio
+async def test_refresh_entity_slices_large_fts_chunk_inserts_into_multiple_statements() -> None:
+    """Large notes exceeding 200 FTS chunks or 2 MB JSON payload are written across multiple INSERT statements inside the same session."""
+    from basic_memory.repository.postgres_fts_chunks import (
+        POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS,
+        POSTGRES_FTS_CHUNK_OVERLAP,
+        POSTGRES_FTS_CHUNK_SIZE,
+    )
+
+    repository = AcceptedNoteSearchRepository(project_id=7)
+    session = _RecordingSession()
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
+    total_chunks = POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS + 25
+    large_body = "x" * ((total_chunks - 1) * step + 100)
+
+    row = build_accepted_note_search_row(
+        entity_id=99,
+        title="Multi-megabyte note",
+        note_type="note",
+        entity_metadata=None,
+        permalink="main/multi-mb-note",
+        file_path="notes/multi-mb-note.md",
+        search_content=large_body,
+        created_at=now,
+        updated_at=now,
+        project_id=7,
+    )
+
+    await repository.refresh_entity(cast(AsyncSession, session), row)
+
+    chunk_inserts = [
+        (sql, params)
+        for sql, params in session.executed
+        if "INSERT INTO search_index_fts_chunks" in sql
+    ]
+    assert len(chunk_inserts) == 2
+    first_batch = json.loads(chunk_inserts[0][1]["chunks"])
+    second_batch = json.loads(chunk_inserts[1][1]["chunks"])
+    assert len(first_batch) == POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS
+    assert len(second_batch) == 25
+    written_indices = [c["chunk_index"] for c in first_batch + second_batch]
+    assert written_indices == list(range(total_chunks))
+
+
+@pytest.mark.asyncio
+async def test_postgres_replace_fts_chunks_slices_by_rows_and_byte_cap() -> None:
+    """_replace_fts_chunks slices chunk batches by both row count and serialized JSON byte cap inside the caller transaction."""
+    from basic_memory.repository.postgres_fts_chunks import (
+        POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS,
+        POSTGRES_FTS_CHUNK_OVERLAP,
+        POSTGRES_FTS_CHUNK_SIZE,
+        slice_postgres_fts_chunk_json_batches,
+    )
+    from basic_memory.repository.search_index_row import SearchIndexRow
+
+    repo = object.__new__(PostgresSearchRepository)
+    repo.project_id = 7
+    session = _RecordingSession()
+
+    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
+    total_chunks = POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS + 15
+    tail_marker = "tail_unique_token_2133"
+    large_body = ("a" * ((total_chunks - 1) * step)) + tail_marker
+
+    row = SearchIndexRow(
+        id=501,
+        title="Large indexed note",
+        content_stems=large_body,
+        content_snippet=large_body,
+        permalink="main/large-indexed-note",
+        file_path="notes/large-indexed-note.md",
+        type="entity",
+        metadata={},
+        entity_id=501,
+        project_id=7,
+    )
+
+    await repo._replace_fts_chunks(cast(AsyncSession, session), [row])
+
+    chunk_inserts = [
+        (sql, params)
+        for sql, params in session.executed
+        if "INSERT INTO search_index_fts_chunks" in sql
+    ]
+    assert len(chunk_inserts) == 2
+    all_rows = [
+        item
+        for _, params in chunk_inserts
+        for item in json.loads(params["chunks"])
+    ]
+    assert len(all_rows) == total_chunks
+    assert [r["chunk_index"] for r in all_rows] == list(range(total_chunks))
+    assert tail_marker in all_rows[-1]["chunk_text"]
+
+    heavy_chunks = [{"chunk_index": i, "chunk_text": "z" * 400_000} for i in range(7)]
+    byte_sliced = slice_postgres_fts_chunk_json_batches(heavy_chunks, max_rows=200, max_bytes=1_000_000)
+    assert len(byte_sliced) == 4
+    assert sum(len(json.loads(b)) for b in byte_sliced) == 7
