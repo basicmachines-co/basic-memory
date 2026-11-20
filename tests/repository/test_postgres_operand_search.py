@@ -142,6 +142,7 @@ async def test_operand_count_avoids_correlated_chunk_probes(
             compiled.params,
             prefer_index_scans=compiled.prefer_index_scans,
             use_savepoint=True,
+            restore_planner_setting=True,
         )
     pending = [rows[0][0][0]["Plan"]]
     chunk_scans = []

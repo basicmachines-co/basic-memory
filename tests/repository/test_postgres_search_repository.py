@@ -2040,6 +2040,7 @@ async def test_postgres_chunk_candidates_use_the_gin_index(session_maker, test_p
             compiled.params,
             prefer_index_scans=compiled.prefer_index_scans,
             use_savepoint=True,
+            restore_planner_setting=True,
         )
     chunk_scans = {
         node["Node Type"]
@@ -2071,3 +2072,101 @@ async def test_postgres_fts_leaves_the_callers_session_planning_normally(
         )
         setting = (await session.execute(text("SHOW enable_seqscan"))).scalar_one()
     assert setting == "on"
+
+
+async def _index_coffee_note(session_maker, project_id: int) -> PostgresSearchRepository:
+    repo = PostgresSearchRepository(session_maker, project_id=project_id)
+    await repo.init_search_index()
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=project_id,
+            id=1,
+            title="Coffee Brewing",
+            content_stems="coffee brewing pour over",
+            content_snippet="coffee brewing snippet",
+            permalink="docs/coffee-brewing",
+            file_path="docs/coffee-brewing.md",
+            type="entity",
+            entity_id=1,
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    return repo
+
+
+def _record_statements(session_maker) -> tuple[list[str], Any]:
+    statements: list[str] = []
+    engine = session_maker.kw["bind"].sync_engine
+
+    def record(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    return statements, lambda: event.remove(engine, "before_cursor_execute", record)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "search_text, relaxed_retry",
+    [("coffee", False), ("coffee espresso latte", True)],
+)
+async def test_postgres_fts_on_its_own_session_only_turns_seqscan_off(
+    session_maker, test_project, search_text, relaxed_retry
+):
+    """A session FTS opened for the search runs nothing afterwards, so the planner
+    setting is neither read nor restored; it ends with the session's transaction."""
+    await _index_coffee_note(session_maker, test_project.id)
+    fts = postgres_search_query_module.PostgresFts(session_maker)
+    statements, stop = _record_statements(session_maker)
+    try:
+        rows = await fts.search(
+            ProjectScope.single(test_project.id),
+            PreparedSearchQuery(search_text=search_text),
+            limit=5,
+            offset=0,
+            allow_relaxed=relaxed_retry,
+        )
+    finally:
+        stop()
+
+    assert [row.permalink for row in rows] == ["docs/coffee-brewing"]
+    seqscan = [sql for sql in statements if "enable_seqscan" in sql]
+    assert "current_setting('enable_seqscan')" not in " ".join(seqscan)
+    if relaxed_retry:
+        # The strict attempt matched nothing, so the relaxed retry set it off again.
+        assert seqscan == ["SELECT set_config('enable_seqscan', 'off', true)"] * 2
+    else:
+        assert seqscan == ["SELECT set_config('enable_seqscan', 'off', true)"]
+
+
+@pytest.mark.asyncio
+async def test_postgres_fts_on_a_callers_session_reads_and_restores_seqscan(
+    session_maker, test_project
+):
+    await _index_coffee_note(session_maker, test_project.id)
+    fts = postgres_search_query_module.PostgresFts(session_maker)
+    statements, stop = _record_statements(session_maker)
+    try:
+        async with db.scoped_session(session_maker) as session:
+            await session.execute(text("SET LOCAL enable_seqscan = off"))
+            await fts.search(
+                ProjectScope.single(test_project.id),
+                PreparedSearchQuery(search_text="coffee"),
+                limit=5,
+                offset=0,
+                session=session,
+            )
+            # The caller's own setting survives, not the server default.
+            setting = (await session.execute(text("SHOW enable_seqscan"))).scalar_one()
+    finally:
+        stop()
+
+    assert setting == "off"
+    seqscan = [sql for sql in statements if "enable_seqscan" in sql and sql.startswith("SELECT")]
+    assert len(seqscan) == 3
+    assert "current_setting('enable_seqscan')" in seqscan[0]
+    assert seqscan[1] == "SELECT set_config('enable_seqscan', 'off', true)"
+    assert seqscan[2].startswith("SELECT set_config('enable_seqscan', $1")
