@@ -1713,6 +1713,43 @@ def set_local(
     console.print("[dim]MCP tools and CLI commands for this project will use local transport[/dim]")
 
 
+@project_app.command("skills")
+def set_serve_skills(
+    name: str = typer.Argument(..., help="Name of the project"),
+    off: bool = typer.Option(False, "--off", help="Stop serving this project's skill notes"),
+) -> None:
+    """Serve a project's `type: skill` notes as MCP skills, or stop with --off.
+
+    Each note with `type: skill` and Agent Skills `name` and `description`
+    frontmatter is served as skill://<project>/<name>/SKILL.md. Only turn this on
+    for projects whose notes you trust as instructions: any agent that can write a
+    note there can write a skill.
+
+    Examples:
+      bm project skills main
+      bm project skills main --off
+    """
+    config_manager = ConfigManager()
+    config = config_manager.config
+    if name not in config.projects:
+        console.print(f"[red]Error: Project '{literal(name)}' not found in config[/red]")
+        raise typer.Exit(1)
+
+    config.projects[name].serve_skills = not off
+    # save_config reports a failed write by return value; confirming a change
+    # that never persisted would leave MCP servers serving revoked skills.
+    write_error = config_manager.save_config(config)
+    if write_error is not None:
+        console.print(f"[red]Error: could not save config: {literal(str(write_error))}[/red]")
+        raise typer.Exit(1)
+
+    if off:
+        console.print(f"[green]Stopped serving skill notes from '{literal(name)}'[/green]")
+    else:
+        console.print(f"[green]Serving skill notes from '{literal(name)}' over MCP[/green]")
+        console.print("[dim]Restart MCP clients that cache the skill list[/dim]")
+
+
 @project_app.command("ls")
 def ls_project_command(
     name: str = typer.Option(..., "--name", help="Project name to list files from"),
