@@ -56,21 +56,35 @@ async def test_cached_read_without_read_cache_route_fails_fast() -> None:
             await client.get("/projects/p1/tree")
 
 
-def test_directory_tree_operation_is_keyed_apart_from_the_earlier_shape() -> None:
-    """Tree entries stored before file checksums were added are never read back."""
-    assert ReadCacheOperation.directory_tree.value != "directory_tree"
-    assert ReadCacheOperation.directory_tree.value.startswith("directory_tree")
-    # Every other operation keeps its original key.
-    assert {
-        op.value for op in ReadCacheOperation if op is not ReadCacheOperation.directory_tree
-    } == {
+#: Operations keyed apart from the key they had before a change to their answers.
+#: Entries stored under the earlier key are never read back.
+_REKEYED_OPERATIONS = {
+    # File checksums were added to tree entries.
+    ReadCacheOperation.directory_tree: "directory_tree",
+    # The resolver began preferring a stored file path over a slug-colliding sibling.
+    ReadCacheOperation.link_resolve: "link_resolve",
+    ReadCacheOperation.resolve: "resolve",
+}
+
+
+@pytest.mark.parametrize(
+    ("operation", "earlier_key"), list(_REKEYED_OPERATIONS.items()), ids=lambda v: str(v)
+)
+def test_rekeyed_operation_is_keyed_apart_from_its_earlier_answers(
+    operation: ReadCacheOperation, earlier_key: str
+) -> None:
+    assert operation.value != earlier_key
+    assert operation.value.startswith(earlier_key)
+
+
+def test_operations_not_rekeyed_keep_their_original_key() -> None:
+    # Every other operation's cached answers are unaffected and stay readable.
+    assert {op.value for op in ReadCacheOperation if op not in _REKEYED_OPERATIONS} == {
         "directory_list",
         "directory_structure",
         "entity",
-        "link_resolve",
         "project_resolve",
         "recent_activity",
-        "resolve",
         "resource",
         "search",
     }

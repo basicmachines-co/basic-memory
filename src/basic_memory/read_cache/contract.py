@@ -33,10 +33,16 @@ class ReadCacheOperation(StrEnum):
     # so entries stored under the earlier "directory_tree" key are never read back.
     directory_tree = "directory_tree_v2"
     entity = "entity"
-    link_resolve = "link_resolve"
+    # Note and link resolution carry a resolver marker. The resolver now prefers a
+    # stored file path over a note whose permalink only matches the path's slug, so
+    # "entities/Claude.ai.md" no longer answers with "entities/Claude.md". Answers the
+    # earlier resolver cached live for a week, and no note change retires them, so
+    # these operations moved off the earlier "resolve" and "link_resolve" keys. Bump
+    # the marker again whenever a code change alters which note an identifier names.
+    link_resolve = "link_resolve_v2"
     project_resolve = "project_resolve"
     recent_activity = "recent_activity"
-    resolve = "resolve"
+    resolve = "resolve_v2"
     resource = "resource"
     search = "search"
 
