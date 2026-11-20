@@ -107,11 +107,11 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `milvus_timeout_seconds` | `BASIC_MEMORY_MILVUS_TIMEOUT_SECONDS` | `30.0` | Finite per-operation timeout for Milvus and Zilliz client calls. Increase it for unusually slow deployments. |
 | `milvus_collection_prefix` | `BASIC_MEMORY_MILVUS_COLLECTION_PREFIX` | `"basic_memory"` | Prefix for deterministic project-isolated Milvus collections. |
 | `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
-| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
-| `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. FastEmbed models must exist in the installed FastEmbed catalog. Auto-adjusted per provider if left at default. |
+| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), `"voyage"` (Voyage AI API, no default model), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
+| `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. FastEmbed models must exist in the installed FastEmbed catalog. Auto-adjusted per provider if left at default. The `voyage` provider has no default and requires a Voyage model name. |
 | `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the `openai` or `litellm` provider — point either at a local or self-hosted OpenAI-compatible server. |
-| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key for the `openai` or `litellm` provider. When unset, `openai` falls back to `OPENAI_API_KEY` and `litellm` reads its provider credential env vars. |
-| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. Defaults to 384 for FastEmbed and 1536 for OpenAI/LiteLLM OpenAI. Set this to the model's output size when choosing a non-default FastEmbed or LiteLLM model. |
+| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key for the `openai`, `voyage`, or `litellm` provider. When unset, `openai` falls back to `OPENAI_API_KEY`, `voyage` to `VOYAGE_API_KEY`, and `litellm` reads its provider credential env vars. |
+| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. Defaults to 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI, and 1024 for Voyage (which also accepts 2048, 512, and 256 on most models). Set this to the model's output size when choosing a non-default FastEmbed or LiteLLM model. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
@@ -274,6 +274,73 @@ creates fixed-dimension vector storage before indexing. The key is optional only
 when the server accepts requests without one and `OPENAI_API_KEY` is set;
 otherwise provide it explicitly.
 
+### Voyage AI
+
+Uses the official `voyageai` SDK, an optional extra, to call Voyage AI embedding models.
+Install it in the environment running Basic Memory:
+
+```bash
+uv tool install --force "basic-memory[voyage]" --prerelease=allow --python 3.14
+# Or, in a pip-managed environment:
+pip install "basic-memory[voyage]"
+```
+
+The Voyage provider has **no default model**: `semantic_embedding_model` must name one of the
+models below, and anything else (including Basic Memory's `bge-small-en-v1.5` default) fails
+with an error naming the supported models. The API key comes from `VOYAGE_API_KEY`, or from
+`semantic_embedding_api_key`. A custom `semantic_embedding_api_base` is rejected.
+
+```bash
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=voyage
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=voyage-4
+export VOYAGE_API_KEY=...
+bm reindex --full
+```
+
+| Model | Dimensions | Context | $/1M tokens |
+|---|---|---|---|
+| `voyage-4-large` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.12 |
+| `voyage-4` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.06 |
+| `voyage-4-lite` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.02 |
+| `voyage-code-4` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.12 |
+| `voyage-3-large` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.18 |
+| `voyage-3.5` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.06 |
+| `voyage-3.5-lite` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.02 |
+| `voyage-code-3` | 1024 default; 2048, 1024, 512, 256 | 32k | 0.18 |
+| `voyage-finance-2` | 1024 only | 32k | 0.12 |
+| `voyage-law-2` | 1024 only | 16k | 0.12 |
+| `voyage-context-4`, `voyage-context-3` | 1024 default; 2048, 1024, 512, 256 | see below | see Voyage pricing |
+
+Prices and limits are Voyage's published figures as of 2026-11 and Basic Memory does not
+meter usage; check [Voyage's pricing](https://docs.voyageai.com/docs/pricing) before a large
+reindex.
+
+- **Dimensions.** The size is requested from Voyage only when `semantic_embedding_dimensions`
+  is set; an unsupported value fails when the config is used, not on the first API call.
+- **Roles.** Indexed chunks are embedded with `input_type="document"` and search queries with
+  `"query"`. The LiteLLM input-type settings do not apply.
+- **Batching.** `semantic_embedding_batch_size` must be between 1 and 1000, the API's input
+  limit per request. Voyage also caps the tokens per request: 1M for the `-lite` models, 320K
+  for `voyage-4` and `voyage-3.5`, and 120K for the others, including `voyage-code-4` and the
+  contextualized models. Batches are packed with the model's own tokenizer (downloaded once by
+  the SDK from Hugging Face) so no request exceeds the cap, and a single chunk over the cap
+  fails with an error. A lone input, such as a search query, is not tokenized. If the
+  tokenizer cannot be loaded, a warning is logged and batches are limited by input count only.
+- **Similarity scale.** Cosine scores are model-specific. In a live run, `voyage-code-4` scored
+  a plain-English match near 0.36 where `voyage-4` scored near 0.6, so with the default
+  `semantic_min_similarity` of 0.55 a code model returns nothing for prose queries. Tune the
+  floor for your model.
+- **Errors.** API failures are reported with the text Voyage returns in its `detail` field.
+- **Contextualized models.** `voyage-context-4` and `voyage-context-3` call the
+  contextualized-embeddings endpoint with `enable_auto_chunking=true` and
+  `chunk_size=32000` for indexed chunks, and without auto-chunking for queries. Basic Memory
+  hands the provider chunks that are already split and mixed across notes, so each chunk is
+  one document: these models work, but get no cross-chunk context from the note.
+  Whole-note contextualized indexing is not implemented.
+
+To check the Voyage providers against the live API (needs `VOYAGE_API_KEY`), run
+`just test-voyage-live`.
+
 ### LiteLLM
 
 > **Experimental — advanced users only.** The LiteLLM provider is experimental and aimed at users comfortable operating remote embedding backends: paid API calls, per-model dimension and input-role configuration, and slower reindexing of large corpora. For most users, FastEmbed (local, default) is recommended. See [LiteLLM Provider](litellm-provider.md) for the caveats and tuning.
@@ -336,7 +403,7 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX="task: search result | query
 
 The document prefix is prepended to indexed chunks during sync/reindex. The
 query prefix is prepended to search text for vector and hybrid retrieval.
-Prefixes work with `fastembed`, `openai`, and `litellm` providers.
+Prefixes work with `fastembed`, `openai`, `voyage`, and `litellm` providers.
 
 #### Live LiteLLM Validation
 
@@ -479,6 +546,24 @@ The first reranked search downloads the model when it is not already cached,
 then loads `jinaai/jina-reranker-v1-tiny-en`. Later searches reuse the
 process-wide model instance and cache.
 
+To use Voyage AI's reranker, install the `basic-memory[voyage]` extra and name the model
+explicitly (there is no default):
+
+```bash
+export BASIC_MEMORY_RERANKER_ENABLED=true
+export BASIC_MEMORY_RERANKER_PROVIDER=voyage
+export BASIC_MEMORY_RERANKER_MODEL=rerank-3
+export VOYAGE_API_KEY=...
+```
+
+The Voyage reranker accepts `rerank-3`, `rerank-3-lite`, `rerank-2.5`, and `rerank-2.5-lite`
+(0.05, 0.02, 0.05, and 0.02 $/1M tokens as of 2026-11). It reads `VOYAGE_API_KEY`, or
+`reranker_api_key`, and rejects a custom `reranker_api_base`. Basic Memory rescores the whole
+candidate window in one request, so Voyage's `top_k` is not used and `reranker_candidates`
+may not exceed 1000, Voyage's per-request document limit. Voyage also caps a request at 600K
+tokens in total (query tokens × documents plus all document tokens), so a long query with a
+large pool can be rejected by the API even below 1000.
+
 To use a hosted reranker through LiteLLM, first [install the optional SDK](litellm-provider.md#install-the-optional-sdk), then configure it:
 
 ```bash
@@ -499,6 +584,7 @@ to LiteLLM.
 |---|---|---|---|
 | `fastembed` | Locally with ONNX | `jinaai/jina-reranker-v1-tiny-en` | No API key or per-query cost; downloads a model on first use and adds local inference latency. |
 | `litellm` | Hosted or self-hosted API | No implicit hosted default | Supports LiteLLM rerank providers such as Cohere, Jina, and Voyage; adds network latency, provider cost, and credential requirements. |
+| `voyage` | Voyage AI API | No default; requires `rerank-3`, `rerank-3-lite`, `rerank-2.5`, or `rerank-2.5-lite` | Uses the official `voyageai` SDK (`basic-memory[voyage]`); adds network latency, provider cost, and a `VOYAGE_API_KEY`. |
 
 ### Configuration Reference
 
@@ -507,17 +593,17 @@ All settings use the `BASIC_MEMORY_` environment prefix:
 | Config Field | Environment Variable | Default | Description |
 |---|---|---|---|
 | `reranker_enabled` | `BASIC_MEMORY_RERANKER_ENABLED` | `false` | Enable reranking for vector and hybrid search. Requires semantic search. |
-| `reranker_provider` | `BASIC_MEMORY_RERANKER_PROVIDER` | `fastembed` | `fastembed` for a local ONNX cross-encoder or `litellm` for an API provider. |
-| `reranker_model` | `BASIC_MEMORY_RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` | Model identifier. LiteLLM requires explicit `provider/model` routing. |
+| `reranker_provider` | `BASIC_MEMORY_RERANKER_PROVIDER` | `fastembed` | `fastembed` for a local ONNX cross-encoder, `litellm` for an API provider, or `voyage` for Voyage AI. |
+| `reranker_model` | `BASIC_MEMORY_RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` | Model identifier. LiteLLM requires explicit `provider/model` routing; `voyage` requires a Voyage rerank model name. |
 | `reranker_candidates` | `BASIC_MEMORY_RERANKER_CANDIDATES` | `20` | Number of leading retrieval results rescored on every page. Larger values can improve recall but increase latency and provider usage. |
 | `reranker_max_document_chars` | `BASIC_MEMORY_RERANKER_MAX_DOCUMENT_CHARS` | `2000` | Maximum characters sent per candidate. The default bounds worst-case latency on very long documents with no measured quality loss; `0` sends the full matched text. |
-| `reranker_timeout` | `BASIC_MEMORY_RERANKER_TIMEOUT` | `30.0` | Maximum seconds for each LiteLLM rerank request. FastEmbed runs locally and ignores this setting. |
+| `reranker_timeout` | `BASIC_MEMORY_RERANKER_TIMEOUT` | `30.0` | Maximum seconds for each LiteLLM or Voyage rerank request. FastEmbed runs locally and ignores this setting. |
 | `reranker_api_base` | `BASIC_MEMORY_RERANKER_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider. |
-| `reranker_api_key` | `BASIC_MEMORY_RERANKER_API_KEY` | Unset | Optional credential passed directly to LiteLLM. When unset, LiteLLM resolves provider credentials from its normal environment variables. |
+| `reranker_api_key` | `BASIC_MEMORY_RERANKER_API_KEY` | Unset | Optional credential passed directly to LiteLLM or Voyage. When unset, LiteLLM resolves provider credentials from its normal environment variables and `voyage` reads `VOYAGE_API_KEY`. |
 
 Configuration is validated at startup. Basic Memory rejects unsupported
 providers, blank models, unavailable FastEmbed models or dependencies, a
-LiteLLM model without a provider prefix, and reranking without semantic search.
+LiteLLM model without a provider prefix, a Voyage reranker without a Voyage model name, and reranking without semantic search.
 
 ### Ranking and Pagination Behavior
 
@@ -635,7 +721,7 @@ bm reindex -p my-project
 ### When You Need to Reindex
 
 - **Upgrade note**: Migration now performs a one-time automatic embedding backfill on upgrade.
-- **Provider change**: After switching between `fastembed`, `openai`, and `litellm`
+- **Provider change**: After switching between `fastembed`, `openai`, `voyage`, and `litellm`
 - **Model change**: After changing `semantic_embedding_model`
 - **Dimension change**: After changing `semantic_embedding_dimensions`
 - **LiteLLM role change**: After changing `semantic_embedding_document_input_type` or `semantic_embedding_query_input_type`

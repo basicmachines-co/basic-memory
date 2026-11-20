@@ -122,7 +122,7 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
     provider_name = app_config.semantic_embedding_provider.strip().lower()
     api_base_digest = None
     api_key_digest = None
-    if provider_name in {"openai", "litellm"}:
+    if provider_name in {"openai", "litellm", "voyage"}:
         api_base_digest = _sensitive_value_digest(app_config.semantic_embedding_api_base)
         api_key_digest = _sensitive_value_digest(app_config.semantic_embedding_api_key)
 
@@ -141,6 +141,15 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         embedding_prefix_digest(app_config.semantic_embedding_query_prefix),
         _resolve_cache_dir(app_config),
     )
+
+
+def _reject_voyage_api_base(app_config: BasicMemoryConfig) -> None:
+    """Fail when a custom endpoint is configured: the Voyage provider always calls Voyage."""
+    if app_config.semantic_embedding_api_base is not None:
+        raise ValueError(
+            "semantic_embedding_api_base is not supported with "
+            "semantic_embedding_provider='voyage'; the Voyage provider always calls the Voyage API."
+        )
 
 
 def reset_embedding_provider_cache() -> None:
@@ -199,6 +208,17 @@ def configured_embedding_provider_identity(app_config: BasicMemoryConfig) -> str
             ),
             forward_dimensions=app_config.semantic_embedding_forward_dimensions,
         )
+    elif provider_name == "voyage":
+        from basic_memory.repository.voyage_provider import (
+            resolve_voyage_embedding_model,
+            voyage_embedding_identity,
+        )
+
+        _reject_voyage_api_base(app_config)
+        provider_type_name = "VoyageEmbeddingProvider"
+        model_name = app_config.semantic_embedding_model
+        _, dimensions = resolve_voyage_embedding_model(model_name, configured_dimensions)
+        provider_identity = voyage_embedding_identity(model_name=model_name, dimensions=dimensions)
     else:
         raise ValueError(f"Unsupported semantic embedding provider: {provider_name}")
 
@@ -221,9 +241,10 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
 
     When semantic_embedding_dimensions is set in config, it overrides the
     provider's default dimensions (384 for FastEmbed, 1536 for OpenAI and
-    the LiteLLM OpenAI default). Custom LiteLLM models require an explicit
-    dimension because the vector table schema is created before the first
-    embedding response is available.
+    the LiteLLM OpenAI default, 1024 for Voyage). Custom LiteLLM models require
+    an explicit dimension because the vector table schema is created before the
+    first embedding response is available. The Voyage provider has no default
+    model: semantic_embedding_model must name one.
     """
     cache_key = _provider_cache_key(app_config)
     # Trigger: two threads miss the cache for the same key concurrently.
@@ -304,6 +325,17 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             document_input_type=app_config.semantic_embedding_document_input_type,
             query_input_type=app_config.semantic_embedding_query_input_type,
             forward_dimensions=app_config.semantic_embedding_forward_dimensions,
+            **extra_kwargs,
+        )
+    elif provider_name == "voyage":
+        from basic_memory.repository.voyage_provider import VoyageEmbeddingProvider
+
+        _reject_voyage_api_base(app_config)
+        provider = VoyageEmbeddingProvider(
+            model_name=app_config.semantic_embedding_model,
+            api_key=app_config.semantic_embedding_api_key,
+            batch_size=app_config.semantic_embedding_batch_size,
+            request_concurrency=app_config.semantic_embedding_request_concurrency,
             **extra_kwargs,
         )
     else:

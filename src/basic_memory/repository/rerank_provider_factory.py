@@ -20,7 +20,7 @@ from basic_memory.repository.embedding_provider_factory import (
 from basic_memory.repository.rerank_provider import RerankProvider
 
 # Key on the fields that change the loaded provider's identity: provider, model,
-# (for the litellm path) the endpoint/key routing and timeout, and the resolved cache
+# (for the litellm and voyage paths) the endpoint/key routing and timeout, and the resolved cache
 # dir. The cache dir matters because the fastembed provider is constructed with it —
 # omitting it (as an earlier version did) lets two configs with different cache dirs
 # share one singleton pointing at the wrong directory, the #741/#872 class of bug the
@@ -36,7 +36,7 @@ def _rerank_cache_key(app_config: BasicMemoryConfig) -> RerankCacheKey:
     api_base_digest = None
     api_key_digest = None
     timeout = None
-    if provider_name == "litellm":
+    if provider_name in {"litellm", "voyage"}:
         api_base_digest = _sensitive_value_digest(app_config.reranker_api_base)
         api_key_digest = _sensitive_value_digest(app_config.reranker_api_key)
         timeout = app_config.reranker_timeout
@@ -94,6 +94,14 @@ def create_rerank_provider(app_config: BasicMemoryConfig) -> RerankProvider | No
             model_name=app_config.reranker_model,
             api_key=app_config.reranker_api_key,
             api_base=app_config.reranker_api_base,
+            timeout=app_config.reranker_timeout,
+        )
+    elif provider_name == "voyage":
+        from basic_memory.repository.voyage_rerank_provider import VoyageRerankProvider
+
+        provider = VoyageRerankProvider(
+            model_name=app_config.reranker_model,
+            api_key=app_config.reranker_api_key,
             timeout=app_config.reranker_timeout,
         )
     else:
