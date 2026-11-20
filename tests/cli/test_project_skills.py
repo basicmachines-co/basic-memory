@@ -1,6 +1,8 @@
 """Tests for bm project skills, the per-project trust switch for skill notes."""
 
 import json
+import os
+import threading
 
 import pytest
 from typer.testing import CliRunner
@@ -55,3 +57,20 @@ def test_project_skills_refuses_an_unknown_project(config_file) -> None:
 
     assert result.exit_code == 1
     assert "not found" in result.stdout.lower()
+
+
+def test_project_skills_fails_when_the_config_write_fails(config_file) -> None:
+    CliRunner().invoke(app, ["project", "skills", "main"])
+    # The save writes a pid- and thread-named temp file beside config.json and
+    # CliRunner runs in this thread, so a directory at that path fails the write.
+    temp_path = config_file.parent / (
+        f"{config_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    temp_path.mkdir()
+
+    result = CliRunner().invoke(app, ["project", "skills", "main", "--off"])
+
+    assert result.exit_code == 1
+    assert "could not save config" in result.stdout
+    assert "Stopped serving" not in result.stdout
+    assert _serve_skills(config_file) is True

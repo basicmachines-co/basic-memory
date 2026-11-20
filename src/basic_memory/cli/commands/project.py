@@ -1736,7 +1736,12 @@ def set_serve_skills(
         raise typer.Exit(1)
 
     config.projects[name].serve_skills = not off
-    config_manager.save_config(config)
+    # save_config reports a failed write by return value; confirming a change
+    # that never persisted would leave MCP servers serving revoked skills.
+    write_error = config_manager.save_config(config)
+    if write_error is not None:
+        console.print(f"[red]Error: could not save config: {literal(str(write_error))}[/red]")
+        raise typer.Exit(1)
 
     if off:
         console.print(f"[green]Stopped serving skill notes from '{literal(name)}'[/green]")
