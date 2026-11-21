@@ -40,6 +40,7 @@ from basic_memory.runtime.cleanup import (
     RuntimeNoteFileDeleteJobRequest,
 )
 from basic_memory.runtime.storage import (
+    RuntimeEntityId,
     RuntimeFileChecksum,
     RuntimeFilePath,
     runtime_content_type_is_markdown,
@@ -231,7 +232,10 @@ class LocalNoteFileDeleteStorage:
         path: RuntimeFilePath,
         *,
         expected_checksum: RuntimeFileChecksum,
+        expected_entity_id: RuntimeEntityId,
     ) -> RuntimeGuardedFileDeleteOutcome:
+        # Local files carry no owning-entity metadata; the checksum is the whole guard here.
+        del expected_entity_id
         # The local filesystem has no atomic compare-and-delete, so verify the checksum
         # immediately before deleting. A local race is negligible, but this keeps the runner's
         # guarantee portable: never delete an object that no longer matches (basic-memory-cloud#1618).

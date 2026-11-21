@@ -2,7 +2,10 @@
 
 import pytest
 
-from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
+from basic_memory.indexing.note_file_delete_runner import (
+    RepositoryLiveNotePathCheck,
+    run_note_file_delete,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
@@ -10,6 +13,16 @@ from basic_memory.runtime.cleanup import (
     RuntimeNoteFileDeleteJobRequest,
 )
 from basic_memory.services.exceptions import FileOperationError
+
+
+class FakeLivePaths:
+    def __init__(self, live: bool) -> None:
+        self.live = live
+        self.checked: list[tuple[int, str]] = []
+
+    async def path_is_live(self, *, project_id: int, file_path: str) -> bool:
+        self.checked.append((project_id, file_path))
+        return self.live
 
 
 class FakeNoteFileStorage:
@@ -20,13 +33,13 @@ class FakeNoteFileStorage:
         outcome: RuntimeGuardedFileDeleteOutcome = RuntimeGuardedFileDeleteOutcome.deleted,
     ) -> None:
         self.outcome = outcome
-        self.delete_calls: list[tuple[str, str]] = []
+        self.delete_calls: list[tuple[str, str, int]] = []
         self.delete_error: FileOperationError | None = None
 
     async def delete_file_if_matches(
-        self, path: str, *, expected_checksum: str
+        self, path: str, *, expected_checksum: str, expected_entity_id: int
     ) -> RuntimeGuardedFileDeleteOutcome:
-        self.delete_calls.append((path, expected_checksum))
+        self.delete_calls.append((path, expected_checksum, expected_entity_id))
         if self.delete_error is not None:
             raise self.delete_error
         return self.outcome
@@ -53,7 +66,7 @@ async def test_run_note_file_delete_deletes_matching_object() -> None:
         status=RuntimeDeleteStatus.deleted,
         reason="file deleted: notes/a.md",
     )
-    assert storage.delete_calls == [("notes/a.md", "file-sum")]
+    assert storage.delete_calls == [("notes/a.md", "file-sum", 42)]
 
 
 @pytest.mark.asyncio
@@ -70,7 +83,7 @@ async def test_run_note_file_delete_hands_the_accepted_checksum_to_storage_uncha
     result = await run_note_file_delete(delete_request(etag_checksum), storage=storage)
 
     assert result.status == RuntimeDeleteStatus.deleted
-    assert storage.delete_calls == [("notes/a.md", etag_checksum)]
+    assert storage.delete_calls == [("notes/a.md", etag_checksum, 42)]
 
 
 @pytest.mark.asyncio
@@ -158,3 +171,40 @@ async def test_run_note_file_delete_clears_marker_when_source_already_absent() -
 
     assert result.status == RuntimeDeleteStatus.missing
     assert clearer.cleared == [(101, "notes/a.md", "file-sum")]
+
+
+@pytest.mark.asyncio
+async def test_run_note_file_delete_skips_a_path_a_note_lives_at_again() -> None:
+    """A recreated or moved-back note with identical bytes keeps its file (cloud#3268)."""
+    storage = FakeNoteFileStorage()
+    live_paths = FakeLivePaths(live=True)
+
+    result = await run_note_file_delete(delete_request(), storage=storage, live_paths=live_paths)
+
+    assert live_paths.checked == [(101, "notes/a.md")]
+    assert storage.delete_calls == []
+    assert result == RuntimeFileDeleteResult.changed_before_delete(
+        entity_id=42, file_path="notes/a.md"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_note_file_delete_hands_the_scheduled_entity_to_storage() -> None:
+    storage = FakeNoteFileStorage()
+
+    await run_note_file_delete(
+        delete_request(), storage=storage, live_paths=FakeLivePaths(live=False)
+    )
+
+    assert storage.delete_calls == [("notes/a.md", "file-sum", 42)]
+
+
+
+@pytest.mark.asyncio
+async def test_repository_live_path_check_reads_the_entity_row(
+    session_maker, test_project, sample_entity
+) -> None:
+    check = RepositoryLiveNotePathCheck(session_maker)
+
+    assert await check.path_is_live(project_id=test_project.id, file_path=sample_entity.file_path)
+    assert not await check.path_is_live(project_id=test_project.id, file_path="notes/vacated.md")

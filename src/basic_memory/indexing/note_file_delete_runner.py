@@ -8,13 +8,19 @@ from typing import Protocol, assert_never
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import (
     RuntimeFileDeleteResult,
     RuntimeGuardedFileDeleteOutcome,
     RuntimeNoteFileDeleteJobRequest,
 )
-from basic_memory.runtime.storage import ProjectId, RuntimeFileChecksum, RuntimeFilePath
+from basic_memory.runtime.storage import (
+    ProjectId,
+    RuntimeEntityId,
+    RuntimeFileChecksum,
+    RuntimeFilePath,
+)
 
 
 class NoteFileDeleteStorage(Protocol):
@@ -25,8 +31,14 @@ class NoteFileDeleteStorage(Protocol):
         path: RuntimeFilePath,
         *,
         expected_checksum: RuntimeFileChecksum,
+        expected_entity_id: RuntimeEntityId,
     ) -> RuntimeGuardedFileDeleteOutcome:
         """Delete the object only if it is still the version ``expected_checksum`` identifies.
+
+        ``expected_entity_id`` is the note the delete was scheduled for. Storage that records
+        the owning entity on the object (cloud ``bm-entity-id``) must refuse an object written
+        for a different note: a note recreated at the same path with identical bytes has the
+        same checksum but a new entity. Storage without that metadata may ignore it.
 
         The accepted checksum can come from note_content (a content checksum) or from the entity
         row, and an entity row records whatever checksum its storage indexed. Storage alone knows
@@ -36,6 +48,26 @@ class NoteFileDeleteStorage(Protocol):
         without a native precondition (local filesystem) re-verify immediately before deleting;
         storage with a conditional delete (S3 If-Match) enforces it server-side.
         """
+
+
+class LiveNotePathCheck(Protocol):
+    """Capability that reports whether a note currently lives at a path."""
+
+    async def path_is_live(self, *, project_id: ProjectId, file_path: RuntimeFilePath) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryLiveNotePathCheck:
+    """Answer from the tenant DB whether any entity row names the path now."""
+
+    session_maker: async_sessionmaker[AsyncSession]
+
+    async def path_is_live(self, *, project_id: ProjectId, file_path: RuntimeFilePath) -> bool:
+        async with db.scoped_session(self.session_maker) as session:
+            entity = await EntityRepository(project_id).get_by_file_path(
+                session, file_path, load_relations=False
+            )
+        return entity is not None
 
 
 class MoveVacateClearer(Protocol):
@@ -76,18 +108,32 @@ async def run_note_file_delete(
     *,
     storage: NoteFileDeleteStorage,
     vacate_clearer: MoveVacateClearer | None = None,
+    live_paths: LiveNotePathCheck | None = None,
 ) -> RuntimeFileDeleteResult:
-    """Delete a materialized note file only when storage still matches the accepted guard."""
+    """Delete a materialized note file only when storage still matches the accepted guard.
+
+    A queued delete can run long after it was scheduled. By then a note may live at the path
+    again with identical bytes: a delete-and-recreate, or a move followed by a move back. The
+    checksum alone cannot tell those apart from the stale object, so callers that queue deletes
+    pass ``live_paths``: when the tenant DB says a note lives at the path, the object is that
+    note's canonical file and the delete is skipped.
+    """
     if request.file_checksum is None:
         return RuntimeFileDeleteResult.no_accepted_checksum(
             entity_id=request.entity_id,
             file_path=request.file_path,
         )
 
-    outcome = await storage.delete_file_if_matches(
-        request.file_path,
-        expected_checksum=request.file_checksum,
-    )
+    if live_paths is not None and await live_paths.path_is_live(
+        project_id=request.project_id, file_path=request.file_path
+    ):
+        outcome = RuntimeGuardedFileDeleteOutcome.changed
+    else:
+        outcome = await storage.delete_file_if_matches(
+            request.file_path,
+            expected_checksum=request.file_checksum,
+            expected_entity_id=request.entity_id,
+        )
     match outcome:
         case RuntimeGuardedFileDeleteOutcome.deleted:
             result = RuntimeFileDeleteResult.deleted(

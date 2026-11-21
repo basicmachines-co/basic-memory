@@ -91,7 +91,9 @@ async def test_materialization_rejects_outside_storage_access(tmp_path: Path, op
             case "delete":
                 await storage.delete_file(unsafe)
             case "guarded-delete":
-                await storage.delete_file_if_matches(unsafe, expected_checksum=checksum)
+                await storage.delete_file_if_matches(
+                    unsafe, expected_checksum=checksum, expected_entity_id=1
+                )
             case _:
                 raise AssertionError(operation)
     assert secret.read_bytes() == content.encode()
