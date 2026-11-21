@@ -50,7 +50,7 @@ from basic_memory.runtime.note_content import (
 )
 from basic_memory.runtime.note_materialization import RuntimeFileMetadataSource
 from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
-from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
+from basic_memory.runtime.storage import RuntimeEntityId, RuntimeFileChecksum, RuntimeFilePath
 from basic_memory.runtime.vector_sync import EntityVectorSync
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository
@@ -587,7 +587,10 @@ class LocalNoteContentStorage:
         path: RuntimeFilePath,
         *,
         expected_checksum: RuntimeFileChecksum,
+        expected_entity_id: RuntimeEntityId,
     ) -> RuntimeGuardedFileDeleteOutcome:
+        # Local files carry no owning-entity metadata; the checksum is the whole guard here.
+        del expected_entity_id
         self.file_service.require_project_path(path)
         # Verify the checksum immediately before deleting so a replacement written before the
         # delete is never removed (basic-memory-cloud#1618). Local has no atomic precondition;

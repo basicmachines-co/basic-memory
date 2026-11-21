@@ -135,10 +135,10 @@ async def test_local_guarded_delete_removes_only_the_accepted_version(
     await file_service.write_file("notes/kept.md", "# Replacement\n")
 
     deleted = await storage.delete_file_if_matches(
-        "notes/gone.md", expected_checksum=accepted_checksum
+        "notes/gone.md", expected_checksum=accepted_checksum, expected_entity_id=1
     )
     changed = await storage.delete_file_if_matches(
-        "notes/kept.md", expected_checksum=accepted_checksum
+        "notes/kept.md", expected_checksum=accepted_checksum, expected_entity_id=1
     )
 
     assert deleted is RuntimeGuardedFileDeleteOutcome.deleted
