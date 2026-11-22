@@ -199,7 +199,6 @@ async def test_run_note_file_delete_hands_the_scheduled_entity_to_storage() -> N
     assert storage.delete_calls == [("notes/a.md", "file-sum", 42)]
 
 
-
 @pytest.mark.asyncio
 async def test_repository_live_path_check_reads_the_entity_row(
     session_maker, test_project, sample_entity

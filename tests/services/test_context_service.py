@@ -395,8 +395,17 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
 
 
 @pytest.mark.asyncio
-async def test_find_related_expands_cross_project_relation_targets(session_maker, app_config):
-    """Explicit cross-project links should expand without exposing unrelated incoming links."""
+@pytest.mark.parametrize("cross_project_traversal", [True, False])
+async def test_find_related_expands_cross_project_relation_targets(
+    session_maker, app_config, cross_project_traversal
+):
+    """Explicit cross-project links expand only when cross-project traversal is on.
+
+    With it off (Basic Memory Cloud, where each project has its own readers),
+    the seed project's own relation row stays, but nothing from the other
+    project is returned or named in the hydrated response.
+    """
+    from basic_memory.api.v2.utils import to_graph_context
     from basic_memory.repository.entity_repository import EntityRepository
     from basic_memory.repository.observation_repository import ObservationRepository
     from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
@@ -487,7 +496,11 @@ async def test_find_related_expands_cross_project_relation_targets(session_maker
     entity_repo_p1 = EntityRepository(project1.id)
     obs_repo_p1 = ObservationRepository(project1.id)
     context_service_p1 = ContextService(
-        search_repo_p1, entity_repo_p1, obs_repo_p1, session_maker=session_maker
+        search_repo_p1,
+        entity_repo_p1,
+        obs_repo_p1,
+        session_maker=session_maker,
+        cross_project_traversal=cross_project_traversal,
     )
 
     await search_repo_p1.index_item(
@@ -519,12 +532,18 @@ async def test_find_related_expands_cross_project_relation_targets(session_maker
         row.id for row in context.results[0].related_results if row.type == "relation"
     }
 
-    assert target.id in context_related_entity_ids
-    assert target_child.id in context_related_entity_ids
-    assert unrelated_source.id not in context_related_entity_ids
+    # The seed project's own relation row is always visible; what it reaches is not.
     assert cross_project_relation.id in context_related_relation_ids
-    assert target_relation.id in context_related_relation_ids
+    assert unrelated_source.id not in context_related_entity_ids
     assert unrelated_incoming_relation.id not in context_related_relation_ids
+    if cross_project_traversal:
+        assert target.id in context_related_entity_ids
+        assert target_child.id in context_related_entity_ids
+        assert target_relation.id in context_related_relation_ids
+    else:
+        assert target.id not in context_related_entity_ids
+        assert target_child.id not in context_related_entity_ids
+        assert target_relation.id not in context_related_relation_ids
 
     related = await context_service_p1.find_related(
         [("entity", source.id)], max_depth=2, max_results=100
@@ -533,12 +552,38 @@ async def test_find_related_expands_cross_project_relation_targets(session_maker
     related_entity_ids = {row.id for row in related if row.type == "entity"}
     related_relation_ids = {row.id for row in related if row.type == "relation"}
 
-    assert target.id in related_entity_ids
-    assert target_child.id in related_entity_ids
-    assert unrelated_source.id not in related_entity_ids
     assert cross_project_relation.id in related_relation_ids
-    assert target_relation.id in related_relation_ids
+    assert unrelated_source.id not in related_entity_ids
     assert unrelated_incoming_relation.id not in related_relation_ids
+    if cross_project_traversal:
+        assert target.id in related_entity_ids
+        assert target_child.id in related_entity_ids
+        assert target_relation.id in related_relation_ids
+    else:
+        assert target.id not in related_entity_ids
+        assert target_child.id not in related_entity_ids
+        assert target_relation.id not in related_relation_ids
+
+    # The response names the other project's note only when traversal allowed it.
+    async with db.scoped_session(session_maker) as db_session:
+        graph = await to_graph_context(context, entity_repo_p1, db_session)
+    # to_name is link text the seed project's author wrote, so it always shows;
+    # the target's own title and external id must not appear when confined.
+    [link_summary] = [
+        item
+        for item in graph.results[0].related_results
+        if item.type == "relation" and item.relation_id == cross_project_relation.id
+    ]
+    response_text = graph.model_dump_json()
+    if cross_project_traversal:
+        assert link_summary.to_entity == "Company Standards"
+        assert link_summary.to_entity_external_id == target.external_id
+        assert "Review Checklist" in response_text
+    else:
+        assert link_summary.to_entity is None
+        assert link_summary.to_entity_external_id is None
+        assert target.external_id not in response_text
+        assert "Review Checklist" not in response_text
 
 
 @pytest.mark.asyncio

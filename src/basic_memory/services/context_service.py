@@ -79,6 +79,9 @@ class ContextMetadata:
     total_observations: int = 0
     total_relations: int = 0
     has_more: bool = False
+    # Whether related results may include entities from other projects. Response
+    # shaping reads it so hydration never names an entity traversal did not allow.
+    cross_project: bool = True
 
 
 @dataclass
@@ -105,12 +108,23 @@ class ContextService:
         observation_repository: ObservationRepository,
         link_resolver: Optional[LinkResolver] = None,
         session_maker: async_sessionmaker[AsyncSession] | None = None,
+        cross_project_traversal: bool = True,
     ):
+        """Create a context service.
+
+        Args:
+            cross_project_traversal: Follow explicit relations into other projects.
+                Local installs own every project, so this defaults on. A host whose
+                projects have separate readers (Basic Memory Cloud) turns it off so
+                a caller authorized for one project cannot read another project's
+                note titles and links through the graph.
+        """
         self.search_repository = search_repository
         self.entity_repository = entity_repository
         self.observation_repository = observation_repository
         self.link_resolver = link_resolver
         self.session_maker = session_maker
+        self.cross_project_traversal = cross_project_traversal
 
     def _require_session_maker(self) -> async_sessionmaker[AsyncSession]:
         """Fail fast when a session-opening path runs without a session maker."""
@@ -316,6 +330,7 @@ class ContextService:
                 total_observations=sum(len(obs) for obs in observations_by_entity.values()),
                 total_relations=sum(1 for r in related if r.type == SearchItemType.RELATION),
                 has_more=has_more,
+                cross_project=self.cross_project_traversal,
             )
 
             with logfire.span(
@@ -433,8 +448,12 @@ class ContextService:
         # explicit relation edge may point at another project.
         # Outcome: traversal follows only project-owned edges from reached
         # entities, instead of forcing every reached entity into the seed project.
+        # A host that authorizes each project separately disables cross-project
+        # traversal, so every reached entity stays in the seed project.
         seed_project_filter = "AND e.project_id = :project_id"
-        connected_entity_project_filter = ""
+        connected_entity_project_filter = (
+            "" if self.cross_project_traversal else "AND e.project_id = :project_id"
+        )
         relation_project_filter = "AND e_from.project_id = r.project_id"
 
         # Use a CTE that operates directly on entity and relation tables
