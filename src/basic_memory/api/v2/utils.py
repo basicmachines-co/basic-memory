@@ -158,8 +158,13 @@ async def to_graph_context(
                 phase="lookup_entities",
                 result_count=len(entity_ids_needed),
             ):
+                # A relation row can still point at an entity in another project
+                # when traversal was confined to the seed project; hydrating it
+                # then would name an entity the caller was not cleared to see.
                 entities = await entity_repository.find_by_ids_for_hydration(
-                    session, list(entity_ids_needed), include_cross_project=True
+                    session,
+                    list(entity_ids_needed),
+                    include_cross_project=context_result.metadata.cross_project,
                 )
             for e in entities:
                 entity_title_lookup[e.id] = e.title
