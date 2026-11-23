@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from frontmatter import Post
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -30,7 +29,12 @@ from pydantic import (
     model_validator,
 )
 
-from basic_memory.file_utils import dump_frontmatter, parse_frontmatter, remove_frontmatter
+from basic_memory.file_utils import (
+    build_post,
+    dump_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
+)
 from basic_memory.schemas.document_page_map import DocumentPageMapV1
 
 if TYPE_CHECKING:  # pragma: no cover - static import only
@@ -958,7 +962,7 @@ def _format_agent_relation(relation: DocumentAgentRelationV1) -> str:
 
 def _assemble_markdown(frontmatter: _DocumentContractModel, body: str) -> str:
     metadata = frontmatter.model_dump(mode="json", exclude_none=True, by_alias=True)
-    return dump_frontmatter(Post(_normalize_markdown_body(body), **metadata))
+    return dump_frontmatter(build_post(_normalize_markdown_body(body), metadata))
 
 
 def _extract_markdown_body(markdown: str) -> str:

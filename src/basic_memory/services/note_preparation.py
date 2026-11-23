@@ -24,6 +24,7 @@ from basic_memory.file_utils import (
     ParseError,
     dump_frontmatter,
     has_frontmatter,
+    loads_post,
     parse_frontmatter,
     remove_frontmatter,
 )
@@ -526,7 +527,7 @@ def reconcile_prepared_edit_title_from_h1(
         or prepared_title != current_title
     ):
         return PreparedEditTitleReconciliation(markdown_content, prepared_title, metadata)
-    post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
+    post = loads_post(markdown_content, handler=SimpleYamlHandler())
     post.metadata["title"] = prepared_h1
     reconciled_metadata = {**metadata, "title": prepared_h1} if metadata is not None else None
     return PreparedEditTitleReconciliation(dump_frontmatter(post), prepared_h1, reconciled_metadata)
@@ -1023,7 +1024,7 @@ async def prepare_edit_entity_content(
             skip_conflict_check=skip_conflict_check,
             session=session,
         )
-    post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
+    post = loads_post(markdown_content, handler=SimpleYamlHandler())
     if post.metadata.get("permalink") != permalink:
         post.metadata["permalink"] = permalink
         markdown_content = dump_frontmatter(post)
@@ -1079,7 +1080,7 @@ async def prepare_move_entity_content(
     if permalink is None:  # pragma: no cover - update_permalink repairs legacy null rows
         raise ValueError(f"Markdown note is missing a canonical permalink: {entity.file_path}")
     if entity_markdown.frontmatter_state != "malformed":
-        post = frontmatter.loads(markdown_content, handler=SimpleYamlHandler())
+        post = loads_post(markdown_content, handler=SimpleYamlHandler())
         if post.metadata.get("permalink") != permalink:
             post.metadata["permalink"] = permalink
             markdown_content = dump_frontmatter(post)

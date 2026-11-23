@@ -13,7 +13,7 @@ import frontmatter
 from loguru import logger
 from markdown_it import MarkdownIt
 
-from basic_memory.file_utils import file_created_timestamp
+from basic_memory.file_utils import build_post, file_created_timestamp
 from basic_memory.markdown.plugins import observation_plugin, relation_plugin
 from basic_memory.markdown.path_links import markdown_link_path
 from basic_memory.markdown.schemas import (
@@ -338,8 +338,7 @@ class EntityParser:
                 frontmatter_state = "malformed"
         if frontmatter_state == "present":
             fm_metadata, fm_content = frontmatter.parse(content)
-            post = frontmatter.Post(fm_content)
-            post.metadata.update(fm_metadata)
+            post = build_post(fm_content, fm_metadata)
         else:
             # Use Post(content) not Post(content, metadata={})
             # The latter creates {"metadata": {}} in the metadata dict (issue #528)

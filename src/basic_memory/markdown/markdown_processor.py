@@ -2,12 +2,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 from collections import OrderedDict
 
-from frontmatter import Post
 from loguru import logger
 
 
 from basic_memory import file_utils
-from basic_memory.file_utils import dump_frontmatter
+from basic_memory.file_utils import build_post, dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
 
@@ -123,7 +122,7 @@ class MarkdownProcessor:
             content += self.format_relations(markdown.relations)
 
         # Create Post object for frontmatter
-        post = Post(content, **frontmatter_dict)
+        post = build_post(content, frontmatter_dict)
         final_content = dump_frontmatter(post)
 
         logger.debug(f"writing file {path} with content:\n{final_content}")
@@ -175,7 +174,7 @@ class MarkdownProcessor:
             content += self.format_relations(markdown.relations)
 
         # Create Post object for frontmatter
-        post = Post(content, **frontmatter_dict)
+        post = build_post(content, frontmatter_dict)
         return dump_frontmatter(post)
 
     def format_observations(self, observations: list[Observation]) -> str:
