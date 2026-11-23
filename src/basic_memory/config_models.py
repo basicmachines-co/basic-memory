@@ -616,6 +616,16 @@ class BasicMemoryConfig(BaseSettings):
         ),
     )
 
+    read_only: bool = Field(
+        default=False,
+        description=(
+            "Offer only the tools annotated readOnlyHint: true, hiding writes such as "
+            "bm_write, bm_edit, bm_move, bm_delete and bm_project_create. Indexing keeps "
+            "running, so notes written on disk still appear in search. "
+            "Env: BASIC_MEMORY_READ_ONLY"
+        ),
+    )
+
     cli_output_style: Literal["rich", "plain"] = Field(
         default="rich",
         description=(

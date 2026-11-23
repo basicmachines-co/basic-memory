@@ -15,7 +15,7 @@ from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.note_targets import open_project_target, resolve_note
 from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import note_change_failure, refusal
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.server import WRITES_TAG, mcp
 from basic_memory.mcp.tool_params import NoteIdentifier, OutputFormat, ProjectParam
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.utils import coerce_dict
@@ -48,7 +48,7 @@ SECTION_COMMANDS: frozenset[EditCommand] = frozenset(
         "command. Pass `expected_checksum` (from bm_read) to edit only the revision you "
         "read. A missing note is an error; create notes with bm_write."
     ),
-    tags={"notes"},
+    tags={"notes", WRITES_TAG},
     annotations={
         "title": "Edit note",
         "readOnlyHint": False,
