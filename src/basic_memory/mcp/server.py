@@ -77,6 +77,12 @@ def _apply_tool_visibility(
     }
     server.local_provider.add_transform(Visibility(False, names=hidden))
     server.local_provider.add_transform(Visibility(True, names=set(tagged) - hidden))
+    # The instructions reach the same client as the tool list, so they have to
+    # agree with it: guidance that names a hidden write tool sends the model
+    # after calls the server refuses.
+    server._mcp_server.instructions = (
+        READ_ONLY_INSTRUCTIONS if state["read_only"] else BASIC_MEMORY_INSTRUCTIONS
+    )
 
 
 def set_read_only_visibility(server: FastMCP, enabled: bool) -> None:
@@ -297,6 +303,35 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "bm_context. Read before editing with bm_edit; use the returned checksum to guard changes. "
     "bm_write creates notes and explicitly overwrites them; bm_edit never creates missing notes. "
     "Use returned paths for subsequent reads and writes.\n\n"
+    "bm_project_list() discovers projects, grouped by workspace. Pass a project name, "
+    "workspace/project, or external UUID through the required project parameter on note, "
+    "folder, context and schema calls. A qualified path must agree with project. "
+    "Search requires project, projects, or all_projects=true. "
+    "Calls do not remember a previous project selection.\n\n"
+    "The installed tool schemas are authoritative. Most tools default to text; bm_context "
+    'defaults to JSON. Use output_format="json" when consuming structured fields. Failures '
+    "are tool errors, not empty successful results. Follow pagination and continuation fields. "
+    'Call bm_man(page="bm-search(3)") for details, or read memory://man for the manual index. '
+    "With a web or fetch tool, fetch "
+    "https://docs.basicmemory.com/llms.txt first, then only the relevant linked /raw/...md page."
+)
+
+# Served instead of BASIC_MEMORY_INSTRUCTIONS while read-only mode is on. It keeps
+# the reading half and drops every reference to a write tool, so the guidance a
+# client receives never names a tool that mode has hidden.
+READ_ONLY_INSTRUCTIONS = (
+    "Basic Memory is the user's memory across chats: Markdown notes that the user and "
+    "their AI assistants both read and write.\n\n"
+    "This server is read-only: it offers the reading tools only, and the user writes "
+    "notes in their editor or another client. Do not offer to save anything, and do not "
+    "tell the user you saved something.\n\n"
+    "When the user starts on a topic, look for related notes with bm_search or "
+    'bm_recent(project="...") before answering from memory. '
+    "No recent activity does not prove a project is empty.\n\n"
+    "Use bm_list for one folder, bm_find for recursive names or frontmatter inventories, "
+    "bm_search for ranked retrieval or matching lines, and bm_read for note and file content. "
+    "bm_read supports bounded lines, sections, and token budgets. Follow relations with "
+    "bm_context. Use returned paths for subsequent reads.\n\n"
     "bm_project_list() discovers projects, grouped by workspace. Pass a project name, "
     "workspace/project, or external UUID through the required project parameter on note, "
     "folder, context and schema calls. A qualified path must agree with project. "

@@ -135,3 +135,28 @@ async def test_read_only_mode_hides_and_blocks_write_tools() -> None:
     finally:
         set_read_only_visibility(mcp, False)
         assert {tool.name for tool in await mcp.list_tools()} == V1_TOOLS
+
+
+@pytest.mark.asyncio
+async def test_read_only_mode_swaps_the_server_instructions() -> None:
+    """The guidance must not name a tool that read-only mode has hidden.
+
+    Instructions and the tool list reach the client in the same session, so
+    text still telling the model to save with bm_write sends it after a call
+    the server refuses.
+    """
+    try:
+        set_read_only_visibility(mcp, True)
+        instructions = mcp.instructions
+        assert instructions is not None
+        for write_tool in ("bm_write", "bm_edit", "bm_move", "bm_delete"):
+            assert write_tool not in instructions, (
+                f"read-only instructions must not name the hidden tool {write_tool}"
+            )
+        assert "bm_search" in instructions
+        assert "read-only" in instructions
+    finally:
+        set_read_only_visibility(mcp, False)
+        restored = mcp.instructions
+        assert restored is not None
+        assert "bm_write" in restored, "the write guidance must come back when the mode is off"

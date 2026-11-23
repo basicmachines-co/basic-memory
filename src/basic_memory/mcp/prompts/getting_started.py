@@ -15,6 +15,7 @@ from typing import Annotated, Optional
 from loguru import logger
 from pydantic import Field
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.projects import bm_project_list, bm_recent
 
@@ -218,6 +219,10 @@ async def getting_started(
     # collision-safe external id; merged local+cloud rows retain the configured project route.
     project_arg = f'{argument_name}="{argument_value}", '
 
+    # Read-only mode hides every write tool, so the onboarding text must not offer
+    # one the server would refuse.
+    read_only = ConfigManager().load_config().read_only
+
     introduction = dedent(
         """
         # Getting started with Basic Memory
@@ -229,20 +234,33 @@ async def getting_started(
         Here is their recent activity:
         """
     ).strip()
-    next_steps = dedent(
-        f"""
-        Based on what you see above:
-        - **If they have no notes yet**, briefly explain that shared-memory loop and offer to
-          save one useful first note about what they are working on. Then tell them in one
-          line what you saved and how to undo it. If they asked to approve saves, ask first:
-          ```
-          bm_write({project_arg}title="...", content="...", directory="notes")
-          ```
-        - **If they already have notes**, help them keep the loop going:
-          `bm_read({project_arg}identifier="permalink")` to open one,
-          `bm_search({project_arg}query="...")` to find a topic, or
-          `bm_write({project_arg}...)` to capture something new (tell them in one line what
-          you saved; ask first if they asked to approve saves).
-        """
-    ).strip()
+    if read_only:
+        next_steps = dedent(
+            f"""
+            Based on what you see above, help them start reading:
+            - **If they have no notes yet**, explain that this server is read-only: notes
+              written on disk show up in search, and the user creates them in their editor
+              or another client. Do not offer to save a note.
+            - **If they already have notes**, open one with
+              `bm_read({project_arg}identifier="permalink")` or look a topic up with
+              `bm_search({project_arg}query="...")`.
+            """
+        ).strip()
+    else:
+        next_steps = dedent(
+            f"""
+            Based on what you see above:
+            - **If they have no notes yet**, briefly explain that shared-memory loop and offer to
+              save one useful first note about what they are working on. Then tell them in one
+              line what you saved and how to undo it. If they asked to approve saves, ask first:
+              ```
+              bm_write({project_arg}title="...", content="...", directory="notes")
+              ```
+            - **If they already have notes**, help them keep the loop going:
+              `bm_read({project_arg}identifier="permalink")` to open one,
+              `bm_search({project_arg}query="...")` to find a topic, or
+              `bm_write({project_arg}...)` to capture something new (tell them in one line what
+              you saved; ask first if they asked to approve saves).
+            """
+        ).strip()
     return f"{introduction}\n\n{activity_text}\n\n{next_steps}"
