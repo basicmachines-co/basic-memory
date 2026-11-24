@@ -3,6 +3,7 @@
 import hashlib
 import os
 from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 import re
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 import aiofiles
 import yaml
 import frontmatter
+from frontmatter.default_handlers import BaseHandler
 from loguru import logger
 
 from basic_memory.utils import FilePath
@@ -363,6 +365,30 @@ def _is_frontmatter_mapping(yaml_block: str) -> bool:
     except yaml.YAMLError:
         return False
     return loaded is None or isinstance(loaded, dict)
+
+
+def build_post(content: str, metadata: Mapping[str, Any]) -> frontmatter.Post:
+    """Build a Post from note content and its frontmatter mapping.
+
+    Frontmatter is user data, so it never becomes keyword arguments.
+    `frontmatter.Post(content, handler=None, **metadata)` treats the keys
+    `content` and `handler` as its own parameters: a note whose frontmatter
+    uses either name crashed with a TypeError or lost the value
+    (basic-memory#2148). Every Post with arbitrary metadata is built here.
+    """
+    post = frontmatter.Post(content)
+    post.metadata.update(metadata)
+    return post
+
+
+def loads_post(text: str, handler: BaseHandler | None = None) -> frontmatter.Post:
+    """Parse markdown into a Post without `frontmatter.loads`.
+
+    `frontmatter.loads` ends in `Post(content, handler, **metadata)`, the same
+    keyword spread `build_post` exists to avoid.
+    """
+    metadata, content = frontmatter.parse(text, handler=handler)
+    return build_post(content, metadata)
 
 
 def dump_frontmatter(post: frontmatter.Post) -> str:

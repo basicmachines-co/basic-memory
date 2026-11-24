@@ -10,7 +10,6 @@ Flow: Entity loaded with eager observations/relations -> convert to tuples -> co
 
 from pathlib import Path as FilePath
 
-import frontmatter
 from fastapi import APIRouter, HTTPException, Path, Query, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +49,7 @@ from basic_memory.services.schema_validation_hooks import (
 from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.picoschema.diff import diff_schema
 from basic_memory.utils import generate_permalink
+from basic_memory.file_utils import loads_post
 from basic_memory.yaml_policy import SimpleYamlHandler
 from typing import Any
 
@@ -116,7 +116,7 @@ async def _schema_frontmatter_from_file(
     """
     try:
         content = await file_service.read_file_content(entity.file_path)
-        post = frontmatter.loads(content, handler=SimpleYamlHandler())
+        post = loads_post(content, handler=SimpleYamlHandler())
         metadata = dict(post.metadata)
 
         # Trigger: file is mid-edit and missing required schema fields
