@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
@@ -317,6 +318,7 @@ async def test_postgres_replace_fts_chunks_slices_by_rows_and_byte_cap() -> None
     repo = object.__new__(PostgresSearchRepository)
     repo.project_id = 7
     session = _RecordingSession()
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
 
     step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
     total_chunks = POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS + 15
@@ -331,8 +333,10 @@ async def test_postgres_replace_fts_chunks_slices_by_rows_and_byte_cap() -> None
         permalink="main/large-indexed-note",
         file_path="notes/large-indexed-note.md",
         type="entity",
-        metadata={},
+        metadata=None,
         entity_id=501,
+        created_at=now,
+        updated_at=now,
         project_id=7,
     )
 
@@ -344,16 +348,134 @@ async def test_postgres_replace_fts_chunks_slices_by_rows_and_byte_cap() -> None
         if "INSERT INTO search_index_fts_chunks" in sql
     ]
     assert len(chunk_inserts) == 2
-    all_rows = [
-        item
-        for _, params in chunk_inserts
-        for item in json.loads(params["chunks"])
-    ]
+    all_rows = [item for _, params in chunk_inserts for item in json.loads(params["chunks"])]
     assert len(all_rows) == total_chunks
     assert [r["chunk_index"] for r in all_rows] == list(range(total_chunks))
     assert tail_marker in all_rows[-1]["chunk_text"]
 
     heavy_chunks = [{"chunk_index": i, "chunk_text": "z" * 400_000} for i in range(7)]
-    byte_sliced = slice_postgres_fts_chunk_json_batches(heavy_chunks, max_rows=200, max_bytes=1_000_000)
+    byte_sliced = slice_postgres_fts_chunk_json_batches(
+        heavy_chunks, max_rows=200, max_bytes=1_000_000
+    )
     assert len(byte_sliced) == 4
     assert sum(len(json.loads(b)) for b in byte_sliced) == 7
+
+
+@pytest.mark.asyncio
+async def test_postgres_multi_mb_note_slices_fts_chunks_and_finds_tail_text(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("PostgreSQL stores full note bodies in bounded FTS chunks")
+
+    from basic_memory.repository.postgres_fts_chunks import (
+        POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS,
+        POSTGRES_FTS_CHUNK_OVERLAP,
+        POSTGRES_FTS_CHUNK_SIZE,
+    )
+    from basic_memory.repository.search_index_row import SearchIndexRow
+
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
+    # ~2.5 MB note (~420 chunks) so both >2 MB and >200-row slice boundaries are crossed.
+    total_chunks = (POSTGRES_FTS_CHUNK_INSERT_MAX_ROWS * 2) + 20
+    filler = ("alpha beta gamma delta " * 260)[:step]
+    accepted_tail_token = "acceptedtailneedle2133"
+    indexed_tail_token = "indexedtailneedle2133"
+    accepted_body = (filler * (total_chunks - 1)) + f" concluding section {accepted_tail_token}"
+    indexed_body = (filler * (total_chunks - 1)) + f" concluding section {indexed_tail_token}"
+    assert len(accepted_body.encode("utf-8")) > 2 * 1024 * 1024
+
+    repository = AcceptedNoteSearchRepository(project_id=search_repository.project_id)
+    accepted_row = build_accepted_note_search_row(
+        entity_id=701,
+        title="Multi-megabyte accepted note",
+        note_type="note",
+        entity_metadata=None,
+        permalink="main/multi-mb-accepted-note",
+        file_path="notes/multi-mb-accepted-note.md",
+        search_content=accepted_body,
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+
+    accepted_chunk_inserts = 0
+
+    def _count_accepted_inserts(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        nonlocal accepted_chunk_inserts
+        if "INSERT INTO search_index_fts_chunks" in statement:
+            accepted_chunk_inserts += 1
+
+    async with db.scoped_session(session_maker) as session:
+        sync_engine = session.get_bind().engine
+        event.listen(sync_engine, "before_cursor_execute", _count_accepted_inserts)
+        try:
+            await repository.refresh_entity(session, accepted_row)
+        finally:
+            event.remove(sync_engine, "before_cursor_execute", _count_accepted_inserts)
+
+        accepted_count = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM search_index_fts_chunks "
+                    "WHERE project_id = :pid AND search_index_id = 701 AND search_index_type = 'entity'"
+                ),
+                {"pid": search_repository.project_id},
+            )
+        ).scalar_one()
+
+    assert accepted_chunk_inserts >= 3
+    assert accepted_count == total_chunks
+    accepted_hits = await search_repository.search(accepted_tail_token)
+    assert [r.id for r in accepted_hits] == [701]
+
+    indexed_chunk_inserts = 0
+
+    def _count_indexed_inserts(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        nonlocal indexed_chunk_inserts
+        if "INSERT INTO search_index_fts_chunks" in statement:
+            indexed_chunk_inserts += 1
+
+    sync_engine = session_maker.kw["bind"].sync_engine
+    event.listen(sync_engine, "before_cursor_execute", _count_indexed_inserts)
+    try:
+        await search_repository.index_item(
+            SearchIndexRow(
+                id=702,
+                title="Multi-megabyte indexed note",
+                content_stems=indexed_body,
+                content_snippet=indexed_body,
+                permalink="main/multi-mb-indexed-note",
+                file_path="notes/multi-mb-indexed-note.md",
+                type="entity",
+                metadata=None,
+                entity_id=702,
+                created_at=now,
+                updated_at=now,
+                project_id=search_repository.project_id,
+            )
+        )
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", _count_indexed_inserts)
+
+    async with db.scoped_session(session_maker) as session:
+        indexed_count = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM search_index_fts_chunks "
+                    "WHERE project_id = :pid AND search_index_id = 702 AND search_index_type = 'entity'"
+                ),
+                {"pid": search_repository.project_id},
+            )
+        ).scalar_one()
+
+    assert indexed_chunk_inserts >= 3
+    assert indexed_count == total_chunks
+    indexed_hits = await search_repository.search(indexed_tail_token)
+    assert [r.id for r in indexed_hits] == [702]

@@ -1,7 +1,6 @@
 """PostgreSQL tsvector-based search repository implementation."""
 
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import Any, override, List
 
