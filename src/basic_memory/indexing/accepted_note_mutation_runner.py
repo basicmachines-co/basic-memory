@@ -1162,7 +1162,8 @@ async def _run_accepted_note_update(
             reject_locked_note_unless_unlock_only(
                 current_note_content,
                 proposed_markdown=prepared_write.prepared.markdown_content,
-                updated_by_is_stamped=authorship is not None,
+                entity_permalink=entity.permalink,
+                stamped_updated_by=authorship.updated_by if authorship is not None else None,
             )
 
     prepared_write = apply_accepted_note_graph_policy(
@@ -1745,14 +1746,16 @@ def reject_locked_note_unless_unlock_only(
     note_content: NoteContent,
     *,
     proposed_markdown: str,
-    updated_by_is_stamped: bool,
+    entity_permalink: str | None,
+    stamped_updated_by: str | None,
 ) -> None:
     """Let a locked note's replacement through only when it does nothing but unlock."""
     locked_markdown = str(note_content.markdown_content)
     if note_is_locked(locked_markdown) and not is_unlock_only(
         locked_markdown=locked_markdown,
         proposed_markdown=proposed_markdown,
-        updated_by_is_stamped=updated_by_is_stamped,
+        entity_permalink=entity_permalink,
+        stamped_updated_by=stamped_updated_by,
     ):
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.locked, LOCKED_NOTE_MESSAGE)
 

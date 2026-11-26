@@ -169,6 +169,27 @@ async def test_person_without_author_cannot_change_updated_by_while_unlocking(
 
 
 @pytest.mark.asyncio
+async def test_person_can_unlock_a_note_an_agent_wrote(
+    client: AsyncClient, v2_project_url: str, lock_resolver: LockAuthorityResolver
+) -> None:
+    # The unlock writes the person's updated_by over the agent's. That stamp is the
+    # server's, so it is not an edit.
+    lock_resolver.author = "Claude"
+    note_url = await _create_locked(client, v2_project_url)
+    locked = await _stored(client, note_url)
+    assert "updated_by: Claude" in locked
+
+    lock_resolver.lock_authority = PersonInWebApp()
+    lock_resolver.author = "Alice"
+    response = await _put(client, note_url, _without_lock(locked))
+
+    assert response.status_code == 202, response.text
+    unlocked = await _stored(client, note_url)
+    assert not note_is_locked(unlocked)
+    assert "updated_by: Alice" in unlocked
+
+
+@pytest.mark.asyncio
 async def test_agent_cannot_unlock(
     client: AsyncClient, v2_project_url: str, lock_resolver: LockAuthorityResolver
 ) -> None:
