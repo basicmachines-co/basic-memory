@@ -12,12 +12,17 @@ LOCKED = "---\ntitle: Runbook\ntype: note\nlocked: true\n---\n\nKeep this exact 
     [
         "---\ntitle: Runbook\ntype: note\n---\n\nKeep this exact content.\n",
         "---\ntitle: Runbook\ntype: note\nlocked: false\n---\n\nKeep this exact content.\n",
-        # Key order and the server-stamped updater are not the caller's change.
-        "---\ntype: note\ntitle: Runbook\nupdated_by: Alice\n---\n\nKeep this exact content.\n",
+        # Key order is not a change.
+        "---\ntype: note\ntitle: Runbook\n---\n\nKeep this exact content.\n",
     ],
 )
-def test_removing_only_the_lock_is_an_unlock(proposed: str) -> None:
-    assert is_unlock_only(locked_markdown=LOCKED, proposed_markdown=proposed)
+@pytest.mark.parametrize("updated_by_is_stamped", [True, False])
+def test_removing_only_the_lock_is_an_unlock(proposed: str, updated_by_is_stamped: bool) -> None:
+    assert is_unlock_only(
+        locked_markdown=LOCKED,
+        proposed_markdown=proposed,
+        updated_by_is_stamped=updated_by_is_stamped,
+    )
     assert not note_is_locked(proposed)
 
 
@@ -38,5 +43,29 @@ def test_removing_only_the_lock_is_an_unlock(proposed: str) -> None:
         "---\ntitle: [unclosed\n---\n\nKeep this exact content.\n",
     ],
 )
-def test_any_other_change_is_not_an_unlock(proposed: str) -> None:
-    assert not is_unlock_only(locked_markdown=LOCKED, proposed_markdown=proposed)
+@pytest.mark.parametrize("updated_by_is_stamped", [True, False])
+def test_any_other_change_is_not_an_unlock(proposed: str, updated_by_is_stamped: bool) -> None:
+    assert not is_unlock_only(
+        locked_markdown=LOCKED,
+        proposed_markdown=proposed,
+        updated_by_is_stamped=updated_by_is_stamped,
+    )
+
+
+STAMPED_BY_ALICE = (
+    "---\ntitle: Runbook\ntype: note\nupdated_by: Alice\n---\n\nKeep this exact content.\n"
+)
+
+
+def test_stamped_updater_is_not_the_callers_change() -> None:
+    # The server overwrites updated_by when the write names an author.
+    assert is_unlock_only(
+        locked_markdown=LOCKED, proposed_markdown=STAMPED_BY_ALICE, updated_by_is_stamped=True
+    )
+
+
+def test_unstamped_updater_is_the_callers_change() -> None:
+    # With no author, nothing overwrites updated_by, so the caller wrote it.
+    assert not is_unlock_only(
+        locked_markdown=LOCKED, proposed_markdown=STAMPED_BY_ALICE, updated_by_is_stamped=False
+    )

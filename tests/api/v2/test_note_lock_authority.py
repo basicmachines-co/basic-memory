@@ -153,6 +153,22 @@ async def test_person_cannot_unlock_and_change_anything_else(
 
 
 @pytest.mark.asyncio
+async def test_person_without_author_cannot_change_updated_by_while_unlocking(
+    client: AsyncClient, v2_project_url: str, lock_resolver: LockAuthorityResolver
+) -> None:
+    # No author means no stamp overwrites updated_by, so the caller's value would land.
+    lock_resolver.lock_authority = PersonInWebApp()
+    note_url = await _create_locked(client, v2_project_url)
+    locked = await _stored(client, note_url)
+
+    forged = _without_lock(locked).replace("---\n\n", "updated_by: Mallory\n---\n\n", 1)
+    response = await _put(client, note_url, forged)
+
+    assert response.status_code == 423, response.text
+    assert await _stored(client, note_url) == locked
+
+
+@pytest.mark.asyncio
 async def test_agent_cannot_unlock(
     client: AsyncClient, v2_project_url: str, lock_resolver: LockAuthorityResolver
 ) -> None:

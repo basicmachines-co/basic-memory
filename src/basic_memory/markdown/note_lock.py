@@ -58,13 +58,20 @@ def note_is_locked(markdown_content: str) -> bool:
     return metadata.get(LOCKED_FIELD) is True
 
 
-def is_unlock_only(*, locked_markdown: str, proposed_markdown: str) -> bool:
+def is_unlock_only(
+    *,
+    locked_markdown: str,
+    proposed_markdown: str,
+    updated_by_is_stamped: bool,
+) -> bool:
     """Return whether the proposed Markdown only removes the lock from the locked note.
 
     Unlocking is one deliberate action: the proposed note must drop `locked` (or set it
     to false) and change nothing else, so a person cannot unlock and edit in one write.
-    The server stamps `updated_by` on every write, so that key is not the caller's change.
+    When the write names an author, the server stamps `updated_by`, so that key is not
+    the caller's change. Without an author nothing overwrites it, and changing it is an edit.
     """
+    ignored_fields = {LOCKED_FIELD, UPDATED_BY_FIELD} if updated_by_is_stamped else {LOCKED_FIELD}
     if not has_frontmatter(proposed_markdown):
         return False
     try:
@@ -76,11 +83,7 @@ def is_unlock_only(*, locked_markdown: str, proposed_markdown: str) -> bool:
         return False
 
     def unchanged_fields(metadata: dict[str, object]) -> dict[str, object]:
-        return {
-            key: value
-            for key, value in metadata.items()
-            if key not in (LOCKED_FIELD, UPDATED_BY_FIELD)
-        }
+        return {key: value for key, value in metadata.items() if key not in ignored_fields}
 
     return unchanged_fields(locked_metadata) == unchanged_fields(
         proposed_metadata
