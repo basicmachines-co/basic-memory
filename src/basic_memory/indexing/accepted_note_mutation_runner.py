@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import NoReturn, Protocol
+from typing import NoReturn, Protocol, assert_never
 from uuid import UUID
 
 from sqlalchemy import select
@@ -33,7 +33,15 @@ from basic_memory.indexing.accepted_note_write_runner import (
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublication
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
+from basic_memory.markdown.note_lock import (
+    AGENT_WRITER,
+    LOCKED_NOTE_MESSAGE,
+    AgentWriter,
+    NoteLockAuthority,
+    PersonInWebApp,
+    is_unlock_only,
+    note_is_locked,
+)
 from basic_memory.repository import NoteContentVersionConflict
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
@@ -152,6 +160,9 @@ class AcceptedNoteMutationActor:
     # Display name stamped into created_by/updated_by frontmatter. Only the runtime
     # boundary that authenticated the caller may set it; None stamps nothing.
     author: NoteAuthor | None = None
+    # Whether this caller may remove a note's lock. Only the runtime boundary that
+    # authenticated a person may say so; every other caller keeps the one-way lock.
+    lock_authority: NoteLockAuthority = AGENT_WRITER
 
 
 @dataclass(frozen=True, slots=True)
@@ -981,7 +992,15 @@ async def _run_accepted_note_update(
             dependencies=dependencies,
             missing_kind=AcceptedNoteMutationRejectKind.conflict,
         )
-        reject_locked_note(current_note_content)
+        # A person may only unlock, which needs the prepared replacement to judge;
+        # every other caller is refused before any preparation work.
+        match request.actor.lock_authority:
+            case AgentWriter():
+                reject_locked_note(current_note_content)
+            case PersonInWebApp():
+                pass
+            case _:
+                assert_never(request.actor.lock_authority)
         await session.refresh(entity)
         if not runtime_content_type_is_markdown(entity):
             reject_accepted_note_mutation(
@@ -1137,6 +1156,12 @@ async def _run_accepted_note_update(
             )
         except (ParseError, ValueError) as error:
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
+        # Agents were already refused above; only a person's write reaches here locked.
+        if isinstance(request.actor.lock_authority, PersonInWebApp):
+            reject_locked_note_unless_unlock_only(
+                current_note_content,
+                proposed_markdown=prepared_write.prepared.markdown_content,
+            )
 
     prepared_write = apply_accepted_note_graph_policy(
         prepared_write,
@@ -1712,6 +1737,20 @@ def reject_accepted_note_file_path_conflict(
             AcceptedNoteMutationRejectKind.conflict,
             "Note already exists. Use bm_edit to modify it, or delete it first.",
         )
+
+
+def reject_locked_note_unless_unlock_only(
+    note_content: NoteContent,
+    *,
+    proposed_markdown: str,
+) -> None:
+    """Let a locked note's replacement through only when it does nothing but unlock."""
+    locked_markdown = str(note_content.markdown_content)
+    if note_is_locked(locked_markdown) and not is_unlock_only(
+        locked_markdown=locked_markdown,
+        proposed_markdown=proposed_markdown,
+    ):
+        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.locked, LOCKED_NOTE_MESSAGE)
 
 
 def reject_locked_note(note_content: NoteContent) -> None:
