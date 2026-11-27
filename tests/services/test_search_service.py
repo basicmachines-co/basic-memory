@@ -1926,3 +1926,63 @@ async def test_reindex_vectors_is_a_noop_when_the_vector_runtime_is_unavailable(
     assert stats["embedded"] == 0
     assert stats["errors"] == 0
     assert stats["skipped"] == stats["total_entities"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_index_entity_markdown_preserves_metadata_stems_on_long_notes(
+    search_service, session_maker, test_project
+):
+    """Metadata stems (permalink, file_path, tags) must precede body content before truncation."""
+    from basic_memory.repository import EntityRepository
+    from basic_memory.services.search_service import MAX_CONTENT_STEMS_SIZE
+
+    entity_repo = EntityRepository(project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    entity = await _create_entity(
+        session_maker,
+        entity_repo,
+        {
+            "title": "Long Spec",
+            "note_type": "note",
+            "entity_metadata": {"tags": ["unique_tag_token"]},
+            "content_type": "text/markdown",
+            "file_path": "docs/unique_folder_token/long-spec.md",
+            "permalink": "specs/unique_permalink_token",
+            "project_id": test_project.id,
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+    entity = await _get_entity_by_permalink(
+        session_maker, entity_repo, "specs/unique_permalink_token"
+    )
+    assert entity is not None
+
+    long_body = ("bodyword " * 800) + "TAIL_BODY_TOKEN"
+    assert len(long_body) > MAX_CONTENT_STEMS_SIZE
+
+    await search_service.index_entity_markdown(entity, content=long_body)
+
+    async with db.scoped_session(session_maker) as session:
+        stored_stems = await session.scalar(
+            text(
+                "SELECT content_stems FROM search_index "
+                "WHERE project_id = :project_id AND id = :entity_id AND type = :row_type"
+            ),
+            {
+                "project_id": test_project.id,
+                "entity_id": entity.id,
+                "row_type": SearchItemType.ENTITY.value,
+            },
+        )
+
+    assert stored_stems is not None
+    assert len(stored_stems) == MAX_CONTENT_STEMS_SIZE
+    assert "specs/unique_permalink_token" in stored_stems
+    assert "docs/unique_folder_token/long-spec.md" in stored_stems
+    assert "unique_tag_token" in stored_stems
+    assert "TAIL_BODY_TOKEN" not in stored_stems
+
+    for token in ("unique_permalink_token", "unique_folder_token", "unique_tag_token"):
+        results = await search_service.search(SearchQuery(text=token))
+        assert any(r.permalink == "specs/unique_permalink_token" for r in results)

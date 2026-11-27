@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from basic_memory.indexing.accepted_note_search import (
+    MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE,
     AcceptedNoteSearchRow,
     accepted_note_content_stems,
     accepted_note_tags,
@@ -60,6 +61,25 @@ def test_accepted_note_content_stems_include_note_identity_text() -> None:
     assert "Main body" in stems
     assert "notes/project-plan.md" in stems
     assert "strategy" in stems
+
+
+def test_accepted_note_content_stems_preserves_metadata_when_body_exceeds_max_size() -> None:
+    long_body = ("bodyword " * 800) + "TAIL_TOKEN_BEYOND_CAP"
+    stems = accepted_note_content_stems(
+        title="Long Spec",
+        search_content=long_body,
+        permalink="specs/unique-permalink-token",
+        file_path="docs/unique-folder-token/long-spec.md",
+        tags=("unique-tag-token",),
+    )
+
+    assert len(stems) == MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE
+    assert "specs/unique-permalink-token" in stems
+    assert "unique-permalink-token" in stems
+    assert "docs/unique-folder-token/long-spec.md" in stems
+    assert "unique-folder-token" in stems
+    assert "unique-tag-token" in stems
+    assert "TAIL_TOKEN_BEYOND_CAP" not in stems
 
 
 def test_strip_search_text_treats_missing_values_as_empty_text() -> None:
