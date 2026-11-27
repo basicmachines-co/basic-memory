@@ -41,6 +41,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
 from basic_memory.indexing.accepted_note_write_runner import (
     refresh_accepted_note_search_index,
 )
+from basic_memory.markdown.note_lock import AGENT_WRITER, NoteLockAuthority
 from basic_memory.indexing.relation_persistence import (
     RelationGenerationPublication,
     RelationGenerationPublisher,
@@ -105,6 +106,9 @@ class NoteContentMutationActorContext:
     # Display name stamped into created_by/updated_by frontmatter. Routes never
     # set it; only a resolver that authenticated the caller can supply it.
     author: str | None = None
+    # Whether the caller may remove a note's lock. Routes never set it; only a
+    # resolver that authenticated a person can.
+    lock_authority: NoteLockAuthority = AGENT_WRITER
 
 
 class NoteContentMutationActorResolver(Protocol):
@@ -157,6 +161,7 @@ def accepted_note_mutation_actor(
     actor_kind: str | None,
     actor_name: str | None,
     author: str | None = None,
+    lock_authority: NoteLockAuthority = AGENT_WRITER,
 ) -> AcceptedNoteMutationActor:
     """Build the typed accepted-note actor passed to core mutation runners."""
     return AcceptedNoteMutationActor(
@@ -164,6 +169,7 @@ def accepted_note_mutation_actor(
         kind=actor_kind,
         name=actor_name,
         author=author,
+        lock_authority=lock_authority,
     )
 
 
@@ -751,6 +757,7 @@ class NoteContentMutationService:
                 actor_kind=actor.actor_kind,
                 actor_name=actor.actor_name,
                 author=actor.author,
+                lock_authority=actor.lock_authority,
             ),
             source=actor.source,
         )
