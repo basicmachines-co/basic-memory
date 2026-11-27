@@ -572,6 +572,27 @@ name, `workspace/project`, or external UUID through `project`.
 Use `bm_man(page="bm-search(3)")` for the installed contract, or see the
 [tool guide](docs/ai-assistant-guide-extended.md). CLI commands retain their shell names.
 
+### Read-only mode
+
+Set `BASIC_MEMORY_READ_ONLY=true` on an MCP server that should not offer writes:
+only tools annotated `readOnlyHint: true` stay available, so `bm_write`,
+`bm_edit`, `bm_move`, `bm_delete` and `bm_project_create` disappear from the
+tool list and the server instructions no longer describe them.
+
+Read-only mode covers the tools, not the indexer. Indexing keeps running so
+notes written on disk by another process still appear in search, which means a
+read-only instance can still write on its own: the indexer stamps `permalink:`
+frontmatter into files during sync, and it starts a file watcher and a startup
+scan. When one vault is shared by several MCP clients and only one of them
+should write, also set `BASIC_MEMORY_INDEX_CHANGES=false` on the read-only
+ones. That leaves a single indexing writer and no redundant watchers, while
+the primary client keeps indexing.
+
+```bash
+# secondary harness: read tools only, no indexing, no watcher
+BASIC_MEMORY_READ_ONLY=true BASIC_MEMORY_INDEX_CHANGES=false basic-memory mcp
+```
+
 ## CLI essentials
 
 ```bash
