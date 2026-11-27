@@ -28,7 +28,7 @@ from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 from basic_memory.mcp.note_targets import ProjectTarget, open_project_target
 from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import note_change_failure, refusal, revision_conflict
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.server import WRITES_TAG, mcp
 from basic_memory.mcp.similar_notes import (
     SimilarNote,
     find_similar_notes,
@@ -76,7 +76,7 @@ class NotePlacement:
         "hold frontmatter, observations "
         "('- [category] fact #tag') and relations ('- relation_type [[Other Note]]')."
     ),
-    tags={"notes"},
+    tags={"notes", WRITES_TAG},
     annotations={
         "title": "Write note",
         "readOnlyHint": False,

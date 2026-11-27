@@ -19,7 +19,7 @@ from basic_memory.mcp.note_targets import (
     resolve_note,
 )
 from basic_memory.mcp.refusals import note_change_failure, refusal
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.server import WRITES_TAG, mcp
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.schemas.memory import memory_url_path
 
@@ -33,7 +33,7 @@ from basic_memory.schemas.memory import memory_url_path
         "`expected_checksum` (from bm_read) to delete a note only if it is still the "
         "revision you read. A note that does not exist is an error. This cannot be undone."
     ),
-    tags={"notes"},
+    tags={"notes", WRITES_TAG},
     annotations={
         "title": "Delete note",
         "readOnlyHint": False,

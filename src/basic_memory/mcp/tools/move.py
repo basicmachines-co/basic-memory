@@ -25,7 +25,7 @@ from basic_memory.mcp.note_targets import (
 )
 from basic_memory.mcp.note_writes import NoteChange
 from basic_memory.mcp.refusals import note_change_failure, refusal
-from basic_memory.mcp.server import mcp
+from basic_memory.mcp.server import WRITES_TAG, mcp
 from basic_memory.mcp.tool_params import OutputFormat, ProjectParam
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.schemas.memory import memory_url_path
@@ -45,7 +45,7 @@ from basic_memory.utils import generate_permalink, validate_project_path
         "new note (new id, its own history, links not rewritten) and deleted here; a "
         "directory moves note by note."
     ),
-    tags={"notes"},
+    tags={"notes", WRITES_TAG},
     annotations={
         "title": "Move note",
         "readOnlyHint": False,

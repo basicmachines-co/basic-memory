@@ -10,7 +10,12 @@ from typing import Annotated, Any
 from fastmcp import Context
 from pydantic import AliasChoices, Field
 
-from basic_memory.mcp.server import PROJECT_DELETE_TAG, mcp, set_project_delete_visibility
+from basic_memory.mcp.server import (
+    PROJECT_DELETE_TAG,
+    WRITES_TAG,
+    mcp,
+    set_project_delete_visibility,
+)
 from basic_memory.mcp.tool_params import (
     Items,
     OutputFormat,
@@ -62,7 +67,7 @@ async def bm_project_list(
         "Create a Basic Memory project named `name` whose notes live in the folder `path`. "
         "In Cloud, `workspace` picks the workspace that holds it."
     ),
-    tags={"projects"},
+    tags={"projects", WRITES_TAG},
     annotations={
         "title": "Create project",
         "readOnlyHint": False,
@@ -165,7 +170,7 @@ async def bm_recent(
         "Remove a Basic Memory project. Its files stay on disk unless `delete_notes=true`; "
         "a Cloud project's files are always deleted. This cannot be undone."
     ),
-    tags={"projects", PROJECT_DELETE_TAG},
+    tags={"projects", PROJECT_DELETE_TAG, WRITES_TAG},
     annotations={
         "title": "Delete project",
         "readOnlyHint": False,

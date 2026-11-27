@@ -624,6 +624,21 @@ class BasicMemoryConfig(BaseSettings):
         ),
     )
 
+    read_only: bool = Field(
+        default=False,
+        description=(
+            "Offer only the tools annotated readOnlyHint: true, hiding writes such as "
+            "bm_write, bm_edit, bm_move, bm_delete and bm_project_create. Indexing keeps "
+            "running, so notes written on disk still appear in search. Because indexing "
+            "keeps running, a read-only instance can still write to disk: the indexer "
+            "stamps permalink: frontmatter during sync, and it starts its own file watcher "
+            "and startup scan. When several MCP clients share one vault and only one of "
+            "them should write, also set BASIC_MEMORY_INDEX_CHANGES=false on the read-only "
+            "ones so only the primary client indexes. "
+            "Env: BASIC_MEMORY_READ_ONLY"
+        ),
+    )
+
     cli_output_style: Literal["rich", "plain"] = Field(
         default="rich",
         description=(

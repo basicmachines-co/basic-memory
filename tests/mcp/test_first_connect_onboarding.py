@@ -217,6 +217,46 @@ async def test_getting_started_offers_first_note_conditionally(client, test_proj
 
 
 @pytest.mark.asyncio
+async def test_getting_started_drops_the_write_path_in_read_only_mode(monkeypatch):
+    """A read-only server must not onboard the user toward a tool it hides."""
+
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [
+                {
+                    "name": "research",
+                    "qualified_name": "personal/research",
+                    "external_id": "project-1",
+                    "is_default": True,
+                    "workspace_is_default": True,
+                }
+            ],
+            "default_project": "research",
+            "constrained_project": None,
+        }
+
+    async def fake_recent_activity(**_kwargs: object) -> str:
+        return "# Recent activity\n\n- Updated [[Project Plan]]"
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.bm_project_list", fake_list_memory_projects
+    )
+    monkeypatch.setattr("basic_memory.mcp.prompts.getting_started.bm_recent", fake_recent_activity)
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.ConfigManager",
+        lambda: type("C", (), {"load_config": lambda self: type("Cfg", (), {"read_only": True})()})(),
+    )
+
+    result = await getting_started(project="research")  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert "bm_write" not in result, "a read-only server must not offer a save"
+    assert "read-only" in result
+    # The reading half stays, so the prompt is still useful.
+    assert "bm_read(" in result
+    assert "bm_search(" in result
+
+
+@pytest.mark.asyncio
 async def test_getting_started_preserves_markdown_around_multiline_activity(monkeypatch):
     """Embedded activity must not turn the surrounding prompt into an indented code block."""
 

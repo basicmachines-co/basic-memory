@@ -29,20 +29,75 @@ from basic_memory.services.initialization import initialize_app
 import logfire
 
 PROJECT_DELETE_TAG = "project-delete"
+WRITES_TAG = "writes"
+
+# Last applied tool-visibility flags, per server. Visibility marks are "last one
+# appended wins", so the two flags have to be composed into one decision: an
+# enable mark for writes would otherwise re-show bm_project_delete after
+# set_project_delete_visibility had hidden it.
+_VISIBILITY_STATE_ATTR = "_basic_memory_tool_visibility"
 
 
-def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
-    """Show or hide bm_project_delete.
+def _apply_tool_visibility(
+    server: FastMCP,
+    *,
+    read_only: bool | None = None,
+    enable_project_delete: bool | None = None,
+) -> None:
+    """Recompute tool visibility from both flags.
 
-    The last visibility mark appended wins, so this is safe
-    to call at import, at each lifespan start, and in tests.
+    Hides every tool that either carries WRITES_TAG while read-only mode is on,
+    or carries PROJECT_DELETE_TAG while project delete is off. The complement is
+    then marked visible by name, so neither flag can re-show the other's
+    hidden tools.
 
-    The mark goes on the local provider, which owns the tools, not on the server:
+    The marks go on the local provider, which owns the tools, not on the server:
     the Skills extension (resources/skills.py) refuses servers with server-level
     transforms, because a transform could hide or rename skill files after
     skills/list has already advertised their digests.
     """
-    server.local_provider.add_transform(Visibility(enabled, tags={PROJECT_DELETE_TAG}))
+    state = getattr(
+        server, _VISIBILITY_STATE_ATTR, {"read_only": False, "enable_project_delete": False}
+    )
+    if read_only is not None:
+        state["read_only"] = read_only
+    if enable_project_delete is not None:
+        state["enable_project_delete"] = enable_project_delete
+    setattr(server, _VISIBILITY_STATE_ATTR, state)
+
+    tagged = {
+        component.name: set(component.tags or ())
+        for component in server.local_provider._components.values()
+    }
+    hidden = {
+        name
+        for name, tags in tagged.items()
+        if (state["read_only"] and WRITES_TAG in tags)
+        or (not state["enable_project_delete"] and PROJECT_DELETE_TAG in tags)
+    }
+    server.local_provider.add_transform(Visibility(False, names=hidden))
+    server.local_provider.add_transform(Visibility(True, names=set(tagged) - hidden))
+    # The instructions reach the same client as the tool list, so they have to
+    # agree with it: guidance that names a hidden write tool sends the model
+    # after calls the server refuses.
+    server._mcp_server.instructions = (
+        READ_ONLY_INSTRUCTIONS if state["read_only"] else BASIC_MEMORY_INSTRUCTIONS
+    )
+
+
+def set_read_only_visibility(server: FastMCP, enabled: bool) -> None:
+    """Hide the write tools when read-only mode is on.
+
+    Every tool annotated readOnlyHint: False carries WRITES_TAG, so read-only
+    mode cannot drift out of sync with the tool annotations; the test
+    `test_writes_tag_matches_read_only_annotations` fails when one is missing.
+    """
+    _apply_tool_visibility(server, read_only=enabled)
+
+
+def set_project_delete_visibility(server: FastMCP, enabled: bool) -> None:
+    """Show or hide bm_project_delete."""
+    _apply_tool_visibility(server, enable_project_delete=enabled)
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -115,6 +170,11 @@ async def lifespan(app: FastMCP):
     # Why: deleting a project removes it for every client; only the user turns it on.
     # Outcome: bm_project_delete is listed only then.
     set_project_delete_visibility(app, config.enable_project_delete)
+
+    # Trigger: the read_only config flag (off by default).
+    # Why: a shared knowledge base may be read by agents that must not write to it.
+    # Outcome: only the read-only tools are listed; the write tools cannot be called.
+    set_read_only_visibility(app, config.read_only)
 
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 
@@ -243,6 +303,35 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "bm_context. Read before editing with bm_edit; use the returned checksum to guard changes. "
     "bm_write creates notes and explicitly overwrites them; bm_edit never creates missing notes. "
     "Use returned paths for subsequent reads and writes.\n\n"
+    "bm_project_list() discovers projects, grouped by workspace. Pass a project name, "
+    "workspace/project, or external UUID through the required project parameter on note, "
+    "folder, context and schema calls. A qualified path must agree with project. "
+    "Search requires project, projects, or all_projects=true. "
+    "Calls do not remember a previous project selection.\n\n"
+    "The installed tool schemas are authoritative. Most tools default to text; bm_context "
+    'defaults to JSON. Use output_format="json" when consuming structured fields. Failures '
+    "are tool errors, not empty successful results. Follow pagination and continuation fields. "
+    'Call bm_man(page="bm-search(3)") for details, or read memory://man for the manual index. '
+    "With a web or fetch tool, fetch "
+    "https://docs.basicmemory.com/llms.txt first, then only the relevant linked /raw/...md page."
+)
+
+# Served instead of BASIC_MEMORY_INSTRUCTIONS while read-only mode is on. It keeps
+# the reading half and drops every reference to a write tool, so the guidance a
+# client receives never names a tool that mode has hidden.
+READ_ONLY_INSTRUCTIONS = (
+    "Basic Memory is the user's memory across chats: Markdown notes that the user and "
+    "their AI assistants both read and write.\n\n"
+    "This server is read-only: it offers the reading tools only, and the user writes "
+    "notes in their editor or another client. Do not offer to save anything, and do not "
+    "tell the user you saved something.\n\n"
+    "When the user starts on a topic, look for related notes with bm_search or "
+    'bm_recent(project="...") before answering from memory. '
+    "No recent activity does not prove a project is empty.\n\n"
+    "Use bm_list for one folder, bm_find for recursive names or frontmatter inventories, "
+    "bm_search for ranked retrieval or matching lines, and bm_read for note and file content. "
+    "bm_read supports bounded lines, sections, and token budgets. Follow relations with "
+    "bm_context. Use returned paths for subsequent reads.\n\n"
     "bm_project_list() discovers projects, grouped by workspace. Pass a project name, "
     "workspace/project, or external UUID through the required project parameter on note, "
     "folder, context and schema calls. A qualified path must agree with project. "

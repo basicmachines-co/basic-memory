@@ -4,6 +4,7 @@ import os
 import stat
 import tempfile
 import pytest
+from pydantic import ValidationError
 from datetime import datetime
 from typing import Any, cast, get_args
 
@@ -108,6 +109,32 @@ class TestLegacySyncChangesMigration:
             default_project="main",
         )
         assert config.index_changes is True
+
+    def test_read_only_defaults_to_off(self):
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+        )
+        assert config.read_only is False
+
+    def test_read_only_env_turns_it_on(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_READ_ONLY", "true")
+        config = BasicMemoryConfig(
+            env="test",
+            projects={"main": {"path": "/tmp/legacy"}},
+            default_project="main",
+        )
+        assert config.read_only is True
+
+    def test_read_only_rejects_unrecognised_env_value(self, monkeypatch):
+        monkeypatch.setenv("BASIC_MEMORY_READ_ONLY", "yes-please")
+        with pytest.raises(ValidationError):
+            BasicMemoryConfig(
+                env="test",
+                projects={"main": {"path": "/tmp/legacy"}},
+                default_project="main",
+            )
 
 
 class TestBasicMemoryConfig:
