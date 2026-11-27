@@ -85,11 +85,11 @@ def accepted_note_content_stems(
     """Build the entity-level content_stems value from accepted DB state."""
     content_stems: list[str] = []
     content_stems.extend(search_text_variants(title))
-    if search_content:
-        content_stems.append(search_content)
     content_stems.extend(search_text_variants(permalink))
     content_stems.extend(search_text_variants(file_path))
     content_stems.extend(tags)
+    if search_content:
+        content_stems.append(search_content)
 
     stems = strip_search_text("\n".join(part for part in content_stems if part and part.strip()))
     if len(stems) > MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE:

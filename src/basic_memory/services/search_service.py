@@ -1122,12 +1122,6 @@ class SearchService:
         title_variants = self._generate_variants(entity.title)
         content_stems.extend(title_variants)
 
-        if content is None:
-            content = await self.file_service.read_entity_content(entity)
-        if content:
-            content_stems.append(content)
-            content_snippet = _strip_nul(content)
-
         if entity.permalink:
             content_stems.extend(self._generate_variants(entity.permalink))
 
@@ -1137,10 +1131,16 @@ class SearchService:
         if entity_tags:
             content_stems.extend(entity_tags)
 
+        if content is None:
+            content = await self.file_service.read_entity_content(entity)
+        if content:
+            content_stems.append(content)
+            content_snippet = _strip_nul(content)
+
         entity_content_stems = _strip_nul("\n".join(p for p in content_stems if p and p.strip()))
 
-        if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
-            entity_content_stems = entity_content_stems[:MAX_CONTENT_STEMS_SIZE]  # pragma: no cover
+        if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:
+            entity_content_stems = entity_content_stems[:MAX_CONTENT_STEMS_SIZE]
 
         rows_to_index.append(
             SearchIndexRow(
