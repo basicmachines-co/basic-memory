@@ -102,6 +102,41 @@ async def test_project_index_adds_permalink_when_optional_frontmatter_is_disable
 
 
 @pytest.mark.asyncio
+async def test_forced_index_adds_permalink_without_reformatting_note(
+    test_project: Project,
+    project_config,
+    app_config,
+    config_manager,
+) -> None:
+    app_config.ensure_frontmatter_on_sync = False
+    config_manager.save_config(app_config)
+    original_content = (
+        "---\n"
+        'title: "Decision: a long title that goes past eighty characters so the YAML dumper wraps it"\n'
+        "tags: [decision, memory, obsidian]\n"
+        'aliases: ["Alias one"]\n'
+        "---\n\n"
+        "# Body\n\n"
+        "Text.\n"
+    )
+    note_path = project_config.home / "note.md"
+    note_path.write_bytes(original_content.encode("utf-8"))
+
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    expected_permalink = f"{test_project.permalink}/note"
+    expected_content = original_content.replace(
+        'aliases: ["Alias one"]\n',
+        f'aliases: ["Alias one"]\npermalink: {expected_permalink}\n',
+    )
+    assert note_path.read_bytes() == expected_content.encode("utf-8")
+
+
+@pytest.mark.asyncio
 async def test_project_index_reconciles_permalink_collisions_when_optional_frontmatter_is_disabled(
     test_project: Project,
     project_config,

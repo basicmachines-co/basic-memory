@@ -443,6 +443,40 @@ async def test_prepare_move_entity_content_updates_permalink_when_move_policy_en
 
 
 @pytest.mark.asyncio
+async def test_prepare_move_entity_content_preserves_frontmatter_formatting(
+    entity_service,
+) -> None:
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Move Formatted",
+            directory="notes",
+            note_type="note",
+            content="Body",
+        )
+    )
+    current_content = (
+        "---\n"
+        'title: "Move Formatted"\n'
+        "tags: [decision, memory, obsidian]\n"
+        'aliases: ["Alias one"]\n'
+        "---\n\n"
+        "Text without a trailing newline."
+    )
+
+    prepared = await entity_service.prepare_move_entity_content(
+        created,
+        current_content,
+        "archive/Move Formatted.md",
+    )
+
+    expected = current_content.replace(
+        "---\n\nText without a trailing newline.",
+        f"permalink: {prepared.permalink}\n---\n\nText without a trailing newline.",
+    )
+    assert prepared.markdown_content == expected
+
+
+@pytest.mark.asyncio
 async def test_update_entity_with_content_rejects_rename_conflicts_before_writing(
     entity_service,
     file_service,
