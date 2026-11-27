@@ -167,6 +167,43 @@ class TestConstructorAutoProvider:
             mock_factory.assert_called_once_with(app_config)
             assert repo._embedding_provider is stub
             assert repo._vector_dimensions == stub.dimensions
+            assert repo._semantic_embedding_sync_batch_size == 2
+
+    def test_resolves_sync_batch_size_from_provider_and_explicit_override(self):
+        session_maker = MagicMock()
+        stub = StubEmbeddingProvider()
+        litellm_config = BasicMemoryConfig(
+            env="test",
+            projects={"test-project": "/tmp/test"},
+            default_project="test-project",
+            database_backend=DatabaseBackend.POSTGRES,
+            semantic_embedding_provider="litellm",
+        )
+        with patch(
+            "basic_memory.repository.postgres_search_repository.create_embedding_provider",
+            return_value=stub,
+        ):
+            repo_default = PostgresSearchRepository(
+                session_maker,
+                project_id=1,
+                app_config=litellm_config,
+            )
+            assert repo_default._semantic_embedding_sync_batch_size == 64
+
+            explicit_config = BasicMemoryConfig(
+                env="test",
+                projects={"test-project": "/tmp/test"},
+                default_project="test-project",
+                database_backend=DatabaseBackend.POSTGRES,
+                semantic_embedding_provider="litellm",
+                semantic_embedding_sync_batch_size=16,
+            )
+            repo_explicit = PostgresSearchRepository(
+                session_maker,
+                project_id=1,
+                app_config=explicit_config,
+            )
+            assert repo_explicit._semantic_embedding_sync_batch_size == 16
 
 
 # --- _ensure_vector_tables guard (lines 259-260) --------------------------

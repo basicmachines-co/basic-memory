@@ -1211,6 +1211,33 @@ class TestSemanticSearchConfig:
         assert config.semantic_embedding_document_prefix == "title: none | text: "
         assert config.semantic_embedding_query_prefix == "task: search result | query: "
 
+    def test_semantic_embedding_batch_sizes_default_to_none_and_resolve_per_provider(self):
+        """Batch sizes stay None on raw config and resolve to 2 for FastEmbed, 64 for remote APIs (#2156)."""
+        fastembed_config = BasicMemoryConfig(semantic_embedding_provider="fastembed")
+        assert fastembed_config.semantic_embedding_batch_size is None
+        assert fastembed_config.semantic_embedding_sync_batch_size is None
+        assert fastembed_config.resolved_embedding_batch_size() == 2
+        assert fastembed_config.resolved_embedding_sync_batch_size() == 2
+
+        for provider in ("openai", "litellm", "  LiteLLM  "):
+            remote_config = BasicMemoryConfig(semantic_embedding_provider=provider)
+            assert remote_config.semantic_embedding_batch_size is None
+            assert remote_config.semantic_embedding_sync_batch_size is None
+            assert remote_config.resolved_embedding_batch_size() == 64
+            assert remote_config.resolved_embedding_sync_batch_size() == 64
+
+    def test_semantic_embedding_batch_sizes_honor_explicit_overrides(self):
+        """Explicit batch sizes in config take precedence over provider defaults (#2156)."""
+        config = BasicMemoryConfig(
+            semantic_embedding_provider="litellm",
+            semantic_embedding_batch_size=16,
+            semantic_embedding_sync_batch_size=32,
+        )
+        assert config.semantic_embedding_batch_size == 16
+        assert config.semantic_embedding_sync_batch_size == 32
+        assert config.resolved_embedding_batch_size() == 16
+        assert config.resolved_embedding_sync_batch_size() == 32
+
     def test_semantic_postgres_prepare_concurrency_defaults_to_4(self):
         """Postgres prepare concurrency should default to a conservative window of 4."""
         config = BasicMemoryConfig()

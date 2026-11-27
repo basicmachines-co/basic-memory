@@ -58,6 +58,8 @@ class DatabaseBackend(str, Enum):
 # Default reranker model — a small local fastembed cross-encoder.
 # LiteLLM cannot route this name, so the litellm provider requires an explicit override.
 DEFAULT_FASTEMBED_RERANK_MODEL = "jinaai/jina-reranker-v1-tiny-en"
+DEFAULT_FASTEMBED_EMBEDDING_BATCH_SIZE = 2
+DEFAULT_REMOTE_EMBEDDING_BATCH_SIZE = 64
 
 
 def resolve_data_dir() -> Path:
@@ -326,14 +328,19 @@ class BasicMemoryConfig(BaseSettings):
         ),
     )
     # Trigger: full local rebuilds spend most of their time waiting behind shared
-    # embed flushes, not constructing vectors themselves.
-    # Why: smaller FastEmbed batches cut queue wait far more than they increase
-    # write overhead on real-world projects, which makes full reindex materially faster.
-    # Outcome: default to the smaller local/cloud-safe batch size we benchmarked as
-    # the current best end-to-end setting in the shared vector sync pipeline.
-    semantic_embedding_batch_size: int = Field(
-        default=2,
-        description="Batch size for embedding generation.",
+    # embed flushes, not constructing vectors themselves, whereas remote HTTP APIs
+    # pay per-request round-trip overhead.
+    # Why: smaller FastEmbed batches (2) cut local ONNX queue wait far more than
+    # they increase write overhead (#731), while remote providers (OpenAI, LiteLLM)
+    # need larger batches (64) to avoid 32x request amplification (#2156).
+    # Outcome: leave the raw config field None by default and resolve the
+    # provider-appropriate batch size at runtime unless explicitly overridden.
+    semantic_embedding_batch_size: int | None = Field(
+        default=None,
+        description=(
+            "Batch size for embedding generation. Uses provider defaults when unset "
+            "(2 for FastEmbed, 64 for OpenAI and LiteLLM)."
+        ),
         gt=0,
     )
     semantic_embedding_request_concurrency: int = Field(
@@ -369,9 +376,12 @@ class BasicMemoryConfig(BaseSettings):
             "Use with prefix-sensitive asymmetric embedding models."
         ),
     )
-    semantic_embedding_sync_batch_size: int = Field(
-        default=2,
-        description="Batch size for vector sync orchestration flushes.",
+    semantic_embedding_sync_batch_size: int | None = Field(
+        default=None,
+        description=(
+            "Batch size for vector sync orchestration flushes. Uses provider defaults "
+            "when unset (2 for FastEmbed, 64 for OpenAI and LiteLLM)."
+        ),
         gt=0,
     )
     semantic_postgres_prepare_concurrency: int = Field(
@@ -1067,3 +1077,21 @@ class BasicMemoryConfig(BaseSettings):
     def data_dir_path(self) -> Path:
         """Get app state directory for config and default SQLite database."""
         return resolve_data_dir()
+
+    def _default_provider_embedding_batch_size(self) -> int:
+        provider_name = self.semantic_embedding_provider.strip().lower()
+        if provider_name == "fastembed":
+            return DEFAULT_FASTEMBED_EMBEDDING_BATCH_SIZE
+        return DEFAULT_REMOTE_EMBEDDING_BATCH_SIZE
+
+    def resolved_embedding_batch_size(self) -> int:
+        """Return the effective embedding batch size for the configured provider."""
+        if self.semantic_embedding_batch_size is not None:
+            return self.semantic_embedding_batch_size
+        return self._default_provider_embedding_batch_size()
+
+    def resolved_embedding_sync_batch_size(self) -> int:
+        """Return the effective vector sync flush batch size for the configured provider."""
+        if self.semantic_embedding_sync_batch_size is not None:
+            return self.semantic_embedding_sync_batch_size
+        return self._default_provider_embedding_batch_size()

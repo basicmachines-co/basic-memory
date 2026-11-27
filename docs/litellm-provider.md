@@ -97,9 +97,9 @@ All options can be set in config or as environment variables.
 | `semantic_embedding_query_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_INPUT_TYPE` | Auto | LiteLLM `input_type` for search queries. |
 | `semantic_embedding_document_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_PREFIX` | Unset | Literal text prefix prepended to indexed document chunks before embedding. |
 | `semantic_embedding_query_prefix` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_QUERY_PREFIX` | Unset | Literal text prefix prepended to search queries before embedding. |
-| `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of text chunks per provider request. |
+| `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | Provider default (`64` for LiteLLM/OpenAI, `2` for FastEmbed) | Number of text chunks per provider request. |
 | `semantic_embedding_request_concurrency` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_REQUEST_CONCURRENCY` | `4` | Maximum concurrent LiteLLM embedding requests. |
-| `semantic_embedding_sync_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_SYNC_BATCH_SIZE` | `2` | Number of prepared vector jobs flushed through the sync pipeline together. |
+| `semantic_embedding_sync_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_SYNC_BATCH_SIZE` | Provider default (`64` for LiteLLM/OpenAI, `2` for FastEmbed) | Number of prepared vector jobs flushed through the sync pipeline together. |
 
 ## Dimensions
 
@@ -192,11 +192,11 @@ Embedding a real corpus through a network API is far slower than local FastEmbed
 the defaults are tuned for the local case. Two things to know before you run a full
 reindex.
 
-**Raise the sync batch size.** `semantic_embedding_sync_batch_size` defaults to `2`, and
-it — not `semantic_embedding_batch_size` — governs throughput on the sync pipeline. With
-the default, a full reindex can take tens of seconds *per note* against a remote provider.
-Raising both to a larger value turns a multi-minute (or longer) reindex into well under a
-minute for the same corpus:
+**Tune batch sizes for your provider's limits.** When `semantic_embedding_provider` is
+`litellm` or `openai`, both `semantic_embedding_batch_size` and
+`semantic_embedding_sync_batch_size` default to `64` (`fastembed` defaults to `2`).
+`semantic_embedding_sync_batch_size` governs how many prepared chunks flush through the
+sync pipeline together, while `semantic_embedding_batch_size` caps each HTTP request:
 
 ```bash
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_SYNC_BATCH_SIZE=32
