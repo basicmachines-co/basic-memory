@@ -133,7 +133,7 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         api_key_digest,
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_forward_dimensions,
-        app_config.semantic_embedding_batch_size,
+        app_config.resolved_embedding_batch_size(),
         app_config.semantic_embedding_request_concurrency,
         app_config.semantic_embedding_document_input_type,
         app_config.semantic_embedding_query_input_type,
@@ -244,6 +244,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
 
     provider: EmbeddingProvider
     provider_name = app_config.semantic_embedding_provider.strip().lower()
+    resolved_batch_size = app_config.resolved_embedding_batch_size()
     if provider_name == "fastembed":
         # Deferred import: fastembed (and its onnxruntime dep) may not be installed
         from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
@@ -262,7 +263,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
 
         provider = FastEmbedEmbeddingProvider(
             model_name=app_config.semantic_embedding_model,
-            batch_size=app_config.semantic_embedding_batch_size,
+            batch_size=resolved_batch_size,
             **extra_kwargs,
         )
     elif provider_name == "openai":
@@ -276,7 +277,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             model_name=model_name,
             api_key=app_config.semantic_embedding_api_key,
             base_url=app_config.semantic_embedding_api_base,
-            batch_size=app_config.semantic_embedding_batch_size,
+            batch_size=resolved_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,
             **extra_kwargs,
         )
@@ -299,7 +300,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             model_name=model_name,
             api_key=app_config.semantic_embedding_api_key,
             api_base=app_config.semantic_embedding_api_base,
-            batch_size=app_config.semantic_embedding_batch_size,
+            batch_size=resolved_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,
             document_input_type=app_config.semantic_embedding_document_input_type,
             query_input_type=app_config.semantic_embedding_query_input_type,

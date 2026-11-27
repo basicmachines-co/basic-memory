@@ -84,7 +84,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._semantic_vector_k = self._app_config.semantic_vector_k
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._semantic_embedding_sync_batch_size = (
-            self._app_config.semantic_embedding_sync_batch_size
+            self._app_config.resolved_embedding_sync_batch_size()
         )
         self._embedding_provider = embedding_provider
         self._semantic_vector_index_name = vector_index_name or "sqlite-vec"

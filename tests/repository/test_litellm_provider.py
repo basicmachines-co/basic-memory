@@ -337,7 +337,7 @@ async def test_litellm_provider_output_ordering(monkeypatch):
 
 
 def test_factory_selects_litellm_provider():
-    """Factory should select LiteLLMEmbeddingProvider for litellm config."""
+    """Factory should select LiteLLMEmbeddingProvider for litellm config with default batch_size=64."""
     config = BasicMemoryConfig(
         env="test",
         projects={"test": "/tmp/basic-memory-test"},
@@ -348,6 +348,22 @@ def test_factory_selects_litellm_provider():
     provider = create_embedding_provider(config)
     assert isinstance(provider, LiteLLMEmbeddingProvider)
     assert provider.model_name == "openai/text-embedding-3-small"
+    assert provider.batch_size == 64
+
+
+def test_factory_forwards_explicit_litellm_batch_size():
+    """Factory should forward explicit semantic_embedding_batch_size to LiteLLMEmbeddingProvider (#2156)."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test": "/tmp/basic-memory-test"},
+        default_project="test",
+        semantic_embedding_provider="litellm",
+        semantic_embedding_model="openai/text-embedding-3-small",
+        semantic_embedding_batch_size=24,
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider.batch_size == 24
 
 
 def test_factory_maps_default_model_for_litellm():

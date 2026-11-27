@@ -341,6 +341,7 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
     fastembed_provider = create_embedding_provider(fastembed_config)
     assert isinstance(fastembed_provider, FastEmbedEmbeddingProvider)
     assert fastembed_provider.dimensions == 384
+    assert fastembed_provider.batch_size == 2
 
     openai_config = BasicMemoryConfig(
         env="test",
@@ -351,6 +352,32 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
     openai_provider = create_embedding_provider(openai_config)
     assert isinstance(openai_provider, OpenAIEmbeddingProvider)
     assert openai_provider.dimensions == 1536
+    assert openai_provider.batch_size == 64
+
+
+def test_embedding_provider_factory_forwards_explicit_batch_size_override():
+    """Explicit semantic_embedding_batch_size should override provider defaults (#2156)."""
+    openai_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="openai",
+        semantic_embedding_batch_size=16,
+    )
+    openai_provider = create_embedding_provider(openai_config)
+    assert isinstance(openai_provider, OpenAIEmbeddingProvider)
+    assert openai_provider.batch_size == 16
+
+    fastembed_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_batch_size=32,
+    )
+    fastembed_provider = create_embedding_provider(fastembed_config)
+    assert isinstance(fastembed_provider, FastEmbedEmbeddingProvider)
+    assert fastembed_provider.batch_size == 32
 
 
 def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():

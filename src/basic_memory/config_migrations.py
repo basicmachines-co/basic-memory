@@ -4,6 +4,44 @@ import os
 from typing import Any
 
 
+LEGACY_AUTO_PERSISTED_EMBEDDING_BATCH_SIZE = 2
+EXPLICIT_EMBEDDING_BATCH_SIZE_KEY = "semantic_embedding_batch_size_explicit"
+_EMBEDDING_BATCH_SIZE_FIELDS = (
+    "semantic_embedding_batch_size",
+    "semantic_embedding_sync_batch_size",
+)
+
+
+def _is_legacy_batch_size_value(value: Any) -> bool:
+    return type(value) is int and value == LEGACY_AUTO_PERSISTED_EMBEDDING_BATCH_SIZE
+
+
+def has_legacy_embedding_batch_sizes(data: Any) -> bool:
+    """Return whether config data carries pre-#2156 auto-persisted batch size defaults.
+
+    Before #2156, BasicMemoryConfig defaulted both semantic_embedding_batch_size and
+    semantic_embedding_sync_batch_size to 2, and _file_config_dict() serialized both
+    defaults into config.json. Upgraded configs store None unless explicitly overridden.
+    """
+    if not isinstance(data, dict):
+        return False
+    if data.get(EXPLICIT_EMBEDDING_BATCH_SIZE_KEY) is True:
+        return False
+    return all(
+        _is_legacy_batch_size_value(data.get(field)) for field in _EMBEDDING_BATCH_SIZE_FIELDS
+    )
+
+
+def migrate_legacy_embedding_batch_sizes(data: Any) -> Any:
+    """Clear pre-#2156 auto-persisted embedding batch defaults (2) to None."""
+    if not isinstance(data, dict):
+        return data
+    if has_legacy_embedding_batch_sizes(data):
+        for field in _EMBEDDING_BATCH_SIZE_FIELDS:
+            data[field] = None
+    return data
+
+
 def migrate_legacy_sync_fields(
     data: Any,
     *,

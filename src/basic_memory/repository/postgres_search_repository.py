@@ -117,7 +117,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._semantic_vector_k = self._app_config.semantic_vector_k
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._semantic_embedding_sync_batch_size = (
-            self._app_config.semantic_embedding_sync_batch_size
+            self._app_config.resolved_embedding_sync_batch_size()
         )
         self._semantic_postgres_prepare_concurrency = (
             self._app_config.semantic_postgres_prepare_concurrency

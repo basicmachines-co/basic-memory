@@ -88,7 +88,7 @@ def _enable_semantic_for_benchmark(search_service, app_config) -> None:
     if repository._embedding_provider is None:
         repository._embedding_provider = FastEmbedEmbeddingProvider(
             model_name=app_config.semantic_embedding_model,
-            batch_size=app_config.semantic_embedding_batch_size,
+            batch_size=app_config.resolved_embedding_batch_size(),
         )
     repository._vector_dimensions = repository._embedding_provider.dimensions
     repository._vector_tables_initialized = False
