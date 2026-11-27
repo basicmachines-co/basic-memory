@@ -12,6 +12,7 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from basic_memory.config_migrations import (
+    migrate_legacy_embedding_batch_sizes,
     migrate_legacy_projects,
     migrate_legacy_sync_fields,
 )
@@ -776,6 +777,18 @@ class BasicMemoryConfig(BaseSettings):
         that are no longer part of the config model.
         """
         return migrate_legacy_projects(data)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_embedding_batch_sizes(cls, data: Any) -> Any:
+        """Clear pre-#2156 auto-persisted embedding batch defaults (2) to None.
+
+        Before #2156, _file_config_dict() serialized both batch defaults as 2 into
+        config.json. Resetting legacy auto-persisted pairs to None lets remote
+        providers (OpenAI, LiteLLM) resolve their 64 default on upgrade while
+        keeping FastEmbed at 2.
+        """
+        return migrate_legacy_embedding_batch_sizes(data)
 
     @property
     def is_test_env(self) -> bool:

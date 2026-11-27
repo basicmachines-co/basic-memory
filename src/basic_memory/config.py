@@ -13,6 +13,11 @@ from loguru import logger
 
 from basic_memory import __version__
 from basic_memory import config_logging as _config_logging
+from basic_memory.config_migrations import (
+    EXPLICIT_EMBEDDING_BATCH_SIZE_KEY,
+    has_legacy_embedding_batch_sizes,
+    migrate_legacy_embedding_batch_sizes,
+)
 from basic_memory.config_models import (
     APP_DATABASE_NAME as APP_DATABASE_NAME,
     CONFIG_DIR_MODE as CONFIG_DIR_MODE,
@@ -108,6 +113,10 @@ class ConfigManager:
                             if local_sync_path and not os.path.isabs(path):
                                 needs_resave = True
                                 break
+
+                if has_legacy_embedding_batch_sizes(file_data):
+                    migrate_legacy_embedding_batch_sizes(file_data)
+                    needs_resave = True
 
                 merged_data = file_data.copy()
                 for field_name in env_overridden_fields(file_data):
@@ -326,6 +335,7 @@ def _file_config_dict(
     file_data: dict[str, Any] = (
         json.loads(file_path.read_text(encoding="utf-8")) if file_path.exists() else {}
     )
+    migrate_legacy_embedding_batch_sizes(file_data)
 
     # Trigger: `bm config set KEY` (or another command that writes one named
     #          setting) while BASIC_MEMORY_KEY is set.
@@ -342,6 +352,15 @@ def _file_config_dict(
             config_dict[field_name] = file_data[legacy_key]
         else:
             config_dict.pop(field_name, None)
+
+    if (
+        type(config_dict.get("semantic_embedding_batch_size")) is int
+        and config_dict.get("semantic_embedding_batch_size") == 2
+        and type(config_dict.get("semantic_embedding_sync_batch_size")) is int
+        and config_dict.get("semantic_embedding_sync_batch_size") == 2
+    ):
+        config_dict[EXPLICIT_EMBEDDING_BATCH_SIZE_KEY] = True
+
     return config_dict
 
 

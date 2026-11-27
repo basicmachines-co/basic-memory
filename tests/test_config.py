@@ -1238,6 +1238,65 @@ class TestSemanticSearchConfig:
         assert config.resolved_embedding_batch_size() == 16
         assert config.resolved_embedding_sync_batch_size() == 32
 
+    def test_persisted_legacy_embedding_batch_sizes_migrate_on_upgrade_and_honor_post_migration_override(
+        self,
+    ):
+        """Pre-#2156 config.json files auto-persisted both batch defaults as 2; loading
+        migrates them to None (resolving to 64 for remote providers) while preserving
+        post-migration explicit overrides of 2 (#2156)."""
+        import json
+        import basic_memory.config
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            legacy_config_data = {
+                "env": "dev",
+                "projects": {"main": {"path": str(temp_path / "main"), "mode": "local"}},
+                "default_project": "main",
+                "semantic_embedding_provider": "openai",
+                "semantic_embedding_batch_size": 2,
+                "semantic_embedding_sync_batch_size": 2,
+            }
+            config_manager.config_file.write_text(
+                json.dumps(legacy_config_data, indent=2),
+                encoding="utf-8",
+            )
+            basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
+
+            loaded = config_manager.load_config()
+            assert loaded.semantic_embedding_batch_size is None
+            assert loaded.semantic_embedding_sync_batch_size is None
+            assert loaded.resolved_embedding_batch_size() == 64
+            assert loaded.resolved_embedding_sync_batch_size() == 64
+
+            persisted = json.loads(config_manager.config_file.read_text(encoding="utf-8"))
+            assert persisted["semantic_embedding_batch_size"] is None
+            assert persisted["semantic_embedding_sync_batch_size"] is None
+
+            # Post-migration explicit override of 2 (single field and both fields) must stick.
+            loaded.semantic_embedding_batch_size = 2
+            config_manager.save_config(loaded)
+            reloaded_single = config_manager.load_config()
+            assert reloaded_single.semantic_embedding_batch_size == 2
+            assert reloaded_single.semantic_embedding_sync_batch_size is None
+            assert reloaded_single.resolved_embedding_batch_size() == 2
+            assert reloaded_single.resolved_embedding_sync_batch_size() == 64
+
+            reloaded_single.semantic_embedding_sync_batch_size = 2
+            config_manager.save_config(reloaded_single)
+            reloaded_both = config_manager.load_config()
+            assert reloaded_both.semantic_embedding_batch_size == 2
+            assert reloaded_both.semantic_embedding_sync_batch_size == 2
+            assert reloaded_both.resolved_embedding_batch_size() == 2
+            assert reloaded_both.resolved_embedding_sync_batch_size() == 2
+
     def test_semantic_postgres_prepare_concurrency_defaults_to_4(self):
         """Postgres prepare concurrency should default to a conservative window of 4."""
         config = BasicMemoryConfig()
