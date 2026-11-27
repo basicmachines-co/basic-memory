@@ -1,7 +1,6 @@
 """PostgreSQL tsvector-based search repository implementation."""
 
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import Any, override, List
 
@@ -35,7 +34,10 @@ from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
 )
 from basic_memory.repository.pgvector_index import PgVectorIndex, lock_vector_storage_ddl
-from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
+from basic_memory.repository.postgres_fts_chunks import (
+    slice_postgres_fts_chunk_json_batches,
+    split_postgres_fts_chunks,
+)
 
 
 def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
@@ -263,37 +265,41 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         # Script n-grams scale with note size and are pure CPU work. Building them in a
         # worker thread keeps a large indexing batch from stalling every request on the loop.
-        chunks = await asyncio.to_thread(_fts_chunk_params, search_index_rows)
-        if not chunks:
+        chunk_batches = await asyncio.to_thread(
+            lambda: slice_postgres_fts_chunk_json_batches(_fts_chunk_params(search_index_rows))
+        )
+        if not chunk_batches:
             return
 
-        await session.execute(
-            text("""
-                INSERT INTO search_index_fts_chunks (
-                    project_id,
-                    search_index_id,
-                    search_index_type,
-                    chunk_index,
-                    chunk_text,
-                    script_ngrams
-                )
-                SELECT
-                    :project_id,
-                    chunk.search_index_id,
-                    chunk.search_index_type,
-                    chunk.chunk_index,
-                    chunk.chunk_text,
-                    chunk.script_ngrams
-                FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
-                    search_index_id INTEGER,
-                    search_index_type VARCHAR,
-                    chunk_index INTEGER,
-                    chunk_text TEXT,
-                    script_ngrams TEXT
-                )
-            """),
-            {"project_id": self.project_id, "chunks": json.dumps(chunks)},
-        )
+        insert_chunks_sql = text("""
+            INSERT INTO search_index_fts_chunks (
+                project_id,
+                search_index_id,
+                search_index_type,
+                chunk_index,
+                chunk_text,
+                script_ngrams
+            )
+            SELECT
+                :project_id,
+                chunk.search_index_id,
+                chunk.search_index_type,
+                chunk.chunk_index,
+                chunk.chunk_text,
+                chunk.script_ngrams
+            FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
+                search_index_id INTEGER,
+                search_index_type VARCHAR,
+                chunk_index INTEGER,
+                chunk_text TEXT,
+                script_ngrams TEXT
+            )
+        """)
+        for chunks_json in chunk_batches:
+            await session.execute(
+                insert_chunks_sql,
+                {"project_id": self.project_id, "chunks": chunks_json},
+            )
 
     # ------------------------------------------------------------------
     # Abstract hook implementations (vector/semantic, Postgres-specific)
