@@ -59,6 +59,13 @@ class DatabaseBackend(str, Enum):
 # LiteLLM cannot route this name, so the litellm provider requires an explicit override.
 DEFAULT_FASTEMBED_RERANK_MODEL = "jinaai/jina-reranker-v1-tiny-en"
 
+# Voyage AI rerank models. The voyage provider has no default model, so reranker_model must
+# name one of these explicitly.
+VOYAGE_RERANK_MODELS = ("rerank-3", "rerank-3-lite", "rerank-2.5", "rerank-2.5-lite")
+# Voyage rejects a rerank request with more documents than this; the whole candidate pool is
+# sent in one request, so reranker_candidates is bounded by it.
+VOYAGE_RERANK_MAX_DOCUMENTS = 1000
+
 
 def resolve_data_dir() -> Path:
     """Resolve the Basic Memory data directory.
@@ -291,7 +298,10 @@ class BasicMemoryConfig(BaseSettings):
     )
     semantic_embedding_model: str = Field(
         default="bge-small-en-v1.5",
-        description="Embedding model identifier used by the local provider.",
+        description=(
+            "Embedding model identifier used by the local provider. The voyage provider "
+            "has no default and requires a Voyage model name such as 'voyage-4'."
+        ),
     )
     semantic_embedding_api_base: str | None = Field(
         default=None,
@@ -304,17 +314,19 @@ class BasicMemoryConfig(BaseSettings):
     semantic_embedding_api_key: str | None = Field(
         default=None,
         description=(
-            "Optional API key passed directly to the openai or litellm embedding "
-            "provider. When unset, the openai provider falls back to OPENAI_API_KEY "
-            "and litellm resolves provider credential environment variables."
+            "Optional API key passed directly to the openai, litellm, or voyage embedding "
+            "provider. When unset, the openai provider falls back to OPENAI_API_KEY, "
+            "voyage falls back to VOYAGE_API_KEY, and litellm resolves provider "
+            "credential environment variables."
         ),
     )
     semantic_embedding_dimensions: int | None = Field(
         default=None,
         description=(
             "Embedding vector dimensions. Uses provider defaults when unset "
-            "(384 for FastEmbed, 1536 for OpenAI and LiteLLM OpenAI default); "
-            "required for custom LiteLLM models."
+            "(384 for FastEmbed, 1536 for OpenAI and LiteLLM OpenAI default, 1024 for Voyage); "
+            "required for custom LiteLLM models. Voyage accepts 2048, 1024, 512 or 256 "
+            "on Matryoshka models and only 1024 on voyage-finance-2 and voyage-law-2."
         ),
     )
     semantic_embedding_forward_dimensions: bool | None = Field(
@@ -431,13 +443,14 @@ class BasicMemoryConfig(BaseSettings):
     )
     reranker_provider: str = Field(
         default="fastembed",
-        description="Reranker provider: 'fastembed' (local ONNX cross-encoder) or 'litellm' "
-        "(Cohere/Jina/Voyage/etc. via API).",
+        description="Reranker provider: 'fastembed' (local ONNX cross-encoder), 'litellm' "
+        "(Cohere/Jina/Voyage/etc. via API), or 'voyage' (Voyage AI via its official SDK).",
     )
     reranker_model: str = Field(
         default=DEFAULT_FASTEMBED_RERANK_MODEL,
         description="Reranker model identifier. For litellm use the 'provider/model' form, "
-        "e.g. 'cohere/rerank-v3.5'.",
+        "e.g. 'cohere/rerank-v3.5'. The voyage provider has no default and requires one of "
+        "rerank-3, rerank-3-lite, rerank-2.5, rerank-2.5-lite.",
     )
     reranker_max_document_chars: int = Field(
         default=2000,
@@ -452,7 +465,7 @@ class BasicMemoryConfig(BaseSettings):
     )
     reranker_timeout: float = Field(
         default=30.0,
-        description="Maximum seconds allowed for each LiteLLM rerank request. "
+        description="Maximum seconds allowed for each LiteLLM or Voyage rerank request. "
         "FastEmbed runs locally and ignores this setting.",
         gt=0,
     )
@@ -463,8 +476,9 @@ class BasicMemoryConfig(BaseSettings):
     )
     reranker_api_key: str | None = Field(
         default=None,
-        description="Optional API key passed to the litellm reranker provider. When unset, "
-        "litellm resolves credentials from provider environment variables.",
+        description="Optional API key passed to the litellm or voyage reranker provider. When "
+        "unset, litellm resolves credentials from provider environment variables and voyage "
+        "reads VOYAGE_API_KEY.",
     )
     reranker_candidates: int = Field(
         default=20,
@@ -989,12 +1003,13 @@ class BasicMemoryConfig(BaseSettings):
           loading config instead of deferring them to the first search request.
         - The default model is a local fastembed cross-encoder that litellm cannot
           route, so the litellm provider needs an explicit provider/model model id.
+        - The voyage provider has no default model and accepts only Voyage rerank models.
         """
         if not self.reranker_enabled:
             return self
         provider = self.reranker_provider.strip().lower()
-        if provider not in {"fastembed", "litellm"}:
-            raise ValueError("reranker_provider must be one of: fastembed, litellm")
+        if provider not in {"fastembed", "litellm", "voyage"}:
+            raise ValueError("reranker_provider must be one of: fastembed, litellm, voyage")
         model = self.reranker_model.strip()
         if not model:
             raise ValueError("reranker_model must not be blank when reranker_enabled=True")
@@ -1018,6 +1033,21 @@ class BasicMemoryConfig(BaseSettings):
                     f"Unsupported FastEmbed reranker model {model!r}. "
                     f"Supported models: {supported_names}"
                 )
+        if provider == "voyage" and self.reranker_api_base is not None:
+            raise ValueError(
+                "reranker_api_base is not supported with reranker_provider='voyage'; "
+                "the Voyage provider always calls the Voyage API."
+            )
+        if provider == "voyage" and self.reranker_candidates > VOYAGE_RERANK_MAX_DOCUMENTS:
+            raise ValueError(
+                f"reranker_candidates={self.reranker_candidates} exceeds the "
+                f"{VOYAGE_RERANK_MAX_DOCUMENTS} documents Voyage accepts per rerank request."
+            )
+        if provider == "voyage" and model not in VOYAGE_RERANK_MODELS:
+            raise ValueError(
+                "reranker_provider='voyage' requires reranker_model to name a Voyage rerank "
+                f"model; got {model!r}. Supported models: {', '.join(VOYAGE_RERANK_MODELS)}."
+            )
         if provider == "litellm" and model == DEFAULT_FASTEMBED_RERANK_MODEL:
             raise ValueError(
                 "reranker_provider='litellm' requires an explicit reranker_model in "

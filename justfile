@@ -409,6 +409,10 @@ test-semantic-report:
 test-litellm-live *args:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_LITELLM_INTEGRATION=1 PYTHONPATH=test-int:src uv run --extra litellm python -m semantic.litellm_live_harness {{args}}
 
+# Run opt-in live Voyage AI provider checks (needs VOYAGE_API_KEY in the environment)
+test-voyage-live:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_RUN_VOYAGE_INTEGRATION=1 uv run --extra voyage pytest -p pytest_mock -v --no-cov test-int/semantic/test_voyage_live_models.py
+
 # Run semantic benchmarks (Postgres combos only)
 test-semantic-postgres:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic -k postgres test-int/semantic/
