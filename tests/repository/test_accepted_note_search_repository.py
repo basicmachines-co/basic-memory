@@ -131,6 +131,30 @@ async def test_refresh_entity_uses_plain_insert_for_sqlite_virtual_table() -> No
 
 
 @pytest.mark.asyncio
+async def test_sqlite_refresh_entity_does_not_duplicate_body_in_script_ngrams() -> None:
+    repository = AcceptedNoteSearchRepository(project_id=7)
+    session = _RecordingSession(dialect_name="sqlite")
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    row = build_accepted_note_search_row(
+        entity_id=43,
+        title="Project Plan",
+        note_type="decision",
+        entity_metadata=None,
+        permalink="main/project-plan",
+        file_path="notes/project-plan.md",
+        search_content="Main body 獨特詞彙",
+        created_at=now,
+        updated_at=now,
+        project_id=7,
+    )
+
+    await repository.refresh_entity(cast(AsyncSession, session), row)
+
+    _, insert_params = session.executed[1]
+    assert insert_params["script_ngrams"].count("獨特") == 1
+
+
+@pytest.mark.asyncio
 async def test_refresh_entity_rejects_cross_project_rows() -> None:
     repository = AcceptedNoteSearchRepository(project_id=7)
     session = _RecordingSession()
