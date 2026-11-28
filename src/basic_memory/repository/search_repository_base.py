@@ -1118,13 +1118,21 @@ class SearchRepositoryBase(ABC):
     ) -> None:
         """Delete all search index entries for an entity.
 
+        Matches ``get_entity_search_rows()`` ownership keys so legacy upgraded
+        rows with ``entity_id IS NULL`` (entity ``id`` or relation ``from_id``)
+        are deleted alongside rows stamped with ``entity_id``.
         This implementation is shared across backends as it uses standard SQL DELETE.
         A caller-owned ``session`` keeps the delete inside the caller's transaction.
         """
         async with db.scoped_session(self.session_maker, session) as session:
             await session.execute(
                 text(
-                    "DELETE FROM search_index WHERE entity_id = :entity_id AND project_id = :project_id"
+                    "DELETE FROM search_index "
+                    "WHERE project_id = :project_id AND ("
+                    "(type = 'entity' AND id = :entity_id) "
+                    "OR entity_id = :entity_id "
+                    "OR (type = 'relation' AND from_id = :entity_id)"
+                    ")"
                 ),
                 {"entity_id": entity_id, "project_id": self.project_id},
             )

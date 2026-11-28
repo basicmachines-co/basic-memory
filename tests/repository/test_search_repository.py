@@ -576,6 +576,92 @@ async def test_delete_by_entity_id(search_repository, search_entity):
 
 
 @pytest.mark.asyncio
+async def test_delete_by_entity_id_removes_legacy_ownerless_rows(search_repository, search_entity):
+    """Deleting an entity also removes legacy rows with entity_id=None (id/from_id ownership)."""
+    sibling_entity_id = search_entity.id + 1000
+    note_metadata = {"note_type": search_entity.note_type}
+
+    legacy_entity_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="Legacy Ownerless Entity",
+        content_stems="legacy ownerless entity token",
+        content_snippet="legacy ownerless entity token",
+        permalink="legacy/ownerless-entity",
+        file_path="legacy/ownerless-entity.md",
+        entity_id=None,
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+        metadata=note_metadata,
+    )
+    legacy_relation_row = SearchIndexRow(
+        id=search_entity.id + 500,
+        type=SearchItemType.RELATION.value,
+        title="Legacy Ownerless Relation",
+        content_stems="legacy ownerless relation token",
+        content_snippet="legacy ownerless relation token",
+        permalink="legacy/ownerless-entity/relates_to/target",
+        file_path="legacy/ownerless-entity.md",
+        entity_id=None,
+        from_id=search_entity.id,
+        to_id=search_entity.id + 900,
+        relation_type="relates_to",
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+        metadata=note_metadata,
+    )
+    sibling_legacy_row = SearchIndexRow(
+        id=sibling_entity_id,
+        type=SearchItemType.ENTITY.value,
+        title="Sibling Legacy Entity",
+        content_stems="sibling legacy entity token",
+        content_snippet="sibling legacy entity token",
+        permalink="legacy/sibling-entity",
+        file_path="legacy/sibling-entity.md",
+        entity_id=None,
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+        metadata=note_metadata,
+    )
+    colliding_observation_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.OBSERVATION.value,
+        title="Sibling Observation",
+        content_stems="sibling collision observation token",
+        content_snippet="sibling collision observation token",
+        permalink="legacy/sibling-entity/observations/note/sibling-obs",
+        file_path="legacy/sibling-entity.md",
+        entity_id=sibling_entity_id,
+        category="note",
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+        metadata=note_metadata,
+    )
+
+    for row in (
+        legacy_entity_row,
+        legacy_relation_row,
+        sibling_legacy_row,
+        colliding_observation_row,
+    ):
+        await search_repository.index_item(row)
+
+    await search_repository.delete_by_entity_id(search_entity.id)
+
+    assert await search_repository.get_entity_search_rows(search_entity.id) == []
+    assert await search_repository.search(search_text="legacy ownerless entity token") == []
+    assert await search_repository.search(search_text="legacy ownerless relation token") == []
+    assert len(await search_repository.search(search_text="sibling legacy entity token")) == 1
+    assert (
+        len(await search_repository.search(search_text="sibling collision observation token")) == 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_to_insert_includes_project_id(search_repository):
     """Test that the to_insert method includes project_id."""
     # Create a search index row with project_id
