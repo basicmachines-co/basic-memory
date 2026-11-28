@@ -9,6 +9,7 @@ from basic_memory.models import Entity
 from basic_memory.repository.script_ngrams import (
     analyze_script_query,
     build_script_ngrams,
+    script_ngram_inputs,
     script_run_grams,
     script_runs,
 )
@@ -807,3 +808,128 @@ async def test_search_matches_script_text_beyond_the_parent_fts_limit(search_rep
 
     assert [result.id for result in await search_repository.search("适者生存")] == [1295]
     assert [result.id for result in await search_repository.search("進化 适者生存")] == [1295]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_index_does_not_duplicate_content_snippet_in_script_ngrams(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite indexes content_snippet alongside content_stems")
+
+    from sqlalchemy import text
+
+    now = datetime.now(timezone.utc)
+    body = "獨特字詞測試內容"
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1330,
+        type="entity",
+        file_path="notes/dedupe.md",
+        title="Dedupe",
+        content_stems=f"Dedupe\n{body}",
+        content_snippet=body,
+        permalink="notes/dedupe",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    async with db.scoped_session(session_maker) as session:
+        stored = (
+            await session.execute(
+                text("SELECT script_ngrams FROM search_index WHERE id = 1330"),
+            )
+        ).scalar_one()
+
+    assert stored.count("獨特") == 1
+    assert [result.id for result in await search_repository.search("獨特字詞")] == [1330]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_bulk_index_dedupes_truncated_long_body_while_keeping_tail(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite indexes content_snippet alongside content_stems")
+
+    from sqlalchemy import text
+
+    now = datetime.now(timezone.utc)
+    full_body = f"前端詞彙 {'x' * 6500} 尾端詞彙"
+    truncated_stems = f"LongTitle\n{full_body}"[:6000]
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1331,
+        type="entity",
+        file_path="notes/long-dedupe.md",
+        title="LongTitle",
+        content_stems=truncated_stems,
+        content_snippet=full_body,
+        permalink="notes/long-dedupe",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.bulk_index_items([row])
+
+    async with db.scoped_session(session_maker) as session:
+        stored = (
+            await session.execute(
+                text("SELECT script_ngrams FROM search_index WHERE id = 1331"),
+            )
+        ).scalar_one()
+
+    assert stored.count("前端") == 1
+    assert stored.count("尾端") == 1
+    assert [result.id for result in await search_repository.search("前端詞彙")] == [1331]
+    assert [result.id for result in await search_repository.search("尾端詞彙")] == [1331]
+
+
+def test_script_ngram_inputs_edge_cases() -> None:
+    assert script_ngram_inputs("T", "stems", None) == ("T", "stems")
+    assert script_ngram_inputs("T", None, "snip") == ("T", "snip")
+    assert script_ngram_inputs("T", "T\nbody", "body") == ("T", "T\nbody")
+    assert script_ngram_inputs("T", "body", "prefix body suffix") == ("T", "prefix body suffix")
+    assert script_ngram_inputs("T", "disjoint stems", "other snippet") == (
+        "T",
+        "disjoint stems",
+        "other snippet",
+    )
+
+    # When the first 64 chars of the body also appear earlier in metadata/title,
+    # overlap detection must advance to the actual truncated body suffix.
+    shared_prefix = "A" * 70
+    full_body = f"{shared_prefix} middle tail"
+    stems = f"{shared_prefix} title-extra\n{shared_prefix} mid"
+    assert script_ngram_inputs("T", stems, full_body) == (
+        "T",
+        f"{shared_prefix} title-extra\n",
+        full_body,
+    )
+
+    # Short (<64 char) truncated overlap at a newline boundary must still deduplicate.
+    long_meta = "meta " * 1196
+    short_overlap_body = "前端獨特詞彙" * 30
+    stems_short_overlap = f"{long_meta}\n{short_overlap_body}"[:6000]
+    assert script_ngram_inputs("T", stems_short_overlap, short_overlap_body) == (
+        "T",
+        f"{long_meta}\n",
+        short_overlap_body,
+    )
+
+    # Must never split a contiguous CJK/script run mid-run (which would drop the boundary bigram).
+    contiguous_stems = "專利" + "侵權分析" * 20
+    contiguous_snippet = "侵權分析" * 25
+    assert script_ngram_inputs("T", contiguous_stems, contiguous_snippet) == (
+        "T",
+        contiguous_stems,
+        contiguous_snippet,
+    )
+    assert (
+        "利侵"
+        in build_script_ngrams(
+            *script_ngram_inputs("T", contiguous_stems, contiguous_snippet)
+        ).split()
+    )

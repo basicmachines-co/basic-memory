@@ -41,7 +41,7 @@ from basic_memory.repository.search_reader import (
     vector_eligible,
 )
 from basic_memory.repository.search_scope import ProjectScope
-from basic_memory.repository.script_ngrams import build_script_ngrams
+from basic_memory.repository.script_ngrams import build_script_ngrams, script_ngram_inputs
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_chunking import (
     SemanticSourceRow,
@@ -980,9 +980,11 @@ class SearchRepositoryBase(ABC):
             insert_data = search_index_row.to_insert(serialize_json=True)
             insert_data["project_id"] = self.project_id
             insert_data["script_ngrams"] = build_script_ngrams(
-                search_index_row.title,
-                search_index_row.content_stems,
-                search_index_row.content_snippet,
+                *script_ngram_inputs(
+                    search_index_row.title,
+                    search_index_row.content_stems,
+                    search_index_row.content_snippet,
+                )
             )
 
             # Insert new record
@@ -1033,9 +1035,11 @@ class SearchRepositoryBase(ABC):
                 insert_data = row.to_insert(serialize_json=True)
                 insert_data["project_id"] = self.project_id
                 insert_data["script_ngrams"] = build_script_ngrams(
-                    row.title,
-                    row.content_stems,
-                    row.content_snippet,
+                    *script_ngram_inputs(
+                        row.title,
+                        row.content_stems,
+                        row.content_snippet,
+                    )
                 )
                 insert_data_list.append(insert_data)
 

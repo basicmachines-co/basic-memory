@@ -122,6 +122,47 @@ def build_script_ngrams(*texts: str | None) -> str:
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
+def script_ngram_inputs(
+    title: str | None,
+    content_stems: str | None,
+    content_snippet: str | None = None,
+) -> tuple[str | None, ...]:
+    """Select row fields for script_ngrams without double-indexing content_snippet.
+
+    SQLite passes ``content_snippet`` alongside ``content_stems`` so CJK text beyond
+    the 6,000-character ``content_stems`` cap remains searchable. When ``content_snippet``
+    is already contained in ``content_stems``, omit the duplicate. When ``content_stems``
+    ends with a truncated prefix of ``content_snippet`` starting at a whitespace or start
+    boundary, retain only the non-overlapping prefix of ``content_stems`` plus the full
+    ``content_snippet`` so runs spanning the truncation boundary remain intact and no
+    script run in ``content_stems`` is ever split mid-run.
+    """
+    if not content_snippet:
+        return (title, content_stems)
+    if not content_stems:
+        return (title, content_snippet)
+    if content_snippet in content_stems:
+        return (title, content_stems)
+    if content_stems in content_snippet:
+        return (title, content_snippet)
+
+    first_char = content_snippet[0]
+    last_char = content_stems[-1]
+    stems_len = len(content_stems)
+    pos = max(0, stems_len - len(content_snippet))
+    overlap_start = content_stems.find(first_char, pos)
+    while overlap_start != -1:
+        if (
+            (overlap_start == 0 or content_stems[overlap_start - 1].isspace())
+            and content_snippet[stems_len - overlap_start - 1] == last_char
+            and content_snippet.startswith(content_stems[overlap_start:])
+        ):
+            return (title, content_stems[:overlap_start], content_snippet)
+        overlap_start = content_stems.find(first_char, overlap_start + 1)
+
+    return (title, content_stems, content_snippet)
+
+
 def analyze_script_query(text: str) -> ScriptQuery:
     """Split a natural-language query into word text and ordered script grams."""
     normalized = unicodedata.normalize("NFKC", text)

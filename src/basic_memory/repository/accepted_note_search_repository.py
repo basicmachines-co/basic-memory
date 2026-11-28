@@ -16,7 +16,7 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     delete_project_index_vector_rows,
 )
 from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
-from basic_memory.repository.script_ngrams import build_script_ngrams
+from basic_memory.repository.script_ngrams import build_script_ngrams, script_ngram_inputs
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]
@@ -134,9 +134,11 @@ def accepted_note_search_insert_params(
     include_full_content_grams: bool,
 ) -> SearchIndexSqlParams:
     """Build SQL parameters for one accepted-note search row."""
-    script_texts = (row.title, row.content_stems)
-    if include_full_content_grams:
-        script_texts = (*script_texts, row.content_snippet)
+    script_texts = script_ngram_inputs(
+        row.title,
+        row.content_stems,
+        row.content_snippet if include_full_content_grams else None,
+    )
     return {
         "id": row.id,
         "title": row.title,
