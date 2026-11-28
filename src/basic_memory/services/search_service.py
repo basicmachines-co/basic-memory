@@ -1235,34 +1235,20 @@ class SearchService:
     async def handle_delete(self, entity: Entity):
         """Handle complete entity deletion from search and semantic index state.
 
-        This replicates the logic from sync_service.handle_delete() to properly clean up
-        all search index entries for an entity and its related data.
+        Deletes all search index rows owned by ``entity.id`` directly rather than
+        by recomputed permalinks: when a target entity is deleted first,
+        ``Relation.to_id`` becomes NULL via ``ON DELETE SET NULL``, which changes
+        ``Relation.permalink`` from ``from/type/to_permalink`` to
+        ``from/type/to_name`` and would leave orphaned relation rows behind.
+        Scoping by ``entity_id`` (and ``project_id``) also preserves #1437: it
+        cannot touch another entity's rows even if permalinks collide.
         """
         logger.debug(
             f"Cleaning up search index for entity_id={entity.id}, file_path={entity.file_path}, "
             f"observations={len(entity.observations)}, relations={len(entity.outgoing_relations)}"
         )
 
-        # Clean up search index - same logic as sync_service.handle_delete()
-        # Each address is paired with the kind that owns it: one permalink can be shared
-        # by two kinds, so deleting by address alone took another note's row with it
-        # (#1437), and nothing rebuilds a projection whose source row still exists.
-        addressed_rows = (
-            [(entity.permalink, SearchItemType.ENTITY)]
-            + [(o.permalink, SearchItemType.OBSERVATION) for o in entity.observations]
-            + [(r.permalink, SearchItemType.RELATION) for r in entity.outgoing_relations]
-        )
-
-        logger.debug(
-            f"Deleting search index entries for entity_id={entity.id}, "
-            f"index_entries={len(addressed_rows)}"
-        )
-
-        for permalink, search_item_type in addressed_rows:
-            if permalink:
-                await self.delete_by_permalink(permalink, search_item_type)
-            else:
-                await self.delete_by_entity_id(entity.id)
+        await self.delete_by_entity_id(entity.id)
 
         # Trigger: entity deletion removes the source rows for this note.
         # Why: semantic chunks/embeddings are stored separately from search_index rows.

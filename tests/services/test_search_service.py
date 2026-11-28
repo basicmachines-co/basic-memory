@@ -1926,3 +1926,102 @@ async def test_reindex_vectors_is_a_noop_when_the_vector_runtime_is_unavailable(
     assert stats["embedded"] == 0
     assert stats["errors"] == 0
     assert stats["skipped"] == stats["total_entities"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_handle_delete_removes_relation_rows_after_target_entity_is_deleted(
+    search_service,
+    entity_repository,
+    session_maker,
+    test_project,
+):
+    """Deleting a target entity first must not leave orphaned relation rows in search_index.
+
+    When entity A is deleted before entity B, Relation.to_id is set to NULL via
+    ON DELETE SET NULL, changing Relation.permalink from `from/type/to_permalink`
+    to `from/type/to_name`. Deleting B's search rows by entity_id removes the
+    original relation row even after that permalink drift, without touching sibling
+    entities.
+    """
+    from basic_memory.models.knowledge import Entity, Relation
+
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        target = Entity(
+            project_id=test_project.id,
+            title="Target Note",
+            note_type="note",
+            permalink="folder/target-note",
+            file_path="folder/target-note.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        source = Entity(
+            project_id=test_project.id,
+            title="Source Note",
+            note_type="note",
+            permalink="folder/source-note",
+            file_path="folder/source-note.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        sibling = Entity(
+            project_id=test_project.id,
+            title="Sibling Note",
+            note_type="note",
+            permalink="folder/sibling-note",
+            file_path="folder/sibling-note.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([target, source, sibling])
+        await session.flush()
+        session.add(
+            Relation(
+                project_id=test_project.id,
+                from_id=source.id,
+                to_id=target.id,
+                to_name="Target Note",
+                relation_type="relates_to",
+            )
+        )
+        await session.flush()
+        target_id, source_id, sibling_id = target.id, source.id, sibling.id
+
+    async with db.scoped_session(session_maker) as session:
+        target_loaded = await entity_repository.get_by_permalink(session, "folder/target-note")
+        source_loaded = await entity_repository.get_by_permalink(session, "folder/source-note")
+        sibling_loaded = await entity_repository.get_by_permalink(session, "folder/sibling-note")
+    assert target_loaded is not None
+    assert source_loaded is not None
+    assert sibling_loaded is not None
+
+    await search_service.index_entity_markdown(target_loaded, content="Target body")
+    await search_service.index_entity_markdown(source_loaded, content="Source body")
+    await search_service.index_entity_markdown(sibling_loaded, content="Sibling body")
+
+    indexed_rows = await search_service.repository.get_entity_search_rows(source_id)
+    assert any(row.type == SearchItemType.RELATION.value for row in indexed_rows)
+
+    # Delete target first: ON DELETE SET NULL clears source's relation.to_id.
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.delete(session, target_id)
+    await search_service.handle_delete(target_loaded)
+
+    # Reload source after target deletion so its relation.to_entity is None.
+    async with db.scoped_session(session_maker) as session:
+        source_after_target_delete = await entity_repository.get_by_permalink(
+            session, "folder/source-note"
+        )
+        assert source_after_target_delete is not None
+        assert source_after_target_delete.outgoing_relations[0].to_entity is None
+        await entity_repository.delete(session, source_id)
+
+    await search_service.handle_delete(source_after_target_delete)
+
+    assert await search_service.repository.get_entity_search_rows(source_id) == []
+    sibling_rows = await search_service.repository.get_entity_search_rows(sibling_id)
+    assert [row.id for row in sibling_rows] == [sibling_id]
